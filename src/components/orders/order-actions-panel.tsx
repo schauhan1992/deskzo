@@ -1,9 +1,13 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { OrderStatus, PaymentTerms } from "@prisma/client";
 import { approveOrder, processOrder, fulfillOrder, cancelOrder } from "@/actions/order";
+import { createVendorPoForOrder } from "@/actions/order-vendor-po";
+import { documentPath, tradeDocumentStatusLabels } from "@/lib/trade-documents";
+import type { TradeDocumentStatus } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { Dialog } from "@/components/ui/dialog";
@@ -33,6 +37,17 @@ export type OrderPurchaseState = {
   vendorName: string | null;
 };
 
+/**
+ * Our purchase order to the vendor (owner, 15 Oct 2026 — src/lib/orders/vendor-po.ts): null where the
+ * plan has no purchase orders. `canRaise` is "Raise purchase orders"; `live` the order's PO, a draft
+ * included; `canOpen` whether the viewer may open documents at all.
+ */
+export type OrderVendorPo = {
+  canRaise: boolean;
+  canOpen: boolean;
+  live: { id: string; docNumber: string; status: TradeDocumentStatus } | null;
+};
+
 /** The order's credit position while it awaits approval — see `orderCreditPosition`. */
 export type OrderCredit = {
   rating: CreditRating;
@@ -59,6 +74,7 @@ export function OrderActionsPanel({
   companyName,
   credit = null,
   purchase,
+  vendorPo = null,
 }: {
   order: PayableOrder & { orderStatus: OrderStatus; vendorId: string | null; purchasePrice: unknown; ourPoNumber: string | null; addedByUserId: string };
   purchase: OrderPurchaseState;
@@ -71,6 +87,7 @@ export function OrderActionsPanel({
   companyId: string;
   companyName: string;
   credit?: OrderCredit | null;
+  vendorPo?: OrderVendorPo | null;
 }) {
   const router = useRouter();
   const clock = useClock();
@@ -115,6 +132,13 @@ export function OrderActionsPanel({
   // Fulfilling goes by what was saved, so it waits until the vendor and price are.
   const savedForPurchase = !!order.vendorId && order.purchasePrice !== null && order.purchasePrice !== undefined && order.purchasePrice !== "";
   const vendorName = (id: string) => vendorOptions.find((v) => v.id === id)?.name ?? "the vendor";
+  /**
+   * "Create vendor PO" raises the PO from what is saved, so it waits for a saved vendor and price, for
+   * sales to accept a higher one, and for the box's own changes to be saved.
+   */
+  const offersPo = !!vendorPo?.canRaise && !vendorPo.live;
+  const unsavedChanges = vendorId !== (order.vendorId ?? "") || purchasePrice !== (order.purchasePrice ? String(order.purchasePrice) : "");
+  const poReady = savedForPurchase && !purchase.pendingIncrease && !unsavedChanges;
 
   function handleApprove(approved: boolean, notes?: string) {
     setError(null);
@@ -146,10 +170,27 @@ export function OrderActionsPanel({
       } else {
         // Said, so a save is seen to have happened — before, the box just looked the same afterwards.
         setPurchasingNotice(
-          `Saved — ${vendorName(vendorId)} at ${formatCurrency(Number(purchasePrice))} a unit${ourPoNumber.trim() ? `, our PO ${ourPoNumber.trim()}` : ""}. Mark it fulfilled once it's delivered.`,
+          `Saved — ${vendorName(vendorId)} at ${formatCurrency(Number(purchasePrice))} a unit${ourPoNumber.trim() ? `, our PO ${ourPoNumber.trim()}` : ""}.${
+            offersPo ? " Create the vendor PO next, and mark it fulfilled once it's delivered." : " Mark it fulfilled once it's delivered."
+          }`,
         );
       }
       router.refresh();
+    });
+  }
+
+  /** A draft PO to the saved vendor, opened to check and issue (src/actions/order-vendor-po.ts). */
+  function handleCreatePo() {
+    setPurchasingError(null);
+    setPurchasingNotice(null);
+    startTransition(async () => {
+      const result = await createVendorPoForOrder(order.id);
+      if (!result.ok) {
+        setPurchasingError(result.error);
+        router.refresh();
+        return;
+      }
+      router.push(documentPath(result.data.id));
     });
   }
 
@@ -344,6 +385,11 @@ export function OrderActionsPanel({
             >
               {isPending ? "Saving…" : aboveCeiling ? "Ask sales to accept" : "Save purchasing details"}
             </Button>
+            {offersPo && (
+              <Button type="button" variant="secondary" size="sm" disabled={isPending || !poReady} onClick={handleCreatePo}>
+                Create vendor PO
+              </Button>
+            )}
             <Button
               type="button"
               variant="secondary"
@@ -354,13 +400,34 @@ export function OrderActionsPanel({
               Mark fulfilled
             </Button>
           </div>
-          {/* Why "Mark fulfilled" can't be pressed, in words rather than in a tooltip nobody sees. */}
+          {vendorPo?.live && (
+            <p className="text-xs text-muted">
+              Purchase order{" "}
+              {vendorPo.canOpen ? (
+                <Link href={documentPath(vendorPo.live.id)} className="font-mono text-brand hover:underline">
+                  {vendorPo.live.docNumber}
+                </Link>
+              ) : (
+                <span className="font-mono text-text">{vendorPo.live.docNumber}</span>
+              )}{" "}
+              · {tradeDocumentStatusLabels[vendorPo.live.status]}
+              {vendorPo.live.status === "DRAFT" ? " — check it and issue it; its number then fills in Our PO to vendor." : ""}
+            </p>
+          )}
+          {/* Why "Mark fulfilled" (and "Create vendor PO") can't be pressed, in words rather than in a tooltip nobody sees. */}
           {(purchase.pendingIncrease || !savedForPurchase) && (
             <p className="text-xs text-subtle">
               {purchase.pendingIncrease
-                ? "Mark fulfilled waits for sales to accept the higher price."
-                : "Save the vendor and purchase price first — then it can be marked fulfilled."}
+                ? offersPo
+                  ? "The PO and Mark fulfilled wait for sales to accept the higher price."
+                  : "Mark fulfilled waits for sales to accept the higher price."
+                : offersPo
+                  ? "Save the vendor and purchase price first — then create the PO, and mark it fulfilled once it's delivered."
+                  : "Save the vendor and purchase price first — then it can be marked fulfilled."}
             </p>
+          )}
+          {offersPo && savedForPurchase && !purchase.pendingIncrease && unsavedChanges && (
+            <p className="text-xs text-subtle">Save your changes first — the PO is raised from the saved vendor and price.</p>
           )}
           {purchasingError && (
             <p role="alert" className="text-xs text-danger">

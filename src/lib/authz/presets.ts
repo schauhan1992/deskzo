@@ -217,6 +217,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       "orders.approve",
       "documents.issue",
       "documents.send",
+      "purchase.raiseOrders",
       "ledger.viewReports",
       "expenses.reimburse",
       "expenses.viewAll",
@@ -242,6 +243,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       "documents.issue",
       "documents.send",
       "documents.void",
+      "purchase.raiseOrders",
       "expenses.approve",
       "expenses.reimburse",
       "expenses.viewAll",
@@ -274,7 +276,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     // This role held nothing at all before, because it was missing from the role list the
     // permission screen renders from — see src/lib/roles.ts.
     permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, "meetings.schedule",
-      "vault.use","orders.process", "products.edit", "tickets.create", "companies.viewAll", "data.exportCatalog", "data.importCatalog",
+      "vault.use","orders.process", "purchase.raiseOrders", "products.edit", "tickets.create", "companies.viewAll", "data.exportCatalog", "data.importCatalog",
       // Whoever places the order with the distributor is who should be checking its monthly bill.
       "purchase.reconcile",
       // And the rebate and deal price the distributor agreed to, to buy at.
@@ -410,6 +412,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       "documents.issue",
       "documents.send",
       "documents.void",
+      "purchase.raiseOrders",
       "purchase.reconcile",
       "portal.manage",
       "tickets.create",

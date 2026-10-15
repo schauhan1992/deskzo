@@ -150,6 +150,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "order-punch.ts": ["orders"],
   "order.ts": ["orders"],
   "order-billing.ts": ["orders"],
+  // "Create vendor PO" from an order's Purchasing box; it asks for Purchase documents itself (owner, 15 Oct 2026).
+  "order-vendor-po.ts": ["orders"],
   // Backend rebates on orders, their programmes and the report (owner, 1 Oct 2026).
   "rebate.ts": ["orders"],
   // Branches and GST registrations are the company itself, not a module: every document names one.

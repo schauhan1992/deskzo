@@ -24,6 +24,7 @@ const BY_KEY: Record<string, ModuleRef> = {
   "documents.issue": "sales_documents",
   "documents.send": "sales_documents",
   "documents.void": "sales_documents",
+  "purchase.raiseOrders": "purchase_documents",
   "catalog.manage": "items",
   "collections.followUp": "receivables",
   "notes.broadcast": "notes",

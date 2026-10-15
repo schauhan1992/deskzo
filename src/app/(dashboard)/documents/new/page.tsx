@@ -18,6 +18,7 @@ import { viewerHas } from "@/actions/permission";
 import { leadPath, orderPath } from "@/lib/record-links";
 import { invoiceStartFromOrders } from "@/lib/orders/invoice-draft";
 import { formatOrderId } from "@/lib/order-id";
+import { documentWriteKey } from "@/lib/documents/write-permission";
 import {
   documentDirection,
   documentListPath,
@@ -31,14 +32,15 @@ export default async function NewDocumentPage({
   /** `orders`: order ids, comma-separated — a tax invoice started from them (src/lib/orders/invoice-draft.ts). */
   searchParams: Promise<{ type?: string; companyId?: string; leadId?: string; orders?: string }>;
 }) {
-  // Seeing documents isn't raising one: without "Raise and issue sales documents" the form could
-  // only ever refuse to save, so it is not found (owner, 8 Oct 2026).
-  if (!(await viewerHas("documents.view")) || !(await viewerHas("documents.issue"))) notFound();
   const params = await searchParams;
   // A delivery challan is not in this list — it is raised from a consignment, so there is no blank
   // form for one. The cast narrows to the types that do have one.
   if (!tradeDocumentTypeValues.includes(params.type as (typeof tradeDocumentTypeValues)[number])) notFound();
   const docType = params.type as TradeDocumentType;
+  // Seeing documents isn't raising one: without the permission this type asks — "Raise purchase
+  // orders" for a PO, "Raise and issue sales documents" for the rest — the form could only ever refuse
+  // to save, so it is not found (owner, 8 Oct 2026).
+  if (!(await viewerHas("documents.view")) || !(await viewerHas(documentWriteKey(docType, "issue")))) notFound();
 
   // The branch decides which series the number comes from, so the two number reads wait for it —
   // and only for it: everything else is fetched alongside.

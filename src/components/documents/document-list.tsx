@@ -23,6 +23,7 @@ import { ViewModeToggle } from "@/components/ui/view-mode-toggle";
 import { getViewMode } from "@/actions/view-mode";
 import { formatCurrency } from "@/lib/utils";
 import { PAGE_SIZES, resolvePage, resolvePageSize } from "@/lib/pagination";
+import { documentWriteKey } from "@/lib/documents/write-permission";
 import {
   documentDirection,
   documentListPath,
@@ -84,9 +85,9 @@ export async function DocumentList({
    * `branch` left in a link from when there were two must not narrow a list with no control to undo it.
    */
   const multiBranchCheck = isMultiBranch();
-  // "New …" only for somebody who may raise one (owner, 8 Oct 2026): every document type is saved
-  // through the same "Raise and issue sales documents" gate.
-  const canRaise = await viewerHas("documents.issue");
+  // "New …" only for somebody who may raise one (owner, 8 Oct 2026): a purchase order asks "Raise
+  // purchase orders", every other type "Raise and issue sales documents".
+  const canRaise = await viewerHas(documentWriteKey(docType, "issue"));
   const [viewMode, { rows, total }, summary, approvalPolicy, users, multiBranch, branches] = await Promise.all([
     getViewMode("documents"),
     multiBranchCheck.then((multi) =>

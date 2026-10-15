@@ -41,6 +41,8 @@ import { orderBilling, ordersOnSamePo } from "@/lib/orders/billing";
 import { moduleAccessFor } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { recurringBillingFor } from "@/actions/recurring-billing";
+import { livePurchaseOrders } from "@/lib/orders/vendor-po";
+import type { OrderVendorPo } from "@/components/orders/order-actions-panel";
 import { orderSteps, stepHistory, stepsOfOrders } from "@/lib/pipeline/order-steps-server";
 import { stepStatusLabel, stepsOf, takesSteps } from "@/lib/pipeline/order-steps";
 
@@ -109,6 +111,19 @@ export async function OrderDetail({
   ]);
   const billingById = await orderBilling([order.id, ...poSiblingIds]);
   const ownBilling = billingById.get(order.id)!;
+
+  /**
+   * Our PO to the vendor (src/lib/orders/vendor-po.ts): purchase orders are Purchase documents', so the
+   * Purchasing box offers one only where the plan has them; raising one asks "Raise purchase orders".
+   */
+  const purchaseDocsOpen = (await moduleAccessFor(userId, "purchase_documents")) === "available";
+  const vendorPo: OrderVendorPo | null = purchaseDocsOpen
+    ? {
+        canRaise: !viewAs && (await can(userId, "purchase.raiseOrders")),
+        canOpen: canSeeDocs,
+        live: (await livePurchaseOrders([order.id])).get(order.id) ?? null,
+      }
+    : null;
   const siblingRows = poSiblingIds.length
     ? await db.companyProduct.findMany({ where: { id: { in: poSiblingIds } }, select: { id: true, orderSeq: true, item: { select: { name: true } } }, orderBy: { orderSeq: "asc" } })
     : [];
@@ -765,6 +780,7 @@ export async function OrderDetail({
                 companyId={order.company.id}
                 companyName={order.company.name}
                 credit={credit}
+                vendorPo={vendorPo}
                 purchase={{
                   purchaseRelease: order.purchaseRelease,
                   releaseOn: order.releaseOn,

@@ -202,6 +202,19 @@ export const PERMISSION_REGISTRY = [
     defaultRoles: ["PURCHASE", "MANAGEMENT"],
   },
   {
+    /**
+     * Purchase orders have their own permission (owner, 15 Oct 2026): before, raising one took "Raise
+     * and issue sales documents", which the purchase team didn't hold and sales did. Which key a
+     * document's writes ask is src/lib/documents/write-permission.ts.
+     */
+    key: "purchase.raiseOrders",
+    label: "Raise purchase orders",
+    description:
+      "Create, edit, issue and cancel purchase orders to vendors — from the Purchase orders list, a vendor's page, or in one click from an order's Purchasing box. The people who choose the vendor and the price raise the PO, rather than the people who sell. A PO posts nothing to the books; the vendor's bill does, and stays with \"Raise and issue sales documents\".",
+    defaultRoles: ["PURCHASE", "ACCOUNTS", "MANAGEMENT"],
+    group: "Orders & fulfilment",
+  },
+  {
     key: "orders.approveLoss",
     label: "Approve orders sold below cost",
     description:

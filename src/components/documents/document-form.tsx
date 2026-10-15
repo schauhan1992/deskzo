@@ -1063,6 +1063,7 @@ export function DocumentForm({
                         line={line}
                         lineNumber={index + 1}
                         orders={isSales ? orders : EMPTY_ORDERS}
+                        buying={!isSales}
                         periodShown={periodShown}
                         onOrder={(orderId) => applyOrder(line.key, orderId)}
                         warning={line.companyProductId ? orderWarnings[line.companyProductId] ?? null : null}
@@ -1354,10 +1355,13 @@ function LineLinks({
   onPeriod,
   onOpenPeriod,
   warning = null,
+  buying = false,
 }: {
   line: LineDraft;
   lineNumber: number;
   orders: PartyOrder[];
+  /** A purchase order's line, raised from an order's Purchasing box: it buys for the order rather than billing it. */
+  buying?: boolean;
   /** Whether this type of document carries a period at all (`showsServicePeriod`). */
   periodShown: boolean;
   onOrder: (orderId: string) => void;
@@ -1379,13 +1383,13 @@ function LineLinks({
     <div className="mt-1.5 space-y-1.5">
       {showOrders && (
         <Select
-          aria-label={`Order billed, line ${lineNumber}`}
+          aria-label={buying ? `Order bought for, line ${lineNumber}` : `Order billed, line ${lineNumber}`}
           value={line.companyProductId}
           onChange={(e) => onOrder(e.target.value)}
           className="h-8 text-xs"
         >
-          <option value="">Not billing an order</option>
-          {linkedElsewhere && <option value={line.companyProductId}>The order this line bills</option>}
+          <option value="">{buying ? "Not for an order" : "Not billing an order"}</option>
+          {linkedElsewhere && <option value={line.companyProductId}>{buying ? "The order this line buys for" : "The order this line bills"}</option>}
           {orders.map((o) => (
             <option key={o.id} value={o.id}>
               {orderLabel(o)}

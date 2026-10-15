@@ -13,6 +13,7 @@ import { can } from "@/lib/authz/resolve";
 import { DocumentForm } from "@/components/documents/document-form";
 import { isEditable, tradeDocumentLabels } from "@/lib/trade-documents";
 import { periodKey } from "@/lib/documents/service-period";
+import { documentWriteKey } from "@/lib/documents/write-permission";
 
 /**
  * A stored date as the day it holds, for a date input. A document's dates are typed days kept as their
@@ -24,8 +25,9 @@ const asDateInput = (value: Date | string | null | undefined) => periodKey(value
 export default async function EditDocumentPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const [document, user] = await Promise.all([getTradeDocument(id), requireUser()]);
-  // Editing is raising: the form could only refuse to save without it (owner, 8 Oct 2026).
-  if (!document || !(await can(user.id, "documents.issue"))) notFound();
+  // Editing is raising: the form could only refuse to save without it (owner, 8 Oct 2026) — for a
+  // purchase order, "Raise purchase orders" (src/lib/documents/write-permission.ts).
+  if (!document || !(await can(user.id, documentWriteKey(document.docType, "issue")))) notFound();
 
   /**
    * Via the party the document was raised for — `document.companyId`, already loaded, so this is a

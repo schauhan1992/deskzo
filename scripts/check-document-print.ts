@@ -249,6 +249,7 @@ async function main() {
           canCancelIrn: false,
           canIssue: may,
           canVoid: may,
+          canConvert: may,
         }),
       );
 

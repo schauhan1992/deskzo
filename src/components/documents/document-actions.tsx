@@ -38,6 +38,7 @@ export function DocumentActions({
   canCancelIrn,
   canIssue,
   canVoid,
+  canConvert,
   canEmail = false,
 }: {
   id: string;
@@ -52,11 +53,14 @@ export function DocumentActions({
   canEmail?: boolean;
   /**
    * "Raise and issue sales documents" and "Delete or cancel a sales document" (owner, 8 Oct 2026):
-   * only the buttons the viewer may press are shown — issue, edit, convert and the IRN with the
-   * first; a status, a cancellation and deleting a draft with the second.
+   * only the buttons the viewer may press are shown — issue, edit and the IRN with the first; a
+   * status, a cancellation and deleting a draft with the second. On a purchase order both are "Raise
+   * purchase orders" (src/lib/documents/write-permission.ts).
    */
   canIssue: boolean;
   canVoid: boolean;
+  /** May raise what it converts into — a PO's bill as much as a quote's invoice is a sales-document write. */
+  canConvert: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -74,7 +78,7 @@ export function DocumentActions({
   // A dead document isn't a starting point for anything — the server refuses these conversions, and
   // offering a button that always errors is worse than not offering it.
   const isDead = status === "CANCELLED" || status === "REJECTED";
-  const targets = isDead || !canIssue ? [] : (conversionTargets[docType] ?? []);
+  const targets = isDead || !canConvert ? [] : (conversionTargets[docType] ?? []);
   // Statuses you can set by hand, minus the one it already has — setting a document to where it
   // already is isn't an action. A rejected or cancelled document keeps these: the server allows the
   // reverse, and hiding them would make a mis-click permanent with no way back through the UI.

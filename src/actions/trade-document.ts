@@ -33,7 +33,11 @@ import {
   conversionTargets,
   manualStatuses,
   tradeDocumentLabels,
+  tradeDocumentTypeValues,
 } from "@/lib/trade-documents";
+import { documentWriteKey, documentWriteRefusal } from "@/lib/documents/write-permission";
+import { syncOrdersWithPurchaseOrder } from "@/lib/orders/vendor-po";
+import { orderPath } from "@/lib/record-links";
 import {
   tradeDocumentSchema,
   updateTradeDocumentSchema,
@@ -82,19 +86,49 @@ function revalidateDocument(docType: TradeDocumentType, id?: string) {
  * question from who may issue one, and gating reads on `documents.issue` would empty the document
  * lists embedded in the company, lead and project screens. The reads are narrowed instead by the
  * account scope below, which answers "whose customer is this" rather than "what may you do".
+ *
+ * Which permission depends on the document's type (src/lib/documents/write-permission.ts): a purchase
+ * order asks "Raise purchase orders" for everything, anything else the sales-document pair. The type
+ * comes from the document itself when the write names one — never from what the caller says it is —
+ * and from the input only when creating. Before anything is known, the sales pair answers, as it did.
  */
-async function mayWrite(key: "documents.issue" | "documents.void") {
+async function mayWrite(kind: "issue" | "void", of: { docType: TradeDocumentType } | { id: unknown }) {
   const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
-  if (!(await can(user.id, key))) {
-    return {
-      user,
-      error:
-        key === "documents.void"
-          ? "You don't have permission to delete or cancel a document."
-          : "You don't have permission to raise or issue sales documents.",
-    };
-  }
+  const docType = "docType" in of ? of.docType : await storedType(of.id);
+  if (!(await can(user.id, documentWriteKey(docType, kind)))) return { user, error: documentWriteRefusal(docType, kind) };
   return { user, error: null as string | null };
+}
+
+/** What stands in for a document's type while it isn't known: any sales document. */
+const UNKNOWN_TYPE: TradeDocumentType = "INVOICE";
+
+/** A stored document's type, by id; the stand-in for an id that names none. */
+async function storedType(id: unknown): Promise<TradeDocumentType> {
+  if (typeof id !== "string" || !id) return UNKNOWN_TYPE;
+  return (await db.tradeDocument.findUnique({ where: { id }, select: { docType: true } }))?.docType ?? UNKNOWN_TYPE;
+}
+
+/** The type an unvalidated input names (`docType`, or a conversion's `target`); the stand-in for anything else. */
+function claimedType(value: unknown): TradeDocumentType {
+  return typeof value === "string" && (tradeDocumentTypeValues as readonly string[]).includes(value) ? (value as TradeDocumentType) : UNKNOWN_TYPE;
+}
+
+/** A field of an unvalidated input object, for the gate to read before the schema does. */
+function field(input: unknown, key: string): unknown {
+  return typeof input === "object" && input !== null ? (input as Record<string, unknown>)[key] : undefined;
+}
+
+/**
+ * The orders a purchase order is for, after it was issued or its status changed: their "Our PO to
+ * vendor" follows it (src/lib/orders/vendor-po.ts), and their pages are redrawn.
+ */
+async function followPurchaseOrder(docType: TradeDocumentType, documentId: string) {
+  if (docType !== "PURCHASE_ORDER") return;
+  const changed = await syncOrdersWithPurchaseOrder(documentId);
+  if (changed.length === 0) return;
+  const orders = await db.companyProduct.findMany({ where: { id: { in: changed } }, select: { orderSeq: true } });
+  for (const o of orders) revalidatePath(orderPath(o.orderSeq));
+  revalidatePath("/orders");
 }
 
 /**
@@ -125,7 +159,7 @@ export async function createTradeDocument(
   input: unknown,
   origin: DocumentOrigin = "MANUAL",
 ): Promise<ActionResult<{ id: string }>> {
-  const gate = await mayWrite("documents.issue");
+  const gate = await mayWrite("issue", { docType: claimedType(field(input, "docType")) });
   if (gate.error) return { ok: false, error: gate.error };
   const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   const parsed = tradeDocumentSchema.safeParse(input);
@@ -149,7 +183,7 @@ export async function createTradeDocument(
 }
 
 export async function updateTradeDocument(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const gate = await mayWrite("documents.issue");
+  const gate = await mayWrite("issue", { id: field(input, "id") });
   if (gate.error) return { ok: false, error: gate.error };
   const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   const parsed = updateTradeDocumentSchema.safeParse(input);
@@ -286,7 +320,7 @@ export async function updateTradeDocument(input: unknown): Promise<ActionResult<
 }
 
 export async function deleteTradeDocument(id: string): Promise<ActionResult<{ id: string }>> {
-  const gate = await mayWrite("documents.void");
+  const gate = await mayWrite("void", { id });
   if (gate.error) return { ok: false, error: gate.error };
   const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   const existing = await db.tradeDocument.findUnique({
@@ -324,7 +358,7 @@ export async function deleteTradeDocument(id: string): Promise<ActionResult<{ id
  * doesn't have to remember a second step.
  */
 export async function issueTradeDocument(input: unknown): Promise<ActionResult<{ id: string; docNumber: string; einvoiceError?: string }>> {
-  const gate = await mayWrite("documents.issue");
+  const gate = await mayWrite("issue", { id: field(input, "id") });
   if (gate.error) return { ok: false, error: gate.error };
   const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   const parsed = issueTradeDocumentSchema.safeParse(input);
@@ -461,6 +495,7 @@ export async function issueTradeDocument(input: unknown): Promise<ActionResult<{
     }
   }
 
+  await followPurchaseOrder(existing.docType, id);
   revalidateDocument(existing.docType, id);
   return { ok: true, data: { id, docNumber, einvoiceError } };
 }
@@ -600,7 +635,7 @@ async function generateEInvoice_internal(id: string): Promise<{ ok: true } | { o
 }
 
 export async function generateEInvoice(id: string): Promise<ActionResult<{ id: string }>> {
-  const gate = await mayWrite("documents.issue");
+  const gate = await mayWrite("issue", { id });
   if (gate.error) return { ok: false, error: gate.error };
   const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   if (!(await countryFeatureAvailable("einvoice"))) return { ok: false, error: "E-invoicing is India's, and this workspace is set up for another country." };
@@ -634,7 +669,7 @@ export async function generateEInvoice(id: string): Promise<ActionResult<{ id: s
 }
 
 export async function cancelEInvoice(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const gate = await mayWrite("documents.void");
+  const gate = await mayWrite("void", { id: field(input, "id") });
   if (gate.error) return { ok: false, error: gate.error };
   const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   if (!(await countryFeatureAvailable("einvoice"))) return { ok: false, error: "E-invoicing is India's, and this workspace is set up for another country." };
@@ -703,7 +738,8 @@ export async function cancelEInvoice(input: unknown): Promise<ActionResult<{ id:
  * source and linked back to it, so the original stays exactly as it was sent to the customer.
  */
 export async function convertTradeDocument(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const gate = await mayWrite("documents.issue");
+  // Converting raises the target: a PO becoming the vendor's bill asks what raising a bill asks.
+  const gate = await mayWrite("issue", { docType: claimedType(field(input, "target")) });
   if (gate.error) return { ok: false, error: gate.error };
   const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   const parsed = convertTradeDocumentSchema.safeParse(input);
@@ -863,7 +899,7 @@ export async function convertTradeDocument(input: unknown): Promise<ActionResult
  * document with who and when; moving it on from cancelled clears them — the audit keeps the history.
  */
 export async function setTradeDocumentStatus(id: string, status: TradeDocumentStatus, reason?: string): Promise<ActionResult<{ id: string }>> {
-  const gate = await mayWrite("documents.void");
+  const gate = await mayWrite("void", { id });
   if (gate.error) return { ok: false, error: gate.error };
   const user = await requireModuleUser(["sales_documents", "purchase_documents"]);
   const document = await db.tradeDocument.findUnique({
@@ -906,6 +942,7 @@ export async function setTradeDocumentStatus(id: string, status: TradeDocumentSt
     entityId: id,
     entityLabel: `${document.docNumber} → ${status.toLowerCase().replace(/_/g, " ")}${why?.ok ? `: ${why.reason}` : ""}`,
   });
+  await followPurchaseOrder(document.docType, id);
   revalidateDocument(document.docType, id);
   return { ok: true, data: { id } };
 }
@@ -1256,8 +1293,11 @@ export async function listCompanyDocuments(companyId: string) {
  * isn't in a state to change is counted as skipped rather than failing the whole batch.
  */
 export async function bulkUpdateTradeDocuments(input: unknown): Promise<ActionResult<{ count: number; skipped: number }>> {
-  const gate = await mayWrite("documents.issue");
-  if (gate.error) return { ok: false, error: gate.error };
+  // Somebody who may write some kind of document; each one's own action then asks for its own type.
+  const writer = await requireModuleUser(["sales_documents", "purchase_documents"]);
+  if (!(await can(writer.id, "documents.issue")) && !(await can(writer.id, "purchase.raiseOrders"))) {
+    return { ok: false, error: documentWriteRefusal(UNKNOWN_TYPE, "issue") };
+  }
   await requireModuleUser(["sales_documents", "purchase_documents"]);
   const parsed = bulkUpdateTradeDocumentsSchema.safeParse(input);
   if (!parsed.success) {

@@ -52,6 +52,7 @@ import {
   tradeDocumentStatusLabels,
 } from "@/lib/trade-documents";
 import { companyPath, leadPath } from "@/lib/record-links";
+import { documentWriteKey } from "@/lib/documents/write-permission";
 
 /**
  * A document's full detail. Rendered on its own page and again inside the split view on a document
@@ -255,8 +256,10 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
             hasIrn={!!document.irn}
             einvoiceEnabled={org.einvoiceEnabled}
             canCancelIrn={isWithinCancellationWindow(document.ackDate)}
-            canIssue={await viewerHas("documents.issue")}
-            canVoid={await viewerHas("documents.void")}
+            canIssue={await viewerHas(documentWriteKey(document.docType, "issue"))}
+            canVoid={await viewerHas(documentWriteKey(document.docType, "void"))}
+            // Every conversion makes a sales-document type — a bill, an invoice, a proforma.
+            canConvert={await viewerHas("documents.issue")}
             canEmail={
               isEmailable(document.docType) &&
               document.status !== "DRAFT" &&

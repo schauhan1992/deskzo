@@ -114,6 +114,7 @@ import { headcountLabel } from "@/lib/company-size";
 import { isModuleEntitled } from "@/lib/modules-access";
 import { customerRevenue } from "@/actions/revenue";
 import { CustomerRevenueCard } from "@/components/revenue/customer-revenue-card";
+import { documentWriteKey } from "@/lib/documents/write-permission";
 
 const CLOSED_STATUSES = ["WON", "LOST", "DISQUALIFIED"];
 
@@ -993,7 +994,8 @@ export async function CompanyDetail({
                   documents={documents}
                   isVendor={isVendor}
                   managedByResellerName={managedByReseller?.name}
-                  canRaise={await hasEffectivePermission(userId, "documents.issue")}
+                  // The button raises a PO for a vendor and a proposal for anybody else.
+                  canRaise={await hasEffectivePermission(userId, documentWriteKey(isVendor ? "PURCHASE_ORDER" : "PROPOSAL", "issue"))}
                 />
               </CardContent>
             </Card>
