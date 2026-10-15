@@ -3604,6 +3604,13 @@ model SupportMailSettings {
   acknowledge           Boolean  @default(true)
   defaultAssigneeUserId String?
   defaultAssignee       User?    @relation("SupportMailDefaultAssignee", fields: [defaultAssigneeUserId], references: [id], onDelete: SetNull)
+  /// Where replies to customers go out from (owner, 15 Oct 2026; src/lib/support-mail/reply-from.ts):
+  /// "DESKZO", Deskzo's own Support mail; "COMPANY", the company's mail server (Settings › Messaging),
+  /// falling back to Deskzo's when it isn't set up or refuses one.
+  replyFrom             String   @default("DESKZO")
+  /// With "COMPANY": the address replies go from, e.g. support@wroffy.com — the one forwarded to the
+  /// helpdesk address. Null: the server's own From address.
+  companyFrom           String?
   updatedAt             DateTime @updatedAt
 
   @@map("support_mail_settings")

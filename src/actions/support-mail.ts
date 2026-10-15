@@ -11,7 +11,12 @@ import { formatTicketId } from "@/lib/tickets";
 import { parseSeqQuery } from "@/lib/order-id";
 import { inboundDomain, workspaceSupportAddress } from "@/lib/support-mail/config";
 import { normalizeAddress, visiblePart } from "@/lib/support-mail/rules";
-import { sendSupportEmail } from "@/lib/support-mail/send";
+import { forwardsHere, sendSupportEmail, supportReplySettings } from "@/lib/support-mail/send";
+import { checkCompanyFrom, deskzoAddressing, isReplyFrom, type ReplyFrom } from "@/lib/support-mail/reply-from";
+import { emailRouteFor } from "@/lib/marketing/pipeline";
+import { platformFromAddress } from "@/lib/platform/mailer";
+import { helpdeskFromOwnAddress } from "@/lib/platform/helpdesk-from";
+import { notMigratedYet } from "@/lib/not-migrated";
 import { companiesByDomain } from "@/lib/support-mail/domain-match";
 import { canViewContacts } from "@/lib/authz/contact-access";
 import { ticketPath } from "@/lib/record-links";
@@ -47,11 +52,20 @@ export type SupportMailSetup = {
   /** Gmail's latest "confirm forwarding" email, so setting up forwarding can be finished from here. */
   gmailConfirmation: { body: string; receivedAt: string } | null;
 };
+  /** Where replies go out from (src/lib/support-mail/reply-from.ts), and the address the company's server sends as. */
+  replyFrom: ReplyFrom;
+  companyFrom: string | null;
+  /** The company's mail server for transactional mail (Settings › Messaging); null when there is none. */
+  companyServer: { label: string; fromEmail: string | null } | null;
+  /** Whether mail to `companyFrom` has reached the helpdesk, so replies can go back to it. */
+  companyForwards: boolean;
+  /** What Deskzo's mail shows the customer: its From, and a Reply-To when that isn't the helpdesk address. Null when unknown. */
+  deskzoFrom: { from: string; replyTo: string | null } | null;
 
 export async function getSupportMailSetup(): Promise<SupportMailSetup | null> {
   const user = await requireModuleUser("helpdesk");
   if (!(await hasEffectivePermission(user.id, "settings.manage"))) return null;
-  const [address, settings, agents, last, gmail] = await Promise.all([
+  const [address, settings, agents, last, gmail, reply, companyServer, accountFrom, fromOwn] = await Promise.all([
     workspaceSupportAddress(),
     db.supportMailSettings.findUnique({ where: { id: "global" } }),
     db.user.findMany({ where: SUPPORT_TEAM, orderBy: { name: "asc" }, select: { id: true, name: true } }),
@@ -62,7 +76,13 @@ export async function getSupportMailSetup(): Promise<SupportMailSetup | null> {
       select: { body: true, createdAt: true },
     }),
   ]);
+    supportReplySettings(),
+    emailRouteFor("TRANSACTIONAL"),
+    // The platform's mail settings live in the control plane; a page that can't read them says less, not nothing.
+    platformFromAddress("SUPPORT").catch(() => null),
+    helpdeskFromOwnAddress(),
   return {
+  const deskzo = address ? deskzoAddressing(fromOwn, address) : null;
     address,
     acknowledge: settings?.acknowledge ?? true,
     defaultAssigneeUserId: settings?.defaultAssigneeUserId ?? null,
@@ -70,9 +90,20 @@ export async function getSupportMailSetup(): Promise<SupportMailSetup | null> {
     lastReceivedAt: last?.createdAt.toISOString() ?? null,
     gmailConfirmation: gmail ? { body: gmail.body.slice(0, 4000), receivedAt: gmail.createdAt.toISOString() } : null,
   };
+    replyFrom: reply.replyFrom,
+    companyFrom: reply.companyFrom,
+    companyServer,
+    companyForwards: reply.companyFrom ? await forwardsHere(reply.companyFrom) : false,
+    deskzoFrom: deskzo && (deskzo.from ?? accountFrom) ? { from: (deskzo.from ?? accountFrom)!, replyTo: deskzo.replyTo } : null,
 }
 
-export async function saveSupportMailSettings(input: { acknowledge: boolean; defaultAssigneeUserId: string | null }): Promise<ActionResult<null>> {
+export async function saveSupportMailSettings(input: {
+  acknowledge: boolean;
+  defaultAssigneeUserId: string | null;
+  /** Left out by an older page: the reply route stays as it is. */
+  replyFrom?: ReplyFrom;
+  companyFrom?: string | null;
+}): Promise<ActionResult<null>> {
   const user = await requireModuleUser("helpdesk");
   if (!(await hasEffectivePermission(user.id, "settings.manage"))) return { ok: false, error: "You can't change support email settings." };
   const assignee = input?.defaultAssigneeUserId ? String(input.defaultAssigneeUserId) : null;
@@ -80,8 +111,26 @@ export async function saveSupportMailSettings(input: { acknowledge: boolean; def
     return { ok: false, error: "A new ticket can only go to somebody in a support team." };
   }
   const data = { acknowledge: input?.acknowledge !== false, defaultAssigneeUserId: assignee };
+  const route = input?.replyFrom === undefined ? null : isReplyFrom(input.replyFrom) ? input.replyFrom : "invalid";
+  if (route === "invalid") return { ok: false, error: "Choose where replies go out from." };
+  const companyFrom = checkCompanyFrom(input?.companyFrom, inboundDomain());
+  if (!companyFrom.ok) return { ok: false, error: companyFrom.error };
   await db.supportMailSettings.upsert({ where: { id: "global" }, create: { id: "global", ...data }, update: data });
-  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "SupportMailSettings", entityId: "global", entityLabel: "Support email settings" });
+  if (route) {
+    try {
+      await db.supportMailSettings.update({ where: { id: "global" }, data: { replyFrom: route, companyFrom: route === "COMPANY" ? companyFrom.value : null }, select: { id: true } });
+    } catch (err) {
+      if (!notMigratedYet(err)) throw err;
+      return { ok: false, error: "The rest is saved, but where replies go from can be chosen once this workspace has finished updating. Try again in a few minutes." };
+    }
+  }
+  await recordAudit({
+    userId: user.id,
+    action: "UPDATE",
+    entityType: "SupportMailSettings",
+    entityId: "global",
+    entityLabel: route ? `Support email settings — replies from ${route === "COMPANY" ? (companyFrom.value ?? "the company's mail server") : "Deskzo's mail"}` : "Support email settings",
+  });
   revalidatePath("/settings/support-email");
   return { ok: true, data: null };
 }

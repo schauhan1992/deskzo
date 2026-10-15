@@ -1,19 +1,31 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/lib/db";
+import { notMigratedYet } from "@/lib/not-migrated";
 import { getOrganisation } from "@/lib/organisation";
-import { sendPlatformMail } from "@/lib/platform/mailer";
+import { sendPlatformMail, type PlatformMail } from "@/lib/platform/mailer";
+import { deliverNow, emailRouteFor } from "@/lib/marketing/pipeline";
+import { textToHtml } from "@/lib/marketing/html";
 import { currentTenant } from "@/lib/tenancy/resolve";
 import { inboundDomain, workspaceSupportAddress } from "@/lib/support-mail/config";
 import { replySubject } from "@/lib/support-mail/rules";
+import { companyAddressing, deskzoAddressing, isReplyFrom, type ReplyFrom } from "@/lib/support-mail/reply-from";
+import { helpdeskFromOwnAddress } from "@/lib/platform/helpdesk-from";
 
 /**
  * An email from the helpdesk to a customer: an agent's reply, or the acknowledgement of a new ticket.
  *
- * Sent through the platform's mail server under the company's name — "Wroffy Support" — from the
- * platform's own address, with Reply-To the workspace's helpdesk address. So the customer's answer comes
- * back through the forwarding address and lands on the same ticket: by its In-Reply-To and References,
- * or failing those by the [TCK-…] tag in the subject. Every email sent is kept in the ticket's
- * conversation, and one the mail server refused is kept as FAILED with the reason.
+ * Always under the company's name — "Wroffy Support" — and through the route Settings → Support email
+ * chose (src/lib/support-mail/reply-from.ts):
+ *
+ *   · Deskzo's Support mail — from the helpdesk address itself where the platform sends for its domain,
+ *     else from the platform's address with Reply-To the helpdesk address;
+ *   · the company's own mail server — from its support address, falling back to Deskzo's mail, with a
+ *     note on the email, when that server isn't set up or refuses it.
+ *
+ * Either way the customer's answer comes back to the helpdesk address and lands on the same ticket: by
+ * its In-Reply-To and References, or failing those (a provider that writes its own Message-ID) by the
+ * [TCK-…] tag in the subject. Every email sent is kept in the ticket's conversation, and one no mail
+ * server took is kept as FAILED with the reason.
  */
 
 export type SupportSend = {
@@ -34,33 +46,97 @@ export async function supportFromName(): Promise<string> {
   return `${company} Support`;
 }
 
+/** The workspace's choice under Settings → Support email; Deskzo's mail before it made one, or before its table has the columns. */
+export async function supportReplySettings(): Promise<{ replyFrom: ReplyFrom; companyFrom: string | null }> {
+  try {
+    const row = await db.supportMailSettings.findUnique({ where: { id: "global" }, select: { replyFrom: true, companyFrom: true } });
+    return { replyFrom: isReplyFrom(row?.replyFrom) ? row.replyFrom : "DESKZO", companyFrom: row?.companyFrom ?? null };
+  } catch (err) {
+    if (notMigratedYet(err)) return { replyFrom: "DESKZO", companyFrom: null };
+    throw err;
+  }
+}
+
+/** Whether mail sent to this address has reached the helpdesk — forwarding from it works, so replies can go back to it. */
+export async function forwardsHere(address: string): Promise<boolean> {
+  return (await db.supportEmail.count({ where: { direction: "INBOUND", toAddresses: { has: address } } })) > 0;
+}
+
+/** A refusal in words safe to keep and show: one short line, or a plain "refused". */
+function inWords(err: unknown, fallback: string): string {
+  const said = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+  return /^[\w .,:;'()@/?!—–-]{1,240}$/.test(said) ? said : fallback;
+}
+
 export async function sendSupportEmail(input: SupportSend): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   const domain = inboundDomain();
-  const replyTo = await workspaceSupportAddress();
-  if (!domain || !replyTo) return { ok: false, error: "Support email isn't set up on this platform yet, so a reply couldn't come back to the ticket." };
+  const helpdesk = await workspaceSupportAddress();
+  if (!domain || !helpdesk) return { ok: false, error: "Support email isn't set up on this platform yet, so a reply couldn't come back to the ticket." };
 
   const messageId = `<${randomUUID()}@${domain}>`;
   const references = [...(input.answering?.references ?? []), ...(input.answering?.messageId ? [input.answering.messageId] : [])].slice(-20);
   const subject = replySubject(input.ticket.title, input.ticket.ticketSeq);
   const fromName = await supportFromName();
   const cc = (input.cc ?? []).filter((a) => a && a !== input.to);
+  const settings = await supportReplySettings();
 
   let failure: string | null = null;
-  try {
-    await sendPlatformMail({
-      type: "SUPPORT",
-      to: input.to,
-      cc,
-      subject,
-      text: input.body,
-      replyTo,
-      fromName,
-      messageId,
-      inReplyTo: input.answering?.messageId ?? undefined,
-      references,
-    });
-  } catch (err) {
-    failure = err instanceof Error && /^[\w .,:'-]{1,200}$/.test(err.message) ? err.message : "The mail server refused it.";
+  /** Why it went another way than the one chosen, kept on the email. */
+  let note: string | null = null;
+  let fromAddress: string | null = null;
+
+  if (settings.replyFrom === "COMPANY") {
+    const route = await emailRouteFor("TRANSACTIONAL");
+    if (!route) {
+      note = "Your mail server isn't set up in Settings › Messaging, so this went through Deskzo's mail.";
+    } else {
+      const addressing = companyAddressing(settings.companyFrom, settings.companyFrom ? await forwardsHere(settings.companyFrom) : false, helpdesk);
+      const sent = await deliverNow(
+        {
+          to: input.to,
+          ...(cc.length ? { cc } : {}),
+          subject,
+          text: input.body,
+          html: textToHtml(input.body),
+          fromName,
+          fromEmail: addressing.from,
+          replyTo: addressing.replyTo,
+          headers: {
+            "Message-ID": messageId,
+            ...(input.answering?.messageId ? { "In-Reply-To": input.answering.messageId } : {}),
+            ...(references.length ? { References: references.join(" ") } : {}),
+          },
+        },
+        "TRANSACTIONAL",
+        { delivering: true },
+      );
+      if (sent.ok) fromAddress = sent.fromEmail ?? addressing.from ?? route.fromEmail ?? helpdesk;
+      else note = `Your mail server didn't take it (${inWords(sent.error, "refused")}), so this went through Deskzo's mail.`;
+    }
+  }
+
+  if (!fromAddress) {
+    const mail: PlatformMail = { type: "SUPPORT", to: input.to, cc, subject, text: input.body, fromName, messageId, inReplyTo: input.answering?.messageId ?? undefined, references };
+    const own = deskzoAddressing(await helpdeskFromOwnAddress(), helpdesk);
+    try {
+      const used = await sendPlatformMail({ ...mail, ...(own.from ? { fromAddress: own.from } : {}), ...(own.replyTo ? { replyTo: own.replyTo } : {}) });
+      fromAddress = used ?? own.from ?? helpdesk;
+    } catch (err) {
+      if (own.from) {
+        // The service wouldn't send as the helpdesk address: once more from its own, answers still coming back here.
+        try {
+          const used = await sendPlatformMail({ ...mail, replyTo: helpdesk });
+          fromAddress = used ?? helpdesk;
+          note = [note, `Deskzo's mail couldn't send from ${helpdesk} (${inWords(err, "refused")}), so it went from Deskzo's own address.`].filter(Boolean).join(" ");
+        } catch (again) {
+          failure = inWords(again, "The mail server refused it.");
+          fromAddress = helpdesk;
+        }
+      } else {
+        failure = inWords(err, "The mail server refused it.");
+        fromAddress = helpdesk;
+      }
+    }
   }
 
   const row = await db.supportEmail.create({
@@ -68,7 +144,7 @@ export async function sendSupportEmail(input: SupportSend): Promise<{ ok: true; 
       direction: "OUTBOUND",
       state: failure ? "FAILED" : "SENT",
       ticketId: input.ticket.id,
-      fromAddress: replyTo,
+      fromAddress,
       fromName,
       toAddresses: [input.to],
       ccAddresses: cc,
@@ -77,7 +153,7 @@ export async function sendSupportEmail(input: SupportSend): Promise<{ ok: true; 
       messageId,
       inReplyTo: input.answering?.messageId ?? null,
       references,
-      note: failure,
+      note: [note, failure].filter(Boolean).join(" ") || null,
       sentByUserId: input.sentByUserId,
     },
     select: { id: true },

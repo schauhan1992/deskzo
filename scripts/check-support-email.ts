@@ -16,6 +16,11 @@
  *      conversation and its files only for whoever may open the ticket.
  *   8. Settings: the address, acknowledging, the default agent (a support-team member only).
  *   9. What the screens draw.
+ *  10. By the sender's domain.
+ *  11. Where replies go from: Deskzo's mail — from the helpdesk address itself once the console allows it,
+ *      and from Deskzo's own when the service refuses that — or the company's mail server, from its
+ *      support address, answers coming back to it once forwarding from it is proven, and through Deskzo
+ *      with a note when the server isn't set up or refuses.
  *
  * Real emails built with nodemailer, posted through the platform's door (`receiveInbound`) signed as the
  * Cloudflare worker signs them, on a scratch database built from the migrations and dropped at the end.
@@ -25,6 +30,7 @@
  */
 import "dotenv/config";
 import Module from "node:module";
+import net from "node:net";
 import { execSync } from "node:child_process";
 import { createHmac, randomBytes } from "node:crypto";
 import { createElement, type ReactElement } from "react";
@@ -122,6 +128,56 @@ async function mime(m: Mime): Promise<Buffer> {
   const MailComposer = require("nodemailer/lib/mail-composer") as new (o: unknown) => { compile(): { build(cb: (err: Error | null, out: Buffer) => void): void } };
   return new Promise((resolve, reject) =>
     new MailComposer({ to: m.to ?? "support@acme.test", ...m }).compile().build((err, out) => (err ? reject(err) : resolve(out))),
+  );
+}
+
+/** A mail server that accepts anything and remembers it: just enough SMTP for nodemailer. */
+function fakeSmtp(): Promise<{ port: number; close: () => Promise<void>; mails: { from: string; rcpt: string[]; data: string }[] }> {
+  const mails: { from: string; rcpt: string[]; data: string }[] = [];
+  const server = net.createServer((socket) => {
+    let buffer = "";
+    let inData = false;
+    let current = { from: "", rcpt: [] as string[], data: "" };
+    socket.write("220 zz.fake ESMTP\r\n");
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      let at: number;
+      while ((at = buffer.indexOf("\r\n")) >= 0) {
+        const line = buffer.slice(0, at);
+        buffer = buffer.slice(at + 2);
+        if (inData) {
+          if (line === ".") {
+            inData = false;
+            mails.push(current);
+            current = { from: "", rcpt: [], data: "" };
+            socket.write("250 queued\r\n");
+          } else current.data += `${line.startsWith("..") ? line.slice(1) : line}\n`;
+          continue;
+        }
+        const verb = line.slice(0, 4).toUpperCase();
+        if (verb === "EHLO") socket.write("250-zz.fake\r\n250 AUTH PLAIN\r\n");
+        else if (verb === "AUTH") socket.write("235 ok\r\n");
+        else if (verb === "MAIL") {
+          current.from = line;
+          socket.write("250 ok\r\n");
+        } else if (verb === "RCPT") {
+          current.rcpt.push(/<([^>]+)>/.exec(line)?.[1] ?? line);
+          socket.write("250 ok\r\n");
+        } else if (verb === "DATA") {
+          inData = true;
+          socket.write("354 go on\r\n");
+        } else if (verb === "QUIT") {
+          socket.write("221 bye\r\n");
+          socket.end();
+        } else socket.write("250 ok\r\n");
+      }
+    });
+    socket.on("error", () => {});
+  });
+  return new Promise((resolve) =>
+    server.listen(0, "127.0.0.1", () =>
+      resolve({ port: (server.address() as net.AddressInfo).port, close: () => new Promise<void>((done) => server.close(() => done())), mails }),
+    ),
   );
 }
 
@@ -498,6 +554,122 @@ async function run(db: PrismaClient) {
   const amanNext = await email({ from: "aman@acme.test", subject: "New laptop request", text: "Please." });
   const amanNextEmail = await db.supportEmail.findUniqueOrThrow({ where: { id: amanNext.emailId! }, select: { note: true, contactId: true } });
   ok("their next email opens a ticket as the contact they now are", amanNext.state === "NEW_TICKET" && amanNextEmail.note === null && amanNextEmail.contactId !== null, amanNext);
+
+  // ── 11. Where replies go from ────────────────────────────────────────────────────────────────
+  section("11. Where replies go from");
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const rules = require("../src/lib/support-mail/reply-from") as typeof import("../src/lib/support-mail/reply-from");
+  const helpdeskFrom = require("../src/lib/platform/helpdesk-from") as typeof import("../src/lib/platform/helpdesk-from");
+  const { encryptSecret } = require("../src/lib/crypto") as typeof import("../src/lib/crypto");
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  ok("Deskzo's mail: from its own address, answers to the helpdesk address", same(rules.deskzoAddressing(false, helpdesk), { from: null, replyTo: helpdesk }));
+  ok("  or from the helpdesk address itself, once the platform may send for it", same(rules.deskzoAddressing(true, helpdesk), { from: helpdesk, replyTo: null }));
+  ok(
+    "the company's server: from its support address, answers to the helpdesk address until forwarding from it is proven",
+    same(rules.companyAddressing("help@acme.test", false, helpdesk), { from: "help@acme.test", replyTo: helpdesk }),
+  );
+  ok("  then to the support address itself", same(rules.companyAddressing("help@acme.test", true, helpdesk), { from: "help@acme.test", replyTo: null }));
+  ok("  and with none given, from the server's own address", same(rules.companyAddressing(null, true, helpdesk), { from: null, replyTo: helpdesk }));
+  const checked = rules.checkCompanyFrom("Help@Acme.Test", DOMAIN);
+  ok(
+    "the support address is checked: an address, lowercased, never on the helpdesk domain, empty for the server's own",
+    checked.ok && checked.value === "help@acme.test" && !rules.checkCompanyFrom("not an address", DOMAIN).ok && !rules.checkCompanyFrom(`x@${DOMAIN}`, DOMAIN).ok && same(rules.checkCompanyFrom("  ", DOMAIN), { ok: true, value: null }),
+  );
+
+  const lastOut = () => db.supportEmail.findFirstOrThrow({ where: { ticketId: ticket.id, direction: "OUTBOUND" }, orderBy: { createdAt: "desc" }, select: { fromAddress: true, note: true, state: true } });
+  const capture = async (m: import("../src/lib/platform/mailer").PlatformMail) => {
+    sent.push(m);
+  };
+  mailer.setTestPlatformMailer(capture);
+
+  sent.length = 0;
+  const throughDeskzo = await actions.replyToTicketByEmail({ ticketId: ticket.id, body: "Through Deskzo." });
+  ok("by default a reply goes through Deskzo's mail, answers to the helpdesk address", throughDeskzo.ok && sent[0]?.replyTo === helpdesk && sent[0]?.fromAddress === undefined, sent[0]);
+
+  helpdeskFrom.setTestHelpdeskFromOwnAddress(true);
+  try {
+    sent.length = 0;
+    const own = await actions.replyToTicketByEmail({ ticketId: ticket.id, body: "From the helpdesk address." });
+    ok("with the console's switch on, it goes from the helpdesk address itself", own.ok && sent[0]?.fromAddress === helpdesk && sent[0]?.replyTo === undefined, sent[0]);
+    ok("  and is kept as from it", (await lastOut()).fromAddress === helpdesk);
+    mailer.setTestPlatformMailer(async (m) => {
+      if (m.fromAddress) throw new Error("Sender address rejected");
+      sent.push(m);
+    });
+    sent.length = 0;
+    const retried = await actions.replyToTicketByEmail({ ticketId: ticket.id, body: "Again." });
+    const retriedRow = await lastOut();
+    ok(
+      "  a service that won't send as it: the reply goes from Deskzo's own address, answers still coming back, with a note",
+      retried.ok && sent.length === 1 && !sent[0]?.fromAddress && sent[0]?.replyTo === helpdesk && retriedRow.state === "SENT" && /couldn't send from/.test(retriedRow.note ?? ""),
+      retriedRow,
+    );
+  } finally {
+    helpdeskFrom.setTestHelpdeskFromOwnAddress(null);
+    mailer.setTestPlatformMailer(capture);
+  }
+
+  ok("a helpdesk address can't be the company's", !(await actions.saveSupportMailSettings({ acknowledge: false, defaultAssigneeUserId: agent.id, replyFrom: "COMPANY", companyFrom: helpdesk })).ok);
+  ok("  nor something that isn't an address", !(await actions.saveSupportMailSettings({ acknowledge: false, defaultAssigneeUserId: agent.id, replyFrom: "COMPANY", companyFrom: "help desk" })).ok);
+  const chose = await actions.saveSupportMailSettings({ acknowledge: false, defaultAssigneeUserId: agent.id, replyFrom: "COMPANY", companyFrom: "Help@Acme.Test" });
+  const chosen = (await actions.getSupportMailSetup())!;
+  ok("the company's server is chosen, sending as its support address", chose.ok && chosen.replyFrom === "COMPANY" && chosen.companyFrom === "help@acme.test", chose);
+  ok("  without a server set up, the page says so", chosen.companyServer === null);
+  ok("  and the other settings are kept", chosen.acknowledge === false && chosen.defaultAssigneeUserId === agent.id);
+  ok("an older page that doesn't send the route leaves it alone", (await actions.saveSupportMailSettings({ acknowledge: false, defaultAssigneeUserId: agent.id })).ok && (await actions.getSupportMailSetup())!.replyFrom === "COMPANY");
+
+  sent.length = 0;
+  const noServer = await actions.replyToTicketByEmail({ ticketId: ticket.id, body: "No server yet." });
+  const noServerRow = await lastOut();
+  ok("with no server set up, the reply still goes — through Deskzo's mail, saying why", noServer.ok && sent.length === 1 && /isn't set up in Settings › Messaging/.test(noServerRow.note ?? ""), noServerRow);
+
+  const server = await fakeSmtp();
+  try {
+    await db.messagingProvider.create({
+      data: {
+        key: "smtp",
+        kind: "EMAIL",
+        label: "Zz SMTP",
+        enabled: true,
+        priority: -1000,
+        classes: ["TRANSACTIONAL"],
+        fromName: "Acme Mail",
+        fromEmail: "noreply@acme.test",
+        config: { host: "127.0.0.1", port: String(server.port), user: "noreply@acme.test" },
+        secretCipher: await encryptSecret("zz-password"),
+      },
+    });
+    ok("the page names the company's server", (await actions.getSupportMailSetup())!.companyServer?.fromEmail === "noreply@acme.test");
+    sent.length = 0;
+    const viaServer = await actions.replyToTicketByEmail({ ticketId: ticket.id, body: "From your own server." });
+    const wire = server.mails.at(-1);
+    ok("the reply goes through the company's server, not Deskzo's", viaServer.ok && sent.length === 0 && !!wire && wire.rcpt.includes("boss@acme.test"), viaServer);
+    ok("  from its support address, in the company's support name", !!wire && /^From: .*Support.* <help@acme\.test>$/m.test(wire.data), wire?.data.split("\n").find((l) => l.startsWith("From:")));
+    ok("  answers to the helpdesk address while forwarding from it isn't proven", !!wire && new RegExp(`^Reply-To: ${helpdesk.replace(/[.]/g, "\\.")}$`, "m").test(wire.data));
+    ok("  threaded under the customer's last email", !!wire && /^In-Reply-To: </m.test(wire.data) && /^References: </m.test(wire.data));
+    ok("  and kept as from it", (await lastOut()).fromAddress === "help@acme.test");
+
+    const forwarded = await email({ from: "boss@acme.test", to: "help@acme.test", subject: `Re: [${formatTicketId(ticket.ticketSeq)}]`, text: "Forwarded to you." });
+    ok("an email to the support address arrives, forwarded", forwarded.state === "REPLY", forwarded);
+    ok("  so the page says answers go back to it", (await actions.getSupportMailSetup())!.companyForwards === true);
+    await actions.replyToTicketByEmail({ ticketId: ticket.id, body: "Now with forwarding." });
+    const wire2 = server.mails.at(-1);
+    ok("  and the next reply has no Reply-To — answers go to the support address, and come back", !!wire2 && wire2 !== wire && !/^Reply-To:/m.test(wire2.data));
+
+    await server.close();
+    sent.length = 0;
+    const refusedByServer = await actions.replyToTicketByEmail({ ticketId: ticket.id, body: "Server down." });
+    const refusedRow = await lastOut();
+    ok("a server that refuses: the reply goes through Deskzo's mail instead, saying why", refusedByServer.ok && sent.length === 1 && /mail server didn't take it/.test(refusedRow.note ?? ""), refusedRow);
+  } finally {
+    await db.messagingProvider.deleteMany({ where: { label: "Zz SMTP" } });
+    await server.close().catch(() => {});
+  }
+
+  const replyHtml = renderToStaticMarkup(createElement(SupportEmailSettings, { setup: (await actions.getSupportMailSetup())! }) as ReactElement);
+  ok("Settings offers where replies go from", replyHtml.includes("Replies to customers") && replyHtml.includes("Your mail server") && replyHtml.includes("help@acme.test"));
+  ok("back to Deskzo's mail", (await actions.saveSupportMailSettings({ acknowledge: false, defaultAssigneeUserId: agent.id, replyFrom: "DESKZO" })).ok && (await actions.getSupportMailSetup())!.companyFrom === null);
   mailer.setTestPlatformMailer(null);
 }
 

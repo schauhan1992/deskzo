@@ -552,7 +552,7 @@ export async function deliverNow(
     if (!implementation) continue;
     const credentials = await providerCredentials(candidate.id);
     const result = await implementation.send(message, credentials);
-    if (result.ok) return { ok: true, provider: candidate.label, fromEmail: credentials.fromEmail };
+    if (result.ok) return { ok: true, provider: candidate.label, fromEmail: message.fromEmail ?? credentials.fromEmail };
     last = result.error;
     if (!result.retryable) break;
   }

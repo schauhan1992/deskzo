@@ -1,9 +1,10 @@
 /**
  * Deskzo One — tickets by email: the Cloudflare Email Worker for tickets.deskzo.com.
  *
- * Cloudflare Email Routing hands every email for <anything>@tickets.deskzo.com to this worker (a
- * catch-all rule, "Send to a Worker"). It posts the email, whole and untouched, to Deskzo, signed with
- * the secret the two share. Deskzo decides which workspace it is for and what it becomes
+ * Cloudflare Email Routing hands this worker every email for a workspace's helpdesk address,
+ * <workspace>@tickets.deskzo.com: one "Send to a Worker" rule per address, since Cloudflare allows a
+ * catch-all only on the apex domain (docs/deploy-coolify.md, "Tickets by email"). It posts the email,
+ * whole and untouched, to Deskzo, signed with the secret the two share. Deskzo decides which workspace it is for and what it becomes
  * (src/lib/support-mail).
  *
  * Settings → Variables and Secrets on the worker:

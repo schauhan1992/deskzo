@@ -231,22 +231,57 @@ set up once, here, for every workspace. It needs deskzo.com's DNS on Cloudflare 
    `deploy/cloudflare/inbound-email-worker.js`, and deploy. Under its *Settings → Variables and Secrets* add:
    - `DESKZO_INBOUND_URL` = `https://deskzo.com/api/platform/inbound-email` (text);
    - `DESKZO_INBOUND_SECRET` = the secret from step 2 (type *Secret*).
-4. **Email Routing → Routing rules → Catch-all address** for `tickets.deskzo.com`: action *Send to a Worker*,
-   destination `deskzo-inbound-email`. Enable it.
-5. **On the Deskzo application → Environment Variables,** add, then **Redeploy**:
+4. **On the Deskzo application → Environment Variables,** add, then **Redeploy**:
 
 ```ini
 INBOUND_MAIL_DOMAIN=tickets.deskzo.com
 INBOUND_MAIL_SECRET=<the secret from step 2>
 ```
 
-6. **Check:** in Deskzo's own workspace, Settings → Support email now shows `deskzo@tickets.deskzo.com`. Send it an
-   email from an address that is a contact: a ticket opens, and the acknowledgement arrives. From any other address,
-   the email waits in Helpdesk → Support inbox. An address that is no workspace bounces.
+5. **One routing rule per workspace.** Cloudflare allows a catch-all only on the apex domain, not on
+   `tickets.deskzo.com`, so each helpdesk address needs its own rule (owner, 15 Oct 2026: kept to one address per
+   workspace rather than a separate tickets domain). For each workspace that uses support email: **Email Routing →
+   Routing rules → Custom addresses → Create address**, address `<workspace>@tickets.deskzo.com` with the
+   workspace's own name typed in place of `<workspace>` — `wroffy` for wroffy.deskzo.com, the address its Settings →
+   Support email shows — action *Send to a Worker*, destination `deskzo-inbound-email`. Without the rule,
+   Cloudflare itself bounces the email with "550 5.1.1 Address does not exist", and it never reaches Deskzo.
+   Cloudflare allows 200 rules per domain. Past that, a separate domain for tickets (its apex catch-all to the same
+   worker, and `INBOUND_MAIL_DOMAIN` set to it) or one address with Cloudflare's plus-addressing is needed.
+   Seen on 15 Oct 2026: deskzo.com's own *Catch-all* rule, set to Drop, also dropped mail to
+   `tickets.deskzo.com` addresses with no rule of their own. Set to *Send to a Worker* → `deskzo-inbound-email`
+   instead, it may serve every workspace with no rule each — and it never sees deskzo.com's own mail, whose MX is
+   Microsoft 365. Try it with one test email to a workspace without a rule before relying on it.
+6. **Check:** in Deskzo's own workspace, Settings → Support email now shows `deskzo@tickets.deskzo.com`. Add its
+   rule (step 5), then send it an email from an address that is a contact: a ticket opens, and the acknowledgement
+   arrives. From any other address, the email waits in Helpdesk → Support inbox. An address with a rule but no
+   workspace behind it bounces with Deskzo's "No helpdesk answers at this address."
 
-Replies to customers go out through the account Settings › Mail names for **Support** mail (else the default's) as
-"<Company> Support", from that type's address, with Reply-To the workspace's helpdesk address, so the customer's
-answer comes back to the ticket.
+### Where replies go out from
+
+Every reply and acknowledgement goes out as "<Company> Support". Each workspace chooses the mail that sends it
+under Settings → Support email (src/lib/support-mail/reply-from.ts):
+
+- **Deskzo's mail** (the default): the account Settings › Mail names for **Support** mail, else the default's.
+  - From that account's address, with Reply-To the workspace's helpdesk address, so the customer's answer comes back
+    to the ticket.
+  - Or from the helpdesk address itself, `wroffy@tickets.deskzo.com`, once the console's **Helpdesk replies** switch
+    (Settings › Mail) is on — see below.
+- **The company's mail server**: Settings › Mail & messaging's transactional route in the workspace — the one
+  documents use. From the support address the company gives (`support@wroffy.com`). Answers go to the helpdesk
+  address until an email forwarded from that address has arrived, then to the address itself. When the server isn't
+  set up, or refuses a reply, the reply goes through Deskzo's mail and the ticket says why.
+
+**Sending from the helpdesk address**, as Zendesk and Freshdesk do, needs the Support account's mail service allowed
+to send for `tickets.deskzo.com`. Microsoft 365 can't; Amazon SES, SendGrid, Mailgun, Brevo, Postmark and Elastic
+Email can, once the domain is verified with them:
+
+1. In the service, add `tickets.deskzo.com` as a sending domain (in SES, a verified `deskzo.com` covers it too).
+   Add the DKIM records it gives you in Cloudflare, as *DNS only*.
+2. `tickets.deskzo.com` already has Cloudflare's SPF record (`v=spf1 include:_spf.mx.cloudflare.net ~all`). Add the
+   service's include to that same record — one SPF record per name, never two.
+3. Once the service shows the domain as verified, turn on **Settings › Mail → Helpdesk replies** in the console and
+   send a reply from a test ticket. If the service still refuses the address, that reply goes from the account's own
+   address and its ticket says so.
 
 ## Releases
 

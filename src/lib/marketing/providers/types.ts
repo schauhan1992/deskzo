@@ -29,6 +29,13 @@ export type OutboundMessage = {
   bcc?: string[];
   fromName?: string | null;
   replyTo?: string | null;
+  /**
+   * A helpdesk's reply through the company's mail (src/lib/support-mail/send.ts): the address it goes
+   * from instead of the account's own — the company's support@, which its server may send as — and who
+   * else it is copied to.
+   */
+  fromEmail?: string | null;
+  cc?: string[];
   attachments?: { filename: string; contentType: string; content: Buffer }[];
 };
 
@@ -83,8 +90,8 @@ export function requireSecret(config: ProviderConfig): string | null {
   return secret && secret.length > 0 ? secret : null;
 }
 
-export function fromHeader(config: ProviderConfig, message?: Pick<OutboundMessage, "fromName">): string {
-  const email = config.fromEmail?.trim() ?? "";
+export function fromHeader(config: ProviderConfig, message?: Pick<OutboundMessage, "fromName" | "fromEmail">): string {
+  const email = (message?.fromEmail ?? config.fromEmail)?.trim() ?? "";
   // A name typed by a person can't be trusted to keep to its header: no quotes, brackets or line breaks.
   const name = (message?.fromName ?? config.fromName)?.replace(/["\\<>\r\n]/g, " ").replace(/\s+/g, " ").trim();
   return name ? `"${name}" <${email}>` : email;

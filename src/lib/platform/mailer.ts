@@ -39,6 +39,12 @@ export type PlatformMail = {
   text: string;
   replyTo?: string;
   fromName?: string;
+  /**
+   * An address to send from instead of the account's own: a helpdesk reply from the workspace's helpdesk
+   * address, once the console says the Support account may send for that domain
+   * (src/lib/platform/helpdesk-from.ts). Nothing else sets it.
+   */
+  fromAddress?: string;
   cc?: string[];
   /** A workspace's document (type DOCUMENTS): the others it goes to, a copy to the sender, its HTML and its PDF. */
   moreTo?: string[];
@@ -80,7 +86,7 @@ export async function sendPlatformMail(mail: PlatformMail): Promise<string | nul
  */
 export async function deliverMail(mail: PlatformMail, options: { connectionId?: string; test?: boolean } = {}): Promise<{ via: string; messageId: string | null; fromAddress: string }> {
   const route = await resolveMail(mail.type, { connectionId: options.connectionId });
-  const from: MailFrom = { name: mail.fromName ?? route.from.name, address: route.from.address };
+  const from: MailFrom = { name: mail.fromName ?? route.from.name, address: mail.fromAddress ?? route.from.address };
   const replyTo = mail.replyTo ?? route.replyTo ?? undefined;
   const log = {
     stream: options.connectionId && options.test ? ("DEFAULT" as const) : mail.type,
@@ -149,6 +155,11 @@ async function writeOutbox(mail: PlatformMail, from: string, replyTo: string | u
     .join("");
   await writeFile(file, `From: ${from}\nTo: ${[mail.to, ...(mail.moreTo ?? [])].join(", ")}\n${headers}Subject: ${mail.subject}\n\n${mail.text}\n`, "utf8");
   console.log(`[platform mail] no mail account and no PLATFORM_SMTP_URL — written to ${path.relative(process.cwd(), file)}`);
+}
+
+/** The address a type of mail goes from as its account stands now — the console's choice, else the server's. */
+export async function platformFromAddress(type: MailType): Promise<string> {
+  return (await resolveMail(type)).from.address;
 }
 
 /** PLATFORM_MAIL_FROM as it stands — the sender while no account names one. */

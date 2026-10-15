@@ -10,10 +10,12 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Label, Select } from "@/components/ui/input";
 import { ActionNotice } from "@/components/ui/action-notice";
 import { useClock } from "@/components/time/clock-provider";
+import { SupportReplyFrom } from "@/components/settings/support-reply-from";
 
 /**
  * Settings → Support email: the workspace's helpdesk address, how to forward the company's own support
- * mail to it from the mail service it uses, and the two choices about new tickets.
+ * mail to it from the mail service it uses, which mail its replies go out from, and the two choices about
+ * new tickets.
  *
  * Nothing on the company's domain changes. Its support@ keeps working as it does; a forwarding rule in
  * that mailbox sends a copy here, where each email becomes a ticket (src/lib/support-mail/receive.ts).
@@ -141,6 +143,8 @@ export function SupportEmailSettings({ setup }: { setup: SupportMailSetup }) {
           </CardContent>
         </Card>
       )}
+
+      {setup.address && <SupportReplyFrom setup={setup} />}
 
       <Card>
         <CardHeader className="text-sm font-medium text-text">New tickets by email</CardHeader>

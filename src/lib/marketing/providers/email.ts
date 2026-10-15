@@ -46,6 +46,7 @@ export const resendProvider: MessageProvider = {
         body: JSON.stringify({
           from: fromHeader(config, message),
           to: allRecipients(message).map((r) => r.email),
+          ...(message.cc?.length ? { cc: message.cc } : {}),
           ...(message.bcc?.length ? { bcc: message.bcc } : {}),
           reply_to: replyToFor(message, config),
           subject: message.subject,
@@ -104,7 +105,7 @@ export const elasticProvider: MessageProvider = {
         method: "POST",
         headers: { "X-ElasticEmail-ApiKey": key, "Content-Type": "application/json" },
         body: JSON.stringify({
-          Recipients: { To: allRecipients(message).map((r) => r.email), ...(message.bcc?.length ? { BCC: message.bcc } : {}) },
+          Recipients: { To: allRecipients(message).map((r) => r.email), ...(message.cc?.length ? { CC: message.cc } : {}), ...(message.bcc?.length ? { BCC: message.bcc } : {}) },
           Content: {
             From: fromHeader(config, message),
             ReplyTo: replyToFor(message, config),
@@ -232,6 +233,7 @@ async function smtpSend(
     const info = await smtpTransport(settings, password).sendMail({
       from: fromHeader(config, message),
       to: allRecipients(message).map((r) => (r.name ? { name: r.name, address: r.email } : r.email)),
+      ...(message.cc?.length ? { cc: message.cc } : {}),
       ...(message.bcc?.length ? { bcc: message.bcc } : {}),
       replyTo: replyToFor(message, config),
       subject: message.subject,

@@ -52,6 +52,7 @@ export const PLAIN_KEYS = [
   "partners.twoPersonPayout",
   "mail.documents.personDaily",
   "mail.documents.workspaceDaily",
+  "mail.helpdesk.fromOwnAddress",
 ] as const;
 export type PlainKey = (typeof PLAIN_KEYS)[number];
 

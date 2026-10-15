@@ -10,6 +10,7 @@ import { controlDb } from "@/lib/platform/control-db";
 import { ConsoleRefused } from "@/lib/platform/refused";
 import { StaffRefused, requireStaff, type Staff } from "@/lib/platform/staff-session";
 import { saveDocumentMailLimits, type DocumentMailLimits } from "@/lib/platform/document-mail-limits";
+import { saveHelpdeskFromOwnAddress } from "@/lib/platform/helpdesk-from";
 
 /**
  * Settings › Mail (src/lib/platform/mail): the accounts the platform's mail goes through and which
@@ -37,6 +38,16 @@ async function asStaff<T>(roles: readonly StaffRole[], work: (staff: Staff) => P
     if (refusal !== null) return { ok: false, error: refusal };
     throw err;
   }
+}
+
+/** Whether helpdesk replies through Deskzo's mail go from each workspace's own helpdesk address (src/lib/platform/helpdesk-from.ts). Owners only. */
+export async function consoleSaveHelpdeskFrom(on: boolean): Promise<ConsoleResult<boolean>> {
+  return asStaff(OWNERS, async (staff) => {
+    const saved = await saveHelpdeskFromOwnAddress(on === true, staff.id);
+    await consoleAudit(staff, "mail.helpdeskFrom", { on: saved });
+    revalidateConsole();
+    return saved;
+  });
 }
 
 /** Deskzo's daily limits on documents workspaces send through its mail (src/lib/platform/document-mail-limits.ts). Owners only. */

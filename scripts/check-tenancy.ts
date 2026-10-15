@@ -148,6 +148,8 @@ const STATE: Record<string, Allowed> = {
   "src/lib/platform/domains.ts:testResolver": { reason: "test override, set only by check scripts — no check asks real DNS" },
   "src/lib/platform/document-mail-limits.ts:cached": { reason: "shared: Deskzo's two daily limits on documents sent through its mail, the same for every workspace — read every minute" },
   "src/lib/platform/document-mail-limits.ts:testLimits": { reason: "test override, set only by check scripts" },
+  "src/lib/platform/helpdesk-from.ts:cached": { reason: "shared: whether helpdesk replies through Deskzo's mail go from each workspace's own address, the same for every workspace — read every minute" },
+  "src/lib/platform/helpdesk-from.ts:testValue": { reason: "test override, set only by check scripts" },
 };
 
 // ─── The scan ────────────────────────────────────────────────────────────────────────────────────
