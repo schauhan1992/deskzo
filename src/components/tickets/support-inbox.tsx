@@ -25,6 +25,10 @@ export type InboxEmail = {
   attachments: { id: string; fileName: string; mimeType: string; sizeBytes: number }[];
   /** Companies where the sender is already a contact — offered first. */
   companies: { id: string; name: string }[];
+  /** The sender's domain, where it can say whose they are (never Gmail and the like). */
+  domain: string | null;
+  /** Companies whose contacts write from that domain — offered next. */
+  domainCompanies: { id: string; name: string }[];
 };
 
 /**
@@ -54,7 +58,9 @@ export function SupportInbox({ emails, companies }: { emails: InboxEmail[]; comp
 function InboxCard({ email, companies }: { email: InboxEmail; companies: CompanyComboOption[] }) {
   const router = useRouter();
   const clock = useClock();
-  const [companyId, setCompanyId] = useState(email.companies.length === 1 ? email.companies[0]!.id : "");
+  // The one company it plainly belongs to, chosen already: the sender's own, else their domain's.
+  const suggested = email.companies.length === 1 ? email.companies[0]! : email.companies.length === 0 && email.domainCompanies.length === 1 ? email.domainCompanies[0]! : null;
+  const [companyId, setCompanyId] = useState(suggested?.id ?? "");
   const [saveContact, setSaveContact] = useState(email.companies.length === 0);
   const [contactName, setContactName] = useState(email.fromName ?? "");
   const [ticketRef, setTicketRef] = useState("");
@@ -65,7 +71,8 @@ function InboxCard({ email, companies }: { email: InboxEmail; companies: Company
   const long = email.body.split("\n").length > 12 || email.body.length > 1200;
   const choices = [
     ...email.companies.map((c) => ({ id: c.id, name: c.name, hint: "(a contact there)" })),
-    ...companies.filter((c) => !email.companies.some((k) => k.id === c.id)),
+    ...email.domainCompanies.map((c) => ({ id: c.id, name: c.name, hint: `(contacts at ${email.domain})` })),
+    ...companies.filter((c) => !email.companies.some((k) => k.id === c.id) && !email.domainCompanies.some((k) => k.id === c.id)),
   ];
 
   function run(work: () => Promise<{ ok: true; data: { ticketSeq: number } | null } | { ok: false; error: string }>, text: (seq?: number) => string) {

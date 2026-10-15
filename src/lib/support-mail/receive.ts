@@ -11,6 +11,7 @@ import { inboundDomain } from "@/lib/support-mail/config";
 import type { IncomingEmail } from "@/lib/support-mail/parse";
 import { FLOOD_PER_HOUR, isForwardingConfirmation, normalizeAddress, ticketSeqFromSubject, visiblePart } from "@/lib/support-mail/rules";
 import { sendSupportEmail } from "@/lib/support-mail/send";
+import { companiesForSenderDomain } from "@/lib/support-mail/domain-match";
 
 /**
  * One email that reached this workspace's helpdesk address, decided — inside the workspace
@@ -25,11 +26,15 @@ import { sendSupportEmail } from "@/lib/support-mail/send";
  *      somebody already on the ticket: its contact, or an address that wrote to it or was written to. A
  *      stranger quoting a ticket number waits in the inbox instead; nobody adds to a customer's ticket by
  *      guessing its number.
- *   4. **A new ticket** (NEW_TICKET) when the sender is a contact at exactly one company: opened by the
- *      workspace's Automation account, given to the default agent when there is one, acknowledged by
- *      email when the workspace says so.
- *   5. **The Support inbox** (INBOX) otherwise — an unknown sender, one known at several companies,
- *      Gmail's forwarding confirmation — for somebody to decide where it belongs.
+ *   4. **A new ticket** (NEW_TICKET) when the sender is a contact at exactly one company — or, not a
+ *      contact anywhere, writes from a domain that exactly one company's contacts use (owner, 15 Oct
+ *      2026: aman@wroffy.com is Wroffy's when sachin@wroffy.com is a contact there; never Gmail and the
+ *      like, src/lib/support-mail/domain-match.ts). Opened by the workspace's Automation account, given
+ *      to the default agent when there is one, acknowledged by email when the workspace says so. A
+ *      ticket filed by its domain has no contact: the ticket offers to add the sender as one.
+ *   5. **The Support inbox** (INBOX) otherwise — an unknown sender at an unknown domain, one known (or
+ *      whose domain is known) at several companies, one who has left, Gmail's forwarding confirmation —
+ *      for somebody to decide where it belongs.
  *
  * The support team (anybody in a support-team department) is told about each new ticket and reply that
  * nobody is assigned to, and about each email waiting in the inbox; an assigned ticket tells its agent.
@@ -143,8 +148,25 @@ export async function receiveEmail(mail: IncomingEmail, now = new Date()): Promi
     orderBy: { createdAt: "asc" },
   });
   const companies = [...new Set(contacts.map((c) => c.companyId))];
-  if (companies.length === 0) return waiting("The sender isn't a contact yet");
   if (companies.length > 1) return waiting(`The sender is a contact at ${companies.length} companies`);
+
+  // Where it goes: the sender's own company, else the one company their domain belongs to.
+  let place: { companyId: string; contactId: string | null; note: string | null; companyName: string | null };
+  if (companies.length === 1) {
+    place = { companyId: contacts[0]!.companyId, contactId: contacts[0]!.id, note: null, companyName: null };
+  } else {
+    // Somebody who has left speaks for nobody there — not even through their old colleagues' domain.
+    const left = await db.contact.count({ where: { email: { equals: sender, mode: "insensitive" }, leftAt: { not: null } } });
+    if (left > 0) return waiting("The sender has left the company they were a contact at");
+    const byDomain = await companiesForSenderDomain(sender);
+    if (!byDomain || byDomain.companies.length === 0) return waiting("The sender isn't a contact yet");
+    if (byDomain.companies.length > 1) {
+      const names = byDomain.companies.slice(0, 3).map((c) => c.name).join(", ");
+      return waiting(`${byDomain.domain} is the domain of contacts at ${byDomain.companies.length} companies: ${names}${byDomain.companies.length > 3 ? "…" : ""}`);
+    }
+    const company = byDomain.companies[0]!;
+    place = { companyId: company.id, contactId: null, note: `Filed under ${company.name} by the sender's domain, ${byDomain.domain}`, companyName: company.name };
+  }
 
   const settings = await db.supportMailSettings.findUnique({ where: { id: "global" } });
   const agent = settings?.defaultAssigneeUserId
@@ -153,13 +175,12 @@ export async function receiveEmail(mail: IncomingEmail, now = new Date()): Promi
         select: { id: true },
       })
     : null;
-  const contact = contacts[0]!;
   const opener = await automationUserId();
   const { ticket: made, emailId } = await db.$transaction(async (tx) => {
     const created = await tx.ticket.create({
       data: {
-        companyId: contact.companyId,
-        contactId: contact.id,
+        companyId: place.companyId,
+        contactId: place.contactId,
         title: base.subject.slice(0, 200),
         description: visiblePart(base.body).visible.slice(0, 5000) || null,
         assignedToUserId: agent?.id ?? null,
@@ -168,13 +189,13 @@ export async function receiveEmail(mail: IncomingEmail, now = new Date()): Promi
       select: { id: true, ticketSeq: true, title: true },
     });
     const row = await tx.supportEmail.create({
-      data: { ...base, state: "NEW_TICKET", ticketId: created.id, contactId: contact.id, attachments: { create: mail.attachments } },
+      data: { ...base, state: "NEW_TICKET", ticketId: created.id, contactId: place.contactId, note: place.note, attachments: { create: mail.attachments } },
       select: { id: true },
     });
     return { ticket: created, emailId: row.id };
   });
   const ref = formatTicketId(made.ticketSeq);
-  await recordAudit({ userId: opener, action: "CREATE", entityType: "Ticket", entityId: made.id, entityLabel: `${ref} — ${made.title} (by email from ${sender})` });
+  await recordAudit({ userId: opener, action: "CREATE", entityType: "Ticket", entityId: made.id, entityLabel: `${ref} — ${made.title} (by email from ${sender}${place.companyName ? `, filed under ${place.companyName} by its domain` : ""})` });
 
   if (settings?.acknowledge ?? true) {
     await sendSupportEmail({
@@ -191,6 +212,11 @@ export async function receiveEmail(mail: IncomingEmail, now = new Date()): Promi
       ].join("\n"),
     });
   }
-  await tell(agent ? [agent.id] : await supportTeam(), `New ticket by email: ${ref}`, `${base.fromName ?? sender}: ${made.title}`, ticketPath(made.ticketSeq));
+  await tell(
+    agent ? [agent.id] : await supportTeam(),
+    `New ticket by email: ${ref}`,
+    `${base.fromName ?? sender}: ${made.title}${place.companyName ? ` — filed under ${place.companyName} by their email's domain` : ""}`,
+    ticketPath(made.ticketSeq),
+  );
   return { state: "NEW_TICKET", emailId, ticketSeq: made.ticketSeq };
 }

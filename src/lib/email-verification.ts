@@ -44,6 +44,12 @@ const FREE_DOMAINS = new Set([
   "gmail.com", "googlemail.com", "yahoo.com", "yahoo.in", "yahoo.co.in", "ymail.com",
   "hotmail.com", "outlook.com", "live.com", "msn.com", "rediffmail.com", "rediff.com",
   "icloud.com", "me.com", "aol.com", "proton.me", "protonmail.com", "zohomail.in", "gmx.com",
+  // Widened 15 Oct 2026: a support email from one of these is matched to a company by its domain
+  // (src/lib/support-mail/domain-match.ts) unless it is here, so a gap files strangers under a customer.
+  "yahoo.co.uk", "rocketmail.com", "hotmail.co.uk", "hotmail.co.in", "outlook.in", "live.in", "live.co.uk", "mac.com",
+  "aim.com", "zoho.com", "zohomail.com", "yandex.com", "yandex.ru", "mail.com", "gmx.net", "gmx.de", "web.de", "pm.me",
+  "fastmail.com", "tutanota.com", "hey.com", "inbox.com", "qq.com", "163.com", "126.com", "naver.com", "sify.com",
+  "indiatimes.com",
 ]);
 
 /**

@@ -448,6 +448,56 @@ async function run(db: PrismaClient) {
   ok("  links its files through the checked route", threadHtml.includes(`/api/support-email/attachments/${file.id}`));
   ok("  marks the one that wasn't sent", threadHtml.includes("Not sent"));
   ok("  and offers the reply box", threadHtml.includes("Send reply") && threadHtml.includes("Reply to boss@acme.test"));
+
+  // ── 10. By the sender's domain ───────────────────────────────────────────────────────────────
+  section("10. By the sender's domain");
+  // Asha@Acme.test is Zz Acme's contact, so acme.test is Zz Acme's domain.
+  const aman = await email({ from: "Aman Verma <aman@acme.test>", subject: "VPN keeps dropping", text: "Since this morning." });
+  ok("a stranger writing from a contact's domain opens a ticket", aman.state === "NEW_TICKET" && typeof aman.ticketSeq === "number", aman);
+  const amans = await db.ticket.findUniqueOrThrow({ where: { ticketSeq: aman.ticketSeq! }, select: { id: true, companyId: true, contactId: true, assignedToUserId: true } });
+  ok("  at that company, with no contact yet", amans.companyId === acme.id && amans.contactId === null);
+  const amanEmail = await db.supportEmail.findUniqueOrThrow({ where: { id: aman.emailId! }, select: { note: true } });
+  ok("  saying it was filed by the domain", amanEmail.note === "Filed under Zz Acme by the sender's domain, acme.test", amanEmail.note);
+  ok("  and given to the default agent like any other", amans.assignedToUserId === agent.id);
+  const amanAgain = await email({ from: "aman@acme.test", subject: `Re: [${formatTicketId(aman.ticketSeq!)}] VPN keeps dropping`, text: "Still down." });
+  ok("  their reply joins that ticket — they're in its conversation", amanAgain.state === "REPLY" && amanAgain.ticketSeq === aman.ticketSeq, amanAgain);
+
+  await db.contact.create({ data: { companyId: beta.id, name: "Beta Owner", email: "beta.owner@gmail.com" } });
+  const gmail = await email({ from: "someone@gmail.com", subject: "Help", text: "Hi" });
+  ok("free mail never says whose a sender is, even when a contact uses it", gmail.state === "INBOX" && gmail.note === "The sender isn't a contact yet", gmail);
+  await db.contact.create({ data: { companyId: gamma.id, name: "Odd Entry", email: "x@zzsm.test" } });
+  const colleague = await email({ from: "colleague@zzsm.test", subject: "Internal", text: "Hi" });
+  ok("  nor does our own people's domain", colleague.state === "INBOX" && colleague.note === "The sender isn't a contact yet", colleague);
+  await db.contact.create({ data: { companyId: beta.id, name: "Twin A", email: "a@twin.test" } });
+  await db.contact.create({ data: { companyId: gamma.id, name: "Twin B", email: "b@twin.test" } });
+  const twin = await email({ from: "c@twin.test", subject: "Whose?", text: "Hi" });
+  ok("a domain two companies' contacts use waits, naming both", twin.state === "INBOX" && /twin\.test is the domain of contacts at 2 companies: Zz Beta, Zz Gamma/.test(twin.note ?? ""), twin);
+  const sub = await email({ from: "x@in.acme.test", subject: "Sub", text: "Hi" });
+  ok("  and a subdomain isn't the domain", sub.state === "INBOX", sub);
+  await db.contact.create({ data: { companyId: acme.id, name: "Gone Person", email: "gone@acme.test", leftAt: new Date() } });
+  const gone = await email({ from: "gone@acme.test", subject: "Me again", text: "Hi" });
+  ok("somebody who has left waits — their old colleagues' domain doesn't speak for them", gone.state === "INBOX" && /has left/.test(gone.note ?? ""), gone);
+
+  const waitingNow = (await actions.listSupportInbox())!;
+  const twinRow = waitingNow.find((e) => e.fromAddress === "c@twin.test");
+  ok("the inbox offers the domain's companies", twinRow?.domain === "twin.test" && twinRow.domainCompanies.length === 2, JSON.stringify(twinRow?.domainCompanies));
+  ok("  and none for free mail", waitingNow.find((e) => e.fromAddress === "someone@gmail.com")?.domain === null);
+
+  const amanThread = await renderHtml(TicketEmails({ ticketId: amans.id }));
+  ok("the ticket says how it found its company", amanThread.includes("Filed under Zz Acme by the sender"));
+  ok("  and offers to add the sender as a contact", amanThread.includes("aman@acme.test isn") && amanThread.includes("Add as contact"));
+  actor = viewer;
+  ok("somebody who can't add contacts can't add them", !(await actions.addTicketSenderAsContact({ ticketId: amans.id, address: "aman@acme.test" })).ok);
+  actor = owner;
+  ok("  nor anybody an address that never wrote to the ticket", !(await actions.addTicketSenderAsContact({ ticketId: amans.id, address: "someone.else@acme.test" })).ok);
+  const addedAman = await actions.addTicketSenderAsContact({ ticketId: amans.id, address: "aman@acme.test", name: "Aman Verma" });
+  ok("the sender is added to the company's contacts", addedAman.ok && (await db.contact.count({ where: { companyId: acme.id, email: "aman@acme.test", name: "Aman Verma" } })) === 1, addedAman);
+  ok("  and becomes the ticket's contact", (await db.ticket.findUniqueOrThrow({ where: { id: amans.id }, select: { contactId: true } })).contactId === (addedAman.ok ? addedAman.data.contactId : "x"));
+  ok("  once", (await actions.addTicketSenderAsContact({ ticketId: amans.id, address: "aman@acme.test" })).ok && (await db.contact.count({ where: { email: "aman@acme.test" } })) === 1);
+  ok("  and the ticket stops offering", !(await renderHtml(TicketEmails({ ticketId: amans.id }))).includes("aman@acme.test isn"));
+  const amanNext = await email({ from: "aman@acme.test", subject: "New laptop request", text: "Please." });
+  const amanNextEmail = await db.supportEmail.findUniqueOrThrow({ where: { id: amanNext.emailId! }, select: { note: true, contactId: true } });
+  ok("their next email opens a ticket as the contact they now are", amanNext.state === "NEW_TICKET" && amanNextEmail.note === null && amanNextEmail.contactId !== null, amanNext);
   mailer.setTestPlatformMailer(null);
 }
 

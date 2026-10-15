@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
-import { mayAddTo, ticketAccess } from "@/lib/authz/access";
+import { mayAccess, mayAccessContactsOf, mayAddTo, ticketAccess } from "@/lib/authz/access";
 import { hasEffectivePermission } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
 import { PEOPLE_ONLY } from "@/lib/people";
@@ -12,6 +12,9 @@ import { parseSeqQuery } from "@/lib/order-id";
 import { inboundDomain, workspaceSupportAddress } from "@/lib/support-mail/config";
 import { normalizeAddress, visiblePart } from "@/lib/support-mail/rules";
 import { sendSupportEmail } from "@/lib/support-mail/send";
+import { companiesByDomain } from "@/lib/support-mail/domain-match";
+import { canViewContacts } from "@/lib/authz/contact-access";
+import { ticketPath } from "@/lib/record-links";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -116,12 +119,20 @@ export async function listSupportInbox() {
         select: { email: true, company: { select: { id: true, name: true } } },
       })
     : [];
-  return rows.map((r) => ({
-    ...r,
-    createdAt: r.createdAt.toISOString(),
-    body: visiblePart(r.body).visible.slice(0, 20_000),
-    companies: known.filter((k) => normalizeAddress(k.email) === r.fromAddress).map((k) => k.company),
-  }));
+  // And the companies whose contacts write from the same domain (src/lib/support-mail/domain-match.ts).
+  const byDomain = await companiesByDomain(senders);
+  return rows.map((r) => {
+    const companies = known.filter((k) => normalizeAddress(k.email) === r.fromAddress).map((k) => k.company);
+    const sameDomain = byDomain.get(r.fromAddress);
+    return {
+      ...r,
+      createdAt: r.createdAt.toISOString(),
+      body: visiblePart(r.body).visible.slice(0, 20_000),
+      companies,
+      domain: sameDomain?.domain ?? null,
+      domainCompanies: (sameDomain?.companies ?? []).filter((c) => !companies.some((k) => k.id === c.id)),
+    };
+  });
 }
 
 /** The inbox email, still waiting — or why it can't be acted on. */
@@ -244,7 +255,79 @@ export async function ticketEmails(ticketId: string) {
     emails: emails.map((e) => ({ ...e, createdAt: e.createdAt.toISOString(), ...visiblePart(e.body) })),
     replyTo: lastIn?.fromAddress ?? (ticket.contact?.email ? normalizeAddress(ticket.contact.email) : null),
     canReply: inboundDomain() !== null,
+    newSenders: await newSendersOf(user.id, ticket.id, emails),
   };
+}
+
+/** The ticket's company, as the access engine asks about it. */
+async function ticketCompany(ticketId: string) {
+  return (
+    await db.ticket.findUnique({
+      where: { id: ticketId },
+      select: { contactId: true, company: { select: { id: true, name: true, ownerUserId: true, relationshipType: true } } },
+    })
+  );
+}
+
+/**
+ * Who wrote to the ticket without being one of its company's contacts — a sender filed by their domain
+ * (src/lib/support-mail/domain-match.ts), or one an agent placed from the inbox without saving — for one
+ * click to add them. Only for somebody who may add the company's contacts; at most three.
+ */
+async function newSendersOf(userId: string, ticketId: string, emails: { direction: string; fromAddress: string; fromName: string | null }[]) {
+  const senders = new Map<string, string | null>();
+  for (const e of emails) if (e.direction === "INBOUND" && e.fromAddress.includes("@") && !senders.has(e.fromAddress)) senders.set(e.fromAddress, e.fromName);
+  if (senders.size === 0) return null;
+  const found = await ticketCompany(ticketId);
+  if (!found || !(await canViewContacts(userId)) || !(await mayAccessContactsOf(userId, "edit", found.company))) return null;
+  const known = await db.contact.findMany({
+    where: { companyId: found.company.id, OR: [...senders.keys()].map((a) => ({ email: { equals: a, mode: "insensitive" as const } })) },
+    select: { email: true },
+  });
+  const knownAddresses = new Set(known.map((k) => normalizeAddress(k.email ?? "")));
+  const people = [...senders].filter(([address]) => !knownAddresses.has(address)).slice(0, 3).map(([address, name]) => ({ address, name }));
+  return people.length ? { companyName: found.company.name, people } : null;
+}
+
+/**
+ * Adds somebody who wrote to the ticket to its company's contacts (owner, 15 Oct 2026) — the one click a
+ * ticket filed by its sender's domain offers. Only an address that wrote to this ticket, by somebody who
+ * may add the company's contacts; it becomes the ticket's contact when it has none and they may edit it.
+ */
+export async function addTicketSenderAsContact(input: { ticketId: string; address: string; name?: string }): Promise<ActionResult<{ contactId: string }>> {
+  const user = await requireModuleUser("helpdesk");
+  const ticket = await visibleTicket(user.id, input?.ticketId);
+  if (!ticket) return { ok: false, error: "That ticket no longer exists." };
+  const address = normalizeAddress(String(input?.address ?? ""));
+  const wrote = await db.supportEmail.count({ where: { ticketId: ticket.id, direction: "INBOUND", fromAddress: address } });
+  if (!address || wrote === 0) return { ok: false, error: "Only somebody who wrote to this ticket can be added from it." };
+  const found = await ticketCompany(ticket.id);
+  if (!found || !(await canViewContacts(user.id)) || !(await mayAccessContactsOf(user.id, "edit", found.company))) {
+    return { ok: false, error: "You can't add contacts to this company." };
+  }
+  const company = found.company;
+  const setOnTicket = found.contactId === null && (await mayAccess(user.id, "tickets", "edit", ticket.id));
+
+  const { contactId, created } = await db.$transaction(async (tx) => {
+    const existing = await tx.contact.findFirst({ where: { companyId: company.id, email: { equals: address, mode: "insensitive" } }, select: { id: true } });
+    const name = String(input?.name ?? "").trim() || address.split("@")[0]!;
+    const contact = existing ?? (await tx.contact.create({ data: { companyId: company.id, name: name.slice(0, 120), email: address, createdByUserId: user.id }, select: { id: true } }));
+    if (setOnTicket) await tx.ticket.update({ where: { id: ticket.id }, data: { contactId: contact.id } });
+    await tx.supportEmail.updateMany({ where: { ticketId: ticket.id, fromAddress: address, contactId: null }, data: { contactId: contact.id } });
+    return { contactId: contact.id, created: !existing };
+  });
+  if (created) {
+    await recordAudit({
+      userId: user.id,
+      action: "CREATE",
+      entityType: "Contact",
+      entityId: contactId,
+      entityLabel: `${address} at ${company.name} (from ${formatTicketId(ticket.ticketSeq)})`,
+    });
+  }
+  revalidatePath(ticketPath(ticket.ticketSeq));
+  revalidatePath(`/tickets/${ticket.id}`);
+  return { ok: true, data: { contactId } };
 }
 
 export async function replyToTicketByEmail(input: { ticketId: string; body: string; cc?: string[] }): Promise<ActionResult<null>> {

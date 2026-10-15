@@ -4,6 +4,7 @@ import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { workspaceClock } from "@/lib/time/workspace";
 import { fileSize } from "@/lib/support-mail/rules";
 import { TicketEmailReply } from "@/components/tickets/ticket-email-reply";
+import { TicketSenderContact } from "@/components/tickets/ticket-sender-contact";
 
 /**
  * A ticket's email conversation with the customer (src/lib/support-mail): what they wrote, what we
@@ -19,6 +20,7 @@ export async function TicketEmails({ ticketId }: { ticketId: string }) {
     <Card>
       <CardHeader className="text-sm font-medium text-text">Email conversation</CardHeader>
       <CardContent className="space-y-4">
+        {thread.newSenders && <TicketSenderContact ticketId={ticketId} companyName={thread.newSenders.companyName} people={thread.newSenders.people} />}
         {thread.emails.length === 0 && <p className="text-sm text-subtle">No emails yet. A reply from here starts the conversation.</p>}
         {thread.emails.map((e) => {
           const ours = e.direction === "OUTBOUND";
@@ -37,6 +39,8 @@ export async function TicketEmails({ ticketId }: { ticketId: string }) {
                 </span>
               </header>
               {e.ccAddresses.length > 0 && <p className="text-xs text-subtle">Cc {e.ccAddresses.join(", ")}</p>}
+              {/* How it found its company, when that was the sender's domain (src/lib/support-mail/receive.ts). */}
+              {!ours && e.state === "NEW_TICKET" && e.note && <p className="text-xs text-subtle">{e.note}</p>}
               <p className="mt-1.5 whitespace-pre-wrap break-words text-sm text-text">{e.visible || <span className="text-subtle">(No text.)</span>}</p>
               {e.quoted && (
                 <details className="mt-1">
