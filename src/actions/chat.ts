@@ -52,6 +52,7 @@ import {
 } from "@/lib/chat/server";
 import type { ChatMemberView, ChatMessageView, ChatPerson, ChatPinView, ChatReactionView, ChatSummary } from "@/lib/chat/types";
 import type { ActionResult } from "@/actions/company";
+import { filteredWordsRefusal } from "@/lib/word-filter/server";
 
 /**
  * Team chat: one-to-one and group conversations between the people of the workspace (src/lib/chat).
@@ -231,6 +232,9 @@ export async function sendChatMessage(form: FormData): Promise<ActionResult<Chat
   if (!body && files.length === 0) return fail("Write something, or attach a file.");
   if (body.length > MAX_BODY) return fail(`Messages can be up to ${MAX_BODY.toLocaleString("en-IN")} characters — this one is ${body.length.toLocaleString("en-IN")}.`);
   if (files.length > MAX_FILES) return fail(`Up to ${MAX_FILES} files at a time.`);
+  // Words the workspace keeps out of chat (src/lib/word-filter): not sent, and only the sender is told.
+  const filtered = await filteredWordsRefusal("CHAT", [body]);
+  if (filtered) return fail(filtered);
   const totalBytes = files.reduce((t, f) => t + f.size, 0);
   if (totalBytes > MAX_FILES_BYTES) return fail("Files can come to 5 MB at most on one message.");
   const typed: { file: File; mimeType: string }[] = [];
@@ -309,6 +313,9 @@ export async function editChatMessage(messageId: string, newBody: string): Promi
   if (!body && row._count.attachments === 0) return fail("A message can't be empty — delete it instead.");
   if (body.length > MAX_BODY) return fail(`Messages can be up to ${MAX_BODY.toLocaleString("en-IN")} characters.`);
   if (body === row.body) return { ok: true, data: (await messageViewOf(messageId))! };
+  // Words the workspace keeps out of chat (src/lib/word-filter): not sent, and only the sender is told.
+  const filtered = await filteredWordsRefusal("CHAT", [body]);
+  if (filtered) return fail(filtered);
 
   const members = await db.chatMember.findMany({ where: { chatId: row.chatId, leftAt: null }, select: { userId: true, user: { select: { name: true } } } });
   const mentionIds =
@@ -500,6 +507,9 @@ export async function createGroupChat(input: { name: string; memberIds: string[]
   const name = input.name.replace(/\s+/g, " ").trim();
   if (!name) return fail("Give the group a name.");
   if (name.length > MAX_GROUP_NAME) return fail(`Group names can be up to ${MAX_GROUP_NAME} characters.`);
+  // Words the workspace keeps out of chat (src/lib/word-filter): not sent, and only the sender is told.
+  const filtered = await filteredWordsRefusal("CHAT", [name]);
+  if (filtered) return fail(filtered);
   const people = await colleagues(input.memberIds ?? [], user.id);
   if (people.length === 0) return fail("Add at least one person.");
   if (people.length + 1 > MAX_GROUP_MEMBERS) return fail(`A group can have up to ${MAX_GROUP_MEMBERS} people.`);
@@ -537,6 +547,9 @@ export async function renameGroupChat(chatId: string, newName: string): Promise<
   if (!name) return fail("Give the group a name.");
   if (name.length > MAX_GROUP_NAME) return fail(`Group names can be up to ${MAX_GROUP_NAME} characters.`);
   if (name === admin.name) return { ok: true, data: null };
+  // Words the workspace keeps out of chat (src/lib/word-filter): not sent, and only the sender is told.
+  const filtered = await filteredWordsRefusal("CHAT", [name]);
+  if (filtered) return fail(filtered);
   await db.chat.update({ where: { id: chatId }, data: { name } });
   await postSystemLine(chatId, `${user.name} renamed the group to "${name}"`);
   await publish(await currentMemberIds(chatId), { type: "chat-changed", chatId });

@@ -22,6 +22,7 @@ import {
   addTicketCommentSchema,
 } from "@/lib/validation/ticket";
 import type { ActionResult } from "@/actions/company";
+import { filteredWordsRefusal } from "@/lib/word-filter/server";
 
 /** Only users in a department marked as a support team can be assigned tickets. */
 async function isSupportAgent(userId: string): Promise<boolean> {
@@ -76,6 +77,9 @@ export async function createTicket(input: unknown): Promise<ActionResult<{ id: s
   if (data.assignedToUserId && !(await isSupportAgent(data.assignedToUserId))) {
     return { ok: false, error: "Tickets can only be assigned to someone in the Tech Support department." };
   }
+  // Words the workspace keeps out of tickets (src/lib/word-filter): not saved, and only the writer is told.
+  const filtered = await filteredWordsRefusal("TICKETS", [data.title, data.description]);
+  if (filtered) return { ok: false, error: filtered };
 
   const ticket = await db.ticket.create({
     data: {
@@ -336,6 +340,10 @@ export async function addTicketComment(input: unknown): Promise<ActionResult<{ i
   if (!ticket) {
     return { ok: false, error: "Ticket not found." };
   }
+
+  // Words the workspace keeps out of tickets (src/lib/word-filter): not saved, and only the writer is told.
+  const filtered = await filteredWordsRefusal("TICKETS", [body]);
+  if (filtered) return { ok: false, error: filtered };
 
   const comment = await db.ticketComment.create({ data: { ticketId, userId: user.id, body } });
 

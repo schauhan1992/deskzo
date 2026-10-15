@@ -36,6 +36,7 @@ import {
   Trophy,
   MapPin,
   MessageCircle,
+  MessageSquareOff,
   Shuffle,
   Truck,
   UserCog,
@@ -266,6 +267,15 @@ export const SETTINGS: SettingsSection[] = [
             icon: MessageCircle,
             permission: "settings.manage",
             module: "chat",
+          },
+          {
+            key: "word-filter",
+            label: "Word filter",
+            description: "Words kept out of chat and tickets: Deskzo's preset of abusive words in English, Hindi and Hinglish, and your own.",
+            href: "/settings/word-filter",
+            icon: MessageSquareOff,
+            permission: "settings.manage",
+            module: ["chat", "helpdesk"],
           },
           {
             key: "access-control",

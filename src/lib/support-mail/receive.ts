@@ -12,6 +12,7 @@ import type { IncomingEmail } from "@/lib/support-mail/parse";
 import { FLOOD_PER_HOUR, isForwardingConfirmation, normalizeAddress, ticketSeqFromSubject, visiblePart } from "@/lib/support-mail/rules";
 import { sendSupportEmail } from "@/lib/support-mail/send";
 import { companiesForSenderDomain } from "@/lib/support-mail/domain-match";
+import { activeWordFilter } from "@/lib/word-filter/server";
 
 /**
  * One email that reached this workspace's helpdesk address, decided — inside the workspace
@@ -69,14 +70,19 @@ export async function receiveEmail(mail: IncomingEmail, now = new Date()): Promi
   }
 
   const sender = mail.from?.address ?? "";
+  // A customer's words the workspace keeps out of tickets are let in as stars (owner, 15 Oct 2026) — the
+  // email still reaches its ticket; what is kept, and shown, is masked (src/lib/word-filter).
+  const filter = await activeWordFilter("TICKETS");
+  const subject = filter ? filter.mask(mail.subject ?? "") : mail.subject;
+  const text = filter ? filter.mask(mail.text ?? "") : mail.text;
   const base = {
     direction: "INBOUND" as const,
     fromAddress: sender || "unknown",
     fromName: mail.from?.name ?? null,
     toAddresses: mail.to,
     ccAddresses: mail.cc,
-    subject: mail.subject || "(no subject)",
-    body: mail.text,
+    subject: subject || "(no subject)",
+    body: text,
     messageId: mail.messageId,
     inReplyTo: mail.inReplyTo,
     references: mail.references,

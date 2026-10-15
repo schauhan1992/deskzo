@@ -13508,3 +13508,23 @@ model ChatSettings {
 
   @@map("chat_settings")
 }
+
+/**
+ * Words kept out of chat or tickets (owner, 15 Oct 2026) — one row per area, "CHAT" or "TICKETS", each
+ * with its own list. No row is off. Matching is src/lib/word-filter/match.ts; Deskzo's preset is
+ * src/lib/word-filter/preset.ts.
+ */
+model WordFilter {
+  area        String   @id
+  enabled     Boolean  @default(false)
+  /// Deskzo's preset of abusive words, alongside the workspace's own.
+  usePreset   Boolean  @default(true)
+  /// The workspace's own words and phrases; a trailing * catches endings.
+  words       String[] @default([])
+  /// Preset words let through — a name that happens to be one, say.
+  allowed     String[] @default([])
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("word_filters")
+}

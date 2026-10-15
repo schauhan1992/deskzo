@@ -152,6 +152,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "order-billing.ts": ["orders"],
   // "Create vendor PO" from an order's Purchasing box; it asks for Purchase documents itself (owner, 15 Oct 2026).
   "order-vendor-po.ts": ["orders"],
+  // The word filter: each area asks its own module — Chat, or the Helpdesk for tickets (owner, 15 Oct 2026).
+  "word-filter.ts": ["chat", "helpdesk"],
   // Backend rebates on orders, their programmes and the report (owner, 1 Oct 2026).
   "rebate.ts": ["orders"],
   // Branches and GST registrations are the company itself, not a module: every document names one.

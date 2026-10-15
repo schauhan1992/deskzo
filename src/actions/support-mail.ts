@@ -18,6 +18,7 @@ import { platformFromAddress } from "@/lib/platform/mailer";
 import { helpdeskFromOwnAddress } from "@/lib/platform/helpdesk-from";
 import { notMigratedYet } from "@/lib/not-migrated";
 import { companiesByDomain } from "@/lib/support-mail/domain-match";
+import { filteredWordsRefusal } from "@/lib/word-filter/server";
 import { canViewContacts } from "@/lib/authz/contact-access";
 import { ticketPath } from "@/lib/record-links";
 import type { ActionResult } from "@/actions/company";
@@ -386,6 +387,9 @@ export async function replyToTicketByEmail(input: { ticketId: string; body: stri
   const body = String(input?.body ?? "").trim();
   if (!body) return { ok: false, error: "Write the reply first." };
   if (body.length > 20_000) return { ok: false, error: "That reply is too long for one email." };
+  // Words the workspace keeps out of tickets (src/lib/word-filter): not saved, and only the writer is told.
+  const filtered = await filteredWordsRefusal("TICKETS", [body]);
+  if (filtered) return { ok: false, error: filtered };
   const cc = (input?.cc ?? []).map(normalizeAddress).filter((a) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(a)).slice(0, 10);
 
   const lastIn = await db.supportEmail.findFirst({
