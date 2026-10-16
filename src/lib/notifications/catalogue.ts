@@ -51,6 +51,7 @@ export const NOTIFICATION_CATALOGUE: NotificationDefinition[] = [
   { type: "TASK_ASSIGNED", label: "A task is assigned to me", when: "Somebody puts a task in your name.", group: "work" },
   { type: "TASK_DUE", label: "A task is due", when: "One of your tasks reaches its due date.", group: "work" },
   { type: "TASK_OVERDUE", label: "A task is overdue", when: "A due date passes with the task still open.", group: "work" },
+  { type: "TASK_COMMENT", label: "A comment on my task", when: "Somebody comments on a task you made or that is yours.", group: "work" },
   { type: "CALLBACK_DUE", label: "A callback is due", when: "A time you promised to ring somebody back arrives.", group: "work" },
   { type: "NOTE_REMINDER", label: "A note reminder", when: "A sticky note you set a reminder on comes round.", group: "work" },
   { type: "MEETING_SOON", label: "A meeting is about to start", when: "A meeting in your connected calendar starts within ten minutes.", group: "work" },

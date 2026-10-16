@@ -5,6 +5,10 @@ import { getUserPerformance, canViewPerformance } from "@/actions/performance";
 import { Card, Badge } from "@/components/ui/card";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { formatCurrency } from "@/lib/utils";
+import { Avatar } from "@/components/ui/avatar";
+import { moduleAvailableForTenant } from "@/lib/modules-access";
+import { workspaceClock } from "@/lib/time/workspace";
+import { taskXpLeaders } from "@/lib/tasks/leaderboard";
 
 function formatActiveTime(seconds: number) {
   const hours = Math.floor(seconds / 3600);
@@ -26,6 +30,10 @@ export default async function PerformancePage({
   const rows = await getUserPerformance({ from: params.from, to: params.to });
   // Shown where the workspace has orders: what each purchaser saved against sales's distributor prices.
   const showSavings = rows.some((r) => r.purchaseSavings !== null);
+  // Task XP (owner, 16 Oct 2026): borrowed from Tasks, so only where the plan has it and it's on.
+  const leaders = (await moduleAvailableForTenant("tasks"))
+    ? await taskXpLeaders((await workspaceClock()).dayRange(params.from, params.to))
+    : null;
 
   return (
     <div>
@@ -46,6 +54,36 @@ export default async function PerformancePage({
           <Trophy className="h-4 w-4" style={{ color: "#f59e0b" }} aria-hidden /> Most active of the fortnight
         </Link>
       </div>
+
+      {leaders && (
+        <Card className="mt-6 p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <Trophy className="h-4 w-4 text-warning" aria-hidden />
+            <h2 className="text-sm font-medium text-text">Task XP</h2>
+            <span className="text-xs text-muted">Earned by finishing tasks on time, in this period.</span>
+          </div>
+          {leaders.length === 0 ? (
+            <p className="text-sm text-subtle">No XP earned yet — set XP on tasks, and it&apos;s earned when they&apos;re done by their due date.</p>
+          ) : (
+            <ol className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {leaders.map((l, i) => (
+                <li key={l.userId} className="flex items-center gap-3 rounded-base border border-line px-3 py-2">
+                  <span className={`w-6 text-center text-sm font-semibold ${i === 0 ? "text-warning" : "text-muted"}`}>{i + 1}</span>
+                  <Avatar user={{ id: l.userId, name: l.name, photoUpdatedAt: l.photoUpdatedAt }} size="sm" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-text">{l.name}</span>
+                    <span className="block text-xs text-muted">
+                      {l.tasks} task{l.tasks === 1 ? "" : "s"} on time
+                      {l.badges.length > 0 && ` · ${l.badges.slice(0, 3).join(", ")}${l.badges.length > 3 ? "…" : ""}`}
+                    </span>
+                  </span>
+                  <span className="text-sm font-semibold tabular-nums text-success">{l.xp} XP</span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </Card>
+      )}
 
       <Card className="mt-6 overflow-x-auto p-0">
         <table className="w-full text-sm">

@@ -278,6 +278,26 @@ const NOT_YET_EVERYWHERE = {
   // 20261110100000_field_access_unmask. Read by name in src/lib/authz/role-registry.ts and
   // src/actions/role.ts, which treat a workspace without it as having every role active.
   role: { active: true },
+  // 20261110140000_tasks_advanced. Asked for with `omit: ADVANCED` (src/lib/tasks/server.ts) by the task
+  // actions — the Tasks page and the task lists on a company, lead and ticket — which need the migration;
+  // everything else that reads a task keeps to the columns it always had.
+  task: {
+    status: true,
+    priority: true,
+    startDate: true,
+    estimateMinutes: true,
+    departmentId: true,
+    challengeId: true,
+    xp: true,
+    xpSetById: true,
+    badge: true,
+    xpEarned: true,
+    xpEarnedById: true,
+    xpEarnedAt: true,
+    repeat: true,
+    repeatUntil: true,
+    repeatedFromId: true,
+  },
 } satisfies Prisma.GlobalOmitConfig;
 
 /** The one client, made on first use. */

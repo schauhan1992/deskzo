@@ -340,6 +340,8 @@ enum NotificationType {
   TASK_ASSIGNED
   TASK_DUE
   TASK_OVERDUE
+  /// Somebody commented on a task you are on (owner, 16 Oct 2026).
+  TASK_COMMENT
   LEAD_ASSIGNED
   LEAD_STATUS_CHANGED
   LEAD_ACTIVITY
@@ -851,6 +853,12 @@ model User {
   invitesHosted          VisitorInvite[]          @relation("InviteHost")
   invitesCreated         VisitorInvite[]          @relation("InviteCreatedBy")
   photo                  UserPhoto?               @relation("UserPhoto")
+  tasksXpEarned          Task[]                   @relation("TaskXpEarner")
+  taskComments           TaskComment[]            @relation("TaskCommentAuthor")
+  taskAttachments        TaskAttachment[]         @relation("TaskAttachmentUploader")
+  taskTimeLogs           TaskTimeLog[]            @relation("TaskTimeLogger")
+  taskStars              TaskStar[]               @relation("TaskStarrer")
+  taskChallengesMade     TaskChallenge[]          @relation("TaskChallengeCreator")
   creditDecisions        CreditDecision[]         @relation("CreditDecidedBy")
   messagesSent           MarketingMessage[]       @relation("MarketingMessageSentBy")
 
@@ -904,6 +912,8 @@ model Department {
   updatedAt               DateTime @updatedAt
 
   members       User[]
+  tasks          Task[]          @relation("TaskTeam")
+  taskChallenges TaskChallenge[] @relation("TaskChallengeTeam")
   candidates    Candidate[]
   celebrations  Celebration[]
   journalLines  JournalLine[]  @relation("JournalLineCostCentre")
@@ -3740,13 +3750,171 @@ model Task {
   projectId String?
   project   Project? @relation("TaskProject", fields: [projectId], references: [id], onDelete: Cascade)
 
+  // ── Advanced tasks (owner, 16 Oct 2026 — src/lib/tasks/rules.ts) ──────────────────────────────────
+  /// Where it stands. `done` stays the one "closed" flag everything else reads: DONE and CANCELLED close
+  /// a task, and a task closed through the old tick reads as DONE whatever this says (`effectiveStatus`).
+  status          TaskStatus   @default(TODO)
+  priority        TaskPriority @default(MEDIUM)
+  /// A calendar day, held as `dueDate` is: before it, an open task is "Upcoming".
+  startDate       DateTime?
+  estimateMinutes Int?
+  /// The team it's for — one of the workspace's departments.
+  departmentId    String?
+  department      Department?    @relation("TaskTeam", fields: [departmentId], references: [id], onDelete: SetNull)
+  challengeId     String?
+  challenge       TaskChallenge? @relation(fields: [challengeId], references: [id], onDelete: SetNull)
+  /// What finishing it on time is worth, and the badge that comes with it — never set by its own assignee.
+  xp              Int          @default(0)
+  /// Who last set it — never its assignee: XP counts only when somebody else put it there.
+  xpSetById       String?
+  badge           String?
+  /// Frozen when it's done on time: who earned what, and when. Cleared if it's opened again.
+  xpEarned        Int?
+  xpEarnedById    String?
+  xpEarnedBy      User?        @relation("TaskXpEarner", fields: [xpEarnedById], references: [id], onDelete: SetNull)
+  xpEarnedAt      DateTime?
+  /// Done, it makes its next one (`nextOccurrence`) — until this day, when set.
+  repeat          TaskRepeat?
+  repeatUntil     DateTime?
+  /// The task this one repeats.
+  repeatedFromId  String?
+
+  checklist   TaskChecklistItem[]
+  comments    TaskComment[]
+  attachments TaskAttachment[]
+  timeLogs    TaskTimeLog[]
+  stars       TaskStar[]
+
   @@index([assignedToUserId])
   @@index([companyId])
   @@index([leadId])
   @@index([ticketId])
   @@index([dueDate])
   @@index([aboutUserId, hrStage])
+  @@index([status])
+  @@index([departmentId])
+  @@index([challengeId])
+  @@index([xpEarnedById, xpEarnedAt])
+  @@index([repeatedFromId])
   @@map("tasks")
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskRepeat {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+/// A step of a task, ticked off on its own.
+model TaskChecklistItem {
+  id        String    @id @default(cuid())
+  taskId    String
+  task      Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  title     String
+  done      Boolean   @default(false)
+  doneAt    DateTime?
+  doneById  String?
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+
+  @@index([taskId, sortOrder])
+  @@map("task_checklist_items")
+}
+
+model TaskComment {
+  id        String    @id @default(cuid())
+  taskId    String
+  task      Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User      @relation("TaskCommentAuthor", fields: [userId], references: [id], onDelete: Cascade)
+  body      String
+  createdAt DateTime  @default(now())
+
+  @@index([taskId, createdAt])
+  @@map("task_comments")
+}
+
+/// A file on a task, kept in the workspace's own database and served only to who may see the task.
+model TaskAttachment {
+  id           String   @id @default(cuid())
+  taskId       String
+  task         Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploadedById String
+  uploadedBy   User     @relation("TaskAttachmentUploader", fields: [uploadedById], references: [id], onDelete: Cascade)
+  fileName     String
+  mimeType     String
+  size         Int
+  data         Bytes
+  createdAt    DateTime @default(now())
+
+  @@index([taskId])
+  @@map("task_attachments")
+}
+
+/// Time spent on a task, logged by whoever spent it, against the task's estimate.
+model TaskTimeLog {
+  id        String   @id @default(cuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation("TaskTimeLogger", fields: [userId], references: [id], onDelete: Cascade)
+  minutes   Int
+  note      String?
+  /// The day the time was spent, as a calendar day.
+  spentOn   DateTime @db.Date
+  createdAt DateTime @default(now())
+
+  @@index([taskId])
+  @@index([userId, spentOn])
+  @@map("task_time_logs")
+}
+
+/// A task somebody starred — theirs alone.
+model TaskStar {
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation("TaskStarrer", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([taskId, userId])
+  @@index([userId])
+  @@map("task_stars")
+}
+
+/// A goal tasks are grouped under ("Database migration"), with the XP its tasks carry adding up.
+model TaskChallenge {
+  id           String      @id @default(cuid())
+  name         String
+  description  String?
+  departmentId String?
+  department   Department? @relation("TaskChallengeTeam", fields: [departmentId], references: [id], onDelete: SetNull)
+  startDate    DateTime?
+  endDate      DateTime?
+  createdById  String?
+  createdBy    User?       @relation("TaskChallengeCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  archivedAt   DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  tasks Task[]
+
+  @@index([archivedAt])
+  @@map("task_challenges")
 }
 
 /**

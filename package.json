@@ -152,6 +152,7 @@
     "check:vendor-po": "tsx scripts/check-vendor-po.ts",
     "check:word-filter": "tsx scripts/check-word-filter.ts",
     "check:board-attendance": "tsx scripts/check-board-attendance.ts",
+    "check:tasks-advanced": "tsx scripts/check-tasks-advanced.ts",
     "check:vendor-banking": "tsx scripts/check-vendor-banking.ts",
     "check:documents-sections": "tsx scripts/check-documents-sections.ts",
     "check:custom-field-filters": "tsx scripts/check-custom-field-filters.ts",

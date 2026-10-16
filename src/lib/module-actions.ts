@@ -215,6 +215,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "table-preference.ts": "core",
   "target.ts": ["targets"],
   "task.ts": ["tasks"],
+  // A task's checklist, comments, files, time, the form's choices and challenges (owner, 16 Oct 2026).
+  "task-extras.ts": ["tasks"],
   "tax-reports.ts": ["accounting"],
   "ticket.ts": ["helpdesk"],
   // Tickets by email: the address and its settings, the Support inbox, replies (src/lib/support-mail).
