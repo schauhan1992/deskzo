@@ -330,8 +330,25 @@ export async function resolveMail(stream: MailStreamKey, options: { connectionId
   return { kind: "connection", connection, from: { name: name ?? connection.fromName, address: fromAddress }, replyTo, via: connection.name };
 }
 
-// Microsoft 365: a token per account, used until five minutes before it ends.
+// Microsoft 365: a token per account and resource (Graph, or Exchange Online's SMTP), used until five minutes before it ends.
 const tokens = new Map<string, { key: string; token: string; until: number }>();
+
+/**
+ * Microsoft 365 sends one of two ways (owner, 16 Oct 2026 — "it works in another app"):
+ *
+ *   · **Microsoft Graph**, when the app holds Mail.Send (application). Admin consent is all it needs —
+ *     the way most apps send — and the mail goes whole, as MIME, so its threading headers survive.
+ *   · **SMTP with XOAUTH2**, when it holds SMTP.SendAsApp instead: Exchange also wants the app registered
+ *     as a service principal with rights on the mailbox (New-ServicePrincipal, Add-MailboxPermission).
+ *
+ * Which one is decided by the Graph token: Microsoft writes the app's permissions into it.
+ */
+type MicrosoftResource = "graph" | "outlook";
+const MICROSOFT_SCOPE: Record<MicrosoftResource, string> = {
+  graph: "https://graph.microsoft.com/.default",
+  outlook: "https://outlook.office365.com/.default",
+};
+const tokenSlot = (connectionId: string, resource: MicrosoftResource) => `${connectionId}|${resource}`;
 let testTokenFetch: typeof fetch | null = null;
 let testTransport: ((options: SMTPTransport.Options) => Transporter) | null = null;
 
@@ -343,7 +360,8 @@ export function setTestMailTransport(transport: ((options: SMTPTransport.Options
 }
 
 function forgetToken(connectionId: string) {
-  tokens.delete(connectionId);
+  tokens.delete(tokenSlot(connectionId, "graph"));
+  tokens.delete(tokenSlot(connectionId, "outlook"));
 }
 
 /**
@@ -355,16 +373,20 @@ export function forgetMailToken(connectionId: string): void {
   forgetToken(connectionId);
 }
 
-/** The permissions ("roles") Microsoft wrote into an account's current token, or null without one. Read, never verified — it is only for saying why a send failed. */
-function tokenRoles(connectionId: string): string[] | null {
-  const held = tokens.get(connectionId);
-  if (!held) return null;
+/** The permissions ("roles") Microsoft wrote into a token, or null when it can't be read. Read, never verified: it only chooses the way to send and says why one failed. */
+function rolesIn(token: string): string[] | null {
   try {
-    const payload = JSON.parse(Buffer.from(held.token.split(".")[1] ?? "", "base64url").toString("utf8")) as { roles?: unknown };
+    const payload = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8")) as { roles?: unknown };
     return Array.isArray(payload.roles) ? payload.roles.filter((r): r is string => typeof r === "string") : [];
   } catch {
     return null;
   }
+}
+
+/** The roles in an account's current token for a resource, or null without one. */
+function tokenRoles(connectionId: string, resource: MicrosoftResource = "outlook"): string[] | null {
+  const held = tokens.get(tokenSlot(connectionId, resource));
+  return held ? rolesIn(held.token) : null;
 }
 
 /**
@@ -374,18 +396,27 @@ function tokenRoles(connectionId: string): string[] | null {
  */
 export function microsoftHint(connection: MailConnection, err: unknown): string | null {
   if (connection.provider !== "MICROSOFT_365") return null;
-  const e = err as { message?: unknown; response?: unknown } | null;
+  const e = err as { message?: unknown; response?: unknown; code?: unknown; responseCode?: unknown } | null;
   const said = `${typeof e?.message === "string" ? e.message : ""} ${typeof e?.response === "string" ? e.response : ""}`;
+  if (e?.code === "EGRAPH") {
+    if (e.responseCode === 404 || /ErrorInvalidUser|MailboxNotEnabledForRESTAPI|ResourceNotFound/.test(said)) {
+      return `Microsoft has no mailbox ${connection.username ?? ""} in this tenant: check the mailbox, and that the directory (tenant) ID is the one it belongs to.`;
+    }
+    if (e.responseCode === 403 || /ErrorAccessDenied/.test(said)) {
+      return "The app has Mail.Send, but Exchange refused this mailbox: an application access policy may leave it out (Test-ApplicationAccessPolicy), or admin consent is missing.";
+    }
+    return null;
+  }
   if (/5\.7\.139/.test(said)) {
     return "SMTP AUTH is off for this mailbox in Microsoft 365: Set-CASMailbox -Identity <mailbox> -SmtpClientAuthenticationDisabled $false, then allow up to an hour.";
   }
   if (/5\.7\.3\b|\b535\b/.test(said)) {
     const roles = tokenRoles(connection.id);
     if (roles && !roles.includes("SMTP.SendAsApp")) {
-      return "The app's token has no SMTP.SendAsApp: add it under Office 365 Exchange Online › Application permissions, grant admin consent, and test again.";
+      return "The app has neither Mail.Send nor SMTP.SendAsApp: add Microsoft Graph › Application permissions › Mail.Send (simplest), grant admin consent, and test again.";
     }
     if (roles) {
-      return "The app has SMTP.SendAsApp, so Exchange doesn't let it use this mailbox yet: run New-ServicePrincipal and Add-MailboxPermission (the steps), then allow 30 minutes.";
+      return "The app has SMTP.SendAsApp, so Exchange doesn't let it use this mailbox yet: run New-ServicePrincipal and Add-MailboxPermission (the steps), then allow 30 minutes — or give the app Microsoft Graph's Mail.Send instead, which needs neither.";
     }
   }
   return null;
@@ -398,11 +429,12 @@ function microsoftSaid(body: unknown): string {
   return [typeof b.error === "string" ? b.error : null, description.replace(/\s*Trace ID:.*$/i, "")].filter(Boolean).join(": ") || "no reason given";
 }
 
-async function microsoftToken(connection: MailConnection, secret: string): Promise<string> {
+async function microsoftToken(connection: MailConnection, secret: string, resource: MicrosoftResource = "outlook"): Promise<string> {
   const key = `${connection.msTenantId}|${connection.msClientId}|${connection.updatedAt.getTime()}`;
-  const held = tokens.get(connection.id);
+  const slot = tokenSlot(connection.id, resource);
+  const held = tokens.get(slot);
   if (held && held.key === key && held.until > Date.now()) return held.token;
-  const body = new URLSearchParams({ client_id: connection.msClientId ?? "", client_secret: secret, scope: "https://outlook.office365.com/.default", grant_type: "client_credentials" });
+  const body = new URLSearchParams({ client_id: connection.msClientId ?? "", client_secret: secret, scope: MICROSOFT_SCOPE[resource], grant_type: "client_credentials" });
   const res = await (testTokenFetch ?? fetch)(`https://login.microsoftonline.com/${encodeURIComponent(connection.msTenantId ?? "")}/oauth2/v2.0/token`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -412,8 +444,45 @@ async function microsoftToken(connection: MailConnection, secret: string): Promi
   const json = (await res.json().catch(() => null)) as { access_token?: unknown; expires_in?: unknown } | null;
   if (!res.ok || typeof json?.access_token !== "string") throw new Error(`Microsoft refused the app's sign-in (${res.status}): ${microsoftSaid(json)}`);
   const seconds = typeof json.expires_in === "number" ? json.expires_in : Number(json.expires_in) || 3600;
-  tokens.set(connection.id, { key, token: json.access_token, until: Date.now() + Math.max(60, seconds - 300) * 1000 });
+  tokens.set(slot, { key, token: json.access_token, until: Date.now() + Math.max(60, seconds - 300) * 1000 });
   return json.access_token;
+}
+
+/** What Graph said when it refused, as one line. */
+function graphSaid(body: unknown): string {
+  const e = body && typeof body === "object" ? (body as { error?: { code?: unknown; message?: unknown } }).error : null;
+  return [typeof e?.code === "string" ? e.code : null, typeof e?.message === "string" ? e.message : null].filter(Boolean).join(": ") || "no reason given";
+}
+
+/**
+ * A transport that hands the finished message to Microsoft Graph (POST /users/{mailbox}/sendMail, the
+ * MIME base64-encoded) — headers, attachments and blind copies as nodemailer built them.
+ */
+function graphTransport(connection: MailConnection, token: string): Transporter {
+  const mailbox = encodeURIComponent(connection.username ?? "");
+  return nodemailer.createTransport({
+    name: "microsoft-graph",
+    version: "1",
+    send(mail: { message: { keepBcc: boolean; build(cb: (err: Error | null, raw: Buffer) => void): void; messageId(): string; getEnvelope(): unknown } }, callback: (err: Error | null, info?: unknown) => void) {
+      // Graph takes the recipients from the message itself, so blind copies stay in it for Graph to strip.
+      mail.message.keepBcc = true;
+      mail.message.build((buildErr, raw) => {
+        if (buildErr) return callback(buildErr);
+        (testTokenFetch ?? fetch)(`https://graph.microsoft.com/v1.0/users/${mailbox}/sendMail`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "text/plain" },
+          body: raw.toString("base64"),
+          signal: AbortSignal.timeout(30_000),
+        })
+          .then(async (res) => {
+            if (res.ok) return callback(null, { envelope: mail.message.getEnvelope(), messageId: mail.message.messageId(), response: `${res.status} Accepted by Microsoft Graph` });
+            const said = graphSaid(await res.json().catch(() => null));
+            callback(Object.assign(new Error(`Microsoft Graph refused the mail (${res.status}): ${said}`), { code: "EGRAPH", responseCode: res.status }));
+          })
+          .catch((err: unknown) => callback(err instanceof Error ? err : new Error(String(err))));
+      });
+    },
+  } as unknown as SMTPTransport.Options);
 }
 
 /**
@@ -423,6 +492,11 @@ async function microsoftToken(connection: MailConnection, secret: string): Promi
 export async function transportFor(connection: MailConnection, how: { fresh?: boolean } = {}): Promise<Transporter> {
   if (how.fresh) forgetToken(connection.id);
   const secret = connection.secretCipher ? openForPlatform("mail-connection", connection.secretCipher) : "";
+  if (connection.provider === "MICROSOFT_365") {
+    // Graph when the app holds Mail.Send; a Graph token that can't be had leaves SMTP to say why.
+    const graph = await microsoftToken(connection, secret, "graph").catch(() => null);
+    if (graph && rolesIn(graph)?.includes("Mail.Send")) return graphTransport(connection, graph);
+  }
   const auth: SMTPTransport.Options["auth"] =
     connection.provider === "MICROSOFT_365"
       ? { type: "OAuth2", user: connection.username ?? "", accessToken: await microsoftToken(connection, secret) }

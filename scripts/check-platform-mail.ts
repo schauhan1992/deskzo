@@ -137,11 +137,26 @@ const transport = (options: SMTPTransport.Options) =>
       return { messageId: `<zz-${sent.length}@check>` };
     },
   }) as unknown as Transporter;
+// Microsoft: tokens for Exchange Online's SMTP (counted in tokenCalls, as they always were), tokens for
+// Graph (counted apart), and Graph's sendMail.
 const tokenCalls: { url: string; body: string }[] = [];
+const graphTokenCalls: { url: string; body: string }[] = [];
 let tokenAnswer: { status: number; body: unknown } = { status: 200, body: { access_token: "zz-token-1", expires_in: 3600, token_type: "Bearer" } };
+let graphTokenAnswer: { status: number; body: unknown } = { status: 200, body: { access_token: "zz-graph-plain", expires_in: 3600, token_type: "Bearer" } };
+const graphSends: { url: string; auth: string; type: string; body: string }[] = [];
+let graphAnswer: { status: number; body: unknown } = { status: 202, body: null };
 const tokenFetch = (async (url: string | URL, init?: RequestInit) => {
-  tokenCalls.push({ url: String(url), body: String(init?.body ?? "") });
-  return new Response(JSON.stringify(tokenAnswer.body), { status: tokenAnswer.status, headers: { "content-type": "application/json" } });
+  const target = String(url);
+  if (target.startsWith("https://graph.microsoft.com/")) {
+    const headers = (init?.headers ?? {}) as Record<string, string>;
+    graphSends.push({ url: target, auth: headers.authorization ?? "", type: headers["content-type"] ?? "", body: String(init?.body ?? "") });
+    return new Response(graphAnswer.body === null ? null : JSON.stringify(graphAnswer.body), { status: graphAnswer.status });
+  }
+  const body = String(init?.body ?? "");
+  const forGraph = (new URLSearchParams(body).get("scope") ?? "").startsWith("https://graph.microsoft.com/");
+  (forGraph ? graphTokenCalls : tokenCalls).push({ url: target, body });
+  const answer = forGraph ? graphTokenAnswer : tokenAnswer;
+  return new Response(JSON.stringify(answer.body), { status: answer.status, headers: { "content-type": "application/json" } });
 }) as typeof fetch;
 
 async function main() {
@@ -361,8 +376,8 @@ async function main() {
     failNext = exchangeRefusal("5.7.3", "Authentication unsuccessful");
     const noRole = await actions.consoleSendTestMail({ connectionId: m365Id });
     ok(
-      "5.7.3 with a token lacking SMTP.SendAsApp: says to add it and grant consent, then what Exchange said",
-      noRole.ok && !noRole.data.ok && /no SMTP\.SendAsApp: add it under Office 365 Exchange Online/.test(noRole.data.error ?? "") && (noRole.data.error ?? "").includes("5.7.3"),
+      "5.7.3 with a token lacking SMTP.SendAsApp: says to add Graph's Mail.Send and grant consent, then what Exchange said",
+      noRole.ok && !noRole.data.ok && /neither Mail\.Send nor SMTP\.SendAsApp: add Microsoft Graph/.test(noRole.data.error ?? "") && (noRole.data.error ?? "").includes("5.7.3"),
       noRole.ok ? noRole.data.error : noRole.error,
     );
     tokenAnswer = { status: 200, body: { access_token: jwt(["SMTP.SendAsApp"]), expires_in: 3600 } };
@@ -381,6 +396,44 @@ async function main() {
     ok("after Exchange refuses a token, the next send asks for a new one", tokenCalls.length === afterRefusal + 1);
     await mailer.sendPlatformMail(mail("ACCOUNT"));
     ok("  and keeps that one while it works", tokenCalls.length === afterRefusal + 1);
+
+    // Graph (owner, 16 Oct 2026): an app holding Mail.Send sends through Microsoft Graph — admin consent is
+    // all it needs, no Exchange service principal — the whole message as MIME.
+    const graphToken = jwt(["Mail.Send"]);
+    graphTokenAnswer = { status: 200, body: { access_token: graphToken, expires_in: 3600 } };
+    const smtpBefore = sent.length;
+    graphSends.length = 0;
+    const viaGraph = await actions.consoleSendTestMail({ connectionId: m365Id });
+    ok("an app with Mail.Send sends through Microsoft Graph, not SMTP", viaGraph.ok && viaGraph.data.ok && graphSends.length === 1 && sent.length === smtpBefore, viaGraph.ok ? viaGraph.data : viaGraph.error);
+    const graphForm = new URLSearchParams(graphTokenCalls.at(-1)?.body ?? "");
+    ok("  with a Graph token from the tenant, by client credentials", graphForm.get("scope") === "https://graph.microsoft.com/.default" && graphForm.get("grant_type") === "client_credentials" && graphTokenCalls.at(-1)?.url === `https://login.microsoftonline.com/${m365.msTenantId}/oauth2/v2.0/token`);
+    const g = graphSends[0];
+    ok("  to the mailbox's sendMail, as text/plain base64 MIME", g?.url === "https://graph.microsoft.com/v1.0/users/mailer%40zz.example/sendMail" && g.auth === `Bearer ${graphToken}` && g.type === "text/plain", g?.url);
+    const mimeOf = (send: { body: string } | undefined) => Buffer.from(send?.body ?? "", "base64").toString("utf8");
+    ok("  the whole message: From and Subject in it", /^From: .*mailer@zz\.example/m.test(mimeOf(g)) && /^Subject: /m.test(mimeOf(g)));
+    await mailer.sendPlatformMail({ ...mail("ACCOUNT"), replyTo: "back@zz.example", messageId: "<zz-thread@zz.example>", inReplyTo: "<zz-prev@zz.example>", references: ["<zz-prev@zz.example>"], bcc: ["hidden@zz.example"] });
+    const threaded = mimeOf(graphSends.at(-1));
+    ok(
+      "  keeping Message-ID, In-Reply-To, Reply-To and blind copies — Graph takes recipients from the message",
+      threaded.includes("Message-ID: <zz-thread@zz.example>") && threaded.includes("In-Reply-To: <zz-prev@zz.example>") && threaded.includes("Reply-To: back@zz.example") && threaded.includes("Bcc: hidden@zz.example"),
+      threaded.split("\n").slice(0, 12).join(" | "),
+    );
+    ok("  and the log has it sent", (await lastLog()).status === "SENT");
+    graphAnswer = { status: 403, body: { error: { code: "ErrorAccessDenied", message: "Access is denied. Check credentials and try again." } } };
+    const denied = await actions.consoleSendTestMail({ connectionId: m365Id });
+    ok(
+      "Graph refusing: says an access policy or consent is in the way, then what Graph said",
+      denied.ok && !denied.data.ok && /application access policy/.test(denied.data.error ?? "") && /ErrorAccessDenied/.test(denied.data.error ?? ""),
+      denied.ok ? denied.data.error : denied.error,
+    );
+    graphAnswer = { status: 404, body: { error: { code: "ErrorInvalidUser", message: "The requested user 'mailer@zz.example' is invalid." } } };
+    const noMailbox = await actions.consoleSendTestMail({ connectionId: m365Id });
+    ok("  no such mailbox: says so, and to check the tenant", noMailbox.ok && !noMailbox.data.ok && /no mailbox mailer@zz\.example in this tenant/.test(noMailbox.data.error ?? ""), noMailbox.ok ? noMailbox.data.error : noMailbox.error);
+    graphAnswer = { status: 202, body: null };
+    graphTokenAnswer = { status: 200, body: { access_token: "zz-graph-plain", expires_in: 3600 } };
+    const backToSmtp = sent.length;
+    await actions.consoleSendTestMail({ connectionId: m365Id });
+    ok("without Mail.Send it is SMTP again, as before", sent.length === backToSmtp + 1);
 
     tokenAnswer = { status: 401, body: { error: "invalid_client", error_description: "AADSTS7000215: Invalid client secret provided. Ensure the secret being sent is the client secret value.\r\nTrace ID: abc Correlation ID: def" } };
     await actions.consoleSaveMailConnection({ ...m365, id: m365Id, secret: "zz-wrong-secret" });
