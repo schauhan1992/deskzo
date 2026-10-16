@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { CallOutcome, CallDirection, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { leadsInPlan, withoutHiddenLeads } from "@/lib/leads/shown";
+import { leadsSeenBy } from "@/lib/leads/shown";
 import { STILL_THERE } from "@/lib/contacts/left";
 import { requireModuleUser } from "@/lib/modules-access";
 import { recordAudit } from "@/lib/audit";
@@ -307,7 +307,7 @@ export async function listCalls(params: {
     db.callLog.count({ where }),
   ]);
 
-  return toPlain({ rows: withoutHiddenLeads(rows, await leadsInPlan()), total });
+  return toPlain({ rows: (await leadsSeenBy(user.id, rows)), total });
 }
 
 /** Headline figures for the calling team: dials, how many reached a person, and time on the phone. */
@@ -359,7 +359,7 @@ export async function listCompanyCalls(companyId: string, take = 50) {
     take,
     select: callSelect,
   });
-  return toPlain(withoutHiddenLeads(rows, await leadsInPlan()));
+  return toPlain((await leadsSeenBy(user.id, rows)));
 }
 
 /**

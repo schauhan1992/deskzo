@@ -60,7 +60,7 @@ export function RecordAccessGrid({
         <tbody>
           {rows.map((row) => (
             <tr key={row.key} className="border-b border-line last:border-0 align-top">
-              <th scope="row" className="px-3 py-2 text-left font-normal">
+              <th scope="row" className="min-w-[9rem] px-3 py-2 text-left font-normal">
                 <span className="block text-text">{row.label}</span>
                 <span className="block text-xs text-subtle">Own: {row.ownMeans}</span>
               </th>

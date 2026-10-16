@@ -17,3 +17,12 @@ export const LEAD_SOURCE_LABELS: Record<LeadSource, string> = {
 };
 
 export const LEAD_SOURCE_VALUES = Object.keys(LEAD_SOURCE_LABELS) as [LeadSource, ...LeadSource[]];
+
+/**
+ * A lead's source in words — or, where field access masks or restricts it (src/lib/leads/masking.ts),
+ * the masked text the server sent in its place, as it is.
+ */
+export function leadSourceLabel(source: string | null | undefined): string {
+  if (!source) return "—";
+  return (LEAD_SOURCE_LABELS as Record<string, string>)[source] ?? source;
+}

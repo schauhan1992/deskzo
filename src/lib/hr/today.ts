@@ -9,6 +9,7 @@ import { detectSalesWinsLazily, withoutOrphanedWins } from "@/lib/wins/detect";
 import { announceActivityAwardsLazily } from "@/lib/performance/announce";
 import { announcePrizesLazily } from "@/lib/wins/prize-announce";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
+import { maskDealWins } from "@/lib/leads/masking";
 
 /**
  * What to greet the signed-in person with today.
@@ -73,7 +74,8 @@ export const todaysMoments = cache(async (): Promise<{ greeting: string; moments
       db.celebrationSeen.findMany({ where: { userId: user.id }, select: { occasionKey: true } }),
     ]);
     // A win for a customer, deal or target deleted since is not celebrated — see withoutOrphanedWins.
-    const celebrations = await withoutOrphanedWins(allCelebrations);
+    // A won deal's own words, masked for this viewer as their field access says (src/lib/leads/masking.ts).
+    const celebrations = await maskDealWins(user.id, await withoutOrphanedWins(allCelebrations));
 
     const moments = momentsFor({
       today,

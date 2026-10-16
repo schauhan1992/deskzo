@@ -8,6 +8,7 @@ import { isResellerManaged } from "@/lib/reseller";
 import { formatTicketId } from "@/lib/tickets";
 import { companyPath, leadPath, ticketPath, visitPath } from "@/lib/record-links";
 import { MEETING_RECORD_KINDS, type MeetingRecordKind, type MeetingRecordRef } from "@/lib/calendar/kinds";
+import { detailLeadMasker, maskLeadTitle } from "@/lib/leads/masking";
 
 /**
  * The record a meeting is scheduled from — a lead, a customer, one of its contacts, a ticket, or a
@@ -68,15 +69,21 @@ export async function meetingRecordFor(userId: string, ref: MeetingRecordRef): P
       if (!(await moduleAvailableForTenant("leads")) || !(await can(userId, "leads.view"))) return null;
       const lead = await db.lead.findUnique({ where: { id: ref.id }, select: { id: true, leadSeq: true, title: true, contactId: true, company: COMPANY } });
       if (!lead || !(await mayAccess(userId, "leads", "view", lead.id))) return null;
+      // Named as the lead's page names it for this person: the meeting's title goes to the calendar and
+      // to everybody invited, so a field masked here goes out masked.
+      const masker = await detailLeadMasker(userId, lead.id);
+      const companyName = masker.present("companyName", lead.company.name) ?? "";
+      const title = maskLeadTitle(masker, lead.title);
       return {
         ref,
-        label: `Lead · ${lead.company.name} — ${lead.title}`,
+        label: `Lead · ${companyName} — ${title}`,
         href: leadPath(lead.leadSeq),
         links: { ...NO_LINKS, companyId: lead.company.id, leadId: lead.id, contactId: lead.contactId },
         ...around(lead.company),
+        companyName,
         contacts: await contactsOf(userId, lead.company),
         preferredContactIds: lead.contactId ? [lead.contactId] : [],
-        defaults: { title: `${lead.company.name} — ${lead.title}`, location: null, startsAt: null, durationMinutes: 30, online: true, agenda: null },
+        defaults: { title: `${companyName} — ${title}`, location: null, startsAt: null, durationMinutes: 30, online: true, agenda: null },
       };
     }
     case "company": {

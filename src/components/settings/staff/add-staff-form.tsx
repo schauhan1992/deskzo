@@ -28,7 +28,7 @@ import type { DepartmentChoice, RoleChoice, WorkBranch } from "@/components/sett
  * It is the same `createUser` action, with the optional job title, phone and status this form added
  * to it. The reporting manager and "works at" are not part of creating an account and never were;
  * they go through `updateUserAssignment` and `setUserBranch` just after, with their own rules — a
- * reporting line hands the reports' permissions to the manager, so it needs permission to manage
+ * reporting line decides whose records count as the manager's team, so it needs permission to manage
  * access — and a refusal of either is reported without undoing the account.
  */
 

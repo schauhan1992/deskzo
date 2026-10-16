@@ -20,9 +20,15 @@ export function LeadPipelineControls({
   details,
   contacts,
   moveTargets,
+  locked = [],
 }: {
   leadId: string;
   details: LeadDetailsValues;
+  /**
+   * Fields this person sees masked here and so can't change — the title, description or contact. Shown
+   * as they are and read-only; the server keeps what they hold whatever is sent (`updateLeadDetails`).
+   */
+  locked?: ("title" | "description" | "contactName")[];
   contacts: { id: string; name: string }[];
   /** Other pipelines in use, each with its open stages; empty when the lead can't move (closed, or only one pipeline). */
   moveTargets: MoveTarget[];
@@ -84,7 +90,14 @@ export function LeadPipelineControls({
               <Label htmlFor="lead-edit-title" className="text-xs">
                 Title
               </Label>
-              <Input id="lead-edit-title" maxLength={200} value={editing.title} onChange={(e) => setEditing({ ...editing, title: e.target.value })} />
+              <Input
+                id="lead-edit-title"
+                maxLength={200}
+                value={editing.title}
+                readOnly={locked.includes("title")}
+                aria-describedby={locked.includes("title") ? "lead-edit-locked" : undefined}
+                onChange={(e) => setEditing({ ...editing, title: e.target.value })}
+              />
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1">
@@ -109,7 +122,7 @@ export function LeadPipelineControls({
               <Label htmlFor="lead-edit-contact" className="text-xs">
                 Contact
               </Label>
-              <Select id="lead-edit-contact" value={editing.contactId} onChange={(e) => setEditing({ ...editing, contactId: e.target.value })}>
+              <Select id="lead-edit-contact" value={editing.contactId} disabled={locked.includes("contactName")} onChange={(e) => setEditing({ ...editing, contactId: e.target.value })}>
                 <option value="">No specific contact</option>
                 {contacts.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -122,8 +135,21 @@ export function LeadPipelineControls({
               <Label htmlFor="lead-edit-description" className="text-xs">
                 Description
               </Label>
-              <Textarea id="lead-edit-description" rows={4} maxLength={5000} value={editing.description} onChange={(e) => setEditing({ ...editing, description: e.target.value })} />
+              <Textarea
+                id="lead-edit-description"
+                rows={4}
+                maxLength={5000}
+                value={editing.description}
+                readOnly={locked.includes("description")}
+                aria-describedby={locked.includes("description") ? "lead-edit-locked" : undefined}
+                onChange={(e) => setEditing({ ...editing, description: e.target.value })}
+              />
             </div>
+            {locked.length > 0 && (
+              <p id="lead-edit-locked" className="text-xs text-subtle">
+                Masked fields can&apos;t be changed until you unmask this lead. They keep what they hold.
+              </p>
+            )}
           </div>
           <div className="mt-4 flex justify-end gap-2">
             <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(null)} disabled={isPending}>

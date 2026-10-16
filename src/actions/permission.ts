@@ -3,11 +3,11 @@
 import { revalidatePath } from "next/cache";
 import type { Role } from "@/lib/roles";
 import { db } from "@/lib/db";
-import { rolePermits } from "@/lib/authz/role-permission";
+import { roleDefault, rolePermits } from "@/lib/authz/role-permission";
 import { requireUser } from "@/lib/session";
 import { roleExists, roleKeys } from "@/lib/authz/role-registry";
-import { PERMISSIONS, getPermissionDefinition, permissionGroup, type PermissionKey, heldByDefault } from "@/lib/permissions";
-import { can, permissionsFor, explain, resolveUserPermissions, describeSource } from "@/lib/authz/resolve";
+import { PERMISSIONS, getPermissionDefinition, permissionGroup, type PermissionKey } from "@/lib/permissions";
+import { can, permissionsFor, resolveUserPermissions, describeSource, isHeld } from "@/lib/authz/resolve";
 import { holdsFrom, resolveEveryone } from "@/lib/authz/bulk";
 import { actorContext, assertGrantWithinOwnAuthority, assertKeepsOwnAccessAdmin, AuthzError } from "@/lib/authz/guards";
 import { recordPermissionChange } from "@/lib/authz/audit";
@@ -98,7 +98,7 @@ export async function getPermissionMatrix() {
         role,
         overrides.get(`${role}:${perm.key}`) ??
           // Absent an override, an admin holds everything and everyone else holds their defaults.
-          (role === "ADMIN" ? true : heldByDefault(perm, role)),
+          roleDefault(perm, role),
       ]),
     ) as Record<Role, boolean>,
 
@@ -198,7 +198,7 @@ export async function resetRolePermission(role: Role, key: PermissionKey | strin
   try {
     await assertGrantWithinOwnAuthority(actor, key);
     const def = getPermissionDefinition(key);
-    const byDefault = role === "ADMIN" || (def ? heldByDefault(def, role) : false);
+    const byDefault = def ? roleDefault(def, role) : false;
     await assertKeepsOwnAccessAdmin(actor, role, key, byDefault);
   } catch (err) {
     if (err instanceof AuthzError) return { ok: false, error: err.message };
@@ -327,20 +327,12 @@ export async function effectivePermissionsFor(userId: string) {
         label: def.label,
         group: permissionGroup(def),
         tier: def.tier ?? "standard",
-        held: source.via !== "none" && source.via !== "inactive" && !(source.via === "userGrant" && !source.allowed) && !(source.via === "roleOverride" && !source.allowed),
+        held: isHeld(source),
         via: source.via,
         why: describeSource(source, clock),
       };
     }),
   };
-}
-
-/** Why one specific permission resolves the way it does. */
-export async function explainPermission(userId: string, key: PermissionKey | string) {
-  const session = await requireUser();
-  if (userId !== session.id && !(await can(session.id, "permissions.view"))) return null;
-  const source = await explain(userId, key);
-  return { source, why: describeSource(source, await workspaceClock()) };
 }
 
 // ─── The reverse index ────────────────────────────────────────────────────────
@@ -350,7 +342,7 @@ export async function explainPermission(userId: string, key: PermissionKey | str
  *
  * The question an audit actually asks — "list everyone who can approve an invoice" — and the one
  * the role matrix cannot answer by construction. The matrix shows role defaults; it cannot show a
- * personal grant, a personal deny, `adminDefault`, or a key reaching somebody through a report. For
+ * personal grant, a personal deny or `adminDefault`. For
  * `payroll.manage`, whose `defaultRoles` is empty, the matrix shows the column off for all eight
  * roles, which reads as "nobody" while every admin in fact holds it.
  *

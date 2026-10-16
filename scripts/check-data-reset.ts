@@ -112,8 +112,11 @@ async function main() {
   for (const folder of readdirSync(migrationsDir)) {
     if (folder === "migration_lock.toml") continue;
     const sql = readFileSync(path.join(migrationsDir, folder, "migration.sql"), "utf8");
+    // A temporary table lives only while its migration runs (20261110120000_retire_report_inheritance
+    // keeps the registry's facts in one), so there is nothing of it for a reset to keep or wipe.
+    const temporary = new Set([...sql.matchAll(/CREATE TEMP(?:ORARY)? TABLE "([a-z_]+)"/gi)].map((m) => m[1]!));
     // Fixed rows — `VALUES` — not a backfill copying rows from another table, which a reset empties anyway.
-    for (const m of sql.matchAll(/INSERT INTO "([a-z_]+)"[^;]*?\)\s*VALUES/gi)) fixed.push(`${m[1]} (${folder})`);
+    for (const m of sql.matchAll(/INSERT INTO "([a-z_]+)"[^;]*?\)\s*VALUES/gi)) if (!temporary.has(m[1]!)) fixed.push(`${m[1]} (${folder})`);
   }
   const unhandled = fixed.filter((f) => !kept.has(f.split(" ")[0]!));
   ok("every table a migration writes fixed rows into is kept or put back", unhandled.length === 0 && fixed.length >= 2, unhandled.join(", ") || fixed.join(", "));

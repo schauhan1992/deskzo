@@ -23,11 +23,12 @@ export type PermissionDefinition = {
   /** Section in the permission screen. Keys with no group fall under "Other". */
   group?: string;
   /**
-   * Whether a manager may inherit this from somebody who reports to them.
-   *
-   * Defaults to true, which is the existing behaviour. Set false for anything where managing the
-   * person is not the same as being entitled to the capability — payroll being the clearest case:
-   * you may manage the person who runs payroll without being entitled to see everyone's salary.
+   * Whether a manager used to inherit this from somebody who reports to them. Managers no longer
+   * inherit anything (src/lib/authz/resolve.ts; retired by prisma/migrations/20261110120000_retire_
+   * report_inheritance), so nothing that decides access reads this any more. It stays as the record of
+   * which keys were never handed up a reporting line — false for anything where managing the person is
+   * not the same as being entitled to the capability, payroll being the clearest case — and check:rbac
+   * still holds every super-admin-only and critical key to it.
    */
   delegable?: boolean;
   /**

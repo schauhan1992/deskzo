@@ -54,7 +54,7 @@ export function EditStaffDialog({
   branches: WorkBranch[] | null;
   /** `users.assignRole` — reserved to a super admin. */
   mayAssignRole: boolean;
-  /** `permissions.manage` — a reporting line confers the reports' access on the manager. */
+  /** `permissions.manage` — a reporting line decides whose records count as the manager's team. */
   mayChangeManager: boolean;
 }) {
   const router = useRouter();
@@ -276,7 +276,7 @@ export function EditStaffDialog({
             <p id={idFor("manager-hint")} className="text-xs text-subtle">
               {mayChangeManager
                 ? "Their manager also gets every permission they hold."
-                : "A reporting line passes their permissions to their manager, so changing it needs permission to manage access."}
+                : "A reporting line decides whose records count as their manager's team, so changing it needs permission to manage access."}
             </p>
           </div>
 

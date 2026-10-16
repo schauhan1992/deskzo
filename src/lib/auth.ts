@@ -315,13 +315,3 @@ export async function auth(): Promise<Session | null> {
   if (!person || isAutomationKind(person.kind)) return null;
   return { ...session, user: { ...session.user, name: person.name, role: person.role } };
 }
-
-/** Moved to src/lib/roles.ts — a form needing the list should not import this module. */
-
-export function canManageLeads(role: Role) {
-  return role === "ADMIN" || role === "SALES" || role === "CALLING" || role === "MANAGEMENT";
-}
-
-export function canSourceCompanies(role: Role) {
-  return role === "ADMIN" || role === "PROFILE" || role === "CALLING" || role === "SALES";
-}

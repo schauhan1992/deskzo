@@ -3,6 +3,7 @@ import { navPermissions } from "@/actions/permission";
 import { getModuleStates } from "@/actions/module";
 import { visibleSettingsKeys } from "@/lib/settings/catalogue";
 import { SettingsNav } from "@/components/settings/settings-nav";
+import { actingAsSuperAdmin } from "@/lib/authz/super-admin";
 
 /**
  * The shell every settings page sits in.
@@ -16,14 +17,16 @@ import { SettingsNav } from "@/components/settings/settings-nav";
  */
 export default async function SettingsLayout({ children }: { children: React.ReactNode }) {
   const user = await currentUser();
-  const [permissions, modules] = await Promise.all([
+  const [permissions, modules, superAdmin] = await Promise.all([
     user ? navPermissions(user.id) : Promise.resolve([]),
     getModuleStates(),
+    actingAsSuperAdmin(user?.id),
   ]);
 
   const visibleKeys = visibleSettingsKeys(
     permissions,
     modules.filter((m) => m.enabled).map((m) => m.key),
+    { superAdmin },
   );
 
   return (

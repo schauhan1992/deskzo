@@ -19,8 +19,8 @@ export const metadata = { title: "Add staff" };
  *
  * Open to whoever may create accounts (`users.manage`, the key `createUser` checks) and may open
  * Staff & roles at all (`permissions.view`, its catalogue key). The reporting manager is offered only
- * to somebody who may set one (`permissions.manage` — a reporting line hands the reports' permissions
- * to the manager), and "Works at" only where there is more than one branch.
+ * to somebody who may set one (`permissions.manage` — a reporting line decides whose records count as
+ * the manager's team), and "Works at" only where there is more than one branch.
  *
  * Admin is never offered as a starting role, as before: making an admin is `users.assignRole`'s
  * business, done afterwards from the person's row by a super admin.

@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { fieldsFor, peopleForFields } from "@/lib/custom-fields/server";
+import { fieldsFor, peopleForFields, unsearchableByPolicy } from "@/lib/custom-fields/server";
 import {
   CUSTOM_FIELD_LIMITS,
   FIELD_KEY_PATTERN,
@@ -248,9 +248,10 @@ export async function customFilterWhere(
 ): Promise<Record<string, unknown>[]> {
   const inputs = readInputs(filters);
   if (inputs.size === 0) return [];
-  const { visible } = await fieldsFor(entity, userId);
+  const [{ visible }, unsearchable] = await Promise.all([fieldsFor(entity, userId), unsearchableByPolicy(entity, userId)]);
   const clauses: Record<string, unknown>[] = [];
   for (const def of visible) {
+    if (unsearchable.has(def.key)) continue;
     const input = inputs.get(def.key);
     const filter = input ? understandFilter(def, input) : null;
     if (!filter) continue;

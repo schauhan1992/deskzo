@@ -34,6 +34,7 @@ import { scopeUserIds } from "@/lib/authz/scope";
 import { salesLeads } from "@/lib/pipeline/server";
 import { vendorRelationshipTypeValues } from "@/lib/validation/company";
 import type { ActionResult } from "@/actions/company";
+import { listLeadMasker, maskLeads } from "@/lib/leads/masking";
 
 export type DashboardSummary = {
   /** The raw sourcing pool — everyone who hasn't bought anything from us yet (see `customers` for who has). */
@@ -235,10 +236,12 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   const customers: DashboardSummary["customers"] = companyGroups && { total: customersWithOrders };
 
   const closedStatuses = new Set(["WON", "LOST", "DISQUALIFIED"]);
+  // The recent five, named as this person's field access names a lead in a list.
+  const leadMasker = await listLeadMasker(user.id);
   const leads: DashboardSummary["leads"] = !canSeeLeads ? null : {
     open: leadGroups.filter((g) => !closedStatuses.has(g.status)).reduce((sum, g) => sum + g._count, 0),
     pipelineValue: Number(pipelineValueAgg?._sum.estimatedValue ?? 0),
-    recent: recentLeads.map((lead) => ({
+    recent: (await maskLeads(leadMasker, recentLeads)).map((lead) => ({
       id: lead.id,
       leadSeq: lead.leadSeq,
       title: lead.title,

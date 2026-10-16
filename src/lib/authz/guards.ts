@@ -159,3 +159,30 @@ export async function actorContext(userId: string) {
   if (!row) throw new AuthzError("That account no longer exists.");
   return row;
 }
+
+/**
+ * Nobody makes an account start with more than they hold themselves.
+ *
+ * The role's grants as the resolver reads them — its stored answers over its defaults
+ * (src/lib/authz/role-permission.ts `roleGrants`) — not the registry's defaults alone: a custom role,
+ * or a built-in one filled in from the role screen or a preset, would otherwise pass with no check at
+ * all, and somebody holding only `users.manage` could mint an account on a role far above their own.
+ */
+export async function assertMayStartInRole(actor: { id: string; isSuperAdmin: boolean }, role: string) {
+  if (actor.isSuperAdmin) return;
+  const { roleGrants } = await import("@/lib/authz/role-permission");
+  const { PERMISSIONS } = await import("@/lib/permissions");
+  const grants = await roleGrants(role);
+  for (const def of PERMISSIONS) {
+    if (!grants(def.key)) continue;
+    if (def.superAdminOnly || !(await can(actor.id, def.key))) {
+      throw new AuthzError(`A ${role} account starts with "${def.label}", which you don't hold yourself. Ask somebody who does to create it.`);
+    }
+  }
+}
+
+/** A switched-off role is given to nobody (src/actions/role.ts `setRoleActive`). */
+export async function assertRoleAssignable(role: string) {
+  const { roleIsActive } = await import("@/lib/authz/role-registry");
+  if (!(await roleIsActive(role))) throw new AuthzError("That role is switched off. Switch it on, or choose another.");
+}

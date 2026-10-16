@@ -53,6 +53,7 @@ import {
 import type { ChatMemberView, ChatMessageView, ChatPerson, ChatPinView, ChatReactionView, ChatSummary } from "@/lib/chat/types";
 import type { ActionResult } from "@/actions/company";
 import { filteredWordsRefusal } from "@/lib/word-filter/server";
+import { listLeadMasker, maskLead } from "@/lib/leads/masking";
 
 /**
  * Team chat: one-to-one and group conversations between the people of the workspace (src/lib/chat).
@@ -719,7 +720,9 @@ async function recordCard(userId: string, kind: RecordLinkKind, ref: ReturnType<
   }
   if (kind === "leads") {
     const where = ref.kind === "seq" ? { leadSeq: ref.seq } : { id: ref.id };
-    const row = await db.lead.findFirst({ where: { AND: [where, await leadAccess(userId)] }, select: { title: true, leadSeq: true, status: true, company: { select: { name: true } } } });
+    const found = await db.lead.findFirst({ where: { AND: [where, await leadAccess(userId)] }, select: { title: true, leadSeq: true, status: true, company: { select: { name: true } } } });
+    // Named in the card as this person's field access names a lead in a list.
+    const row = found ? maskLead(await listLeadMasker(userId), found) : null;
     return row ? { path, kind, allowed: true, title: row.title, subtitle: [formatLeadId(row.leadSeq), row.company?.name].filter(Boolean).join(" · ") } : null;
   }
   if (kind === "orders") {

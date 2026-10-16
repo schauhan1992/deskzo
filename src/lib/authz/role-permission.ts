@@ -1,6 +1,6 @@
 import type { Role } from "@/lib/roles";
 import { db } from "@/lib/db";
-import { getPermissionDefinition, type PermissionKey, heldByDefault } from "@/lib/permissions";
+import { getPermissionDefinition, type PermissionDefinition, type PermissionKey, heldByDefault } from "@/lib/permissions";
 
 /**
  * What a *role* grants, with no user involved.
@@ -25,6 +25,29 @@ export async function rolePermits(role: Role, key: PermissionKey | string): Prom
    * An admin holds everything unless a super admin has explicitly taken it away, which is why the
    * fallback differs by role rather than by definition.
    */
-  if (role === "ADMIN") return row?.allowed ?? true;
-  return row?.allowed ?? heldByDefault(def, role);
+  return row?.allowed ?? roleDefault(def, role);
+}
+
+/**
+ * What a role holds with nothing stored for it: everything for Admin, unless a super admin takes it
+ * away; the registry's defaults for every other role (a custom role's are none but the sections).
+ * The one statement of it — the screens, the presets and account creation all ask here, and the
+ * resolver applies the same two rules (src/lib/authz/resolve.ts rule 4).
+ */
+export function roleDefault(def: PermissionDefinition, role: Role): boolean {
+  return role === "ADMIN" || heldByDefault(def, role);
+}
+
+/**
+ * Everything one role grants, read once: its stored answers over its defaults — `rolePermits` for
+ * every key at a time, for screens and checks that ask about many.
+ */
+export async function roleGrants(role: Role): Promise<(key: PermissionKey | string) => boolean> {
+  const rows = await db.rolePermission.findMany({ where: { role }, select: { permission: true, allowed: true } });
+  const stored = new Map(rows.map((r) => [r.permission, r.allowed]));
+  return (key) => {
+    const def = getPermissionDefinition(key);
+    if (!def) return false;
+    return stored.get(key) ?? roleDefault(def, role);
+  };
 }

@@ -14,3 +14,14 @@ export async function leadsInPlan(): Promise<boolean> {
 export function withoutHiddenLeads<T extends { lead?: unknown }>(rows: T[], shown: boolean): T[] {
   return shown ? rows : rows.map((row) => ({ ...row, lead: null }));
 }
+
+/**
+ * The rows as one person may see their leads: left off where leads aren't in the plan, and each lead's
+ * name as their field access shows it in a list (src/lib/leads/masking.ts) — for every screen that
+ * names the lead a task, call, visit, note, claim or form response was made against.
+ */
+export async function leadsSeenBy<T extends { lead?: unknown }>(userId: string, rows: T[]): Promise<T[]> {
+  if (!(await leadsInPlan())) return withoutHiddenLeads(rows, false);
+  const { listLeadMasker, maskLeadRefs } = await import("@/lib/leads/masking");
+  return maskLeadRefs(await listLeadMasker(userId), rows as (T & { lead?: { title?: string | null } | null })[]);
+}

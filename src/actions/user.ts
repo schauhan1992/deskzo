@@ -8,8 +8,7 @@ import { db } from "@/lib/db";
 import { refuseWhileViewingAs, requireUser } from "@/lib/session";
 import { wouldCreateCycle } from "@/lib/org-chart";
 import { hasEffectivePermission } from "@/actions/permission";
-import { PERMISSIONS, heldByDefault } from "@/lib/permissions";
-import { actorContext, assertGrantWithinOwnAuthority, assertMayActOnTarget, assertNotSelf, assertSuperAdminRemains, AuthzError } from "@/lib/authz/guards";
+import { actorContext, assertMayActOnTarget, assertMayStartInRole, assertNotSelf, assertRoleAssignable, assertSuperAdminRemains, AuthzError } from "@/lib/authz/guards";
 import { updateUserAssignmentSchema, createUserSchema, updateWorkProfileSchema } from "@/lib/validation/user";
 import type { ActionResult } from "@/actions/company";
 import { seatProblem } from "@/lib/seats";
@@ -85,13 +84,14 @@ export async function updateUserAssignment(input: unknown): Promise<ActionResult
    * when the role is actually moving.
    */
   /**
-   * Re-parenting somebody is a grant, and was priced as an org-chart edit.
+   * Re-parenting somebody is an access decision, and was priced as an org-chart edit.
    *
-   * `resolve.ts` rule 5 hands a manager every delegable permission their active reports hold. So
-   * moving a person under a new manager gives that manager the reports' access — without any grant
-   * guard running, on a form that reads like an HR field. An HR administrator holding `users.manage`
-   * could set herself as the accounts executive's manager in two clicks and inherit
-   * `payments.record`, `payments.manage` and the rest on her next request.
+   * A manager no longer inherits their reports' permissions (src/lib/authz/resolve.ts) — when they did,
+   * an HR administrator holding `users.manage` could set herself as the accounts executive's manager in
+   * two clicks and hold `payments.record` on her next request. What the reporting line still decides is
+   * "Team": every record a role reaches at Team level is its holder's and their reports'. So moving a
+   * person under a new manager still widens what that manager sees — their accounts, leads, visits,
+   * expenses — on a form that reads like an HR field.
    *
    * The same reasoning the role branch below already applies: the stricter key is required only
    * when the thing that confers access actually moves.
@@ -101,7 +101,7 @@ export async function updateUserAssignment(input: unknown): Promise<ActionResult
       return {
         ok: false,
         error:
-          "Changing who somebody reports to also changes what their manager can do, so it needs permission to manage access.",
+          "Changing who somebody reports to also changes whose records their manager sees, so it needs permission to manage access.",
       };
     }
   }
@@ -112,6 +112,7 @@ export async function updateUserAssignment(input: unknown): Promise<ActionResult
     }
     try {
       assertNotSelf(admin.id, id, "role");
+      await assertRoleAssignable(role);
     } catch (err) {
       return refuse(err);
     }
@@ -245,21 +246,15 @@ export async function createUser(
    * true of the temporary password the creator chose before, which `mustChangePassword` didn't help:
    * they were the one who would be asked to change it.)
    *
-   * So the creator must already hold everything the new account would start with — the same test
-   * `assertGrantWithinOwnAuthority` applies one key at a time when granting directly.
+   * So the creator must already hold everything the new account would start with — the role as it
+   * stands, its stored answers over its defaults, not the registry's defaults alone, which let a custom
+   * role through unchecked (`assertMayStartInRole`) — and the role must be switched on.
    */
-  if (!admin.isSuperAdmin) {
-    const wouldHold = PERMISSIONS.filter((def) => heldByDefault(def, role));
-    for (const def of wouldHold) {
-      try {
-        await assertGrantWithinOwnAuthority(admin, def.key);
-      } catch {
-        return {
-          ok: false,
-          error: `A ${role} account starts with "${def.label}", which you don't hold yourself. Ask somebody who does to create it.`,
-        };
-      }
-    }
+  try {
+    await assertRoleAssignable(role);
+    await assertMayStartInRole(admin, role);
+  } catch (err) {
+    return refuse(err);
   }
 
   // A switched-off account takes no seat (src/lib/seats.ts) — it asks for one when it is switched on.

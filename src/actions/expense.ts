@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma, type ExpenseCategory, type ExpenseStatus } from "@prisma/client";
 import { db } from "@/lib/db";
-import { leadsInPlan, withoutHiddenLeads } from "@/lib/leads/shown";
+import { leadsSeenBy } from "@/lib/leads/shown";
 import { rolePermits } from "@/lib/authz/role-permission";
 import { PEOPLE_ONLY } from "@/lib/people";
 import { requireModuleUser } from "@/lib/modules-access";
@@ -167,7 +167,7 @@ export async function listExpensesPaged(params: ExpenseListParams & { page: numb
     }),
     db.expense.count({ where }),
   ]);
-  return { rows: toPlain(withoutHiddenLeads(rows, await leadsInPlan())), total };
+  return { rows: toPlain((await leadsSeenBy(user.id, rows))), total };
 }
 
 /**
@@ -228,7 +228,7 @@ export async function getExpense(id: string) {
     include: expenseListInclude,
   });
   if (!expense) return null;
-  return toPlain((await leadsInPlan()) ? expense : { ...expense, lead: null });
+  return toPlain((await leadsSeenBy(user.id, [expense]))[0]!);
 }
 
 export async function createExpense(input: unknown): Promise<ActionResult<{ id: string; expenseSeq: number }>> {
@@ -546,7 +546,7 @@ export async function listVisitExpenses(visitId: string) {
   const user = await requireModuleUser("expenses");
   const where = await expenseListWhere(user.id, { visitId });
   const rows = await db.expense.findMany({ where, orderBy: { spentOn: "desc" }, include: expenseListInclude });
-  return toPlain(withoutHiddenLeads(rows, await leadsInPlan()));
+  return toPlain((await leadsSeenBy(user.id, rows)));
 }
 
 

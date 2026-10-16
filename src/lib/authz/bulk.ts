@@ -1,7 +1,8 @@
 import type { Role } from "@/lib/roles";
 import { db } from "@/lib/db";
 import { PERMISSIONS, heldByDefault } from "@/lib/permissions";
-import type { PermissionSource } from "@/lib/authz/resolve";
+import { isHeld, type PermissionSource } from "@/lib/authz/resolve";
+import { inactiveRoleKeys } from "@/lib/authz/role-registry";
 
 /**
  * Resolving everybody at once.
@@ -9,13 +10,12 @@ import type { PermissionSource } from "@/lib/authz/resolve";
  * ## Why this exists separately
  *
  * `resolveUserPermissions` is right for one person and wrong for a hundred. It is memoised per
- * request, so a hundred distinct users means a hundred resolutions, each doing a user lookup, two
- * permission queries and a breadth-first walk of the org chart that issues one query per level.
- * The roster and the "who can do X" screen both need every active person, and on this database —
- * 101 users — that was several hundred round trips and a request that did not finish.
+ * request, so a hundred distinct users means a hundred resolutions, each doing a user lookup and its
+ * permission queries (it used to walk the org chart too, before managers stopped inheriting from their
+ * reports). The roster and the "who can do X" screen both need every active person, and on this
+ * database — 101 users — that was several hundred round trips and a request that did not finish.
  *
- * So the same data is fetched in **five queries**, the org chart is walked in memory, and the
- * precedence is applied per user from that.
+ * So the same data is fetched in **four queries**, and the precedence is applied per user from that.
  *
  * ## Why the precedence is written out again, and how it is kept honest
  *
@@ -39,27 +39,17 @@ export type BulkResolved = {
 export async function resolveEveryone(): Promise<Map<string, BulkResolved>> {
   const now = new Date();
 
-  const [users, userRows, roleRows] = await Promise.all([
+  const [users, userRows, roleRows, switchedOff] = await Promise.all([
     db.user.findMany({
-      select: { id: true, name: true, role: true, active: true, isSuperAdmin: true, managerId: true },
+      select: { id: true, role: true, active: true, isSuperAdmin: true },
     }),
     db.userPermission.findMany({
       where: { OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
       select: { userId: true, permission: true, allowed: true, grantedById: true, expiresAt: true, reason: true },
     }),
     db.rolePermission.findMany({ select: { role: true, permission: true, allowed: true } }),
+    inactiveRoleKeys(),
   ]);
-
-  const byId = new Map(users.map((u) => [u.id, u]));
-
-  // Children by manager, so the downline walk is pointer-chasing rather than querying.
-  const children = new Map<string, string[]>();
-  for (const u of users) {
-    if (!u.managerId) continue;
-    const list = children.get(u.managerId) ?? [];
-    list.push(u.id);
-    children.set(u.managerId, list);
-  }
 
   const grantsByUser = new Map<string, Map<string, (typeof userRows)[number]>>();
   for (const row of userRows) {
@@ -70,32 +60,6 @@ export async function resolveEveryone(): Promise<Map<string, BulkResolved>> {
 
   const roleOverride = new Map<string, boolean>();
   for (const row of roleRows) roleOverride.set(`${row.role}:${row.permission}`, row.allowed);
-
-  /** The same breadth-first walk `getDownlineUserIds` does, over the map instead of the database. */
-  const downlineOf = (userId: string) => {
-    const visited = new Set<string>([userId]);
-    const out: { role: Role; through: { id: string; name: string } }[] = [];
-    let frontier = [userId];
-    for (let depth = 0; depth < 32 && frontier.length > 0; depth += 1) {
-      const next: string[] = [];
-      for (const id of frontier) {
-        for (const childId of children.get(id) ?? []) {
-          if (visited.has(childId)) continue;
-          visited.add(childId);
-          const child = byId.get(childId);
-          if (!child) continue;
-          // Deactivated accounts confer nothing, and an admin never confers upward — the two rules
-          // `resolveUserPermissions` applies at the same point.
-          if (child.active && child.role !== "ADMIN") {
-            out.push({ role: child.role, through: { id: child.id, name: child.name } });
-          }
-          next.push(childId);
-        }
-      }
-      frontier = next;
-    }
-    return out;
-  };
 
   const resolved = new Map<string, BulkResolved>();
 
@@ -113,9 +77,14 @@ export async function resolveEveryone(): Promise<Map<string, BulkResolved>> {
       resolved.set(user.id, { userId: user.id, role: user.role, isSuperAdmin: false, active: false, sources });
       continue;
     }
+    // Rule 2b.
+    if (switchedOff.has(user.role)) {
+      for (const def of PERMISSIONS) sources.set(def.key, { via: "roleInactive", role: user.role });
+      resolved.set(user.id, { userId: user.id, role: user.role, isSuperAdmin: false, active: false, sources });
+      continue;
+    }
 
     const grants = grantsByUser.get(user.id);
-    let reports: ReturnType<typeof downlineOf> | null = null;
 
     for (const def of PERMISSIONS) {
       // Rule 3.
@@ -148,23 +117,8 @@ export async function resolveEveryone(): Promise<Map<string, BulkResolved>> {
         continue;
       }
 
-      if (def.delegable === false) {
-        sources.set(def.key, { via: "none" });
-        continue;
-      }
-
-      // Rule 5, and the walk is done at most once per person.
-      reports ??= downlineOf(user.id);
-      let inherited: PermissionSource | null = null;
-      for (const report of reports) {
-        const explicit = roleOverride.get(`${report.role}:${def.key}`);
-        const grantsIt = explicit !== undefined ? explicit : heldByDefault(def, report.role);
-        if (grantsIt) {
-          inherited = { via: "downline", role: report.role, through: report.through };
-          break;
-        }
-      }
-      sources.set(def.key, inherited ?? { via: "none" });
+      // Rule 5: nothing else grants it. Managers no longer inherit from their reports (resolve.ts).
+      sources.set(def.key, { via: "none" });
     }
 
     resolved.set(user.id, { userId: user.id, role: user.role, isSuperAdmin: false, active: user.active, sources });
@@ -173,13 +127,7 @@ export async function resolveEveryone(): Promise<Map<string, BulkResolved>> {
   return resolved;
 }
 
-/** The same "does this count as held" test the single-user path uses. */
+/** The single-user path's own "does this count as held" test, so the two can't drift apart. */
 export function holdsFrom(source: PermissionSource | undefined): boolean {
-  if (!source) return false;
-  return (
-    source.via !== "none" &&
-    source.via !== "inactive" &&
-    !(source.via === "userGrant" && !source.allowed) &&
-    !(source.via === "roleOverride" && !source.allowed)
-  );
+  return isHeld(source);
 }

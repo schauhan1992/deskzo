@@ -180,7 +180,7 @@ internals._load = function (this: unknown, request: string, parent: { filename?:
     };
   }
   if (request === "@/lib/auth") {
-    return { auth: async () => (actor ? { user: { id: actor } } : null), signIn: async () => {}, signOut: async () => {}, handlers: {}, canManageLeads: () => false, canSourceCompanies: () => false };
+    return { auth: async () => (actor ? { user: { id: actor } } : null), signIn: async () => {}, signOut: async () => {}, handlers: {} };
   }
   if (request === "@/lib/session") {
     return {

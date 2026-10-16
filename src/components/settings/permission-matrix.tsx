@@ -424,14 +424,6 @@ export function PermissionMatrix({
                                 Super admin only
                               </Badge>
                             )}
-                            {!perm.delegable && (
-                              <Badge
-                                tone="default"
-                                title="A manager does not inherit this from somebody who reports to them."
-                              >
-                                Not inherited
-                              </Badge>
-                            )}
                             {perm.selfExcluded && (
                               <Badge tone="default" title="The holder cannot use this on a record they raised.">
                                 Not on own records

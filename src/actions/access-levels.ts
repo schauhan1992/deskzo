@@ -8,7 +8,8 @@ import { can } from "@/lib/authz/resolve";
 import { actorContext } from "@/lib/authz/guards";
 import { roleExists } from "@/lib/authz/role-registry";
 import { recordPermissionChange } from "@/lib/authz/audit";
-import { getPermissionDefinition, heldByDefault } from "@/lib/permissions";
+import { getPermissionDefinition } from "@/lib/permissions";
+import { roleGrants } from "@/lib/authz/role-permission";
 import { SUPPORT_READONLY_ROLE, type Role } from "@/lib/roles";
 import { workspaceClock } from "@/lib/time/workspace";
 import { formatCalendarDay } from "@/lib/time/zone";
@@ -69,15 +70,7 @@ export type AccessRow = {
  * away.
  */
 async function rolePermissions(role: Role): Promise<(key: string) => boolean> {
-  const rows = await db.rolePermission.findMany({ where: { role }, select: { permission: true, allowed: true } });
-  const stored = new Map(rows.map((r) => [r.permission, r.allowed]));
-  return (key) => {
-    const def = getPermissionDefinition(key);
-    if (!def) return false;
-    const answer = stored.get(key);
-    if (role === "ADMIN") return answer ?? true;
-    return answer ?? heldByDefault(def, role);
-  };
+  return roleGrants(role);
 }
 
 /** One role's grid. Readable by whoever may review roles; null for anybody else or a role that's gone. */
@@ -268,6 +261,8 @@ function describeAccessSource(source: AccessSource, day: (d: Date) => string): s
       return "Super admin.";
     case "inactive":
       return "Their account is deactivated.";
+    case "roleInactive":
+      return `Their role (${source.role}) is switched off.`;
     case "supportReadOnly":
       return "Platform support on a read-only grant.";
     case "userLevel":

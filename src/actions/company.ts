@@ -59,6 +59,7 @@ import { customFilterWhere, type CustomFilterInputs } from "@/lib/custom-fields/
 import { assignVendorCodes, vendorCodeHolder } from "@/lib/companies/vendor-code";
 import { hasLeft } from "@/lib/contacts/left";
 import { designationData } from "@/lib/contacts/designations";
+import { listLeadMasker, maskLeads } from "@/lib/leads/masking";
 
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -1692,15 +1693,17 @@ export async function getCompany(id: string) {
    * page is only one of the things that can call it. Leads also need to be in the plan (owner, 14 Oct
    * 2026): a workspace that had them keeps them, out of sight, until it has them again.
    */
-  const [seesContacts, seesLeads, seesOrders] = await Promise.all([
+  const [seesContacts, seesLeads, seesOrders, leadMasker] = await Promise.all([
     canViewContacts(user.id),
     isModuleEnabled("leads"),
     hasEffectivePermission(user.id, "orders.view"),
+    listLeadMasker(user.id),
   ]);
   return toPlain({
     ...company,
     contacts: seesContacts ? company.contacts.map((c) => redactContactDetails(c, { restricted, canViewRestricted })) : [],
-    leads: seesLeads ? company.leads : [],
+    // The account's leads as this person's field access shows a lead in a list.
+    leads: seesLeads ? await maskLeads(leadMasker, company.leads) : [],
     products: seesOrders ? company.products : [],
     ordersAsEndCustomer: seesOrders ? company.ordersAsEndCustomer : [],
   });

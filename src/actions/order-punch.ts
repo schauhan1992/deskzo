@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { isModuleEntitled, requireModuleUser } from "@/lib/modules-access";
 import { leadsInPlan } from "@/lib/leads/shown";
 import { canSeeCompany } from "@/lib/authz/company-scope";
+import { leadAccess } from "@/lib/authz/access";
 import { viewerHas } from "@/actions/permission";
 import type { getCreditSnapshot } from "@/actions/credit";
 import { toPlain } from "@/lib/serialize";
@@ -12,6 +13,7 @@ import { isCustomerRelationshipType } from "@/lib/validation/company";
 import { termsExceed } from "@/lib/credit/engine";
 import { assessCompany } from "@/lib/credit/load";
 import { describePriceSource, resolveResellerPrice } from "@/lib/reseller-pricing";
+import { listLeadMasker, maskLeadRefs } from "@/lib/leads/masking";
 
 /**
  * What the order-punching form looks up while it is filled in: one call when the customer is chosen,
@@ -97,16 +99,19 @@ export async function punchCustomerContext(companyId: string) {
       orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
       select: { id: true, label: true, isPrimary: true },
     }),
-    // The rows `listProposalOptions` gives. It adds the account scope inside the lead clause; every
-    // lead here is on this one company, already in scope, so that would narrow nothing. A proposal is a
-    // lead's, so none where the plan has no leads.
-    leadsInPlan().then((leads) =>
+    // The rows `listProposalOptions` gives, by the same rule: a proposal is its lead's, so the lead rule
+    // goes inside the lead clause — the account being in scope says nothing once a lead level narrower
+    // than the account is set. None where the plan has no leads; each named as a list names a lead.
+    leadsInPlan().then(async (leads) =>
       leads
-        ? db.proposal.findMany({
-            where: { lead: { companyId: company.id } },
-            orderBy: { createdAt: "desc" },
-            select: { id: true, status: true, validUntil: true, lead: { select: { title: true } } },
-          })
+        ? maskLeadRefs(
+            await listLeadMasker(user.id),
+            await db.proposal.findMany({
+              where: { lead: { AND: [{ companyId: company.id }, await leadAccess(user.id, "view")] } },
+              orderBy: { createdAt: "desc" },
+              select: { id: true, status: true, validUntil: true, lead: { select: { title: true } } },
+            }),
+          )
         : [],
     ),
     // Only the ids: the form already has every commission party, and flags and sorts these first.

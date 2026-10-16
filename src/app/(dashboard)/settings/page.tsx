@@ -5,6 +5,7 @@ import { navPermissions } from "@/actions/permission";
 import { getModuleStates } from "@/actions/module";
 import { visibleSettings } from "@/lib/settings/catalogue";
 import { Card } from "@/components/ui/card";
+import { actingAsSuperAdmin } from "@/lib/authz/super-admin";
 
 /**
  * All settings.
@@ -18,14 +19,16 @@ import { Card } from "@/components/ui/card";
  */
 export default async function SettingsPage() {
   const user = await currentUser();
-  const [permissions, modules] = await Promise.all([
+  const [permissions, modules, superAdmin] = await Promise.all([
     user ? navPermissions(user.id) : Promise.resolve([]),
     getModuleStates(),
+    actingAsSuperAdmin(user?.id),
   ]);
 
   const sections = visibleSettings(
     permissions,
     modules.filter((m) => m.enabled).map((m) => m.key),
+    { superAdmin },
   );
 
   if (sections.length === 0) {

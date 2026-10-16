@@ -125,9 +125,6 @@ function rowOf(markup: string, text: string): string {
   return markup.split("<tr").find((chunk) => chunk.includes(text)) ?? "";
 }
 /** The role card holding this name. */
-function cardOf(markup: string, name: string): string {
-  return markup.split("<li").find((chunk) => chunk.includes(`>${name}</p>`)) ?? "";
-}
 const count = (markup: string, pattern: RegExp) => (markup.match(pattern) ?? []).length;
 
 // ─── Main ────────────────────────────────────────────────────────────────────────────────────────
@@ -152,7 +149,9 @@ async function main() {
   const PERM = require("../src/actions/permission") as typeof import("../src/actions/permission");
   const PAGE = require("../src/app/(dashboard)/settings/access/page") as typeof import("../src/app/(dashboard)/settings/access/page");
   const ADD = require("../src/app/(dashboard)/settings/access/new/page") as typeof import("../src/app/(dashboard)/settings/access/new/page");
-  const { RoleDialog } = require("../src/components/settings/staff/role-dialog") as typeof import("../src/components/settings/staff/role-dialog");
+  const { RoleAccessEditor } = require("../src/components/settings/roles/role-access-editor") as typeof import("../src/components/settings/roles/role-access-editor");
+  const { permissionsOfModule } = require("../src/lib/staff/access-modules") as typeof import("../src/lib/staff/access-modules");
+  const { roleAccessLevels } = require("../src/actions/access-levels") as typeof import("../src/actions/access-levels");
   /* eslint-enable @typescript-eslint/no-require-imports */
 
   const mail: { to: string; subject: string; text: string }[] = [];
@@ -279,7 +278,8 @@ async function main() {
     ok("  no switch-off on your own row", adminRow.includes(`aria-label="Edit ${TAG} Admin"`) && !adminRow.includes("Switch off"));
     const saRow = rowOf(staffHtml, `>${superAdmin.name}</span>`);
     ok("  nor on the super admin's, whose pill is the brand's", saRow.includes(">Super admin<") && saRow.includes("bg-brand-subtle") && !saRow.includes("Switch off") && !saRow.includes(`aria-label="Edit ${superAdmin.name}"`));
-    ok("everybody keeps the access drawer", akashRow.includes(`Review ${TAG} Akash&#x27;s access`));
+    // Each person's access has a page of its own now (src/app/(dashboard)/settings/access/users/[id]).
+    ok("everybody's row opens their access page", akashRow.includes(`aria-label="Permissions for ${TAG} Akash"`) && akashRow.includes(`href="/settings/access/users/`));
     ok("on a phone the table scrolls inside its card", staffHtml.includes('class="overflow-x-auto"><table class="w-full min-w-[760px]'));
     ok("departments are kept under the table", staffHtml.includes(">Departments<"));
 
@@ -288,7 +288,7 @@ async function main() {
     keep("staff-tab-reviewer", staffReviewer);
     ok("a reviewer is told it's read-only", staffReviewer.includes("You can review access but not change it."));
     ok("  and gets no Add staff, pencil or switch-off", !staffReviewer.includes("/settings/access/new") && !staffReviewer.includes(`Edit ${TAG} Akash`) && !staffReviewer.includes("Switch off"));
-    ok("  but can still open anybody's access", staffReviewer.includes(`Review ${TAG} Akash&#x27;s access`));
+    ok("  but can still open anybody's access to read it", staffReviewer.includes(`aria-label="Review access for ${TAG} Akash"`));
     ok("  and sees no Leads or Last signed in without the permissions behind them", !staffReviewer.includes(">Leads<") && !staffReviewer.includes(">Last signed in<"));
     ok("an old link to People lands on Staff", (await renderPage("people")).includes("Everyone who can sign in to this workspace."));
 
@@ -441,82 +441,82 @@ async function main() {
       superAdminOnly: def.superAdminOnly === true,
       modules: permissionModules(def.key),
     }));
-    const groups = new Set(catalogue.map((c) => c.group));
-    const card = {
-      key: DIALOG,
-      name: `${TAG} Dialog Role`,
-      description: "Probe",
-      isSystem: false,
-      headcount: 0,
-      activeStaff: 0,
-      held: second,
-    };
-    const dialogProps = {
-      role: card,
-      catalogue,
-      modules: moduleStates,
-      viewerIsSuperAdmin: false,
-      viewerRole: AUDITOR,
-      ownAccessThroughRole: ["permissions.view"],
-      onClose: () => {},
-    };
-    const asReviewer = html(createElement(RoleDialog, { ...dialogProps, mayManage: false, viewerHolds: ["permissions.view"] }));
-    keep("role-dialog-reviewer", asReviewer);
+    // The role's own screen (src/components/settings/roles/role-access-editor.tsx), which replaced the
+    // old Edit role dialog: one module at a time, a box per permission, the server's reasons on a box
+    // that can't be changed.
+    const crm = new Set(permissionsOfModule("crm").map((d) => d.key));
+    const labelToKey = new Map(catalogue.map((c) => [c.label.replaceAll("&", "&amp;").replaceAll("'", "&#x27;").replaceAll('"', "&quot;"), c.key]));
+    const keysOf = (markup: string, which: (tag: string) => boolean) =>
+      (markup.match(/<input type="checkbox"[^>]*>/g) ?? [])
+        .filter(which)
+        .map((tag) => labelToKey.get(/aria-label="Allow ([^"]+)"/.exec(tag)?.[1] ?? "") ?? "?");
+    const editorProps = { view: "modules" as const, roleKey: DIALOG, catalogue, selfExcluded: [] as string[], held: second, grid: [], gridWhy: null, modules: moduleStates };
+    const asReviewer = html(
+      createElement(RoleAccessEditor, { ...editorProps, viewer: { mayManage: false, isSuperAdmin: false, holds: ["permissions.view"], role: AUDITOR, ownAccessThroughRole: ["permissions.view"] } }),
+    );
+    keep("role-editor-reviewer", asReviewer);
     const boxes = count(asReviewer, /type="checkbox"/g);
-    ok("the reviewer sees the same dialog: a box for every permission and a Select all per group", boxes === PERMISSIONS.length + groups.size, boxes);
-    ok("  every one disabled", count(asReviewer, /<input type="checkbox"[^>]*disabled=""/g) === boxes);
-    ok("  with no Save — only Close", !asReviewer.includes("Save role") && asReviewer.includes(">Close<") && asReviewer.includes("You can review roles but not change them."));
+    ok("the reviewer sees the role's first module, CRM: a box for each of its permissions", boxes === crm.size, `${boxes} of ${crm.size}`);
+    ok("  every one disabled, saying why", count(asReviewer, /<input type="checkbox"[^>]*disabled=""[^>]*title="You can review roles but not change them."/g) === boxes);
+    ok("  and every module listed to move to", count(asReviewer, /aria-label="Modules"/g) === 1 && asReviewer.includes(">Orders &amp; projects<") && asReviewer.includes(">Administration<"));
 
-    const asAdminProps = { ...dialogProps, mayManage: true, viewerRole: "ADMIN", ownAccessThroughRole: ["permissions.view", "permissions.manage"], viewerHolds: PERMISSIONS.filter((p) => !p.superAdminOnly).map((p) => p.key) };
-    const asAdmin = html(createElement(RoleDialog, asAdminProps));
-    keep("role-dialog-admin", asAdmin);
-    ok("an admin's dialog is titled with the role, under the reference's subtitle", asAdmin.includes(`aria-label="Edit role: ${TAG} Dialog Role"`) && asAdmin.includes("Permissions are enforced on the server for every action, not just hidden in the UI."));
-    ok("  Role name and Description", asAdmin.includes(">Role name<") || asAdmin.includes(">Role name *<"));
-    ok("  \"Permissions (3 selected)\" and a search box", asAdmin.includes("Permissions (3 selected)") && asAdmin.includes('aria-label="Search permissions"'));
-    ok("  one fieldset per catalogue group, with its legend", [...groups].every((g) => asAdmin.includes(`<legend class="px-1 text-sm font-medium text-text">${g.replace("&", "&amp;")}</legend>`)) && count(asAdmin, /<fieldset class="rounded-base/g) === groups.size);
-    ok("  each with a Select all that names its group", [...groups].every((g) => asAdmin.includes(`aria-label="Select all in ${g.replace("&", "&amp;")}"`)));
-    ok("  and its boxes in two columns, one on a phone", asAdmin.includes("grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2"));
-    ok("  every box inside its label, Select all included", count(asAdmin, /<label[^>]*><input type="checkbox"/g) === PERMISSIONS.length + groups.size);
-    const tickedKeys = (asAdmin.match(/<input type="checkbox"[^>]*>/g) ?? [])
-      .filter((tag) => tag.includes('checked=""') && tag.includes("data-permission="))
-      .map((tag) => /data-permission="([^"]+)"/.exec(tag)?.[1] ?? "");
-    ok("  ticked exactly as the role holds", same(tickedKeys, second), tickedKeys);
-    ok("  a super-admin-only box is disabled, saying why", /title="Only a super admin can grant this permission\."[^>]*><input type="checkbox"[^>]*disabled=""[^>]*data-permission="users\.assignRole"/.test(asAdmin));
-    ok("  Payroll's boxes under their module, with a note that it is off", asAdmin.includes("Payroll is switched off for the company"));
-    ok("  and Save role in the footer", asAdmin.includes(">Save role<") && asAdmin.includes("sticky bottom-0"));
-    const fresh = html(createElement(RoleDialog, { ...asAdminProps, role: null }));
-    keep("role-dialog-new", fresh);
-    ok("New role opens empty", fresh.includes('aria-label="New role"') && fresh.includes("Permissions (0 selected)") && fresh.includes("A new role sees every section and holds no permission."));
-    const adminRoleCard = { ...card, key: "ADMIN", name: "Admin", isSystem: true, held: PERMISSIONS.map((p) => p.key) };
-    const adminByAdmin = html(createElement(RoleDialog, { ...asAdminProps, role: adminRoleCard }));
-    ok("Admin's own role is locked for a non-super admin, who may still rename it", adminByAdmin.includes("Only a super admin can change what admins can do") && count(adminByAdmin, /<input type="checkbox"[^>]*disabled=""/g) === PERMISSIONS.length + groups.size && adminByAdmin.includes(">Save role<"));
+    const viewerHolds = PERMISSIONS.filter((p) => !p.superAdminOnly).map((p) => p.key);
+    const asAdmin = html(
+      createElement(RoleAccessEditor, { ...editorProps, viewer: { mayManage: true, isSuperAdmin: false, holds: viewerHolds, role: "ADMIN", ownAccessThroughRole: ["permissions.view", "permissions.manage"] } }),
+    );
+    keep("role-editor-admin", asAdmin);
+    const tickedHere = keysOf(asAdmin, (tag) => tag.includes('checked=""'));
+    ok("an admin's boxes are ticked exactly as the role holds, in this module", same(tickedHere, second.filter((k) => crm.has(k))), tickedHere);
+    ok("  and open to change, but for what only a super admin grants", keysOf(asAdmin, (tag) => tag.includes('disabled=""')).every((k) => PERMISSIONS.find((p) => p.key === k)?.superAdminOnly === true));
+    ok("  with the server's own promise beside Save", asAdmin.includes("Enforced on the server for every request — not just hidden in the menu.") && asAdmin.includes(">Save changes<"));
+    const adminRoleScreen = html(
+      createElement(RoleAccessEditor, {
+        ...editorProps,
+        roleKey: "ADMIN",
+        held: PERMISSIONS.map((p) => p.key),
+        viewer: { mayManage: true, isSuperAdmin: false, holds: viewerHolds, role: "ADMIN", ownAccessThroughRole: ["permissions.view", "permissions.manage"] },
+      }),
+    );
+    ok("Admin's own role is locked for a non-super admin", count(adminRoleScreen, /<input type="checkbox"[^>]*disabled=""[^>]*title="Only a super admin can change what admins can do."/g) === crm.size);
+    const grid = await roleAccessLevels(DIALOG);
+    const records = html(
+      createElement(RoleAccessEditor, {
+        ...editorProps,
+        view: "records",
+        grid: grid?.rows ?? [],
+        viewer: { mayManage: true, isSuperAdmin: false, holds: viewerHolds, role: "ADMIN", ownAccessThroughRole: ["permissions.view", "permissions.manage"] },
+      }),
+    );
+    keep("role-editor-records", records);
+    ok("Record access is the whole grid: a choice per record and action", (grid?.rows.length ?? 0) > 0 && count(records, /<select/g) >= (grid?.rows.length ?? 1));
 
     // ─────────────────────────────────────────────────────────────────────────────────────────────
     section("7. The Roles tab");
 
     actorId = admin.id;
-    const rolesHtml = await renderPage("roles");
+    const rolesHtml = await renderPage("roles", { role: "SALES" });
     keep("roles-tab-admin", rolesHtml);
-    ok("the card is Roles and permissions, under the reference's subtitle", rolesHtml.includes("Roles and permissions") && rolesHtml.includes("Every action in this workspace is checked against these on the server."));
-    const saCard = cardOf(rolesHtml, "Super admin");
-    ok("the super admin's card: every permission, built in", saCard.includes("Every permission · Unrestricted access to every part of the workspace.") && saCard.includes(">Built in<"));
-    ok("  and no pencil", !saCard.includes("aria-label=\"Edit role") && !rolesHtml.includes('aria-label="Edit role Super admin"'));
-    const salesCard = cardOf(rolesHtml, "Sales");
+    ok("the roles are listed, searchable, beside the one open", rolesHtml.includes('placeholder="Search roles…"') && rolesHtml.includes('aria-current="page"'));
+    ok("  the super admin first: holds everything, built in", rolesHtml.includes("holds everything") && rolesHtml.includes(">Super admin<"));
     const salesActive = await db.user.count({ where: { role: "SALES", active: true, isSuperAdmin: false } });
-    ok("a built-in role: shield, count, \"N staff\", Built in, pencil", salesCard.includes(`>${salesActive} staff<`) && salesCard.includes(">Built in<") && salesCard.includes('aria-label="Edit role Sales"') && /\d+ permissions?/.test(salesCard));
-    ok("  but no ⋯, since a built-in role can't be deleted", !salesCard.includes("More actions for"));
-    const dialogCard = cardOf(rolesHtml, `${TAG} Dialog Role`);
-    ok("a custom role nobody holds: \"3 permissions · Probe\" and a ⋯ with Delete", dialogCard.includes("3 permissions · Probe") && dialogCard.includes(`aria-label="More actions for ${TAG} Dialog Role"`) && !dialogCard.includes(">Built in<"));
-    ok("+ New role and Compare roles", rolesHtml.includes(">New role<") && rolesHtml.includes('href="/settings/access?tab=roles&amp;view=compare"'));
-    ok("recent role changes stay on the tab", rolesHtml.includes("Recent role changes"));
+    ok("  Sales with its people counted", rolesHtml.includes(`href="/settings/access?tab=roles&amp;role=SALES"`) && rolesHtml.includes(`${salesActive} ${salesActive === 1 ? "user" : "users"}`));
+    ok("  and a custom role, not marked built in", rolesHtml.includes(`role=${encodeURIComponent(DIALOG)}`));
+    ok("the open role's tabs: Module access, Record access, Field permissions, Business rules, Users, Summary", ["Module access", "Record access", "Field permissions", "Business rules", "Users", "Summary"].every((t) => rolesHtml.includes(`>${t}`)));
+    ok("  its header: Active, Rename and Duplicate — and no Delete on a built-in role", rolesHtml.includes('aria-label="Role switched on"') && rolesHtml.includes(">Rename<") && rolesHtml.includes(">Duplicate<") && !rolesHtml.includes("Delete</button>"));
+    ok("  + Create custom role and Compare roles", rolesHtml.includes(">Create custom role<") && rolesHtml.includes('href="/settings/access?tab=roles&amp;view=compare"'));
+    ok("  and the permission preview", rolesHtml.includes(">Permission preview<"));
+    const customHtml = await renderPage("roles", { role: DIALOG, rtab: "summary" });
+    keep("roles-tab-custom-summary", customHtml);
+    ok("a custom role can be deleted", customHtml.includes("Delete</button>"));
+    ok("  and its Summary keeps its history", customHtml.includes("This role&#x27;s history") && !customHtml.includes("Nothing has changed yet."));
     const compareHtml = await renderPage("roles", { view: "compare" });
     keep("roles-compare-admin", compareHtml);
     ok("Compare roles is the matrix, presets and all", compareHtml.includes(">Compare roles<") && compareHtml.includes('aria-label="Find a permission"'));
 
     actorId = auditor.id;
-    const rolesReviewer = await renderPage("roles");
+    const rolesReviewer = await renderPage("roles", { role: "SALES" });
     keep("roles-tab-reviewer", rolesReviewer);
-    ok("a reviewer can open every role to read it, and change none", rolesReviewer.includes('aria-label="View role Sales"') && !rolesReviewer.includes('aria-label="Edit role') && !rolesReviewer.includes(">New role<") && !rolesReviewer.includes("More actions for"));
+    ok("a reviewer can open every role to read it, and change none", rolesReviewer.includes(`href="/settings/access?tab=roles&amp;role=SALES"`) && !rolesReviewer.includes(">Create custom role<") && !rolesReviewer.includes(">Rename<") && !rolesReviewer.includes(">Duplicate<") && rolesReviewer.includes("You can review roles but not change them."));
 
     actorId = admin.id;
     ok("the Exceptions tab still renders", (await renderPage("exceptions")).includes("Every permission granted or denied to one person"));
