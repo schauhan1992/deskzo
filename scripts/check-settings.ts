@@ -24,6 +24,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { SETTINGS, SETTINGS_ITEMS, mayOpen, activeSettingsKey, visibleSettings } from "../src/lib/settings/catalogue";
+import { firstMatch, searchSettings, searchWords } from "../src/lib/settings/search";
 import { PERMISSIONS } from "../src/lib/permissions";
 import { MODULE_REGISTRY } from "../src/lib/modules";
 
@@ -213,6 +214,55 @@ function main() {
   ok("  /settings itself is nothing — it is the index", activeSettingsKey("/settings") === null);
   ok("  a nested route still highlights its parent", activeSettingsKey("/settings/users/new") === "users");
   ok("  an unrelated page highlights nothing", activeSettingsKey("/companies") === null);
+
+  section("Search");
+
+  // The menu and the All settings page both narrow by typing (owner, 16 Oct 2026). Every word must
+  // appear in the setting, or the group or section it sits under; case, accents and endings don't count.
+  const found = (term: string) => searchSettings(SETTINGS, term).flatMap((s) => s.groups.flatMap((g) => g.items.map((i) => i.key)));
+  const labelOf = (key: string) => SETTINGS_ITEMS.find((i) => i.key === key)?.label ?? key;
+  const labelsFor = (term: string) => found(term).map(labelOf).join(" | ") || "nothing";
+  const finds = (term: string, labels: string[]) => {
+    const got = found(term).map(labelOf);
+    ok(`"${term}" finds ${labels.join(", ")}`, labels.every((l) => got.includes(l)), labelsFor(term));
+  };
+
+  finds("mail", ["Document emails", "Mail & messaging", "Support email"]);
+  finds("invoice", ["e-Invoicing"]);
+  finds("roles", ["Roles & Permissions"]);
+  // Word endings: neither name says "notifications" or "pipelines" — only the stem finds them.
+  finds("notifications", ["Notification preferences"]);
+  finds("pipelines", ["Pipeline"]);
+  // Branches (under Staff) says GSTIN only in its description.
+  finds("gstin", ["Branches"]);
+  finds("MAIL", ["Mail & messaging"]);
+  finds("  mail  ", ["Mail & messaging"]);
+  ok("  an accent is folded away — \"máil\" is \"mail\"", found("m\u00e1il").join() === found("mail").join());
+  ok("  every word must match — \"support mail\" is narrower than \"mail\"", found("support mail").length > 0 && found("support mail").length < found("mail").length, labelsFor("support mail"));
+  ok("  nonsense finds nothing", found("zzqxv").length === 0);
+  ok("  a blank search is everything, untouched", searchSettings(SETTINGS, "   ") === SETTINGS);
+  ok("  punctuation alone is a blank search", searchWords("—, /").length === 0);
+
+  const narrowed = searchSettings(SETTINGS, "mail");
+  ok(
+    "  no empty group or section is left behind",
+    narrowed.every((s) => s.groups.length > 0 && s.groups.every((g) => g.items.length > 0)),
+  );
+  const order = SETTINGS_ITEMS.map((i) => i.key);
+  const mailKeys = found("mail");
+  ok(
+    "  matches keep the catalogue's order",
+    mailKeys.every((k, n) => n === 0 || order.indexOf(mailKeys[n - 1]!) < order.indexOf(k)),
+  );
+  ok("Enter opens the first match", firstMatch(narrowed)?.key === mailKeys[0], firstMatch(narrowed)?.label);
+  ok("  and nothing when nothing matches", firstMatch(searchSettings(SETTINGS, "zzqxv")) === null);
+  const hidden = visibleSettings(["settings.view"], [], {}).flatMap((s) => s.groups.flatMap((g) => g.items.map((i) => i.key)));
+  ok(
+    "  a search never finds what the viewer can't open",
+    searchSettings(visibleSettings(["settings.view"], [], {}), "mail")
+      .flatMap((s) => s.groups.flatMap((g) => g.items.map((i) => i.key)))
+      .every((k) => hidden.includes(k)),
+  );
 
   section("Coverage");
 

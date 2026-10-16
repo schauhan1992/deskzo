@@ -11,6 +11,8 @@ import { getDownlineUserIds } from "@/lib/org-chart";
 import { closedDates, dateOnly, eachDay, isWeekOff, monthRange, toKey } from "@/lib/hr/calendar";
 import { workspaceClock } from "@/lib/time/workspace";
 import { attendanceMarkSchema } from "@/lib/validation/hr";
+import { officeHours } from "@/lib/hr/office-hours";
+import { dayTiming, officeDayMinutes, officeHoursOrRefusal, workedMinutesOf, type OfficeHours } from "@/lib/hr/office-hours-rules";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -176,6 +178,16 @@ export type MonthCell = {
   offDay: "week off" | "holiday" | null;
   note: string | null;
   regularised: boolean;
+  checkInAt: string | null;
+  checkOutAt: string | null;
+  /** Still to come — nothing to say about it yet. */
+  future: boolean;
+  /** A correction asked for and not yet decided. */
+  pending: boolean;
+  /** Against the office hours, when they're set (src/lib/hr/office-hours-rules.ts). */
+  late: boolean;
+  early: boolean;
+  overtime: boolean;
 };
 
 export type MonthRow = {
@@ -189,6 +201,12 @@ export type MonthRow = {
   absent: number;
   /** Working days with nothing recorded — the number HR chases. */
   unrecorded: number;
+  photoUpdatedAt: string | null;
+  /** The month's working days: neither a week off nor a holiday. */
+  workingDays: number;
+  /** Hours worked, and hours the working days less leave come to — null while office hours aren't set. */
+  workedHours: number | null;
+  expectedHours: number | null;
 };
 
 /**
@@ -227,16 +245,22 @@ export async function attendanceMonth(params: {
   const people = await db.user.findMany({
     where,
     orderBy: { name: "asc" },
-    select: { id: true, userSeq: true, name: true, employeeProfile: { select: { designation: true } } },
+    select: { id: true, userSeq: true, name: true, photoUpdatedAt: true, employeeProfile: { select: { designation: true } } },
   });
 
-  const [records, holidays] = await Promise.all([
+  const [records, holidays, pendingRows, hours] = await Promise.all([
     db.attendanceDay.findMany({
       where: { userId: { in: people.map((p) => p.id) }, date: { gte: from, lte: to } },
-      select: { userId: true, date: true, status: true, workedMinutes: true, note: true, regularisedAt: true },
+      select: { userId: true, date: true, status: true, workedMinutes: true, note: true, regularisedAt: true, checkInAt: true, checkOutAt: true },
     }),
     db.holiday.findMany({ where: { date: { gte: from, lte: to } }, select: { date: true, optional: true } }),
+    db.attendanceRegularisation.findMany({
+      where: { userId: { in: people.map((p) => p.id) }, date: { gte: from, lte: to }, status: "PENDING" },
+      select: { userId: true, date: true },
+    }),
+    officeHours(),
   ]);
+  const pending = new Set(pendingRows.map((r) => `${r.userId}:${toKey(r.date)}`));
 
   const closed = closedDates(holidays);
   const byUser = new Map<string, Map<string, (typeof records)[number]>>();
@@ -247,18 +271,28 @@ export async function attendanceMonth(params: {
   }
 
   const days = eachDay(from, to);
-  const today = (await workspaceClock()).calendarDate(new Date());
+  const clock = await workspaceClock();
+  const today = clock.calendarDate(new Date());
+  // A clock-in as minutes from midnight on the workspace's clock, which is what office hours are in.
+  const minuteOf = (at: Date) => {
+    const p = clock.parts(at);
+    return p.hour * 60 + p.minute;
+  };
   const rows: MonthRow[] = people.map((person) => {
     const own = byUser.get(person.id) ?? new Map();
     let present = 0;
     let leave = 0;
     let absent = 0;
     let unrecorded = 0;
+    let workingDays = 0;
+    let workedMinutes = 0;
 
     const cells: MonthCell[] = days.map((day) => {
       const key = toKey(day);
       const record = own.get(key);
       const offDay = isWeekOff(day) ? ("week off" as const) : closed.has(key) ? ("holiday" as const) : null;
+      if (!offDay) workingDays += 1;
+      if (record && hours) workedMinutes += workedMinutesOf(record, hours);
 
       if (record) {
         if (record.status === "PRESENT" || record.status === "WORK_FROM_HOME") present += 1;
@@ -278,8 +312,15 @@ export async function attendanceMonth(params: {
         offDay,
         note: record?.note ?? null,
         regularised: !!record?.regularisedAt,
+        checkInAt: record?.checkInAt ? record.checkInAt.toISOString() : null,
+        checkOutAt: record?.checkOutAt ? record.checkOutAt.toISOString() : null,
+        future: day > today,
+        pending: pending.has(`${person.id}:${key}`),
+        ...dayTiming(record ?? { status: null, checkInAt: null, checkOutAt: null, workedMinutes: null }, hours, minuteOf),
       };
     });
+    // Hours worked against the hours the working days come to, less leave taken (owner, 16 Oct 2026).
+    const round1 = (n: number) => Math.round(n * 10) / 10;
 
     return {
       userId: person.id,
@@ -291,6 +332,10 @@ export async function attendanceMonth(params: {
       leave,
       absent,
       unrecorded,
+      photoUpdatedAt: person.photoUpdatedAt ? person.photoUpdatedAt.toISOString() : null,
+      workingDays,
+      workedHours: hours ? round1(workedMinutes / 60) : null,
+      expectedHours: hours ? round1((Math.max(0, workingDays - leave) * officeDayMinutes(hours)) / 60) : null,
     };
   });
 
@@ -305,5 +350,33 @@ export async function attendanceMonth(params: {
           ? rows.filter((r) => r.leave > 0)
           : rows;
 
-  return { days: days.map(toKey), rows: filtered, totalPeople: rows.length };
+  return { days: days.map(toKey), rows: filtered, totalPeople: rows.length, officeHours: hours };
+}
+
+/**
+ * Sets the company's office hours — what Late, Early, Overtime and hours worked are measured against
+ * (owner, 16 Oct 2026). Whoever manages HR; `null` clears them.
+ */
+export async function saveOfficeHours(input: { start: string; end: string; grace: number } | null): Promise<ActionResult<OfficeHours | null>> {
+  const user = await requireModuleUser("hr");
+  if (!(await hasEffectivePermission(user.id, "hr.manage"))) return { ok: false, error: "Only whoever manages HR can set office hours." };
+  if (input === null) {
+    await db.attendanceSettings.deleteMany({ where: { id: "global" } });
+    await recordAudit({ userId: user.id, action: "UPDATE", entityType: "AttendanceSettings", entityId: "global", entityLabel: "Office hours cleared" });
+    revalidatePath("/people/attendance");
+    return { ok: true, data: null };
+  }
+  const parsed = officeHoursOrRefusal({ start: String(input?.start ?? ""), end: String(input?.end ?? ""), grace: input?.grace });
+  if (!parsed.ok) return { ok: false, error: parsed.error };
+  const data = { ...parsed.hours, updatedById: user.id };
+  await db.attendanceSettings.upsert({ where: { id: "global" }, create: { id: "global", ...data }, update: data });
+  await recordAudit({
+    userId: user.id,
+    action: "UPDATE",
+    entityType: "AttendanceSettings",
+    entityId: "global",
+    entityLabel: `Office hours ${input.start}–${input.end}, ${parsed.hours.graceMinutes} minutes' grace`,
+  });
+  revalidatePath("/people/attendance");
+  return { ok: true, data: parsed.hours };
 }

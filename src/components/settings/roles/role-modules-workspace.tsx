@@ -18,6 +18,7 @@ import { Switch } from "@/components/settings/access/switch";
 import { ModuleIcon } from "@/components/settings/access/module-icon";
 import { ActionIcon } from "@/components/settings/access/action-icon";
 import { PermissionPreview } from "@/components/settings/access/permission-preview";
+import { FullViewButton, useFullView } from "@/components/ui/full-view";
 import type { CatalogueEntry, ModuleStates } from "@/components/settings/staff/types";
 import { cn } from "@/lib/utils";
 
@@ -73,6 +74,8 @@ export function RoleModulesWorkspace({
   const [search, setSearch] = useState("");
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [saving, start] = useTransition();
+  // The Modules box can fill the screen — its Actions table needs the width (src/components/ui/full-view.tsx).
+  const fullView = useFullView();
 
   const byKey = useMemo(() => new Map(catalogue.map((c) => [c.key, c])), [catalogue]);
   const viewerHolds = useMemo(() => new Set(viewer.holds), [viewer.holds]);
@@ -224,7 +227,7 @@ export function RoleModulesWorkspace({
 
   return (
     <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_16rem]">
-      <Card className="min-w-0">
+      <Card className={cn("min-w-0", fullView.frameClass)}>
         <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
           <div className="min-w-0">
             <h3 className="text-base font-semibold text-text">Modules</h3>
@@ -241,6 +244,7 @@ export function RoleModulesWorkspace({
               Module enabled
             </label>
           )}
+          <FullViewButton full={fullView.full} toggle={fullView.toggle} />
         </div>
 
         <div className="@container">

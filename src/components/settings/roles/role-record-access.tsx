@@ -8,6 +8,8 @@ import { RecordAccessGrid, slotOf, type CellChoice } from "@/components/settings
 import { claimsMoreThan, UNDER } from "@/lib/authz/level-order";
 import { Button } from "@/components/ui/button";
 import { ActionNotice } from "@/components/ui/action-notice";
+import { FullViewButton, useFullView } from "@/components/ui/full-view";
+import { cn } from "@/lib/utils";
 
 /**
  * A role's Record Access tab: the whole grid at once — which records people in the role reach for each
@@ -21,6 +23,8 @@ export function RoleRecordAccess({ roleKey, grid, gridWhy, mayManage }: { roleKe
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [saving, start] = useTransition();
   const lockedWhy = !mayManage ? "You can review roles but not change them." : gridWhy;
+  // The box can fill the screen — the record table needs the width (src/components/ui/full-view.tsx).
+  const fullView = useFullView();
 
   function chooseLevel(record: string, action: string, choice: CellChoice) {
     setNotice(null);
@@ -64,12 +68,15 @@ export function RoleRecordAccess({ roleKey, grid, gridWhy, mayManage }: { roleKe
     });
 
   return (
-    <div className="rounded-base border border-line">
-      <div className="space-y-3 p-4">
-        <p className="text-sm text-muted">
-          Which records people in this role reach, for each action. &ldquo;As its permissions&rdquo; follows what the role&apos;s permissions have always meant; a
-          level set here replaces it. Edit, delete and assign can&apos;t reach wider than view.
-        </p>
+    <div className={cn("rounded-base border border-line", fullView.frameClass)}>
+      <div className="flex-1 space-y-3 p-4">
+        <div className="flex items-start justify-between gap-3">
+          <p className="text-sm text-muted">
+            Which records people in this role reach, for each action. &ldquo;As its permissions&rdquo; follows what the role&apos;s permissions have always meant; a
+            level set here replaces it. Edit, delete and assign can&apos;t reach wider than view.
+          </p>
+          <FullViewButton full={fullView.full} toggle={fullView.toggle} />
+        </div>
         {lockedWhy && (
           <p className="flex items-start gap-2 rounded-base bg-info-bg px-3 py-2 text-sm text-info">
             <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
