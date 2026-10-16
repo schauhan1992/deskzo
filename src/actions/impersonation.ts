@@ -36,7 +36,10 @@ export async function startViewingAs(targetUserId: string): Promise<ActionResult
 
   // Read from the database, not the JWT: an admin demoted five minutes ago still carries ADMIN in
   // their token until it is re-issued, and this is the last place that should trust a stale claim.
-  if (!(await hasEffectivePermission(actor.id, "impersonation.use"))) {
+  // An admin's role as well as the permission: `resolveViewAs` honours a ticket only for an admin, so
+  // anybody else holding the permission would be told they had started, and have it logged, with
+  // nothing happening.
+  if (actor.role !== "ADMIN" || !(await hasEffectivePermission(actor.id, "impersonation.use"))) {
     return { ok: false, error: "Only an administrator can view the app as another user." };
   }
 
