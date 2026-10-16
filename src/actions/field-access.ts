@@ -280,7 +280,7 @@ export async function setRoleFieldAccess(role: string, changes: FieldPolicyChang
       detail: `Lead ${w.label.toLowerCase()} for ${role}: ${w.before ? describePolicy(w.before) : "visible (nothing set)"} → ${w.after ? describePolicy(w.after) : "visible (nothing set)"}`,
     });
   }
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   revalidatePath("/", "layout");
   return { ok: true, data: { changed: writes.length } };
 }
@@ -308,7 +308,7 @@ export async function setRoleUnmaskLimit(role: string, dailyLimit: unknown): Pro
     changeKind: "GRANT",
     detail: `Daily unmask limit for ${role}: ${before ? LIMIT_WORDS(before.dailyLimit) : "nothing set"} → ${LIMIT_WORDS(limit)}`,
   });
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   return { ok: true, data: null };
 }
 
@@ -528,7 +528,7 @@ export async function setPersonFieldAccess(
       detail: `Lead ${w.label.toLowerCase()} for ${target.name}: ${describePolicy(w.after ?? w.resulting)}${w.after === null ? " (back to their role)" : ""}${reason ? ` — ${reason}` : ""}`,
     });
   }
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   revalidatePath("/", "layout");
   return { ok: true, data: { changed: writes.length } };
 }
@@ -581,6 +581,6 @@ export async function setPersonUnmaskLimit(
     changeKind: next === null ? "RESET_TO_DEFAULT" : "GRANT",
     detail: `Daily unmask limit for ${target.name}: ${LIMIT_WORDS(resulting)}${next === null ? " (back to their role)" : ""}${reason ? ` — ${reason}` : ""}`,
   });
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   return { ok: true, data: null };
 }

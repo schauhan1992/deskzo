@@ -1,4 +1,5 @@
 import type { PermissionChangeKind, PermissionSubjectType } from "@prisma/client";
+import { rolePath, userPath } from "@/lib/staff/staff-paths";
 import type { Role } from "@/lib/roles";
 import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
@@ -84,7 +85,8 @@ export async function recordPermissionChange(input: {
       await alertAdmins({
         title: isSuperAdminChange ? "Super admin access changed" : "A critical permission was changed",
         message: input.detail ?? `${input.changeKind} on ${input.permission ?? "an account"}`,
-        link: "/settings/access",
+        // Straight to whoever it was changed on: the person, or the role.
+        link: input.subjectUserId ? userPath(input.subjectUserId, "activity") : input.subjectRole ? rolePath(input.subjectRole) : "/settings/users",
       });
     }
   } catch (err) {

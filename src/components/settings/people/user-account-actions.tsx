@@ -7,6 +7,7 @@ import { sendPasswordResetEmail, setUserActive } from "@/actions/user";
 import { issueDigitalCards } from "@/actions/card";
 import { ResetLinkOnce } from "@/components/settings/setup-link-once";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { ActionNotice } from "@/components/ui/action-notice";
 import { EditStaffDialog } from "@/components/settings/staff/edit-staff-dialog";
@@ -98,6 +99,30 @@ export function UserAccountActions({
 
   return (
     <div className="space-y-3">
+      {mode === "login" && (row.tempPassword || showCards) && (
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          {row.tempPassword && (
+            <Badge tone="amber" title="An admin reset their password; they choose their own at next sign-in.">
+              Temporary password
+            </Badge>
+          )}
+          {showCards &&
+            (row.card?.state === "live" ? (
+              <>
+                <Badge tone="green">Digital card live</Badge>
+                <a href={`/c/${row.card.handle}`} target="_blank" rel="noopener noreferrer" className="text-brand hover:underline">
+                  /c/{row.card.handle}
+                </a>
+              </>
+            ) : row.card?.state === "ended" ? (
+              <Badge title="Their last working day has passed — the card shows the company's details.">Digital card ended</Badge>
+            ) : row.card?.state === "off" ? (
+              <Badge>Digital card off</Badge>
+            ) : (
+              <Badge>No digital card</Badge>
+            ))}
+        </div>
+      )}
       <div className="flex flex-wrap gap-2">
         {mode === "profile" && canEdit && (
           <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>

@@ -74,7 +74,8 @@ async function run(db: PrismaClient) {
   const { roleGrants } = require("../src/lib/authz/role-permission") as typeof import("../src/lib/authz/role-permission");
   const { PERMISSIONS } = require("../src/lib/permissions") as typeof import("../src/lib/permissions");
   const mailer = require("../src/lib/platform/mailer") as typeof import("../src/lib/platform/mailer");
-  const { permissionsOfModule } = require("../src/lib/staff/access-modules") as typeof import("../src/lib/staff/access-modules");
+  const { permissionsOfModule, ACCESS_MODULES, actionRowsOf, REACH_KEYS } = require("../src/lib/staff/access-modules") as typeof import("../src/lib/staff/access-modules");
+  const { ACCESS_RECORDS } = require("../src/lib/authz/access") as typeof import("../src/lib/authz/access");
   /* eslint-enable @typescript-eslint/no-require-imports */
   mailer.setTestPlatformMailer(async () => {});
 
@@ -197,6 +198,28 @@ async function run(db: PrismaClient) {
   await person.setPersonPermissions(rep.id, [{ key, state: "inherit" }]);
   as(rep);
   ok("somebody who may not review access gets no preview", (await person.accessPreview({ role: "ADMIN" })) === null);
+
+  section("4b. Every permission has one place on Module Access");
+  // The role and person screens show permissions module by module (src/lib/staff/access-modules.ts):
+  // one that is in no module can't be granted from them at all, and one in two is two switches for one key.
+  const sectionKeys = PERMISSIONS.filter((d) => d.key.startsWith("section.")).map((d) => d.key);
+  const homesOf = (key: string) => ACCESS_MODULES.filter((m) => m.sections.includes(key)).map((m) => m.key);
+  const sectionStrays = sectionKeys.filter((k) => homesOf(k).length !== 1);
+  ok("every menu section belongs to exactly one module", sectionStrays.length === 0, sectionStrays.map((k) => `${k}: ${homesOf(k).join("+") || "none"}`));
+  const unknownSections = ACCESS_MODULES.flatMap((m) => m.sections).filter((k) => !sectionKeys.includes(k));
+  ok("  and every section a module names exists", unknownSections.length === 0, unknownSections);
+  const recordRows = ACCESS_RECORDS.map((r) => ({ key: r.key, label: r.label, actions: [...r.actions] }));
+  const allRows = ACCESS_MODULES.flatMap((m) => actionRowsOf(m.key, recordRows));
+  const keyRows = allRows.flatMap((r) => (r.kind === "key" ? [r.key] : []));
+  const viewRows = allRows.flatMap((r) => (r.kind === "record" && r.viewKey ? [r.viewKey] : []));
+  const placed = new Set([...keyRows, ...viewRows, ...REACH_KEYS]);
+  const unplaced = PERMISSIONS.filter((d) => !d.key.startsWith("section.") && !placed.has(d.key)).map((d) => d.key);
+  ok("every other permission is a row on some module's Actions, or a record's view or reach", unplaced.length === 0, unplaced);
+  const twice = [...new Set([...keyRows, ...viewRows].filter((k, i, all) => all.indexOf(k) !== i))];
+  ok("  and none is a row twice", twice.length === 0, twice);
+  const moduleRecords = new Set(ACCESS_MODULES.flatMap((m) => [...m.records]));
+  const reachWithoutRecord = [...REACH_KEYS].filter((k) => !moduleRecords.has(k.split(".")[0] as never));
+  ok("  a record's reach (\"view all\") is that record's scope, in the module that has it", reachWithoutRecord.length === 0, reachWithoutRecord);
 
   section("5. Switching a role off");
   as(admin);

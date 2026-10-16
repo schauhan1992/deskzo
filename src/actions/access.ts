@@ -134,7 +134,7 @@ export async function setUserPermission(input: {
     detail: `${def.label} ${input.allowed ? "granted to" : "denied to"} ${target.name}${input.reason ? ` — ${input.reason}` : ""}`,
   });
 
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   revalidatePath("/", "layout");
   return { ok: true, data: null };
 }
@@ -182,7 +182,7 @@ export async function clearUserPermission(userId: string, permission: string): P
     changeKind: "RESET_TO_DEFAULT",
     detail: `${permission} for ${target.name} returned to their role default`,
   });
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   revalidatePath("/", "layout");
   return { ok: true, data: null };
 }
@@ -330,7 +330,7 @@ export async function applyPreset(presetKey: string): Promise<ActionResult<{ gra
     detail: `Applied "${preset.label}" to ${preset.role}: ${granted} granted, ${revoked} revoked`,
   });
 
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   revalidatePath("/", "layout");
   return { ok: true, data: { granted, revoked } };
 }
@@ -541,7 +541,7 @@ export async function extendUserPermission(input: {
       : `${input.permission} for ${target.name} made permanent`,
   });
 
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   revalidatePath("/", "layout");
   return { ok: true, data: null };
 }

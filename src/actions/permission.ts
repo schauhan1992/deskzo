@@ -171,7 +171,7 @@ export async function setRolePermission(
     detail: `${def.label} for ${role}`,
   });
 
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   revalidatePath("/", "layout");
   return { ok: true, data: null };
 }
@@ -214,7 +214,7 @@ export async function resetRolePermission(role: Role, key: PermissionKey | strin
     changeKind: "RESET_TO_DEFAULT",
     detail: `${key} for ${role} returned to its default`,
   });
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   revalidatePath("/", "layout");
   return { ok: true, data: null };
 }
@@ -294,7 +294,7 @@ export async function setRolePermissions(
     });
   }
 
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   revalidatePath("/", "layout");
   return { ok: true, data: { changed: writes.length } };
 }

@@ -303,7 +303,7 @@ export const ROLE_PRESETS: RolePreset[] = [
   {
     key: "hr-manager",
     label: "HR manager",
-    description: "An HR executive plus payroll, user accounts (and reading Staff & roles, where they are added), anonymous feedback, expense approvals and bulk employee imports. Note that payroll is not inheritable — a manager of this person does not get it.",
+    description: "An HR executive plus payroll, user accounts (and reading Users, where they are added), anonymous feedback, expense approvals and bulk employee imports. Note that payroll is not inheritable — a manager of this person does not get it.",
     role: "HR",
     permissions: [...EVERY_PROFILE, "meetings.schedule",
       "hr.manage",
@@ -341,7 +341,7 @@ export const ROLE_PRESETS: RolePreset[] = [
      */
     key: "hr-head",
     label: "HR head",
-    description: "Heads HR: everything an HR manager has — people records, hiring, payroll, leave, user accounts, anonymous feedback, expense approvals, employee imports — plus company-wide notices, every IT asset (for exit clearance), the company's own guides, and reading Staff & roles so they can add staff accounts. Payroll and anonymous feedback are not inheritable.",
+    description: "Heads HR: everything an HR manager has — people records, hiring, payroll, leave, user accounts, anonymous feedback, expense approvals, employee imports — plus company-wide notices, every IT asset (for exit clearance), the company's own guides, and reading Users so they can add staff accounts. Payroll and anonymous feedback are not inheritable.",
     role: "HR_HEAD",
     permissions: [...EVERY_PROFILE, "meetings.schedule",
       "hr.manage",

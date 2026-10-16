@@ -264,7 +264,7 @@ export async function setPersonAccessLevels(
       detail: `${accessRecordDefinition(w.record).label} — ${w.action} for ${target.name}: ${LEVEL_WORDS[w.before]} → ${LEVEL_WORDS[w.afterEffective]}${w.after === null ? " (back to their role)" : ""}${reason ? ` — ${reason}` : ""}`,
     });
   }
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   revalidatePath("/", "layout");
   return { ok: true, data: { changed: writes.length } };
 }
@@ -331,7 +331,7 @@ export async function resetPersonToRole(userId: string): Promise<ActionResult<{ 
     changeKind: "RESET_TO_DEFAULT",
     detail: `${target.name} reset to their role (${target.role}): ${grants.length} permission exception(s), ${levels.length} record level(s), ${removedFields} field polic(ies)${ownLimit ? " and their daily limit" : ""} removed`,
   });
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   revalidatePath("/", "layout");
   return { ok: true, data: { removed } };
 }

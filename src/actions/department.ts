@@ -48,7 +48,7 @@ export async function createDepartment(input: unknown): Promise<ActionResult<{ i
 
   try {
     const department = await db.department.create({ data: { name: parsed.data.name.trim() } });
-    revalidatePath("/settings/access");
+    revalidatePath("/settings", "layout");
     return { ok: true, data: { id: department.id, name: department.name } };
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
@@ -73,7 +73,7 @@ export async function updateDepartment(input: unknown): Promise<ActionResult<{ i
       where: { id: parsed.data.id },
       data: { name: parsed.data.name.trim() },
     });
-    revalidatePath("/settings/access");
+    revalidatePath("/settings", "layout");
     return { ok: true, data: { id: department.id, name: department.name } };
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
@@ -90,7 +90,7 @@ export async function setDepartmentSupportTeam(id: string, isSupportTeam: boolea
   }
 
   await db.department.update({ where: { id }, data: { isSupportTeam } });
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   return { ok: true, data: null };
 }
 
@@ -103,7 +103,7 @@ export async function setDepartmentDashboardWidgets(id: string, widgetKeys: stri
   const filtered = widgetKeys.filter((k) => validKeys.has(k));
 
   await db.department.update({ where: { id }, data: { defaultDashboardWidgets: filtered } });
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   return { ok: true, data: null };
 }
 
@@ -114,6 +114,6 @@ export async function deleteDepartment(id: string): Promise<ActionResult<null>> 
   }
 
   await db.department.delete({ where: { id } });
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   return { ok: true, data: null };
 }

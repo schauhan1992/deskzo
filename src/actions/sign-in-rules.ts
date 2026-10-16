@@ -95,7 +95,7 @@ export async function setRoleSignIn(input: unknown): Promise<ActionResult<null>>
   }
   await recordAudit({ userId: admin.id, action: "UPDATE", entityType: "SignInRule", entityId: `role:${role}`, entityLabel: `Sign-in for the ${known.name} role: ${said(method)}` });
   revalidatePath("/settings/security");
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   return { ok: true, data: null };
 }
 
@@ -159,6 +159,6 @@ export async function setPersonSignIn(input: unknown): Promise<ActionResult<null
     throw err;
   }
   await recordAudit({ userId: admin.id, action: "UPDATE", entityType: "SignInRule", entityId: target.id, entityLabel: `Sign-in for ${target.name}: ${method ? said(method) : "their role's or the company's"}` });
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   return { ok: true, data: null };
 }

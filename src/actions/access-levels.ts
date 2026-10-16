@@ -220,7 +220,7 @@ export async function setRoleAccessLevels(role: string, changes: AccessChange[])
     });
   }
 
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   revalidatePath("/", "layout");
   return { ok: true, data: { changed: writes.length } };
 }

@@ -70,9 +70,14 @@ Opening a lead's page is the request to see it: `LeadUnmask` asks `unmaskLead` o
   - `QUOTA_EXHAUSTED`: the limit is reached and the fields stay masked;
   - `DENIED`: the person may not unmask, can't open the lead, or is being viewed as by an admin. Under view-as, the admin's request is refused and logged with who was really at the keyboard.
 
+## Where it's set
+
+- **A role:** Settings › Staff › Roles & Permissions › the role › Field Permissions. It sets each field's policy and the role's daily limit, and each saves as it is changed.
+- **One person:** Settings › Staff › Users › the person. On Permissions with CRM open, the daily limit sits under the module's actions and the field masking table beside them. Field Permissions shows the same two panels, with where each field's answer comes from. Nothing is saved until **Save changes** at the top of the page, which saves every change on the page with one reason and an optional end date. **Reset to role defaults** removes all of them.
+
 ## The unmasking log
 
-**Settings › Staff & security › Unmasking logs.** Every attempt is listed, with filters for when, who, lead and result. It is paged and can be exported to CSV.
+**Settings › Staff › Unmasking logs.** Every attempt is listed, with filters for when, who, lead and result. It is paged and can be exported to CSV.
 
 - **Who can read it:** the workspace's super admin, acting as themselves (`actingAsSuperAdmin`). Nobody else can, not even another admin, and not even the super admin while viewing as somebody.
   - **Every action checks this again:** `mayReadUnmaskLog` runs on each call.

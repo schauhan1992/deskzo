@@ -324,8 +324,8 @@ export function TeamStep({ team, done, onAdded }: { team: OnboardingState["team"
     return (
       <p className="text-sm text-muted">
         Adding people is done under{" "}
-        <Link href="/settings/access" className="font-medium text-brand hover:underline">
-          Settings → Users &amp; access
+        <Link href="/settings/users" className="font-medium text-brand hover:underline">
+          Settings → Staff → Users
         </Link>
         {" "}— come back here when you have, and carry on.
       </p>
@@ -361,8 +361,8 @@ export function TeamStep({ team, done, onAdded }: { team: OnboardingState["team"
       )}
       <p className="text-xs text-subtle">
         Each person gets an email with a link to choose their own password. Roles, departments and access are under{" "}
-        <Link href="/settings/access" className="text-brand hover:underline">
-          Settings → Users &amp; access
+        <Link href="/settings/users" className="text-brand hover:underline">
+          Settings → Staff
         </Link>
         .
       </p>

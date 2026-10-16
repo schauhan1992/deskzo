@@ -256,7 +256,7 @@ export function Sidebar({
    * The section holding the page you are on.
    *
    * Settings is matched exactly for the same reason its link is: `/settings` is a prefix of
-   * `/settings/access` and `/settings/data`, so a `startsWith` test would put you in Administration
+   * `/settings/users` and `/settings/data`, so a `startsWith` test would put you in Administration
    * whichever of them you were looking at — which is true, but it would also claim `/settings` was
    * active while you were on Import & export.
    */

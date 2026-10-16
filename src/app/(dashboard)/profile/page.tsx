@@ -121,7 +121,7 @@ export default async function ProfilePage({
                 <span className="text-text sm:ml-2">{profile.manager?.name ?? "—"}</span>
               </div>
               <p className="col-span-full pt-1 text-xs text-subtle">
-                Name, role, and department are managed by an admin under Staff &amp; roles.
+                Name, role, and department are managed by an admin under Settings → Staff → Users.
               </p>
             </CardContent>
           </Card>

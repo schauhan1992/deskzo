@@ -31,9 +31,8 @@ import { PersonDraftProvider } from "@/components/settings/people/person-draft";
 import { UserHeader } from "@/components/settings/people/user-header";
 import { UsersDirectory, type DirectoryRow } from "@/components/settings/people/users-directory";
 import { UserAccountActions } from "@/components/settings/people/user-account-actions";
-import { FieldMaskingPanel, PersonPermissionsPanel, UnmaskLimitPanel } from "@/components/settings/people/person-permissions-panel";
+import { FieldMaskingPanel, PersonPermissionsPanel, UnmaskLimitPanel, type PersonPermissionRow } from "@/components/settings/people/person-permissions-panel";
 import { PersonRecordAccess } from "@/components/settings/people/person-record-access";
-import type { PersonPermissionRow } from "@/components/settings/people/person-access-editor";
 import type { StaffRow } from "@/components/settings/staff/types";
 
 export const metadata = { title: "Users" };
@@ -527,18 +526,13 @@ async function LoginTab({ person, row, staff, account, viewerId }: { person: Per
   return (
     <div className="space-y-4">
       <Card>
-        <CardHeader className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-text">Account</h3>
+        <CardHeader className="flex flex-wrap items-start justify-between gap-2">
+          <h3 className="pt-1 text-sm font-semibold text-text">Account</h3>
           <UserAccountActions mode="login" {...account} showCards={staff.showCards} />
         </CardHeader>
         <CardContent className="grid gap-2 text-sm sm:grid-cols-2">
           <p className="text-muted">
             Status: <span className="text-text">{!person.active ? "Switched off" : row.setupPending ? "Invited — no password chosen yet" : "Active"}</span>
-            {row.tempPassword && (
-              <Badge tone="amber" className="ml-2" title="An admin reset their password; they choose their own at next sign-in.">
-                Temporary password
-              </Badge>
-            )}
           </p>
           <p className="text-muted">
             Two-factor: <span className="text-text">{person.twoFactorEnabledAt ? `on since ${clock.date(person.twoFactorEnabledAt)}` : "not set up"}</span>
@@ -554,18 +548,6 @@ async function LoginTab({ person, row, staff, account, viewerId }: { person: Per
           {!seesSignIns && staff.showSignIns && (
             <p className="text-muted">
               Last sign-in: <span className="text-text">{row.lastSignIn ? row.lastSignIn.exact : "never"}</span>
-            </p>
-          )}
-          {staff.showCards && (
-            <p className="text-muted">
-              Digital card:{" "}
-              {row.card?.state === "live" ? (
-                <a href={`/c/${row.card.handle}`} target="_blank" rel="noopener noreferrer" className="text-brand hover:underline">
-                  /c/{row.card.handle}
-                </a>
-              ) : (
-                <span className="text-text">{row.card?.state === "ended" ? "ended — their last working day has passed" : row.card?.state === "off" ? "switched off" : "none"}</span>
-              )}
             </p>
           )}
         </CardContent>

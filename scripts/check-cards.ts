@@ -113,7 +113,7 @@ async function main() {
   const CapturePage = (require("../src/app/(dashboard)/cards/events/[id]/capture/page") as typeof import("../src/app/(dashboard)/cards/events/[id]/capture/page")).default;
   const { renderToStaticMarkup } = require("react-dom/server") as typeof import("react-dom/server");
   const notices = require("../src/lib/cards/notices") as typeof import("../src/lib/cards/notices");
-  const { StaffTable } = require("../src/components/settings/staff/staff-table") as typeof import("../src/components/settings/staff/staff-table");
+  const { UserAccountActions } = require("../src/components/settings/people/user-account-actions") as typeof import("../src/components/settings/people/user-account-actions");
   const MyCardPage = (require("../src/app/(dashboard)/cards/page") as typeof import("../src/app/(dashboard)/cards/page")).default;
   const ManagePage = (require("../src/app/(dashboard)/cards/manage/page") as typeof import("../src/app/(dashboard)/cards/manage/page")).default;
   const render = async (page: (props: never) => Promise<unknown>, tab?: string) =>
@@ -361,31 +361,39 @@ async function main() {
     );
     await db.notification.deleteMany({ where: { type: "CARD_CHANGED", userId: { in: people } } });
 
-    section("Staff & roles shows each person's card");
+    section("Users shows each person's card");
     const staffRow = (over: Record<string, unknown>) => ({
       id: "x", name: `${TAG} Person`, email: `p${MAIL}`, role: "SALES", roleName: "Sales", isSuperAdmin: false, status: "active", active: true, setupPending: false, setupLinkIssued: false,
       tempPassword: false, photoUpdatedAt: null, jobTitle: null, phone: null, departmentId: null, departmentName: null, managerId: null, managerName: null, branchId: null,
       twoFactorOn: false, holds: 1, total: 10, exceptions: 0, lapsingSoon: false, openLeads: null, overdueLeads: null, lastSignIn: null, isYou: false, card: null, ...over,
     });
-    const staffTable = (showCards: boolean) =>
-      renderToStaticMarkup(
-        createElement(StaffTable, {
-          rows: [staffRow({ id: "a", name: `${TAG} Live`, card: { handle: "zz-live", state: "live" } }), staffRow({ id: "b", name: `${TAG} Off`, card: { handle: "zz-off", state: "off" } }), staffRow({ id: "c", name: `${TAG} None` })] as never,
-          roles: [],
-          departments: [],
-          branches: null,
-          mayEdit: true,
-          mayAssignRole: true,
-          mayManageAccess: true,
-          viewerIsSuperAdmin: false,
-          showLeads: false,
-          showSignIns: false,
-          showCards,
-        }),
+    // A person's Login & Access (src/app/(dashboard)/settings/users/page.tsx), as the Staff table's card column was.
+    const login = (over: Record<string, unknown>, showCards: boolean) =>
+      textOf(
+        renderToStaticMarkup(
+          createElement(UserAccountActions, {
+            mode: "login",
+            row: staffRow(over) as never,
+            roles: [],
+            departments: [],
+            people: [],
+            branches: null,
+            mayEdit: true,
+            mayAssignRole: true,
+            mayChangeManager: true,
+            viewerIsSuperAdmin: false,
+            showCards,
+          }),
+        ),
       );
-    const withCards = textOf(staffTable(true));
-    ok("for whoever manages cards: live with its address, off with Switch on, none with Issue card", withCards.includes("Digital card") && withCards.includes("/c/zz-live") && withCards.includes("Switch on") && withCards.includes("Issue card"));
-    ok("...and for anybody else, no card column at all", !textOf(staffTable(false)).includes("Digital card"));
+    const cardLive = login({ card: { handle: "zz-live", state: "live" } }, true);
+    const cardOff = login({ card: { handle: "zz-off", state: "off" } }, true);
+    const cardNone = login({}, true);
+    ok(
+      "for whoever manages cards: live with its address, off with Switch on, none with Issue card",
+      cardLive.includes("Digital card live") && cardLive.includes("/c/zz-live") && !cardLive.includes("Issue digital card") && cardOff.includes("Switch digital card on") && cardNone.includes("Issue digital card"),
+    );
+    ok("...and for anybody else, nothing about cards at all", !/digital card/i.test(login({ card: { handle: "zz-live", state: "live" } }, false)));
 
     section("Card events");
     const showName = `${TAG} Expo`;

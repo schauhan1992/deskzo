@@ -897,7 +897,7 @@ export async function setUserBranch(userId: string, branchId: string | null): Pr
     entityId: target.id,
     entityLabel: branch ? `Works at ${branchLabel(branch)}` : "Works at: not set",
   });
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   return { ok: true, data: null };
 }
 

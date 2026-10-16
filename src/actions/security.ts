@@ -34,7 +34,7 @@ function refreshSignIn() {
   invalidateSecuritySettingsCache();
   invalidateWorkplaceSettingsCache();
   revalidatePath("/settings/security");
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   revalidatePath("/login");
   revalidatePath("/profile");
 }

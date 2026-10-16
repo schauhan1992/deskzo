@@ -22,6 +22,7 @@ import {
   Telescope,
   TrendingUp,
   UserCog,
+  KeyRound,
   Users,
   Wallet,
 } from "lucide-react";
@@ -135,9 +136,10 @@ export const SYSTEM_NAV: { group: string; items: SystemNavItem[] }[] = [
   {
     group: "Administration",
     items: [
-      // Exact: `/settings` is a prefix of the two below, and would otherwise light up on both.
+      // Exact: `/settings` is a prefix of the pages below, and would otherwise light up on each.
       { href: "/settings", label: "Settings", icon: SettingsIcon, permission: "settings.manage", exact: true },
-      { href: "/settings/access", label: "Staff & roles", icon: UserCog, permission: "permissions.view" },
+      { href: "/settings/users", label: "Users", icon: UserCog, permission: "permissions.view" },
+      { href: "/settings/roles", label: "Roles & Permissions", icon: KeyRound, permission: "permissions.view" },
       { href: "/settings/security", label: "Security & DLP", icon: ShieldCheck, permission: "security.manage" },
       // Any export permission opens it. Deliberately not gated on being an admin: an accountant who
       // exports statements is not an administrator, and hiding it from them defeats the point.

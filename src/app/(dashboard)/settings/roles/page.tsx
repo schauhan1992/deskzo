@@ -21,7 +21,7 @@ import { ChangeHistory } from "@/components/settings/change-history";
 import { RolesList, CreateRoleButton, type RoleListItem } from "@/components/settings/roles/roles-list";
 import { rolePath } from "@/lib/staff/staff-paths";
 import { RoleHeader } from "@/components/settings/roles/role-header";
-import { RoleAccessEditor } from "@/components/settings/roles/role-access-editor";
+import { RoleRecordAccess } from "@/components/settings/roles/role-record-access";
 import { RoleModulesWorkspace } from "@/components/settings/roles/role-modules-workspace";
 import { RolePresets } from "@/components/settings/roles/role-presets";
 import { FieldPolicyEditor } from "@/components/settings/access/field-policy-editor";
@@ -120,7 +120,7 @@ export default async function RolesAndPermissionsPage({ searchParams }: { search
               </CardContent>
             </Card>
             {tab === "modules" && <ModulesTab role={selected.key} mayManage={mayManage} viewerId={viewer.id} viewerIsSuperAdmin={viewerIsSuperAdmin} />}
-            {tab === "records" && <RecordsTab role={selected.key} mayManage={mayManage} viewerId={viewer.id} viewerIsSuperAdmin={viewerIsSuperAdmin} />}
+            {tab === "records" && <RecordsTab role={selected.key} mayManage={mayManage} viewerId={viewer.id} />}
             {tab === "fields" && <FieldsTab role={selected.key} />}
             {tab === "rules" && <RulesTab role={selected.key} mayManage={mayManage} />}
             {tab === "users" && <UsersTab role={selected.key} />}
@@ -193,23 +193,12 @@ async function ModulesTab({ role, mayManage, viewerId, viewerIsSuperAdmin }: { r
   );
 }
 
-async function RecordsTab({ role, mayManage, viewerId, viewerIsSuperAdmin }: { role: string; mayManage: boolean; viewerId: string; viewerIsSuperAdmin: boolean }) {
+async function RecordsTab({ role, mayManage, viewerId }: { role: string; mayManage: boolean; viewerId: string }) {
   const data = await editorData(role, viewerId);
   return (
     <Card>
       <CardContent className="pt-5">
-        <RoleAccessEditor
-          key={`${role}:records`}
-          view="records"
-          roleKey={role}
-          catalogue={data.catalogue}
-          selfExcluded={data.selfExcluded}
-          held={data.held}
-          grid={data.grid}
-          gridWhy={data.gridWhy}
-          modules={data.modules}
-          viewer={{ mayManage, isSuperAdmin: viewerIsSuperAdmin, ...data.viewer }}
-        />
+        <RoleRecordAccess key={`${role}:records`} roleKey={role} grid={data.grid} gridWhy={data.gridWhy} mayManage={mayManage} />
       </CardContent>
     </Card>
   );
@@ -218,7 +207,7 @@ async function RecordsTab({ role, mayManage, viewerId, viewerIsSuperAdmin }: { r
 async function FieldsTab({ role }: { role: string }) {
   const data = await roleFieldAccess(role);
   if (!data) return <p className="text-sm text-muted">This role&apos;s field access can&apos;t be read.</p>;
-  return <FieldPolicyEditor key={role} mode="role" role={role} data={data} canEdit={data.editable} lockedWhy={data.why} />;
+  return <FieldPolicyEditor key={role} role={role} data={data} canEdit={data.editable} lockedWhy={data.why} />;
 }
 
 async function RulesTab({ role, mayManage }: { role: string; mayManage: boolean }) {

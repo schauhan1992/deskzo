@@ -1,4 +1,5 @@
 import type { CandidateStatus, LetterType } from "@prisma/client";
+import { userPath } from "@/lib/staff/staff-paths";
 import { personPath } from "@/lib/record-links";
 
 /**
@@ -199,7 +200,8 @@ export function offboardingChecklist(i: OffboardingInputs): ChecklistItem[] {
       done: !i.loginActive,
       hint: "An ex-employee with a working account is the one item here that is a security problem.",
       blocking: true,
-      href: "/settings/access",
+      // Their account under Users, where it is switched off.
+      href: userPath(i.userId, "login"),
     },
     {
       key: "equipment",

@@ -15,12 +15,26 @@ import { Switch } from "@/components/settings/access/switch";
 import { ModuleIcon } from "@/components/settings/access/module-icon";
 import { ActionIcon } from "@/components/settings/access/action-icon";
 import { useDraftEditor } from "@/components/settings/people/person-draft";
-import type { PersonPermissionRow } from "@/components/settings/people/person-access-editor";
 import { cn } from "@/lib/utils";
 
 const SCOPE_LABEL: Record<AccessLevel, string> = { NONE: "None", OWN: "Own", TEAM: "Team", BRANCH: "Branch", ALL: "All", FOLLOW: "Account" };
 const SAMPLE: Record<FieldKind, string> = { text: "Acme Technologies", email: "sales@globex.com", phone: "+91 98765 43210", address: "12 MG Road, Pune", choice: "Website" };
 const STANDING = { full: { tone: "green", text: "Full access" }, limited: { tone: "amber", text: "Limited access" }, none: { tone: "red", text: "No access" } } as const;
+
+/** One permission as a person's editors show it: their role's answer, their own (if any), and what applies. */
+export type PersonPermissionRow = {
+  key: string;
+  label: string;
+  description: string;
+  tier: string;
+  selfExcluded: boolean;
+  /** Their role gives it. */
+  role: boolean;
+  /** Their own exception, if any: allow or deny, why and until when. */
+  own: { allowed: boolean; reason: string | null; expiresAt: string | null; expired: boolean } | null;
+  held: boolean;
+  why: string;
+};
 
 type Slot = `${string}:${string}`;
 const slot = (record: string, action: string) => `${record}:${action}` as Slot;

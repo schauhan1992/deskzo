@@ -46,7 +46,7 @@ export function RoleSignInRules({
       <div>
         <h3 className="text-sm font-medium text-text">By role</h3>
         <p className="mt-0.5 text-sm text-muted">
-          Tie everybody in a role to one way of signing in. A person&apos;s own rule, set in Staff &amp; roles, comes first; the super admin always keeps
+          Tie everybody in a role to one way of signing in. A person&apos;s own rule, set on their page under Users, comes first; the super admin always keeps
           password sign-in, as the way back in.
         </p>
       </div>

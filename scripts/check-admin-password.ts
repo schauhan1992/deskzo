@@ -66,7 +66,7 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
     return {
       useRouter: () => ({ push() {}, refresh() {}, replace() {}, back() {}, prefetch() {} }),
       useSearchParams: () => new URLSearchParams(),
-      usePathname: () => "/settings/access",
+      usePathname: () => "/settings/users",
     };
   }
   if (request === "@/components/ui/dialog" || request.endsWith("components/ui/dialog")) {
@@ -91,7 +91,7 @@ async function main() {
   const USER = require("../src/actions/user") as typeof import("../src/actions/user");
   const PROFILE = require("../src/actions/profile") as typeof import("../src/actions/profile");
   const { EditStaffDialog } = require("../src/components/settings/staff/edit-staff-dialog") as typeof import("../src/components/settings/staff/edit-staff-dialog");
-  const { StaffTable } = require("../src/components/settings/staff/staff-table") as typeof import("../src/components/settings/staff/staff-table");
+  const { UserAccountActions } = require("../src/components/settings/people/user-account-actions") as typeof import("../src/components/settings/people/user-account-actions");
   /* eslint-enable @typescript-eslint/no-require-imports */
 
   const mail: { to: string; subject: string; text: string }[] = [];
@@ -272,41 +272,28 @@ async function main() {
     ok("  not before they've set up — that's the setup email", !dialog({ setupPending: true, status: "invited" }).includes("Send reset email"));
     ok("  not for a switched-off account", !dialog({ active: false, status: "off" }).includes("Send reset email"));
 
-    const table = (rows: ReturnType<typeof staffRow>[]) =>
+    // A person's Login & Access under Users (src/app/(dashboard)/settings/users/page.tsx): what the
+    // Staff table's row offered before it.
+    const account = (over: Record<string, unknown> = {}, mayEdit = true) =>
       renderToStaticMarkup(
-        createElement(StaffTable, {
-          rows,
+        createElement(UserAccountActions, {
+          mode: "login",
+          row: staffRow(over) as never,
           roles: [{ key: "SALES", name: "Sales" }],
           departments: [],
+          people: [],
           branches: null,
-          mayEdit: true,
+          mayEdit,
           mayAssignRole: true,
-          mayManageAccess: true,
+          mayChangeManager: true,
           viewerIsSuperAdmin: false,
-          showLeads: false,
-          showSignIns: false,
         }) as ReactElement,
       );
-    const listed = table([staffRow(), staffRow({ id: "you", name: `${TAG} You`, isYou: true }), staffRow({ id: "inv", name: `${TAG} Inv`, setupPending: true, status: "invited" }), staffRow({ id: "tmp", name: `${TAG} Tmp`, tempPassword: true })]);
-    ok("the row has the one-click button", listed.includes(`aria-label="Send ${TAG} Asha a password reset email"`));
-    ok("  not on your own row", !listed.includes(`Send ${TAG} You a password reset email`));
-    ok("  nor an invited one's", !listed.includes(`Send ${TAG} Inv a password reset email`));
-    ok("  and a temporary password shows on its row", listed.includes("Temporary password"));
-    const readOnly = renderToStaticMarkup(
-      createElement(StaffTable, {
-        rows: [staffRow()],
-        roles: [],
-        departments: [],
-        branches: null,
-        mayEdit: false,
-        mayAssignRole: false,
-        mayManageAccess: false,
-        viewerIsSuperAdmin: false,
-        showLeads: false,
-        showSignIns: false,
-      }) as ReactElement,
-    );
-    ok("  and nobody without users.manage is offered it", !readOnly.includes("password reset email"));
+    ok("their Login & Access has the one-click button", account().includes(">Send password reset<"));
+    ok("  not on your own", !account({ isYou: true }).includes("Send password reset"));
+    ok("  nor an invited one's", !account({ setupPending: true, status: "invited" }).includes("Send password reset"));
+    ok("  and a temporary password shows beside it", account({ tempPassword: true }).includes("Temporary password"));
+    ok("  and nobody without users.manage is offered it", !account({}, false).includes("password reset"));
   } finally {
     mailer.setTestPlatformMailer(null);
     await cleanup(db);
