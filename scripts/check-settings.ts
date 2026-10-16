@@ -115,7 +115,14 @@ function main() {
     .filter((e) => e.isDirectory() && fs.existsSync(path.join(settingsDir, e.name, "page.tsx")))
     .map((e) => `/settings/${e.name}`);
 
+  // Retired pages that only send an old link on to where it moved, and render nothing of their own.
+  const RETIRED = new Set(["/settings/access"]);
   for (const route of routes) {
+    if (RETIRED.has(route)) {
+      const source = fs.readFileSync(path.join(settingsDir, route.replace("/settings/", ""), "page.tsx"), "utf8");
+      ok(`${route} is retired: it only redirects`, /\bredirect\(/.test(source) && !/return \(/.test(source) && !SETTINGS_ITEMS.some((i) => i.href === route));
+      continue;
+    }
     const listed = SETTINGS_ITEMS.some((i) => i.href === route);
     // The failure this catches: a feature adds a settings screen, links it from its own module, and
     // it never appears in Settings — which is how e-way bills was reachable only by typing the URL.
@@ -205,7 +212,7 @@ function main() {
 
   ok("/settings/data is Import & export", activeSettingsKey("/settings/data") === "data");
   ok("  /settings itself is nothing — it is the index", activeSettingsKey("/settings") === null);
-  ok("  a nested route still highlights its parent", activeSettingsKey("/settings/access/somebody") === "access");
+  ok("  a nested route still highlights its parent", activeSettingsKey("/settings/users/new") === "users");
   ok("  an unrelated page highlights nothing", activeSettingsKey("/companies") === null);
 
   section("Search");
@@ -222,11 +229,12 @@ function main() {
 
   finds("mail", ["Document emails", "Mail & messaging", "Support email"]);
   finds("invoice", ["e-Invoicing"]);
-  finds("roles", ["Staff & roles"]);
+  finds("roles", ["Roles & Permissions"]);
   // Word endings: neither name says "notifications" or "pipelines" — only the stem finds them.
   finds("notifications", ["Notification preferences"]);
   finds("pipelines", ["Pipeline"]);
-  finds("gstin", ["Branches & GST registrations"]);
+  // Branches (under Staff) says GSTIN only in its description.
+  finds("gstin", ["Branches"]);
   finds("MAIL", ["Mail & messaging"]);
   finds("  mail  ", ["Mail & messaging"]);
   ok("  an accent is folded away — \"máil\" is \"mail\"", found("m\u00e1il").join() === found("mail").join());

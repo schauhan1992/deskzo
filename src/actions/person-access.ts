@@ -10,7 +10,7 @@ import { ACCESS_MODULES, moduleStanding, type ModuleStanding } from "@/lib/staff
 import { actorContext, assertGrantWithinOwnAuthority, assertMayActOnTarget, AuthzError } from "@/lib/authz/guards";
 import { recordPermissionChange } from "@/lib/authz/audit";
 import { notMigratedYet } from "@/lib/not-migrated";
-import { getPermissionDefinition, type PermissionKey } from "@/lib/permissions";
+import { getPermissionDefinition, PERMISSIONS, type PermissionKey } from "@/lib/permissions";
 import { workspaceClock } from "@/lib/time/workspace";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { claimsMoreThan, LEVEL_RANK, LEVEL_WORDS, UNDER, within } from "@/lib/authz/level-order";
@@ -264,7 +264,7 @@ export async function setPersonAccessLevels(
       detail: `${accessRecordDefinition(w.record).label} — ${w.action} for ${target.name}: ${LEVEL_WORDS[w.before]} → ${LEVEL_WORDS[w.afterEffective]}${w.after === null ? " (back to their role)" : ""}${reason ? ` — ${reason}` : ""}`,
     });
   }
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   revalidatePath("/", "layout");
   return { ok: true, data: { changed: writes.length } };
 }
@@ -331,7 +331,7 @@ export async function resetPersonToRole(userId: string): Promise<ActionResult<{ 
     changeKind: "RESET_TO_DEFAULT",
     detail: `${target.name} reset to their role (${target.role}): ${grants.length} permission exception(s), ${levels.length} record level(s), ${removedFields} field polic(ies)${ownLimit ? " and their daily limit" : ""} removed`,
   });
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   revalidatePath("/", "layout");
   return { ok: true, data: { removed } };
 }
@@ -372,4 +372,32 @@ export async function accessPreview(subject: { userId: string } | { role: string
     out.push({ key: m.key, label: m.label, description: m.description, standing: moduleStanding(m, holds, (r) => views.get(r) ?? false) });
   }
   return out;
+}
+
+/**
+ * What a person, or a role, holds and reaches — every permission and every record level — for the
+ * Permission preview, which lays it out by module and says it in words. The same answers as
+ * `accessPreview`, in full rather than as one standing per module; readable by whoever may review
+ * access, and by anybody about themselves.
+ */
+export async function effectiveAccessOf(
+  subject: { userId: string } | { role: string },
+): Promise<{ holds: string[]; levels: Record<string, AccessLevel> } | null> {
+  const session = await requireUser();
+  const mine = "userId" in subject && subject.userId === session.id;
+  if (!mine && !(await can(session.id, "permissions.view"))) return null;
+  const levels: Record<string, AccessLevel> = {};
+  if ("userId" in subject) {
+    const target = await db.user.findUnique({ where: { id: String(subject.userId ?? "") }, select: { id: true } });
+    if (!target) return null;
+    const holds = (await permissionsFor(target.id)).map(String);
+    for (const def of ACCESS_RECORDS) {
+      for (const action of def.actions) levels[`${def.key}:${action}`] = (await explainAccess(target.id, def.key, action)).level;
+    }
+    return { holds, levels };
+  }
+  const [grants, grid] = await Promise.all([roleGrants(subject.role), roleAccessLevels(subject.role)]);
+  if (!grid) return null;
+  for (const row of grid.rows) for (const action of row.actions) levels[`${row.key}:${action}`] = row.cells[action].stored ?? row.cells[action].derived;
+  return { holds: PERMISSIONS.filter((d) => grants(d.key)).map((d) => d.key), levels };
 }

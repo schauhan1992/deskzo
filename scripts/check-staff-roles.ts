@@ -1,19 +1,22 @@
 /**
- * Staff & roles: the workspace's "Users & access", rebuilt in the owner's reference layout.
+ * Settings › Staff: Users and Roles & Permissions — what was Staff & roles, rebuilt as the owner's
+ * mockup, each a page of its own.
  *
  *   1. The pieces without a page: a person's status, "58m ago", which module a permission needs.
- *   2. The Staff tab: its counts and statuses, the leads and last-sign-in columns, the row actions —
- *      as an admin and as a read-only reviewer.
- *   3. Switching somebody off from the Staff tab works, never deletes, and is refused for yourself and
- *      for the super admin.
+ *   2. Users: the list (All / Active / Inactive), one person open — their header, Profile with the open
+ *      leads and job title, Login & Access with the last sign-in and the account's actions — as an admin
+ *      and as a read-only reviewer; and every retired Staff & roles link lands where it moved.
+ *   3. Switching somebody off works, never deletes, and is refused for yourself and for the super admin.
  *   4. Add staff creates an account with a setup link and no password — and keeps `createUser`'s old
  *      callers working.
- *   5. The role dialog saves exactly the boxes ticked (a permission's wider reach is its own box), all
+ *   5. Saving a role writes exactly the boxes ticked (a permission's wider reach is its own box), all
  *      or nothing, and nobody can take away their own way into these screens.
- *   6. A read-only reviewer sees the same dialog, disabled, and the server refuses them anyway.
- *   7. The Roles tab: the super admin's card has no edit; the matrix is still there as Compare roles.
+ *   6. A role's Module Access, as a read-only reviewer and as an admin: the reasons a box can't change;
+ *      and the server refuses a reviewer anyway.
+ *   7. Roles & Permissions: the roles beside the one open, its tabs and header; the permission matrix,
+ *      with the exceptions and who-holds-what under it.
  *
- * The real actions and the real page, with the session, `next/cache`, `next/navigation`, the dialog's
+ * The real actions and the real pages, with the session, `next/cache`, `next/navigation`, the dialog's
  * portal and the platform account hooks substituted. No mail leaves (the platform mailer is
  * replaced), no password is typed or set — fixtures that can "sign in" hold a placeholder nothing
  * matches. Everything is named ZZSTAFF / @zzstaff-check.invalid and removed in a finally; assertions
@@ -76,7 +79,7 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
       },
       useRouter: () => ({ push() {}, refresh() {}, replace() {}, back() {}, prefetch() {} }),
       useSearchParams: () => new URLSearchParams(),
-      usePathname: () => "/settings/access",
+      usePathname: () => "/settings/users",
     };
   }
   // The dialog portals into document.body, which a server render has none of. Its contents are what
@@ -120,11 +123,16 @@ function keep(name: string, markup: string) {
   fs.writeFileSync(path.join(RENDERS, `${name}.html`), page);
 }
 
-/** The table row holding this text, so an assertion is about that person and nobody else. */
-function rowOf(markup: string, text: string): string {
-  return markup.split("<tr").find((chunk) => chunk.includes(text)) ?? "";
+/** What a person reads: the markup without its tags, React's text separators or entities. */
+function text(markup: string): string {
+  return markup
+    .replace(/<!-- -->/g, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&#x27;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/\s+/g, " ");
 }
-/** The role card holding this name. */
 const count = (markup: string, pattern: RegExp) => (markup.match(pattern) ?? []).length;
 
 // ─── Main ────────────────────────────────────────────────────────────────────────────────────────
@@ -147,18 +155,33 @@ async function main() {
   const USER = require("../src/actions/user") as typeof import("../src/actions/user");
   const ROLE = require("../src/actions/role") as typeof import("../src/actions/role");
   const PERM = require("../src/actions/permission") as typeof import("../src/actions/permission");
-  const PAGE = require("../src/app/(dashboard)/settings/access/page") as typeof import("../src/app/(dashboard)/settings/access/page");
-  const ADD = require("../src/app/(dashboard)/settings/access/new/page") as typeof import("../src/app/(dashboard)/settings/access/new/page");
-  const { RoleAccessEditor } = require("../src/components/settings/roles/role-access-editor") as typeof import("../src/components/settings/roles/role-access-editor");
-  const { permissionsOfModule } = require("../src/lib/staff/access-modules") as typeof import("../src/lib/staff/access-modules");
+  const USERS = require("../src/app/(dashboard)/settings/users/page") as typeof import("../src/app/(dashboard)/settings/users/page");
+  const ROLES = require("../src/app/(dashboard)/settings/roles/page") as typeof import("../src/app/(dashboard)/settings/roles/page");
+  const MATRIX = require("../src/app/(dashboard)/settings/roles/matrix/page") as typeof import("../src/app/(dashboard)/settings/roles/matrix/page");
+  const RETIRED = require("../src/app/(dashboard)/settings/access/page") as typeof import("../src/app/(dashboard)/settings/access/page");
+  const RETIRED_PERSON = require("../src/app/(dashboard)/settings/access/users/[id]/page") as typeof import("../src/app/(dashboard)/settings/access/users/[id]/page");
+  const ADD = require("../src/app/(dashboard)/settings/users/new/page") as typeof import("../src/app/(dashboard)/settings/users/new/page");
+  const { RoleModulesWorkspace } = require("../src/components/settings/roles/role-modules-workspace") as typeof import("../src/components/settings/roles/role-modules-workspace");
+  const { RoleRecordAccess } = require("../src/components/settings/roles/role-record-access") as typeof import("../src/components/settings/roles/role-record-access");
+  const { actionRowsOf } = require("../src/lib/staff/access-modules") as typeof import("../src/lib/staff/access-modules");
+  const { userPath, rolePath } = require("../src/lib/staff/staff-paths") as typeof import("../src/lib/staff/staff-paths");
   const { roleAccessLevels } = require("../src/actions/access-levels") as typeof import("../src/actions/access-levels");
   /* eslint-enable @typescript-eslint/no-require-imports */
 
   const mail: { to: string; subject: string; text: string }[] = [];
   mailer.setTestPlatformMailer(async (m) => void mail.push(m));
 
-  const renderPage = async (tab: string, extra: Record<string, string> = {}) =>
-    html(await resolveAsync(await PAGE.default({ searchParams: Promise.resolve({ tab, ...extra }) })));
+  const renderUsers = async (sp: Record<string, string> = {}) => html(await resolveAsync(await USERS.default({ searchParams: Promise.resolve(sp) })));
+  const renderRoles = async (sp: Record<string, string> = {}) => html(await resolveAsync(await ROLES.default({ searchParams: Promise.resolve(sp) })));
+  /** Where a retired page sends you: the stand-in `redirect` throws with the address. */
+  const landsOn = async (page: () => unknown) => {
+    try {
+      await page();
+      return null;
+    } catch (err) {
+      return /^redirect (.*)$/.exec((err as Error).message)?.[1] ?? (err as Error).message;
+    }
+  };
 
   await cleanup(db);
   try {
@@ -252,63 +275,74 @@ async function main() {
     ok("  and nothing is fetched that wasn't asked for", quiet.get(akash.id)?.openLeads === null && quiet.get(akash.id)?.lastSignInAt === null);
 
     actorId = admin.id;
-    const staffHtml = await renderPage("staff");
-    keep("staff-tab-admin", staffHtml);
-    ok("the page is Staff & roles", staffHtml.includes("Staff &amp; roles") && staffHtml.includes("Who can sign in, and exactly what each of them may do."));
+    const usersHtml = await renderUsers({ user: akash.id, tab: "profile" });
+    keep("users-akash-profile-admin", usersHtml);
+    const usersText = text(usersHtml);
+    ok("the page is Users", usersHtml.includes(">Users<") && usersHtml.includes("Manage users and configure individual permissions."));
+    const everybody = await db.user.count();
     const activeNow = await db.user.count({ where: { active: true } });
-    const staffTabCount = /Staff<span class="sr-only">, <\/span><span[^>]*>(\d+)<\/span>/.exec(staffHtml)?.[1];
-    ok("the Staff tab's count is everybody active or invited, read out as \"Staff, N\"", Number(staffTabCount) === activeNow, `${staffTabCount} vs ${activeNow}`);
-    const rolesTabCount = /Roles &amp; permissions<span class="sr-only">, <\/span><span[^>]*>(\d+)<\/span>/.exec(staffHtml)?.[1];
-    ok("  and Roles & permissions counts every role card, the super admin's included", Number(rolesTabCount) === (await db.role.count()) + 1, rolesTabCount);
-    ok("Exceptions and Who can are still tabs", staffHtml.includes("tab=exceptions") && staffHtml.includes("tab=who"));
-    ok("the card says who is listed, with Add staff", staffHtml.includes("Everyone who can sign in to this workspace.") && staffHtml.includes('href="/settings/access/new"'));
-    const akashRow = rowOf(staffHtml, `${TAG} Akash`);
-    const binaRow = rowOf(staffHtml, `${TAG} Bina`);
-    ok("Akash is Active, with his initials in the avatar", akashRow.includes(">Active<") && akashRow.includes(">ZA<"));
-    ok("  Bina, who hasn't chosen a password, is Invited", binaRow.includes(">Invited<"));
-    ok("  Chetan, switched off, is hidden until the filter asks for him", !staffHtml.includes(`${TAG} Chetan`));
-    ok("  the filter offers the switched-off, the invited and the exceptions", staffHtml.includes('value="off"') && staffHtml.includes('value="invited"') && staffHtml.includes('value="exceptions"'));
-    ok("Leads: 2, in red, with the overdue one read out", akashRow.includes("text-danger") && akashRow.includes(">2<") && akashRow.includes("1 past their expected close date"));
-    ok("Last signed in: \"58m ago\", with the exact time on hover", /<time dateTime="[^"]+" title="[^"]+">58m ago<\/time>/.test(akashRow));
-    ok("  and Never for somebody who hasn't", binaRow.includes(">Never<"));
-    ok("the role pill and the access line under it", akashRow.includes(">Sales<") && /Holds \d+ of \d+/.test(akashRow));
-    const adminRow = rowOf(staffHtml, `${TAG} Admin`);
-    ok("\"(you)\" on the viewer's own row", adminRow.includes(`${TAG} Admin</span><span class="text-xs text-muted">(you)</span>`));
-    ok("a pencil and a switch-off on somebody else's row, each naming them", akashRow.includes(`aria-label="Edit ${TAG} Akash"`) && akashRow.includes(`aria-label="Switch off ${TAG} Akash"`));
-    ok("  no switch-off on your own row", adminRow.includes(`aria-label="Edit ${TAG} Admin"`) && !adminRow.includes("Switch off"));
-    const saRow = rowOf(staffHtml, `>${superAdmin.name}</span>`);
-    ok("  nor on the super admin's, whose pill is the brand's", saRow.includes(">Super admin<") && saRow.includes("bg-brand-subtle") && !saRow.includes("Switch off") && !saRow.includes(`aria-label="Edit ${superAdmin.name}"`));
-    // Each person's access has a page of its own now (src/app/(dashboard)/settings/access/users/[id]).
-    ok("everybody's row opens their access page", akashRow.includes(`aria-label="Permissions for ${TAG} Akash"`) && akashRow.includes(`href="/settings/access/users/`));
-    ok("on a phone the table scrolls inside its card", staffHtml.includes('class="overflow-x-auto"><table class="w-full min-w-[760px]'));
-    ok("departments are kept under the table", staffHtml.includes(">Departments<"));
+    const tabCount = (label: string) => Number(new RegExp(`${label} \\((\\d+)\\)`).exec(usersText)?.[1]);
+    ok("All, Active and Inactive, each counted", tabCount("All") === everybody && tabCount("Active") === activeNow && tabCount("Inactive") === everybody - activeNow, `${tabCount("All")}/${tabCount("Active")}/${tabCount("Inactive")} vs ${everybody}/${activeNow}`);
+    ok("  with search, department and role filters", usersHtml.includes('placeholder="Search users…"') && usersHtml.includes(">All departments<") && usersHtml.includes(">All roles<"));
+    ok("  and + to add somebody", usersHtml.includes('href="/settings/users/new"'));
+    const listed = (name: string) => usersHtml.split("<li").find((chunk) => chunk.includes(`>${name}</span>`)) ?? "";
+    ok("everybody is listed with role • department, opening on the tab already open", listed(`${TAG} Akash`).includes(`href="${userPath(akash.id, "profile").replaceAll("&", "&amp;")}"`) && text(listed(`${TAG} Akash`)).includes("Sales"));
+    ok("  Bina, who hasn't chosen a password, says invited", text(listed(`${TAG} Bina`)).includes("• invited"));
+    ok("  and Chetan, switched off, inactive", text(listed(`${TAG} Chetan`)).includes("• inactive"));
+    ok("Akash is open: his initials, Active, his phone", usersHtml.includes(">ZA<") && usersHtml.includes(">Active<") && usersHtml.includes("+91 90000 00001") && usersHtml.includes('aria-current="page"'));
+    ok("  with Reset to role defaults, View as user and Save changes", usersHtml.includes("Reset to role defaults") && usersHtml.includes("View as user") && usersHtml.includes("Save changes"));
+    ok("  and the mockup's tabs", ["Profile", "Role", "Permissions", "Record Access", "Field Permissions", "Business Rules", "Login &amp; Access", "Activity"].every((t) => usersHtml.includes(`>${t}</a>`)));
+    ok("Profile: job title, and open leads with the overdue one", usersText.includes("Zz Field Engineer") && usersText.includes("2 (1 past their expected close date)"));
+    ok("  and Edit profile", usersHtml.includes("Edit profile"));
+    const akashLogin = await renderUsers({ user: akash.id, tab: "login" });
+    keep("users-akash-login-admin", akashLogin);
+    ok("Login & Access: when he last signed in", text(akashLogin).includes("Last sign-in:") && !text(akashLogin).includes("Last sign-in: never"));
+    ok("  Switch off and Send password reset, each through its own action", akashLogin.includes("Switch off") && akashLogin.includes("Send password reset"));
+    const binaLogin = text(await renderUsers({ user: bina.id, tab: "login" }));
+    ok("  Bina is Invited, and never signed in", binaLogin.includes("Invited — no password chosen yet") && binaLogin.includes("Last sign-in: never"));
+    const ownLogin = await renderUsers({ user: admin.id, tab: "login" });
+    ok("no Switch off on your own account", !ownLogin.includes("Switch off"));
+    const saLogin = await renderUsers({ user: superAdmin.id, tab: "login" });
+    ok("  nor on the super admin's, nor Edit profile for an admin who isn't one", !saLogin.includes("Switch off") && !(await renderUsers({ user: superAdmin.id, tab: "profile" })).includes("Edit profile"));
+    const akashPermissions = await renderUsers({ user: akash.id });
+    keep("users-akash-permissions-admin", akashPermissions);
+    ok(
+      "Permissions opens by default: Individual Permissions — role default, override and effective for each action — the daily limit, field masking and effective access",
+      ["Individual Permissions", "Role default (Sales)", "Individual override", "Effective for", "Unmasking limits (Daily)", "Sensitive field masking", "Effective Access for", "Additional user-specific permissions", "Conditions (optional)", "How it works?"].every((t) => text(akashPermissions).includes(t)),
+    );
+    ok("  every action offers Use role default, Allow and Deny", akashPermissions.includes('aria-label="View leads: individual override"') && akashPermissions.includes(">Use role default</option><option value=\"allow\">Allow</option><option value=\"deny\">Deny</option>"));
 
     actorId = auditor.id;
-    const staffReviewer = await renderPage("staff");
-    keep("staff-tab-reviewer", staffReviewer);
-    ok("a reviewer is told it's read-only", staffReviewer.includes("You can review access but not change it."));
-    ok("  and gets no Add staff, pencil or switch-off", !staffReviewer.includes("/settings/access/new") && !staffReviewer.includes(`Edit ${TAG} Akash`) && !staffReviewer.includes("Switch off"));
-    ok("  but can still open anybody's access to read it", staffReviewer.includes(`aria-label="Review access for ${TAG} Akash"`));
-    ok("  and sees no Leads or Last signed in without the permissions behind them", !staffReviewer.includes(">Leads<") && !staffReviewer.includes(">Last signed in<"));
-    ok("an old link to People lands on Staff", (await renderPage("people")).includes("Everyone who can sign in to this workspace."));
+    const usersReviewer = await renderUsers({ user: akash.id, tab: "profile" });
+    keep("users-akash-profile-reviewer", usersReviewer);
+    ok("a reviewer is told it's read-only", usersReviewer.includes("You can review access but not change it."));
+    ok("  and gets no add, Edit profile or Reset", !usersReviewer.includes("/settings/users/new") && !usersReviewer.includes("Edit profile") && !usersReviewer.includes("Reset to role defaults"));
+    ok("  nor Switch off", !(await renderUsers({ user: akash.id, tab: "login" })).includes("Switch off"));
+    ok("  and sees no open leads or sign-ins without the permissions behind them", !text(usersReviewer).includes("Open leads") && !text(await renderUsers({ user: akash.id, tab: "login" })).includes("Last sign-in"));
+
+    actorId = admin.id;
+    ok("an old link to Staff or People lands on Users", (await landsOn(() => RETIRED.default({ searchParams: Promise.resolve({ tab: "people" }) }))) === "/settings/users" && (await landsOn(() => RETIRED.default({ searchParams: Promise.resolve({}) }))) === "/settings/users");
+    ok("  one to a role, on the same role and tab", (await landsOn(() => RETIRED.default({ searchParams: Promise.resolve({ tab: "roles", role: "SALES", rtab: "summary" }) }))) === rolePath("SALES", "summary"));
+    ok("  Compare roles, Exceptions and Who can to the permission matrix", (await landsOn(() => RETIRED.default({ searchParams: Promise.resolve({ tab: "roles", view: "compare" }) }))) === "/settings/roles/matrix" && (await landsOn(() => RETIRED.default({ searchParams: Promise.resolve({ tab: "exceptions" }) }))) === "/settings/roles/matrix#exceptions" && (await landsOn(() => RETIRED.default({ searchParams: Promise.resolve({ tab: "who" }) }))) === "/settings/roles/matrix#who-can");
+    ok("  and a person's old page to them under Users, on the same tab", (await landsOn(() => RETIRED_PERSON.default({ params: Promise.resolve({ id: akash.id }), searchParams: Promise.resolve({ tab: "fields" }) }))) === userPath(akash.id, "fields"));
 
     // ─────────────────────────────────────────────────────────────────────────────────────────────
-    section("3. Switching off from the Staff tab");
+    section("3. Switching somebody off");
 
     actorId = admin.id;
     const off = await USER.setUserActive(akash.id, false);
-    ok("the trash switches Akash off", off.ok, off.ok ? "" : off.error);
+    ok("Switch off switches Akash off", off.ok, off.ok ? "" : off.error);
     ok("  and only switches him off — the account and everything he owns are still there", (await db.user.findUnique({ where: { id: akash.id }, select: { active: true } }))?.active === false && (await db.lead.count({ where: { ownerUserId: akash.id } })) === 3);
-    const offHtml = rowOf(await renderPage("staff"), `${TAG} Akash`);
-    ok("  he leaves the default list", offHtml === "");
+    const offHtml = await renderUsers({ user: akash.id, tab: "login" });
+    ok("  he shows as inactive, with Switch on", text(offHtml).includes("• inactive") && offHtml.includes(">Inactive<") && offHtml.includes("Switch on"));
     const back = await USER.setUserActive(akash.id, true);
     ok("  and can be switched back on", back.ok, back.ok ? "" : back.error);
     const self = await USER.setUserActive(admin.id, false);
     ok("switching yourself off is refused", !self.ok && /own account/.test(self.error), self.ok ? "allowed" : self.error);
     const sa = await USER.setUserActive(superAdmin.id, false);
     ok("  and so is switching off the super admin, by an admin", !sa.ok, sa.ok ? "allowed" : sa.error);
-    const confirmSource = fs.readFileSync(path.join(__dirname, "../src/components/settings/staff/staff-table.tsx"), "utf8");
-    ok("the confirmation says nothing is deleted", confirmSource.includes("Nothing is deleted.") && confirmSource.includes("Switch off ${switchingOff.name}"));
+    const confirmSource = fs.readFileSync(path.join(__dirname, "../src/components/settings/people/user-account-actions.tsx"), "utf8");
+    ok("the confirmation says nothing is deleted", confirmSource.includes("Nothing is deleted.") && confirmSource.includes("Switch off ${row.name}"));
 
     // ─────────────────────────────────────────────────────────────────────────────────────────────
     section("4. Add staff: a setup link, never a password");
@@ -360,7 +394,7 @@ async function main() {
     ok("the same email twice is refused", !twice.ok && /already exists/.test(twice.error));
 
     // ─────────────────────────────────────────────────────────────────────────────────────────────
-    section("5. The role dialog saves exactly what was ticked");
+    section("5. Saving a role writes exactly what was ticked");
 
     const createdRole = await ROLE.createRole({ name: `${TAG} Dialog Role`, description: "Probe" });
     ok("New role makes a role", createdRole.ok, createdRole.ok ? "" : createdRole.error);
@@ -441,93 +475,88 @@ async function main() {
       superAdminOnly: def.superAdminOnly === true,
       modules: permissionModules(def.key),
     }));
-    // The role's own screen (src/components/settings/roles/role-access-editor.tsx), which replaced the
-    // old Edit role dialog: one module at a time, a box per permission, the server's reasons on a box
-    // that can't be changed.
-    const crm = new Set(permissionsOfModule("crm").map((d) => d.key));
-    const labelToKey = new Map(catalogue.map((c) => [c.label.replaceAll("&", "&amp;").replaceAll("'", "&#x27;").replaceAll('"', "&quot;"), c.key]));
-    const keysOf = (markup: string, which: (tag: string) => boolean) =>
-      (markup.match(/<input type="checkbox"[^>]*>/g) ?? [])
-        .filter(which)
-        .map((tag) => labelToKey.get(/aria-label="Allow ([^"]+)"/.exec(tag)?.[1] ?? "") ?? "?");
-    const editorProps = { view: "modules" as const, roleKey: DIALOG, catalogue, selfExcluded: [] as string[], held: second, grid: [], gridWhy: null, modules: moduleStates };
-    const asReviewer = html(
-      createElement(RoleAccessEditor, { ...editorProps, viewer: { mayManage: false, isSuperAdmin: false, holds: ["permissions.view"], role: AUDITOR, ownAccessThroughRole: ["permissions.view"] } }),
-    );
-    keep("role-editor-reviewer", asReviewer);
+    // The role's Module Access (src/components/settings/roles/role-modules-workspace.tsx): one module at
+    // a time, an Allow box per action, the server's reasons on a box that can't be changed.
+    const grid = await roleAccessLevels(DIALOG);
+    const records = (grid?.rows ?? []).map((r) => ({ key: r.key, label: r.label, actions: r.actions }));
+    const crmRows = actionRowsOf("crm", records);
+    const crmKeyRows = crmRows.flatMap((r) => (r.kind === "key" ? [r] : []));
+    const esc = (t: string) => t.replaceAll("&", "&amp;").replaceAll("'", "&#x27;").replaceAll('"', "&quot;");
+    /** The Allow box of the row with this label — its tag, or "" when there is none. */
+    const box = (markup: string, label: string) => (markup.match(/<input type="checkbox"[^>]*>/g) ?? []).find((tag) => tag.includes(`aria-label="Allow ${esc(label)}"`)) ?? "";
+    const workspace = (roleKey: string, held: string[], viewer: { mayManage: boolean; isSuperAdmin: boolean; holds: string[]; role: string; ownAccessThroughRole: string[] }) =>
+      html(
+        createElement(RoleModulesWorkspace, {
+          roleKey,
+          catalogue,
+          held,
+          grid: grid?.rows ?? [],
+          gridWhy: null,
+          selfExcluded: [],
+          moduleStates,
+          viewer,
+          people: [],
+          roleSummaryHref: rolePath(roleKey, "summary"),
+        }),
+      );
+    const asReviewer = workspace(DIALOG, second, { mayManage: false, isSuperAdmin: false, holds: ["permissions.view"], role: AUDITOR, ownAccessThroughRole: ["permissions.view"] });
+    keep("role-modules-reviewer", asReviewer);
     const boxes = count(asReviewer, /type="checkbox"/g);
-    ok("the reviewer sees the role's first module, CRM: a box for each of its permissions", boxes === crm.size, `${boxes} of ${crm.size}`);
-    ok("  every one disabled, saying why", count(asReviewer, /<input type="checkbox"[^>]*disabled=""[^>]*title="You can review roles but not change them."/g) === boxes);
-    ok("  and every module listed to move to", count(asReviewer, /aria-label="Modules"/g) === 1 && asReviewer.includes(">Orders &amp; projects<") && asReviewer.includes(">Administration<"));
+    ok("the reviewer sees the role's first module, CRM: an Allow box for each of its actions", crmRows.length > 0 && crmRows.every((r) => box(asReviewer, r.label) !== ""), `${boxes} boxes, ${crmRows.length} rows`);
+    ok("  every one disabled, saying why", crmRows.every((r) => /disabled=""/.test(box(asReviewer, r.label)) && box(asReviewer, r.label).includes('title="You can review roles but not change them."')));
+    ok("  and every module listed to move to", count(asReviewer, /aria-label="Modules"/g) === 1 && asReviewer.includes(">Sales<") && asReviewer.includes(">Settings<") && asReviewer.includes(">Permission preview<"));
 
     const viewerHolds = PERMISSIONS.filter((p) => !p.superAdminOnly).map((p) => p.key);
-    const asAdmin = html(
-      createElement(RoleAccessEditor, { ...editorProps, viewer: { mayManage: true, isSuperAdmin: false, holds: viewerHolds, role: "ADMIN", ownAccessThroughRole: ["permissions.view", "permissions.manage"] } }),
-    );
-    keep("role-editor-admin", asAdmin);
-    const tickedHere = keysOf(asAdmin, (tag) => tag.includes('checked=""'));
-    ok("an admin's boxes are ticked exactly as the role holds, in this module", same(tickedHere, second.filter((k) => crm.has(k))), tickedHere);
-    ok("  and open to change, but for what only a super admin grants", keysOf(asAdmin, (tag) => tag.includes('disabled=""')).every((k) => PERMISSIONS.find((p) => p.key === k)?.superAdminOnly === true));
-    ok("  with the server's own promise beside Save", asAdmin.includes("Enforced on the server for every request — not just hidden in the menu.") && asAdmin.includes(">Save changes<"));
-    const adminRoleScreen = html(
-      createElement(RoleAccessEditor, {
-        ...editorProps,
-        roleKey: "ADMIN",
-        held: PERMISSIONS.map((p) => p.key),
-        viewer: { mayManage: true, isSuperAdmin: false, holds: viewerHolds, role: "ADMIN", ownAccessThroughRole: ["permissions.view", "permissions.manage"] },
-      }),
-    );
-    ok("Admin's own role is locked for a non-super admin", count(adminRoleScreen, /<input type="checkbox"[^>]*disabled=""[^>]*title="Only a super admin can change what admins can do."/g) === crm.size);
-    const grid = await roleAccessLevels(DIALOG);
-    const records = html(
-      createElement(RoleAccessEditor, {
-        ...editorProps,
-        view: "records",
-        grid: grid?.rows ?? [],
-        viewer: { mayManage: true, isSuperAdmin: false, holds: viewerHolds, role: "ADMIN", ownAccessThroughRole: ["permissions.view", "permissions.manage"] },
-      }),
-    );
-    keep("role-editor-records", records);
-    ok("Record access is the whole grid: a choice per record and action", (grid?.rows.length ?? 0) > 0 && count(records, /<select/g) >= (grid?.rows.length ?? 1));
+    const adminViewer = { mayManage: true, isSuperAdmin: false, holds: viewerHolds, role: "ADMIN", ownAccessThroughRole: ["permissions.view", "permissions.manage"] };
+    const asAdmin = workspace(DIALOG, second, adminViewer);
+    keep("role-modules-admin", asAdmin);
+    ok("an admin's boxes are ticked exactly as the role holds, in this module", crmKeyRows.every((r) => box(asAdmin, r.label).includes('checked=""') === second.includes(r.key)));
+    ok("  and open to change, but for what only a super admin grants", crmKeyRows.every((r) => /disabled=""/.test(box(asAdmin, r.label)) === (PERMISSIONS.find((p) => p.key === r.key)?.superAdminOnly === true)));
+    ok("  with Module enabled for its place in the menu", asAdmin.includes("Module enabled"));
+    const adminRoleScreen = workspace("ADMIN", PERMISSIONS.map((p) => p.key), adminViewer);
+    ok("Admin's own role is locked for a non-super admin", crmKeyRows.every((r) => box(adminRoleScreen, r.label).includes('title="Only a super admin can change what admins can do."')));
+    const recordsHtml = html(createElement(RoleRecordAccess, { roleKey: DIALOG, grid: grid?.rows ?? [], gridWhy: null, mayManage: true }));
+    keep("role-records", recordsHtml);
+    ok("Record Access is the whole grid: a choice per record and action", (grid?.rows.length ?? 0) > 0 && count(recordsHtml, /<select/g) >= (grid?.rows.length ?? 1));
+    const recordsReviewer = html(createElement(RoleRecordAccess, { roleKey: DIALOG, grid: grid?.rows ?? [], gridWhy: null, mayManage: false }));
+    ok("  and read-only for a reviewer, saying why", recordsReviewer.includes("You can review roles but not change them.") && !recordsReviewer.includes("Save changes"));
 
     // ─────────────────────────────────────────────────────────────────────────────────────────────
-    section("7. The Roles tab");
+    section("7. Roles & Permissions");
 
     actorId = admin.id;
-    const rolesHtml = await renderPage("roles", { role: "SALES" });
-    keep("roles-tab-admin", rolesHtml);
+    const rolesHtml = await renderRoles({ role: "SALES" });
+    keep("roles-sales-admin", rolesHtml);
+    ok("the page is Roles & Permissions, with Permission matrix and Create role", rolesHtml.includes("Roles &amp; Permissions") && rolesHtml.includes("Create and manage roles with fine-grained access control") && rolesHtml.includes('href="/settings/roles/matrix"') && rolesHtml.includes("Create role"));
     ok("the roles are listed, searchable, beside the one open", rolesHtml.includes('placeholder="Search roles…"') && rolesHtml.includes('aria-current="page"'));
-    ok("  the super admin first: holds everything, built in", rolesHtml.includes("holds everything") && rolesHtml.includes(">Super admin<"));
+    ok("  the super admin first, marked System", rolesHtml.includes(">Super Admin<") && rolesHtml.includes(">System<"));
     const salesActive = await db.user.count({ where: { role: "SALES", active: true, isSuperAdmin: false } });
-    ok("  Sales with its people counted", rolesHtml.includes(`href="/settings/access?tab=roles&amp;role=SALES"`) && rolesHtml.includes(`${salesActive} ${salesActive === 1 ? "user" : "users"}`));
-    ok("  and a custom role, not marked built in", rolesHtml.includes(`role=${encodeURIComponent(DIALOG)}`));
-    ok("the open role's tabs: Module access, Record access, Field permissions, Business rules, Users, Summary", ["Module access", "Record access", "Field permissions", "Business rules", "Users", "Summary"].every((t) => rolesHtml.includes(`>${t}`)));
-    ok("  its header: Active, Rename and Duplicate — and no Delete on a built-in role", rolesHtml.includes('aria-label="Role switched on"') && rolesHtml.includes(">Rename<") && rolesHtml.includes(">Duplicate<") && !rolesHtml.includes("Delete</button>"));
-    ok("  + Create custom role and Compare roles", rolesHtml.includes(">Create custom role<") && rolesHtml.includes('href="/settings/access?tab=roles&amp;view=compare"'));
-    ok("  and the permission preview", rolesHtml.includes(">Permission preview<"));
-    const customHtml = await renderPage("roles", { role: DIALOG, rtab: "summary" });
-    keep("roles-tab-custom-summary", customHtml);
-    ok("a custom role can be deleted", customHtml.includes("Delete</button>"));
+    ok("  Sales with its people counted", rolesHtml.includes(`href="${rolePath("SALES")}"`) && text(rolesHtml).includes(`${salesActive} ${salesActive === 1 ? "user" : "users"}`));
+    ok("  and a custom role", rolesHtml.includes(`role=${encodeURIComponent(DIALOG)}`) && rolesHtml.includes("Create custom role"));
+    ok("the open role's tabs: Module Access, Record Access, Field Permissions, Business Rules, Users (n), Summary", ["Module Access", "Record Access", "Field Permissions", "Business Rules", `Users (${salesActive})`, "Summary"].every((t) => text(rolesHtml).includes(t)));
+    ok("  its header: Active, Rename, Duplicate — and Delete off on a built-in role", rolesHtml.includes('aria-label="Role switched on"') && rolesHtml.includes('aria-label="Rename ') && rolesHtml.includes("Duplicate") && /<button[^>]*disabled=""[^>]*title="One of the roles this application was built around/.test(rolesHtml));
+    ok("  and the permission preview", rolesHtml.includes(">Permission preview<") && rolesHtml.includes("Select a user (optional)"));
+    const customHtml = await renderRoles({ role: DIALOG, tab: "summary" });
+    keep("roles-custom-summary", customHtml);
+    ok("a custom role can be deleted", !/<button[^>]*disabled=""[^>]*title="One of the roles this application was built around/.test(customHtml) && customHtml.includes("Delete"));
     ok("  and its Summary keeps its history", customHtml.includes("This role&#x27;s history") && !customHtml.includes("Nothing has changed yet."));
-    const compareHtml = await renderPage("roles", { view: "compare" });
-    keep("roles-compare-admin", compareHtml);
-    ok("Compare roles is the matrix, presets and all", compareHtml.includes(">Compare roles<") && compareHtml.includes('aria-label="Find a permission"'));
+    const matrixHtml = html(await resolveAsync(await MATRIX.default()));
+    keep("roles-matrix-admin", matrixHtml);
+    ok("the permission matrix, presets and all", matrixHtml.includes(">Permission matrix<") && matrixHtml.includes('aria-label="Find a permission"'));
+    ok("  with the exceptions to roles and who holds a permission under it", matrixHtml.includes('id="exceptions"') && matrixHtml.includes("Every permission granted or denied to one person") && matrixHtml.includes('id="who-can"') && matrixHtml.includes("Who holds a permission"));
 
     actorId = auditor.id;
-    const rolesReviewer = await renderPage("roles", { role: "SALES" });
-    keep("roles-tab-reviewer", rolesReviewer);
-    ok("a reviewer can open every role to read it, and change none", rolesReviewer.includes(`href="/settings/access?tab=roles&amp;role=SALES"`) && !rolesReviewer.includes(">Create custom role<") && !rolesReviewer.includes(">Rename<") && !rolesReviewer.includes(">Duplicate<") && rolesReviewer.includes("You can review roles but not change them."));
+    const rolesReviewer = await renderRoles({ role: "SALES" });
+    keep("roles-sales-reviewer", rolesReviewer);
+    ok("a reviewer can open every role to read it, and change none", rolesReviewer.includes(`href="${rolePath("SALES")}"`) && !rolesReviewer.includes("Create custom role") && !rolesReviewer.includes('aria-label="Rename ') && !rolesReviewer.includes("Duplicate") && rolesReviewer.includes("You can review roles but not change them."));
 
-    actorId = admin.id;
-    ok("the Exceptions tab still renders", (await renderPage("exceptions")).includes("Every permission granted or denied to one person"));
-    ok("  and so does Who can", (await renderPage("who")).includes("The reverse of every other screen here."));
-
-    section("8. The name");
-    ok("Settings lists it as Staff & roles", SETTINGS_ITEMS.find((i) => i.key === "access")?.label === "Staff & roles");
-    ok("  and the browser tab says so", (PAGE as unknown as { metadata?: { title?: string } }).metadata?.title === "Staff & roles");
+    section("8. The names");
+    ok("Settings › Staff lists Roles & Permissions, Users and Departments", SETTINGS_ITEMS.find((i) => i.key === "roles")?.label === "Roles & Permissions" && SETTINGS_ITEMS.find((i) => i.key === "users")?.label === "Users" && SETTINGS_ITEMS.some((i) => i.href === "/settings/departments"));
+    ok("  and nothing points at the retired page", !SETTINGS_ITEMS.some((i) => i.href.startsWith("/settings/access")));
+    ok("  and the browser tabs say so", (USERS as unknown as { metadata?: { title?: string } }).metadata?.title === "Users" && (ROLES as unknown as { metadata?: { title?: string } }).metadata?.title === "Roles & Permissions");
     // The menu's links are built in src/lib/navigation.ts; the sidebar only draws them.
     const sidebar = fs.readFileSync(path.join(__dirname, "../src/lib/navigation.ts"), "utf8");
-    ok("  as does the sidebar", sidebar.includes('label: "Staff & roles"') && !sidebar.includes('label: "Users & Access"'));
+    ok("  as does the sidebar", sidebar.includes('label: "Users"') && sidebar.includes('label: "Roles & Permissions"') && !sidebar.includes('label: "Staff & roles"'));
   } finally {
     actorId = "";
     mailer.setTestPlatformMailer(null);
@@ -535,7 +564,7 @@ async function main() {
     await db.$disconnect();
   }
 
-  console.log(failures === 0 ? `\nStaff & roles: all ${passes} checks passed.\n` : `\n${failures} FAILED, ${passes} passed\n`);
+  console.log(failures === 0 ? `\nUsers and Roles & Permissions: all ${passes} checks passed.\n` : `\n${failures} FAILED, ${passes} passed\n`);
   process.exit(failures === 0 ? 0 : 1);
 }
 

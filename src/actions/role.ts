@@ -112,7 +112,7 @@ export async function createRole(input: { name: string; description?: string }):
     detail: `${user.name} created the role "${name}" (${key}), holding no permissions yet`,
   });
 
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   return { ok: true, data: { key } };
 }
 
@@ -151,7 +151,7 @@ export async function updateRole(input: {
     });
   }
 
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   revalidatePath("/", "layout");
   return { ok: true, data: null };
 }
@@ -229,7 +229,7 @@ export async function deleteRole(key: string): Promise<ActionResult<null>> {
     detail: `${user.name} deleted the role "${role.name}" (${role.key}), which nobody held`,
   });
 
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   return { ok: true, data: null };
 }
 
@@ -279,7 +279,7 @@ export async function setRoleActive(key: string, active: boolean): Promise<Actio
     changeKind: active ? "ROLE_ACTIVATED" : "ROLE_DEACTIVATED",
     detail: `${user.name} switched the role "${role.name}" ${active ? "back on" : "off"}`,
   });
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   return { ok: true, data: null };
 }
 
@@ -340,6 +340,6 @@ export async function duplicateRole(input: { from: string; name: string; descrip
     changeKind: "ROLE_CREATED",
     detail: `${user.name} made "${input.name.trim()}" (${key}) as a copy of "${source.name}"`,
   });
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   return { ok: true, data: { key } };
 }

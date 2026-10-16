@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { Download } from "lucide-react";
 import { exportUnmaskEventsCsv, type UnmaskLogFilters, type UnmaskLogRow } from "@/actions/unmask-log";
 import { Badge } from "@/components/ui/card";
@@ -9,6 +10,7 @@ import { ActionNotice } from "@/components/ui/action-notice";
 import { useClock } from "@/components/time/clock-provider";
 import { csvFilename } from "@/lib/csv";
 import { SENSITIVE_FIELDS } from "@/lib/authz/field-policy";
+import { leadPath } from "@/lib/record-links";
 
 const RESULT: Record<UnmaskLogRow["result"], { label: string; tone: "green" | "default" | "amber" | "red" }> = {
   ALLOWED: { label: "Unmasked", tone: "green" },
@@ -50,7 +52,7 @@ export function UnmaskLogTable({ rows, filters, total }: { rows: UnmaskLogRow[];
         <p className="text-sm text-muted">{total === 1 ? "1 attempt" : `${total.toLocaleString("en-IN")} attempts`}</p>
         <Button variant="secondary" size="sm" onClick={exportCsv} disabled={pending || total === 0}>
           <Download className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-          {pending ? "Exporting…" : "Export CSV"}
+          {pending ? "Exporting…" : "Export Logs"}
         </Button>
       </div>
       {notice && (
@@ -62,13 +64,13 @@ export function UnmaskLogTable({ rows, filters, total }: { rows: UnmaskLogRow[];
         <table className="w-full text-sm">
           <thead className="border-b border-line bg-surface-sunken text-left text-xs uppercase tracking-wide text-muted">
             <tr>
-              <th className="px-4 py-2.5">When</th>
-              <th className="px-4 py-2.5">Who</th>
+              <th className="px-4 py-2.5">Date &amp; Time</th>
+              <th className="px-4 py-2.5">User</th>
               <th className="px-4 py-2.5">Lead</th>
-              <th className="px-4 py-2.5">Fields</th>
+              <th className="px-4 py-2.5">Fields Unmasked</th>
+              <th className="px-4 py-2.5">IP Address</th>
               <th className="px-4 py-2.5">Result</th>
               <th className="px-4 py-2.5">Used today</th>
-              <th className="px-4 py-2.5">Address</th>
             </tr>
           </thead>
           <tbody>
@@ -82,8 +84,21 @@ export function UnmaskLogTable({ rows, filters, total }: { rows: UnmaskLogRow[];
                   {r.userName}
                   {r.impersonatedBy && <span className="block text-[11px] text-subtle">viewed as by {r.impersonatedBy}</span>}
                 </td>
-                <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-muted">{r.leadRef ?? "—"}</td>
+                <td className="px-4 py-2.5">
+                  {r.lead ? (
+                    <Link href={leadPath(r.lead.leadSeq)} className="text-text hover:underline">
+                      {r.lead.title}
+                    </Link>
+                  ) : (
+                    <span className="text-subtle">Lead removed</span>
+                  )}
+                  <span className="block font-mono text-[11px] text-subtle">{r.leadRef ?? "—"}</span>
+                </td>
                 <td className="px-4 py-2.5 text-muted">{r.fields.map(fieldLabel).join(", ") || "—"}</td>
+                <td className="px-4 py-2.5 text-xs text-muted">
+                  {r.ip ?? "—"}
+                  {r.requestId && <span className="block font-mono text-subtle" title="The request's id, to find it in the server's logs">{r.requestId.slice(0, 8)}</span>}
+                </td>
                 <td className="px-4 py-2.5">
                   <Badge tone={RESULT[r.result].tone}>{RESULT[r.result].label}</Badge>
                   {r.reason && <span className="mt-1 block text-[11px] text-subtle">{r.reason}</span>}
@@ -91,10 +106,6 @@ export function UnmaskLogTable({ rows, filters, total }: { rows: UnmaskLogRow[];
                 <td className="whitespace-nowrap px-4 py-2.5 text-muted">
                   {r.usedToday === null ? "—" : r.dailyLimit === null ? `${r.usedToday}` : `${r.usedToday} / ${r.dailyLimit}`}
                   {r.consumed && <span className="block text-[11px] text-subtle">used a unit</span>}
-                </td>
-                <td className="px-4 py-2.5 text-xs text-subtle">
-                  {r.ip ?? "—"}
-                  {r.requestId && <span className="block font-mono">{r.requestId.slice(0, 8)}</span>}
                 </td>
               </tr>
             ))}

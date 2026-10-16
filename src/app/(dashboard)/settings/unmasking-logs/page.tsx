@@ -3,7 +3,7 @@ import { can } from "@/lib/authz/resolve";
 import { actingAsSuperAdmin } from "@/lib/authz/super-admin";
 import { listUnmaskEvents, type UnmaskLogFilters } from "@/actions/unmask-log";
 import { resolvePage, resolvePageSize, totalPages, PAGE_SIZES } from "@/lib/pagination";
-import { Card } from "@/components/ui/card";
+import { Badge, Card } from "@/components/ui/card";
 import { Pagination } from "@/components/ui/pagination";
 import { SearchParamInput } from "@/components/ui/search-param-input";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
@@ -20,9 +20,9 @@ const RESULTS = [
 ];
 
 /**
- * Settings › Staff & security › Unmasking logs — every attempt to unmask a lead's hidden fields, for
+ * Settings › Staff › Unmasking logs — every attempt to unmask a lead's hidden fields, for
  * the workspace's super admin alone (src/actions/unmask-log.ts decides that, again, on every call).
- * Opens on `permissions.view` like the rest of Staff & security, and then only for the super admin
+ * Opens on `permissions.view` like the rest of Settings › Staff, and then only for the super admin
  * acting as themselves.
  */
 export default async function UnmaskingLogsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
@@ -47,18 +47,21 @@ export default async function UnmaskingLogsPage({ searchParams }: { searchParams
 
   return (
     <div className="animate-fade-rise">
-      <h1 className="text-xl font-semibold text-text">Unmasking logs</h1>
+      <div className="flex flex-wrap items-center gap-2">
+        <h1 className="text-xl font-semibold text-text">Unmasking logs</h1>
+        <Badge tone="brand">Super Admin only</Badge>
+      </div>
       <p className="mt-1 max-w-3xl text-sm text-muted">
         Every time somebody opened a lead whose fields are masked for them: whether it was unmasked, opened again the same day, stopped by the
         daily limit, or refused — with the fields concerned, never what they held. Nobody can change or remove a row.
       </p>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <DateRangePicker fromParam="from" toParam="to" label="When" />
+        <DateRangePicker fromParam="from" toParam="to" label="Date" />
         {data.people.length > 0 && (
-          <SelectParamFilter paramName="userId" label="Who" allLabel="Everyone" options={data.people.map((p) => ({ value: p.id, label: p.name }))} />
+          <SelectParamFilter paramName="userId" label="User" allLabel="All users" options={data.people.map((p) => ({ value: p.id, label: p.name }))} />
         )}
-        <SearchParamInput paramName="lead" placeholder="Lead number" label="Lead" />
+        <SearchParamInput paramName="lead" placeholder="Lead number (LEAD-000123)" label="Lead" />
         <SelectParamFilter paramName="result" label="Result" allLabel="Every result" options={RESULTS} />
       </div>
 

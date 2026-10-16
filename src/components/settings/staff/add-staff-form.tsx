@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { ActionNotice } from "@/components/ui/action-notice";
 import { SetupLinkOnce } from "@/components/settings/setup-link-once";
+import { userPath } from "@/lib/staff/staff-paths";
 import type { DepartmentChoice, RoleChoice, WorkBranch } from "@/components/settings/staff/types";
 
 /**
@@ -42,6 +43,7 @@ type FormOutput = z.output<typeof formSchema>;
 
 /** What the done step shows. `setupUrl` is held only while it is on screen — never stored. */
 type Done = {
+  id: string;
   name: string;
   email: string;
   linking: boolean;
@@ -72,7 +74,8 @@ export function AddStaffForm({
   const [attempt, setAttempt] = useState(0);
 
   if (done) {
-    const backToStaff = () => router.push("/settings/access");
+    // Done opens them under Users, where their access and account are.
+    const backToStaff = () => router.push(userPath(done.id));
     return (
       <Card>
         <CardContent className="space-y-4">
@@ -83,8 +86,8 @@ export function AddStaffForm({
           ))}
           {done.switchedOff ? (
             <p role="status" className="text-sm text-muted">
-              {done.name}&apos;s account is made, switched off, and nobody has been emailed. Switch them on from the Staff
-              list when they start, then send their setup email from the pencil on their row.
+              {done.name}&apos;s account is made, switched off, and nobody has been emailed. Switch them on from Login &amp;
+              Access on their page under Users when they start, then send their setup email from Edit profile.
             </p>
           ) : done.setupUrl ? (
             // The email couldn't be sent: the link itself, once, to pass on (src/lib/account-setup.ts).
@@ -98,13 +101,13 @@ export function AddStaffForm({
               {done.linking
                 ? "set up their account and link it to the workspace they already use"
                 : "choose their own password"}{" "}
-              — it works once, for three days. Until they use it they show as Invited, and the pencil on their row can
-              send it again.
+              — it works once, for three days. Until they use it they show as Invited, and Edit profile on their page under
+              Users can send it again.
             </p>
           ) : (
             <p role="alert" className="rounded-md bg-danger-bg px-3 py-2 text-sm text-danger">
-              {done.name}&apos;s account is made, but the setup email couldn&apos;t be sent. Send it again from the pencil
-              on their row.
+              {done.name}&apos;s account is made, but the setup email couldn&apos;t be sent. Send it again from Edit profile
+              on their page under Users.
             </p>
           )}
           <div className="flex flex-wrap justify-end gap-2 border-t border-line pt-3">
@@ -216,6 +219,7 @@ function AddStaffFields({
     }
 
     onCreated({
+      id: made.id,
       name: values.name.trim(),
       email: values.email.trim(),
       linking: values.usesAnotherWorkspace === true,
@@ -335,7 +339,7 @@ function AddStaffFields({
 
         <div className="flex justify-end gap-2 border-t border-line px-5 py-3">
           <Link
-            href="/settings/access"
+            href="/settings/users"
             className="inline-flex h-8 items-center rounded-base border border-line-strong bg-surface px-3 text-[13px] font-medium text-text shadow-sm transition-colors hover:bg-surface-sunken"
           >
             Cancel

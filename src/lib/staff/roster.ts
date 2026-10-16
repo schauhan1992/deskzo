@@ -4,7 +4,7 @@ import { PEOPLE_ONLY } from "@/lib/people";
 import { workspaceClock } from "@/lib/time/workspace";
 
 /**
- * What the Staff tab of Staff & roles shows beside each person, past what the access roster already
+ * What Users shows of each person, past what the access roster already
  * says (src/actions/permission.ts, `accessRoster`): their photo, work phone and job title, when they
  * last signed in, and the leads they are holding.
  *
@@ -13,7 +13,7 @@ import { workspaceClock } from "@/lib/time/workspace";
  * activity log, lead counts to whoever may see leads. As an endpoint it would answer anybody.
  *
  * Four grouped queries for the whole list, whatever its length. The status and "58m ago" wording is
- * in ./status.ts, which the client table shares.
+ * in ./status.ts, which the client components share.
  */
 
 export type StaffFacts = {

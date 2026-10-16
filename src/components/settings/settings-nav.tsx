@@ -21,8 +21,12 @@ import { cn } from "@/lib/utils";
  * a strip of icons, for a settings page that wants the width. Folded or not is remembered in this
  * browser, read as the main sidebar reads its own (src/components/layout/sidebar.tsx).
  *
- * Hidden on the index itself: that page is the map, and a map does not need a legend beside it.
+ * Hidden on the index itself: that page is the map, and a map does not need a legend beside it. And on
+ * Users and Roles & Permissions, which need the width for their three columns and have "‹ Settings".
  */
+
+/** Users and Roles & Permissions lay three columns out across the page and carry their own way back. */
+const WIDE = ["/settings/users", "/settings/roles"];
 
 const COLLAPSED_KEY = "deskzo-settings-nav-collapsed";
 
@@ -61,7 +65,8 @@ export function SettingsNav({ visibleKeys }: { visibleKeys: string[] }) {
   const collapsed = useSyncExternalStore(collapsedStore.subscribe, collapsedStore.get, collapsedStore.server);
   const [term, setTerm] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
-  if (pathname === "/settings") return null;
+  // The index is the map; the wide pages have the width instead.
+  if (pathname === "/settings" || WIDE.some((p) => pathname === p || pathname.startsWith(`${p}/`))) return null;
 
   // Rebuilt here rather than handed over ready-made: each entry holds an icon component, and a
   // function cannot be serialised from a server component to a client one. Keys can.

@@ -159,6 +159,8 @@ export const TABLE_REGISTRY: TableDefinition[] = [
       { key: "id", label: "ID", default: true, hint: "The short reference — LEAD-000123." },
       { key: "title", label: "Title", default: true, required: true },
       { key: "company", label: "Company", default: true },
+      { key: "email", label: "Email", default: true, hint: "The lead contact's email — only for somebody who may see contacts, and masked where it is masked for them." },
+      { key: "phone", label: "Phone", default: true, hint: "The lead contact's phone — only for somebody who may see contacts, and masked where it is masked for them." },
       { key: "status", label: "Status", default: true },
       { key: "score", label: "Score", default: true, hint: "Out of 100 — hot, warm or cold. Open a lead to see what it is made of." },
       { key: "source", label: "Source", default: true, hint: "Where the enquiry came from — website, referral, a call…" },

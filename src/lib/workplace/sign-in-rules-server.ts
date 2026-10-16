@@ -66,5 +66,5 @@ export function relyingRefusal(relying: { people: number; roles: string[] }, pro
     relying.people > 0 ? `${relying.people} ${relying.people === 1 ? "person" : "people"}` : null,
     relying.roles.length > 0 ? `the ${relying.roles.join(", ")} role${relying.roles.length === 1 ? "" : "s"}` : null,
   ].filter(Boolean);
-  return `${parts.join(" and ")} would have no way to sign in without ${providerName} — change their sign-in rule first (Staff & roles, or the rules by role under Sign-in).`;
+  return `${parts.join(" and ")} would have no way to sign in without ${providerName} — change their sign-in rule first (on their page under Users, or the rules by role under Sign-in).`;
 }

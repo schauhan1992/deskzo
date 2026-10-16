@@ -150,7 +150,7 @@ export async function updateUserAssignment(input: unknown): Promise<ActionResult
     return refuse(err);
   }
 
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   revalidatePath("/", "layout");
   return { ok: true, data: null };
 }
@@ -195,7 +195,7 @@ export async function updateWorkProfile(input: unknown): Promise<ActionResult<nu
     }
   });
 
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   revalidatePath("/cards");
   return { ok: true, data: null };
 }
@@ -293,7 +293,7 @@ export async function createUser(
     throw err;
   }
   await accountsChanged([user.id], { by: `admin:${admin.id}` });
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   // Switched off: no email yet. "Send setup email" offers it once somebody switches them on — the same
   // rule as resending, which refuses a switched-off account.
   if (!startsActive) return { ok: true, data: { id: user.id, emailed: false, startsSwitchedOff: true } };
@@ -343,7 +343,7 @@ export async function resendSetupEmail(id: string): Promise<ActionResult<SetupIn
 
   const invitation = await sendSetupInvitation(target, { by: admin });
   if (!invitation.emailed && !invitation.setupUrl) return { ok: false, error: "The setup email couldn't be sent. Try again in a while." };
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   return { ok: true, data: invitation };
 }
 
@@ -379,7 +379,7 @@ export async function setUserActive(id: string, active: boolean): Promise<Action
   }
 
   await accountsChanged([id], { revoke: active ? undefined : "deactivated", by: `admin:${admin.id}` });
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   revalidatePath("/", "layout");
   return { ok: true, data: null };
 }
@@ -403,7 +403,7 @@ export async function resetUserTwoFactor(id: string): Promise<ActionResult<null>
 
   await db.user.update({ where: { id }, data: { twoFactorSecretCipher: null, twoFactorEnabledAt: null } });
   await accountsChanged([id], { revoke: "two-factor-reset", by: `admin:${admin.id}` });
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   return { ok: true, data: null };
 }
 
@@ -541,6 +541,6 @@ export async function resetPasswordToTemporary(id: string): Promise<ActionResult
   } catch {
     // The notice is a courtesy: the reset has happened, and the admin is passing the password on.
   }
-  revalidatePath("/settings/access");
+  revalidatePath("/settings", "layout");
   return { ok: true, data: { password } };
 }

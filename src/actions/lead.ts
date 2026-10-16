@@ -427,23 +427,30 @@ export async function listLeads(params?: LeadListParams) {
 /**
  * The list view's page of leads. The board view still loads every lead — a kanban with a hidden
  * page 2 would misrepresent the pipeline, which is the one thing it exists to show.
+ *
+ * Its Email and Phone columns are the lead contact's, as on the lead's own page: how to reach somebody
+ * is `contacts.view`'s to give, so without it they aren't read at all (`contactDetails` is false and
+ * the columns aren't drawn) — and with it they are masked as the list masks them for this person.
  */
 export async function listLeadsPaged(params: LeadListParams & { page: number; pageSize: number }) {
   const user = await requireModuleUser("leads");
   // One `where` for both queries: the count has to be the count of the rows this viewer can see,
   // or the pager offers a page 9 that comes back empty.
-  const where = await leadListWhere(user.id, params);
+  const [where, contactDetails] = await Promise.all([leadListWhere(user.id, params), hasEffectivePermission(user.id, "contacts.view")]);
   const [rows, total, masker] = await Promise.all([
     db.lead.findMany({
       where,
       orderBy: leadListOrder(params),
-      include: leadListInclude,
+      include: {
+        ...leadListInclude,
+        contact: { select: contactDetails ? { id: true, name: true, email: true, phone: true } : { id: true, name: true } },
+      },
       ...pageSlice(params.page, params.pageSize),
     }),
     db.lead.count({ where }),
     listLeadMasker(user.id),
   ]);
-  return { rows: await maskLeads(masker, rows), total };
+  return { rows: await maskLeads(masker, rows), total, contactDetails };
 }
 
 export async function getLead(id: string) {

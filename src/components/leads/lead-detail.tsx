@@ -320,7 +320,7 @@ export async function LeadDetail({ id }: { id: string }) {
           {score && <LeadScoreCard result={score} />}
 
           <Card>
-            <CardHeader className="text-sm font-medium text-text">Details</CardHeader>
+            <CardHeader className="text-sm font-medium text-text">Lead Details</CardHeader>
             <CardContent className="space-y-2 text-sm">
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                 <span className="text-muted">Stage</span>

@@ -23,7 +23,7 @@ import type { DepartmentChoice, RoleChoice, StaffRow, WorkBranch } from "@/compo
 import { PersonSignInRule } from "@/components/settings/staff/person-sign-in-rule";
 
 /**
- * The pencil on a Staff row: what the old team table edited in a row of its own — role, department,
+ * Edit profile (and Change role) on a person under Users: what the old team table edited in a row of its own — role, department,
  * reporting manager, where they work, two-factor and the setup email — in one dialog, with their
  * password: a reset email, or a temporary password shown once.
  *

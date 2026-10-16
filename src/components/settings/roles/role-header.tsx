@@ -4,7 +4,6 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Copy, Pencil, Trash2 } from "lucide-react";
 import { deleteRole, duplicateRole, setRoleActive, updateRole } from "@/actions/role";
-import { Badge } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Textarea } from "@/components/ui/input";
@@ -46,42 +45,51 @@ export function RoleHeader({
         setNotice({ tone: "error", text: r.error });
         return;
       }
-      router.push("/settings/access?tab=roles");
+      router.push("/settings/roles");
       router.refresh();
     });
 
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-lg font-semibold text-text">{role.name}</h2>
-            {role.isSystem && <Badge>Built in</Badge>}
-            <code className="font-mono text-[11px] text-subtle">{role.key}</code>
+          <div className="flex items-center gap-1.5">
+            <h2 className="text-xl font-semibold text-text">{role.name}</h2>
+            {mayManage && (
+              <button
+                type="button"
+                onClick={() => setEditing(true)}
+                aria-label={`Rename ${role.name}`}
+                title="Rename"
+                className="grid h-7 w-7 place-items-center rounded-base text-subtle transition-colors hover:bg-surface-sunken hover:text-text"
+              >
+                <Pencil className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            )}
           </div>
           <p className="mt-0.5 max-w-2xl text-sm text-muted">{role.description || "No description yet."}</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="flex items-center gap-2 text-sm text-muted">
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 text-sm text-text">
             <Switch label="Role switched on" checked={role.active} disabled={!mayManage || pending || (role.isSystem && role.active)} onChange={toggle} />
             {role.active ? "Active" : "Switched off"}
           </label>
           {mayManage && (
             <>
-              <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>
-                <Pencil className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-                Rename
-              </Button>
-              <Button variant="secondary" size="sm" onClick={() => setCopying(true)}>
-                <Copy className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+              <Button variant="secondary" onClick={() => setCopying(true)}>
+                <Copy className="mr-1.5 h-4 w-4" aria-hidden />
                 Duplicate
               </Button>
-              {!role.isSystem && (
-                <Button variant="danger" size="sm" onClick={() => setConfirmDelete(true)} disabled={pending}>
-                  <Trash2 className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-                  Delete
-                </Button>
-              )}
+              <Button
+                variant="secondary"
+                className="border-danger/50 text-danger hover:bg-danger-bg"
+                onClick={() => setConfirmDelete(true)}
+                disabled={pending || role.isSystem}
+                title={role.isSystem ? "One of the roles this application was built around — it can't be deleted." : undefined}
+              >
+                <Trash2 className="mr-1.5 h-4 w-4" aria-hidden />
+                Delete
+              </Button>
             </>
           )}
         </div>
@@ -167,7 +175,7 @@ function DuplicateDialog({ role, onClose }: { role: { key: string; name: string 
         return;
       }
       onClose();
-      router.push(`/settings/access?tab=roles&role=${encodeURIComponent(r.data.key)}`);
+      router.push(`/settings/roles?role=${encodeURIComponent(r.data.key)}`);
       router.refresh();
     });
   return (

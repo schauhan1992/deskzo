@@ -2,11 +2,11 @@ import type { StaffStatus } from "@/lib/staff/status";
 import type { ModuleState } from "@/lib/staff/permission-modules";
 
 /**
- * The shapes Staff & roles hands its client components: plain, serialisable, and built on the server
- * by src/app/(dashboard)/settings/access/page.tsx from the actions it already used.
+ * The shapes Users and Roles & Permissions hand their client components: plain, serialisable, and built
+ * on the server by src/app/(dashboard)/settings/users/page.tsx and …/settings/roles/page.tsx.
  */
 
-/** One person in the Staff table. */
+/** One person on Users. */
 export type StaffRow = {
   id: string;
   name: string;

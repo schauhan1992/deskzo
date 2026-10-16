@@ -71,7 +71,7 @@ export function DataManager({ areas }: { areas: AreaRow[] }) {
             <Lock className="mt-0.5 h-4 w-4 shrink-0" />
             <span>
               You don&rsquo;t hold any export permission, so everything below is read-only. A super admin grants these
-              under Staff &amp; roles → Roles &amp; permissions → Data import &amp; export.
+              under Settings → Staff → Roles &amp; Permissions → Import &amp; export.
             </span>
           </CardContent>
         </Card>

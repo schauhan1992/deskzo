@@ -227,8 +227,8 @@ async function main() {
   ok("   but a link for what is true of somebody isn't a permission: without the fact, an admin doesn't get it", onlyFor.length > 0 && onlyFor.every((h) => !hrefs(menu([...PERMISSION_KEYS])).includes(h)), onlyFor.join(", "));
   const smallPlan = menu([...PERMISSION_KEYS], { notEntitled: ["accounting", "revenue_close", "hr", "payroll"] });
   ok("   but not past the plan: no Accounting, no People (HR) for an admin on a plan without them", !groups(smallPlan).includes("Accounting") && !getModuleDefinition("hr")!.navItems.some((i) => hrefs(smallPlan).includes(i.href)));
-  ok("   and the administration links come with their permissions", ["/settings", "/settings/access", "/settings/security", "/settings/data", "/performance"].every((h) => hrefs(everything).includes(h)));
-  ok("   which nobody else gets", !["/settings", "/settings/access", "/settings/security", "/settings/data", "/performance"].some((h) => hrefs(bare).includes(h)));
+  ok("   and the administration links come with their permissions", ["/settings", "/settings/users", "/settings/roles", "/settings/security", "/settings/data", "/performance"].every((h) => hrefs(everything).includes(h)));
+  ok("   which nobody else gets", !["/settings", "/settings/users", "/settings/roles", "/settings/security", "/settings/data", "/performance"].some((h) => hrefs(bare).includes(h)));
 
   section("No modules assigned");
   const empty = menu([]);
@@ -295,11 +295,11 @@ async function main() {
     const notTheirs = ["companies", "orders", "items", "sales_documents", "payments", "accounting", "marketing", "vendors", "helpdesk", "reports"];
     ok("  and none of the customer, sales or finance modules", !notTheirs.some((k) => head.openModules.includes(k)), notTheirs.filter((k) => head.openModules.includes(k)).join(", "));
     ok("  hiring, biometric and celebrations among its People links", ["/people/hiring", "/people/devices", "/people/celebrations", "/people/payroll"].every((h) => hrefs(headMenu).includes(h)));
-    ok("  every IT asset, and Staff & roles to read — but not Settings or Security", hrefs(headMenu).includes("/assets") && hrefs(headMenu).includes("/settings/access") && !hrefs(headMenu).includes("/settings") && !hrefs(headMenu).includes("/settings/security"));
+    ok("  every IT asset, and Users to read — but not Settings or Security", hrefs(headMenu).includes("/assets") && hrefs(headMenu).includes("/settings/users") && !hrefs(headMenu).includes("/settings") && !hrefs(headMenu).includes("/settings/security"));
     ok("  they hold payroll and anonymous feedback, and no customer view", head.permissions.includes("payroll.manage") && head.permissions.includes("engagement.readFeedback") && !head.permissions.some((k) => k === "leads.view" || k === "orders.view"));
     actorId = hrHead.id;
     ok("  and /customers by its address is a 404 for them", (await outcome(page("customers")(props))) === "notFound");
-    const addStaff = await outcome(page("settings/access/new")(props));
+    const addStaff = await outcome(page("settings/users/new")(props));
     ok("  while Add a staff account opens for them, rather than saying they can't", !/^(notFound|error)/.test(addStaff) && !addStaff.includes("You can&#x27;t add staff") && !addStaff.includes("You can't add staff"), addStaff.slice(0, 80));
 
     section("A calling agent, as the role starts");
@@ -309,7 +309,7 @@ async function main() {
     const money = ["payments", "receivables", "payables", "sales_documents", "purchase_documents"];
     ok("their menu has no payments, receivables, payables, quotes or invoices", !money.some((k) => calling.openModules.includes(k)), money.filter((k) => calling.openModules.includes(k)).join(", "));
     // The role as the code starts it keeps the calls, the companies and the leads they work. This suite
-    // runs on the real workspace, whose admin may have changed the role since (Settings → Staff & roles):
+    // runs on the real workspace, whose admin may have changed the role since (Settings → Staff → Roles & Permissions):
     // the menu must then follow the role as it is here, not as it started.
     const startsWith = (key: string) => {
       const def = PERMISSIONS.find((p) => p.key === key);

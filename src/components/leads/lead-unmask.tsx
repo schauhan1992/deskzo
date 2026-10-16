@@ -65,16 +65,18 @@ export function LeadUnmask({
   }, [leadId, revealable, revealed, router]);
 
   const shownUsage = outcome?.usage ?? usage;
-  const counter = shownUsage ? (shownUsage.limit === null ? `${shownUsage.used} unmasked today` : `${shownUsage.used} / ${shownUsage.limit} leads unmasked today`) : null;
+  const counter = shownUsage ? (shownUsage.limit === null ? `${shownUsage.used} unmasked today` : `${shownUsage.used}/${shownUsage.limit} unmasked today`) : null;
   const open = revealed || outcome?.result === "ALLOWED" || outcome?.result === "REPEAT";
 
   if (open) {
     return (
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-base border border-brand/30 bg-brand/5 px-3 py-2 text-sm">
-        <ShieldCheck className="h-4 w-4 shrink-0 text-brand" aria-hidden />
-        <span className="text-text">Unmasked for today.</span>
-        <span className="text-muted">Opening it again today won&apos;t count against your limit.</span>
-        {counter && <span className="ml-auto rounded-full bg-brand/10 px-2 py-0.5 text-xs font-medium text-brand">{counter}</span>}
+      <div className="flex flex-wrap items-start gap-x-3 gap-y-1 rounded-base border border-success/30 bg-success-bg px-3 py-2.5 text-sm">
+        <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-hidden />
+        <span className="min-w-0 flex-1 text-text">
+          This lead has been unmasked. It will remain visible for the rest of today.{" "}
+          <span className="text-muted">You cannot unmask this lead again today — opening it again uses nothing.</span>
+        </span>
+        {counter && <span className="shrink-0 rounded-full bg-success/10 px-2 py-0.5 text-xs font-medium text-success">{counter}</span>}
       </div>
     );
   }
