@@ -170,11 +170,20 @@ function main() {
     openToAll.map((i) => i.key).join(", "),
   );
 
-  const admin = visibleSettings([...permissionKeys], [...moduleKeys]);
+  const owner = visibleSettings([...permissionKeys], [...moduleKeys], { superAdmin: true });
   ok(
-    "  and somebody holding everything sees all of it",
-    admin.flatMap((s) => s.groups.flatMap((g) => g.items)).length === SETTINGS_ITEMS.length,
+    "  and the super admin, holding everything, sees all of it",
+    owner.flatMap((s) => s.groups.flatMap((g) => g.items)).length === SETTINGS_ITEMS.length,
     `${SETTINGS_ITEMS.length} entries`,
+  );
+  // Unmasking logs are the super admin's alone (src/actions/unmask-log.ts), whatever else one holds.
+  const admin = visibleSettings([...permissionKeys], [...moduleKeys]);
+  const adminKeys = admin.flatMap((s) => s.groups.flatMap((g) => g.items.map((i) => i.key)));
+  const superOnly = SETTINGS_ITEMS.filter((i) => i.superAdminOnly).map((i) => i.key);
+  ok(
+    "  an admin holding every permission sees everything but what is the super admin's alone",
+    superOnly.length > 0 && superOnly.every((k) => !adminKeys.includes(k)) && adminKeys.length === SETTINGS_ITEMS.length - superOnly.length,
+    superOnly.join(", "),
   );
 
   ok(
