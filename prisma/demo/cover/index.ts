@@ -5,6 +5,7 @@ import seedOrders from "./orders";
 import seedFinanceCover from "./finance";
 import seedCrm, { resetCrm } from "./crm";
 import seedReach from "./reach";
+import seedTasks from "./tasks";
 import seedPeopleYear from "./people";
 
 /**
@@ -20,7 +21,9 @@ import seedPeopleYear from "./people";
  *   3. crm      — credit ratings worked out by the app's own engine once the invoices are all there,
  *                 then leads, visits, meetings and custom fields;
  *   4. reach    — marketing decides who can be reached from the invoices and tickets as they stand;
- *   5. people   — last: joining and leaving dates, awards and the activity trail are read from
+ *   5. tasks    — the day-to-day work on the leads and tickets the others left, the owner's list and
+ *                 the back office's, dated from the day it runs;
+ *   6. people   — last: joining and leaving dates, awards and the activity trail are read from
  *                 everything the others did.
  */
 
@@ -31,6 +34,7 @@ export const COVER_AREAS: CoverArea[] = [
   { key: "finance", label: "Documents, collections, credit, the books and Revenue & Close", seed: seedFinanceCover },
   { key: "crm", label: "Accounts, leads, calls, visits, meetings and custom fields", seed: seedCrm },
   { key: "reach", label: "Marketing, forms, feedback, the portal and projects", seed: seedReach },
+  { key: "tasks", label: "Tasks on leads and tickets, the owner's list and the back office's", seed: seedTasks },
   { key: "people", label: "Each person's year: HR, payroll, targets, wins and their trail", seed: seedPeopleYear },
 ];
 
