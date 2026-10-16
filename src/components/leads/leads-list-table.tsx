@@ -35,6 +35,8 @@ type LeadRow = {
   expectedCloseDate: Date | string | null;
   updatedAt: Date | string;
   company: { id: string; name: string; companySeq: number };
+  /** The lead's contact — with their email and phone only where the page read them (`contactDetails`). */
+  contact?: { name: string; email?: string | null; phone?: string | null } | null;
   owner: { id: string; name: string } | null;
   /** 0–100, or null for a closed lead — see src/lib/leads/score.ts. */
   score: number | null;
@@ -48,6 +50,7 @@ export function LeadsListTable({
   assignableUsers,
   reassign,
   customColumns = { columns: [], texts: {} },
+  contactDetails = false,
 }: {
   leads: LeadRow[];
   /** The workspace's stages still in use (Settings → Pipeline) — what the bulk bar can move leads to. */
@@ -60,10 +63,18 @@ export function LeadsListTable({
    * the ones they show in the column picker, or each field's default.
    */
   customColumns?: { columns: CustomColumn[]; texts: Record<string, Record<string, string>> };
+  /**
+   * Whether the Email and Phone columns exist for this person — `contacts.view`, as on a lead's own
+   * page. Their values come masked from the server where the list masks them for this person.
+   */
+  contactDetails?: boolean;
 }) {
   const cols = useColumns("leads");
   // The fields this person shows, worked out once: the header and every row draw this one list.
   const fieldColumns = customColumns.columns.filter((c) => cols.showCustom(c.key, c.default));
+  // "No leads yet" spans the shown columns, the workspace's own fields and the View column after them.
+  const VIEW_COLUMN = 1;
+  const emptySpan = cols.count + fieldColumns.length + VIEW_COLUMN;
   const router = useRouter();
   const clock = useClock();
   const selection = useRowSelection(leads);
@@ -150,6 +161,8 @@ export function LeadsListTable({
                 {cols.show("id") && <th className="px-4 py-2.5">ID</th>}
                 {cols.show("title") && <th className="px-4 py-2.5">Title</th>}
                 {cols.show("company") && <th className="px-4 py-2.5">Company</th>}
+                {cols.show("email") && contactDetails && <th className="px-4 py-2.5">Email</th>}
+                {cols.show("phone") && contactDetails && <th className="px-4 py-2.5">Phone</th>}
                 {cols.show("status") && <th className="px-4 py-2.5">Status</th>}
                 {cols.show("score") && <th className="px-4 py-2.5">Score</th>}
                 {cols.show("source") && <th className="px-4 py-2.5">Source</th>}
@@ -194,6 +207,14 @@ export function LeadsListTable({
                       </Link>
                     </td>
                   )}
+                  {cols.show("email") && contactDetails && (
+                    <td className="max-w-[14rem] truncate px-4 py-2.5 text-muted" title={lead.contact?.email ?? undefined}>
+                      {lead.contact?.email ?? <span className="text-subtle">—</span>}
+                    </td>
+                  )}
+                  {cols.show("phone") && contactDetails && (
+                    <td className="whitespace-nowrap px-4 py-2.5 text-muted">{lead.contact?.phone ?? <span className="text-subtle">—</span>}</td>
+                  )}
                   {cols.show("status") && (
                     <td className="px-4 py-2.5">
                       <LeadStatusBadge status={lead.status} stage={lead.stage} lostReason={lead.lostReason} />
@@ -236,7 +257,7 @@ export function LeadsListTable({
               ))}
               {leads.length === 0 && (
                 <tr>
-                  <td colSpan={cols.count + fieldColumns.length + 1} className="px-4 py-8 text-center text-subtle">
+                  <td colSpan={emptySpan} className="px-4 py-8 text-center text-subtle">
                     No leads yet.
                   </td>
                 </tr>

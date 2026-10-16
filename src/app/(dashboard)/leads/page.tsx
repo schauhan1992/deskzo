@@ -84,7 +84,7 @@ export default async function LeadsPage({
   // only the list view is paginated.
   const [viewMode, result, assignableUsers] = await Promise.all([
     getViewMode("leads"),
-    view === "list" ? listLeadsPaged({ ...filters, page, pageSize }) : listLeads(filters).then((rows) => ({ rows, total: rows.length })),
+    view === "list" ? listLeadsPaged({ ...filters, page, pageSize }) : listLeads(filters).then((rows) => ({ rows, total: rows.length, contactDetails: false })),
     listAssignableUsers(),
   ]);
 
@@ -209,6 +209,7 @@ export default async function LeadsPage({
                 assignableUsers={assignableUsers}
                 reassign={await viewerReassignControls()}
                 customColumns={customColumns}
+                contactDetails={result.contactDetails}
               />
               <Pagination
                 page={page}

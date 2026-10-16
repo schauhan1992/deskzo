@@ -71,6 +71,11 @@ export type UnmaskLogRow = {
   impersonatedBy: string | null;
   leadId: string;
   leadRef: string | null;
+  /**
+   * The lead's name and number as they are now, for the super admin reading the log — looked up when
+   * the page is drawn, never stored in the log, and null once the lead is gone.
+   */
+  lead: { title: string; leadSeq: number } | null;
   fields: string[];
   result: UnmaskResult;
   consumed: boolean;
@@ -97,7 +102,12 @@ export async function listUnmaskEvents(
       db.unmaskEvent.findMany({ distinct: ["userId"], select: { userId: true, userName: true }, orderBy: { userName: "asc" }, take: 500 }),
     ]);
     const actors = [...new Set(rows.map((r) => r.impersonatedByUserId).filter((id): id is string => Boolean(id)))];
-    const names = new Map((await db.user.findMany({ where: { id: { in: actors } }, select: { id: true, name: true } })).map((u) => [u.id, u.name]));
+    const [actorRows, leadRows] = await Promise.all([
+      db.user.findMany({ where: { id: { in: actors } }, select: { id: true, name: true } }),
+      db.lead.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.leadId))] } }, select: { id: true, title: true, leadSeq: true } }),
+    ]);
+    const names = new Map(actorRows.map((u) => [u.id, u.name]));
+    const leads = new Map(leadRows.map((l) => [l.id, { title: l.title, leadSeq: l.leadSeq }]));
     return {
       ok: true,
       data: {
@@ -110,6 +120,7 @@ export async function listUnmaskEvents(
           impersonatedBy: r.impersonatedByUserId ? (names.get(r.impersonatedByUserId) ?? r.impersonatedByUserId) : null,
           leadId: r.leadId,
           leadRef: r.leadRef,
+          lead: leads.get(r.leadId) ?? null,
           fields: r.fields,
           result: r.result,
           consumed: r.consumed,
