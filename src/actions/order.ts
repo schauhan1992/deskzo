@@ -40,6 +40,7 @@ import { toPlain } from "@/lib/serialize";
 import { pageSlice } from "@/lib/pagination";
 import { orderBilling } from "@/lib/orders/billing";
 import type { ActionResult } from "@/actions/company";
+import { listLeadMasker, maskLeadRefs } from "@/lib/leads/masking";
 import { checkTerms, recordDecision, MIN_REASON } from "@/lib/credit/guard";
 import type { CreditAssessment } from "@/lib/credit/engine";
 import { orderCreditPosition } from "@/lib/credit/order";
@@ -1618,7 +1619,7 @@ export async function listProposalOptions(companyId: string) {
   const user = await requireModuleUser("orders");
   // A proposal is its lead's: none where the plan has no leads (owner, 14 Oct 2026).
   if (!(await leadsInPlan())) return [];
-  return db.proposal.findMany({
+  const rows = await db.proposal.findMany({
     // A proposal is its lead's, so the lead rule goes inside the `lead` clause rather than beside it.
     // Scoped as well as filtered by the caller's `companyId`: a company id is not a secret, and the
     // picker would otherwise read out what any account has been quoted.
@@ -1626,6 +1627,8 @@ export async function listProposalOptions(companyId: string) {
     orderBy: { createdAt: "desc" },
     select: { id: true, status: true, validUntil: true, lead: { select: { title: true } } },
   });
+  // Each named by its lead, as this person's field access shows a lead's name in a list.
+  return maskLeadRefs(await listLeadMasker(user.id), rows);
 }
 
 /**

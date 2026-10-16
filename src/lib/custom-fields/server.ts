@@ -93,10 +93,41 @@ export function canSeeRestricted(userId: string): Promise<boolean> {
   return can(userId, "fields.seeRestricted");
 }
 
+/**
+ * A lead's custom fields that this person's field access restricts (src/lib/authz/field-policy.ts):
+ * left out of everything they are shown, searched or filtered by, and kept as they are when they
+ * save. Only leads have field access; for every other record type, none.
+ *
+ * Imported when asked for, because the field-access resolver reads this module's definitions.
+ */
+async function restrictedByPolicy(entity: CustomFieldEntityKey, userId: string): Promise<Set<string>> {
+  if (entity !== "LEAD") return new Set();
+  const { leadMasker } = await import("@/lib/authz/fields");
+  const { customFieldKey } = await import("@/lib/authz/field-policy");
+  const masker = await leadMasker(userId, "list");
+  if (!masker.active) return new Set();
+  return new Set((await definitionsFor(entity)).filter((d) => masker.visibility(customFieldKey(d.key)) === "restricted").map((d) => d.key));
+}
+
+/**
+ * Masks the words of a lead's custom field values for one person in one context — a list's columns and
+ * an export's cells in the list answers. Nothing for other record types, or nothing masked.
+ */
+async function customTextMasker(entity: CustomFieldEntityKey, userId: string): Promise<((key: string, text: string) => string) | null> {
+  if (entity !== "LEAD") return null;
+  const { leadMasker } = await import("@/lib/authz/fields");
+  const { customFieldKey } = await import("@/lib/authz/field-policy");
+  const masker = await leadMasker(userId, "list");
+  if (!masker.active) return null;
+  return (key, text) => (text === "" ? text : (masker.present(customFieldKey(key), text) ?? ""));
+}
+
+export { customTextMasker };
+
 /** The fields one person works with on one record type: visible, active, in order. */
 export async function fieldsFor(entity: CustomFieldEntityKey, userId: string) {
-  const [all, restricted] = await Promise.all([definitionsFor(entity), canSeeRestricted(userId)]);
-  return { all, visible: visibleDefs(all, restricted), canSeeRestricted: restricted };
+  const [all, restricted, byPolicy] = await Promise.all([definitionsFor(entity), canSeeRestricted(userId), restrictedByPolicy(entity, userId)]);
+  return { all, visible: visibleDefs(all, restricted).filter((d) => !byPolicy.has(d.key)), canSeeRestricted: restricted, restrictedByPolicy: byPolicy };
 }
 
 /** The model a record type's values live on. */
@@ -177,7 +208,7 @@ export async function prepareCustomFields(params: {
   /** Keys hidden from this person where the record is — see `applyInput`. */
   skip?: Iterable<string>;
 }): Promise<PreparedFields> {
-  const { all, canSeeRestricted: restricted } = await fieldsFor(params.entity, params.userId);
+  const { all, canSeeRestricted: restricted, restrictedByPolicy: byPolicy } = await fieldsFor(params.entity, params.userId);
   const existing = params.existing ?? {};
   const applied = applyInput({
     defs: all,
@@ -186,7 +217,8 @@ export async function prepareCustomFields(params: {
     canSeeRestricted: restricted,
     checkRequired: params.checkRequired,
     only: params.only,
-    skip: params.skip,
+    // A field this person's field access restricts is one they can't see, so they can't change it either.
+    skip: [...(params.skip ?? []), ...byPolicy],
   });
   if (!applied.ok) return { ok: false, errors: applied.errors, error: applied.errors.map((e) => e.message).join(" ") };
 
@@ -211,19 +243,23 @@ export async function prepareCustomFields(params: {
 /** A record's fields as one person sees them on its page: headings, labels, and the values in words. */
 export type DisplayedFields = { group: string; fields: { key: string; label: string; type: CustomFieldTypeKey; text: string; restricted: boolean }[] }[];
 
-export async function displayFields(entity: CustomFieldEntityKey, userId: string, values: CustomFieldValues): Promise<DisplayedFields> {
+export async function displayFields(
+  entity: CustomFieldEntityKey,
+  userId: string,
+  values: CustomFieldValues,
+  /** How each value's words are shown — a lead's page masks them as its field access says. */
+  options: { present?: (key: string, text: string) => string } = {},
+): Promise<DisplayedFields> {
   const { visible } = await fieldsFor(entity, userId);
   if (visible.length === 0) return [];
   const names = await namesOf(personIds(visible, [values]));
+  const present = options.present ?? ((_key: string, text: string) => text);
   return groupDefs(visible).map((g) => ({
     group: g.group,
-    fields: g.fields.map((d) => ({
-      key: d.key,
-      label: d.label,
-      type: d.type,
-      text: formatValue(d, values[d.key], (id) => names.get(id)),
-      restricted: d.restricted,
-    })),
+    fields: g.fields.map((d) => {
+      const text = formatValue(d, values[d.key], (id) => names.get(id));
+      return { key: d.key, label: d.label, type: d.type, text: text === "" ? text : present(d.key, text), restricted: d.restricted };
+    }),
   }));
 }
 
@@ -268,8 +304,11 @@ export function clientDef(d: StoredDefinition): CustomFieldDef {
  * What a form needs for one record type: the fields this person fills in, the values they start
  * with (a new record's are empty) and, when a field names a person, the workspace's people.
  */
-export async function formSetup(entity: CustomFieldEntityKey, userId: string, existing?: CustomFieldValues) {
-  const { visible } = await fieldsFor(entity, userId);
+export async function formSetup(entity: CustomFieldEntityKey, userId: string, existing?: CustomFieldValues, options: { exclude?: Iterable<string> } = {}) {
+  const exclude = new Set(options.exclude ?? []);
+  // A field left out here — one masked on a lead not unmasked today — is neither shown nor sent back,
+  // and the save keeps what it holds (`updateLeadCustomFields`).
+  const visible = (await fieldsFor(entity, userId)).visible.filter((d) => !exclude.has(d.key));
   const people = visible.some((d) => d.type === "USER") ? await peopleForFields() : [];
   return { fields: visible.map(clientDef), values: formValues(visible, existing ?? {}), people };
 }
@@ -289,8 +328,9 @@ export async function listColumns(entity: CustomFieldEntityKey, userId: string, 
   const columns = defs.map((d) => ({ key: d.key, label: d.label, numeric: d.type === "NUMBER" || d.type === "MONEY", default: d.showInList }));
   // A page with no rows still shows the columns' headings, so the table keeps its shape.
   if (defs.length === 0 || ids.length === 0) return { columns, texts: {} as Record<string, Record<string, string>> };
-  const texts = await formatMany(defs, await valuesOf(entity, ids));
-  return { columns, texts: Object.fromEntries(ids.map((id) => [id, texts.get(id) ?? {}])) };
+  const [texts, mask] = await Promise.all([formatMany(defs, await valuesOf(entity, ids)), customTextMasker(entity, userId)]);
+  const shown = (row: Record<string, string>) => (mask ? Object.fromEntries(Object.entries(row).map(([k, t]) => [k, mask(k, t)])) : row);
+  return { columns, texts: Object.fromEntries(ids.map((id) => [id, shown(texts.get(id) ?? {})])) };
 }
 
 /**

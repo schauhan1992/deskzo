@@ -5,7 +5,7 @@ import type { FormAttendance, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { STILL_THERE } from "@/lib/contacts/left";
 import { moduleAvailableForTenant, requireModuleUser } from "@/lib/modules-access";
-import { leadsInPlan, withoutHiddenLeads } from "@/lib/leads/shown";
+import { leadsSeenBy } from "@/lib/leads/shown";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
 import { hasEffectivePermission } from "@/actions/permission";
@@ -620,7 +620,7 @@ export async function listFormResponses(
     category: found.form.category,
     total,
     // A lead the answer made is linked only where the plan has leads (owner, 14 Oct 2026).
-    rows: withoutHiddenLeads(rows, await leadsInPlan()).map(({ payload, ...row }) => {
+    rows: (await leadsSeenBy(user.id, rows)).map(({ payload, ...row }) => {
       const answers = answersOf(payload);
       return {
         ...row,

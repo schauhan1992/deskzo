@@ -22,6 +22,10 @@ export type ActionScope = "core" | "public" | "platform" | readonly string[];
 export const ACTION_MODULES: Record<string, ActionScope> = {
   "access-control.ts": "core",
   "access-gate.ts": "core",
+  // Field access, daily unmask limits and the unmasking log (src/lib/authz/fields.ts, unmask.ts) —
+  // part of roles and permissions, which are core.
+  "field-access.ts": "core",
+  "unmask-log.ts": "core",
   // The role editor's record grid and My access (roles and permissions are core).
   "access-levels.ts": "core",
   "access-lock.ts": "core",
@@ -128,6 +132,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "lead-assignment.ts": ["leads"],
   "lead-capture.ts": ["leads"],
   "lead.ts": ["leads"],
+  // Unmasking a lead's fields on its page, against the daily limit (src/lib/authz/unmask.ts).
+  "lead-unmask.ts": ["leads"],
   "leave.ts": ["hr"],
   "ledger-reports.ts": ["accounting"],
   "ledger.ts": ["accounting"],

@@ -220,3 +220,28 @@ export function presentValue(value: string | null | undefined, policy: FieldPoli
       return maskValue(value, policy.format);
   }
 }
+
+/**
+ * How open a policy leaves a field in one context, narrow to wide: not readable, masked, masked but
+ * may be unmasked, in the clear. For "nobody gives more than they have" — the field twin of granting
+ * only the permissions you hold yourself.
+ */
+export function openness(policy: FieldPolicy, context: FieldContext): number {
+  if (!policy.view) return 0;
+  const masked = context === "list" ? policy.maskInList : policy.maskInDetail;
+  if (!masked) return 3;
+  return policy.unmask ? 2 : 1;
+}
+
+/** Whether `next` is no more open than `own`, in lists and on the record's page alike. */
+export function withinPolicy(next: FieldPolicy, own: FieldPolicy): boolean {
+  return openness(next, "list") <= openness(own, "list") && openness(next, "detail") <= openness(own, "detail");
+}
+
+/** A policy in words, for the permission history: "masked in lists and on the lead, may unmask". */
+export function describePolicy(policy: FieldPolicy): string {
+  if (!policy.view) return "restricted";
+  const where = [policy.maskInList ? "in lists" : null, policy.maskInDetail ? "on the lead" : null].filter(Boolean);
+  if (where.length === 0) return "visible";
+  return `masked ${where.join(" and ")} (${policy.format})${policy.unmask ? ", may unmask" : ""}`;
+}

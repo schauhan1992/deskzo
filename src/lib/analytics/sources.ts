@@ -16,6 +16,8 @@ import type { CustomFieldEntityKey } from "@/lib/custom-fields/rules";
 import { buildWhere, countActiveFilters } from "@/lib/workspace/filters";
 import { workspaceClock } from "@/lib/time/workspace";
 import { NONE, ROW_CAP, type FactSource, type SourceContext } from "./types";
+import { listLeadMasker } from "@/lib/leads/masking";
+import { maskCustomValues } from "@/lib/authz/fields";
 
 /**
  * The fact tables, and everything each one can be sliced by.
@@ -305,7 +307,10 @@ async function loadLeads(ctx: SourceContext) {
   // The lead rule, as the leads screen asks it (src/lib/authz/access.ts) — which is the point. Leads
   // had their own hand-rolled predicate, and that is where the divergence lived.
   const where = await scoped(ctx, await leadAccess(ctx.userId, "view"));
-  return withOwnFields(ctx, (want) =>
+  // A report is a list: the company a lead is for, and its own fields, as this person's field access
+  // shows them in one (src/lib/leads/masking.ts) — so a breakdown can't name what a list would mask.
+  const masker = await listLeadMasker(ctx.userId);
+  const rows = await withOwnFields(ctx, (want) =>
     db.lead.findMany({
       where,
       include: {
@@ -326,6 +331,12 @@ async function loadLeads(ctx: SourceContext) {
       orderBy: { createdAt: "asc" },
     }),
   );
+  if (!masker.active) return rows;
+  return rows.map((r) => ({
+    ...r,
+    company: { ...r.company, name: masker.present("companyName", r.company.name) ?? "" },
+    ...("customFields" in r && r.customFields && typeof r.customFields === "object" ? { customFields: maskCustomValues(masker, r.customFields as Record<string, unknown>) } : {}),
+  }));
 }
 
 const leadsSource: FactSource<LeadRow> = {

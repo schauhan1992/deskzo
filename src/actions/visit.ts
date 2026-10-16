@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { Prisma, type VisitStatus, type VisitPurpose } from "@prisma/client";
 import { db } from "@/lib/db";
-import { leadsInPlan, withoutHiddenLeads } from "@/lib/leads/shown";
+import { leadsInPlan, leadsSeenBy } from "@/lib/leads/shown";
+import { listLeadMasker, maskLeadTitle } from "@/lib/leads/masking";
 import { requireModuleUser } from "@/lib/modules-access";
 import { isModuleEnabled } from "@/actions/module";
 import { toPlain } from "@/lib/serialize";
@@ -11,7 +12,7 @@ import { pageSlice } from "@/lib/pagination";
 import { workspaceClock } from "@/lib/time/workspace";
 import { canSeeCompany } from "@/lib/authz/company-scope";
 import { viewerHas } from "@/actions/permission";
-import { peopleReached, reachesPerson, visitAccess } from "@/lib/authz/access";
+import { leadAccess, peopleReached, reachesPerson, visitAccess } from "@/lib/authz/access";
 import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
 import { formatVisitId, visitPurposeLabels } from "@/lib/visits";
@@ -103,7 +104,7 @@ export async function listVisitsPaged(params: VisitListParams & { page: number; 
     db.visit.count({ where }),
     db.visit.count({ where: { ...where, status: { in: ["PLANNED", "CHECKED_IN"] } } }),
   ]);
-  return { rows: toPlain(withoutHiddenLeads(rows, await leadsInPlan())), total, openCount };
+  return { rows: toPlain((await leadsSeenBy(user.id, rows))), total, openCount };
 }
 
 /** A company's visits, for its 360 view — scoped the same way as the list. */
@@ -112,7 +113,7 @@ export async function listCompanyVisits(companyId: string) {
   if (!(await viewerHas("visits.view"))) return [];
   const where = await visitListWhere(user.id, { companyId });
   const rows = await db.visit.findMany({ where, orderBy: { scheduledFor: "desc" }, include: visitListInclude });
-  return toPlain(withoutHiddenLeads(rows, await leadsInPlan()));
+  return toPlain((await leadsSeenBy(user.id, rows)));
 }
 
 /**
@@ -153,7 +154,7 @@ export async function getVisit(id: string) {
     },
   });
   if (!visit) return null;
-  return toPlain((await leadsInPlan()) ? visit : { ...visit, lead: null });
+  return toPlain((await leadsSeenBy(user.id, [visit]))[0]!);
 }
 
 export async function createVisit(input: unknown): Promise<ActionResult<{ id: string; visitSeq: number }>> {
@@ -429,13 +430,17 @@ export async function visitFormOptions(companyId: string) {
       orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
       select: { id: true, label: true, address: true, city: true, state: true, pincode: true },
     }),
+    // The company's open deals that this person reaches, by the lead rule — as every other lead picker.
     leadsHere
-      ? db.lead.findMany({
-          where: { companyId, status: { notIn: ["WON", "LOST", "DISQUALIFIED"] } },
-          orderBy: { updatedAt: "desc" },
-          select: { id: true, title: true },
-        })
+      ? leadAccess(user.id, "view").then((reach) =>
+          db.lead.findMany({
+            where: { AND: [{ companyId, status: { notIn: ["WON", "LOST", "DISQUALIFIED"] } }, reach] },
+            orderBy: { updatedAt: "desc" },
+            select: { id: true, title: true },
+          }),
+        )
       : [],
   ]);
-  return { contacts, locations, leads };
+  const masker = await listLeadMasker(user.id);
+  return { contacts, locations, leads: leads.map((l) => ({ ...l, title: maskLeadTitle(masker, l.title) })) };
 }

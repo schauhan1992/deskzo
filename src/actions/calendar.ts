@@ -16,6 +16,7 @@ import { companyPath, leadPath, ticketPath, visitPath } from "@/lib/record-links
 import type { MeetingDraft } from "@/lib/calendar/types";
 import type { WorkplaceProvider } from "@/lib/workplace/providers";
 import type { ActionResult } from "@/actions/company";
+import { listLeadMasker, maskLeadTitle } from "@/lib/leads/masking";
 
 /**
  * Calendar (owner, 2–3 Oct 2026): each person's own Outlook, Google Calendar or Zoho Calendar, through
@@ -130,6 +131,7 @@ export async function listMyEvents(input: { from: string; to: string }): Promise
       ...RECORD_SELECT,
     },
   });
+  const masker = await listLeadMasker(user.id);
   return rows.map((r) => ({
     id: r.id,
     title: r.title,
@@ -143,7 +145,7 @@ export async function listMyEvents(input: { from: string; to: string }): Promise
     organizerEmail: r.organizerEmail,
     description: r.description,
     attendees: (Array.isArray(r.attendees) ? r.attendees : []) as MyEvent["attendees"],
-    record: recordOf(r),
+    record: recordOf(masker.active && r.lead ? { ...r, lead: { ...r.lead, title: maskLeadTitle(masker, r.lead.title) } } : r),
   }));
 }
 

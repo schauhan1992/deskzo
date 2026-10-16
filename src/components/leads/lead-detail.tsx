@@ -36,12 +36,16 @@ import { RequirementsList } from "@/components/leads/requirements-list";
 import { TaskList } from "@/components/tasks/task-list";
 import { LeadScoreBadge, LeadScoreCard } from "@/components/leads/lead-score";
 import { refreshLeadScore } from "@/lib/leads/score-store";
-import { LEAD_SOURCE_LABELS } from "@/lib/leads/source";
+import { leadSourceLabel } from "@/lib/leads/source";
 import { CategoryChip } from "@/components/customers/category-chip";
 import { CustomFieldsCard } from "@/components/custom-fields/custom-fields-card";
 import { EditCustomFields } from "@/components/custom-fields/edit-custom-fields";
 import { displayFields, formSetup, valuesFor } from "@/lib/custom-fields/server";
 import { companyPath, leadPath } from "@/lib/record-links";
+import { detailLeadMasker } from "@/lib/leads/masking";
+import { customFieldKey } from "@/lib/authz/field-policy";
+import { unmaskUsageToday } from "@/lib/authz/unmask";
+import { LeadUnmask } from "@/components/leads/lead-unmask";
 
 /**
  * A lead's full detail — the requirement, its timeline, and the controls that move it along.
@@ -114,14 +118,22 @@ export async function LeadDetail({ id }: { id: string }) {
 
   // The workspace's own fields (src/lib/custom-fields) — whoever may open the lead may edit them, as
   // `updateLeadCustomFields` decides it.
+  // Field access on this page (src/lib/leads/masking.ts): `getLead` has already masked the lead itself;
+  // its custom fields are masked here the same way, and a masked one can't be edited until it's unmasked.
+  const masker = await detailLeadMasker(userId, lead.id);
   const customValues = await valuesFor("LEAD", lead.id);
-  const [customShown, customForm] = await Promise.all([displayFields("LEAD", userId, customValues), formSetup("LEAD", userId, customValues)]);
+  const lockedCustom = Object.keys(customValues).filter((k) => masker.locked(customFieldKey(k)));
+  const [customShown, customForm, unmaskUsage] = await Promise.all([
+    displayFields("LEAD", userId, customValues, { present: (key, text) => masker.present(customFieldKey(key), text) ?? "" }),
+    formSetup("LEAD", userId, customValues, { exclude: lockedCustom }),
+    lead.masking.revealable.length > 0 ? unmaskUsageToday(userId) : Promise.resolve(null),
+  ]);
+  const concealed = new Set(lead.masking.concealed);
 
   const company = lead.company;
-  // The address the deal belongs to: the location tied to the lead if there ever is one, otherwise
-  // the account's primary site, which is what a rep means by "where are they".
-  const primaryLocation = company.locations.find((l) => l.isPrimary) ?? company.locations[0] ?? null;
-  const place = [primaryLocation?.city, primaryLocation?.state, primaryLocation?.country].filter(Boolean).join(", ");
+  // The address the deal belongs to: the account's primary site, which is what a rep means by "where
+  // are they" — as `getLead` presents it, masked where this person's field access says.
+  const place = lead.address.place ?? "";
   // A deal can be worked by someone other than whoever manages the account, so both are named
   // rather than collapsed into one "sales rep" that would be wrong half the time.
   const accountManager = company.assignedTo ?? company.owner ?? null;
@@ -129,6 +141,16 @@ export async function LeadDetail({ id }: { id: string }) {
 
   return (
     <div className="@container space-y-6">
+      {(lead.masking.concealed.length > 0 || lead.masking.revealable.length > 0) && (
+        <LeadUnmask
+          key={lead.id}
+          leadId={lead.id}
+          revealable={lead.masking.revealable.length > 0}
+          revealed={lead.masking.revealed}
+          concealed={lead.masking.concealed.length}
+          usage={unmaskUsage}
+        />
+      )}
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
         <div className="min-w-0 flex-1 basis-64">
           <div className="flex flex-wrap items-center gap-2">
@@ -187,7 +209,8 @@ export async function LeadDetail({ id }: { id: string }) {
             companyId={company.id}
             companyName={company.name}
             leadId={lead.id}
-            contact={lead.contact ? { id: lead.contact.id, name: lead.contact.name, phone: lead.contact.phone } : undefined}
+            // A masked number is no number to dial or to log a call against: only the real one, or none.
+            contact={lead.contact ? { id: lead.contact.id, name: lead.contact.name, phone: concealed.has("phone") ? null : lead.contact.phone } : undefined}
           />
           {calendarEnabled && canScheduleMeetings && <ScheduleMeetingButton record={{ kind: "lead", id: lead.id }} />}
           {visitsEnabled && (
@@ -215,8 +238,10 @@ export async function LeadDetail({ id }: { id: string }) {
               expectedCloseDate: closeDay,
               contactId: lead.contactId ?? "",
             }}
-            contacts={companyContacts}
+            // Names one may not see aren't offered to choose from; the lead keeps its contact.
+            contacts={concealed.has("contactName") ? companyContacts.filter((c) => c.id === lead.contactId).map((c) => ({ id: c.id, name: lead.contact?.name ?? c.name })) : companyContacts}
             moveTargets={moveTargets}
+            locked={(["title", "description", "contactName"] as const).filter((f) => concealed.has(f))}
           />
           <LeadStatusControl leadId={lead.id} current={{ id: stage.id, label: stage.label, status: stage.status }} stages={stageChoices} />
         </div>
@@ -313,7 +338,7 @@ export async function LeadDetail({ id }: { id: string }) {
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                 <span className="text-muted">Source</span>
                 <span className="text-right text-text">
-                  {LEAD_SOURCE_LABELS[lead.source]}
+                  {leadSourceLabel(lead.source)}
                   {lead.sourceDetail && <span className="block text-[11px] text-subtle">{lead.sourceDetail}</span>}
                 </span>
               </div>
@@ -322,8 +347,24 @@ export async function LeadDetail({ id }: { id: string }) {
                 <span className="text-text">{accountManager?.name ?? "—"}</span>
               </div>
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                <span className="text-muted">Location</span>
-                <span className="text-right text-text">{place || "—"}</span>
+                <span className="text-muted">Contact</span>
+                <span className="text-right text-text">{lead.contact?.name ?? "—"}</span>
+              </div>
+              {lead.contact && (
+                <>
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                    <span className="text-muted">Email</span>
+                    <span className="break-all text-right text-text">{lead.contact.email ?? "—"}</span>
+                  </div>
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                    <span className="text-muted">Phone</span>
+                    <span className="text-right text-text">{lead.contact.phone ?? "—"}</span>
+                  </div>
+                </>
+              )}
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                <span className="text-muted">Address</span>
+                <span className="text-right text-text">{lead.address.line ?? "—"}</span>
               </div>
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                 <span className="text-muted">Sourced by</span>

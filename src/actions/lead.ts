@@ -42,6 +42,8 @@ import { chooseOwner } from "@/lib/leads/assign";
 import { mayChangeLeadOwner, mayLeaveUnassigned, reassignRights } from "@/lib/authz/reassign";
 import { refreshLeadScore } from "@/lib/leads/score-store";
 import { leadPath } from "@/lib/record-links";
+import { addressLine, detailLeadMasker, listLeadMasker, maskLead, maskLeadTitle } from "@/lib/leads/masking";
+import { customFieldKey } from "@/lib/authz/field-policy";
 
 /** A person's name for the activity log — or "nobody". */
 async function ownerName(userId: string | null | undefined): Promise<string> {
@@ -365,6 +367,11 @@ async function leadListWhere(userId: string, params?: LeadListParams): Promise<P
   // `OR` of its own, so they join the `AND` rather than meeting the search's. A pipeline key there isn't
   // shows nothing; a stage key the pipeline doesn't have narrows nothing. Without a pipeline asked for,
   // every pipeline's leads are listed — what search, the export and other callers have always had.
+  // A field this person's field access restricts is never searched or filtered on: a search that
+  // matched it would tell them what it holds. A masked field can still be searched — it is theirs to
+  // unmask on the lead's page.
+  const masker = await listLeadMasker(userId);
+  const readable = (field: string) => masker.visibility(field) !== "restricted";
   const pipeline = params?.stage || params?.pipeline ? await leadStages() : null;
   const shown = pipeline && params?.pipeline && params.pipeline !== "all" ? (pipeline.pipelines.find((p) => p.key === params.pipeline) ?? null) : undefined;
   const stage = pipeline?.stages.find((s) => s.key === params?.stage && s.pipelineId === (shown?.id ?? MAIN_PIPELINE_ID));
@@ -378,9 +385,11 @@ async function leadListWhere(userId: string, params?: LeadListParams): Promise<P
     ...(params?.search
       ? {
           OR: [
-            { title: { contains: params.search, mode: "insensitive" as const } },
-            { company: { name: { contains: params.search, mode: "insensitive" as const } } },
+            ...(readable("title") ? [{ title: { contains: params.search, mode: "insensitive" as const } }] : []),
+            ...(readable("companyName") ? [{ company: { name: { contains: params.search, mode: "insensitive" as const } } }] : []),
             ...customBranches,
+            // Nothing left to search in: no match, rather than no condition.
+            ...(!readable("title") && !readable("companyName") && customBranches.length === 0 ? [{ id: { in: [] as string[] } }] : []),
           ],
         }
       : {}),
@@ -390,7 +399,7 @@ async function leadListWhere(userId: string, params?: LeadListParams): Promise<P
         : { ownerUserId: params.ownerUserId }
       : {}),
     ...(expectedCloseDate ? { expectedCloseDate } : {}),
-    ...(params?.source ? { source: params.source } : {}),
+    ...(params?.source && readable("source") ? { source: params.source } : {}),
     ...(params?.grade && GRADE_RANGES[params.grade] ? { score: GRADE_RANGES[params.grade] } : {}),
     AND: [await leadAccess(userId, "view"), ...narrowing],
   };
@@ -404,11 +413,15 @@ const leadListInclude = {
 
 export async function listLeads(params?: LeadListParams) {
   const user = await requireModuleUser("leads");
-  return db.lead.findMany({
-    where: await leadListWhere(user.id, params),
-    orderBy: leadListOrder(params),
-    include: leadListInclude,
-  });
+  const [rows, masker] = await Promise.all([
+    db.lead.findMany({
+      where: await leadListWhere(user.id, params),
+      orderBy: leadListOrder(params),
+      include: leadListInclude,
+    }),
+    listLeadMasker(user.id),
+  ]);
+  return rows.map((row) => maskLead(masker, row));
 }
 
 /**
@@ -420,7 +433,7 @@ export async function listLeadsPaged(params: LeadListParams & { page: number; pa
   // One `where` for both queries: the count has to be the count of the rows this viewer can see,
   // or the pager offers a page 9 that comes back empty.
   const where = await leadListWhere(user.id, params);
-  const [rows, total] = await Promise.all([
+  const [rows, total, masker] = await Promise.all([
     db.lead.findMany({
       where,
       orderBy: leadListOrder(params),
@@ -428,8 +441,9 @@ export async function listLeadsPaged(params: LeadListParams & { page: number; pa
       ...pageSlice(params.page, params.pageSize),
     }),
     db.lead.count({ where }),
+    listLeadMasker(user.id),
   ]);
-  return { rows, total };
+  return { rows: rows.map((row) => maskLead(masker, row)), total };
 }
 
 export async function getLead(id: string) {
@@ -442,15 +456,27 @@ export async function getLead(id: string) {
   const lead = await db.lead.findUnique({
     where: { id },
     include: {
+      // What the lead's page shows of its account, and nothing else: this is a server action, so
+      // whatever it selects can be asked for directly — the account's bank and tax details included,
+      // when it selected the whole row.
       company: {
-        include: {
+        select: {
+          id: true,
+          name: true,
+          companySeq: true,
+          stage: true,
+          website: true,
+          linkedinUrl: true,
           // The account's own sales rep, which is not the same as the lead's owner: a rep can be
           // working a deal on an account somebody else manages, and both are worth showing.
           owner: { select: { id: true, name: true } },
           assignedTo: { select: { id: true, name: true } },
           industry: { select: { id: true, name: true } },
           customerCategory: { select: CATEGORY_SELECT },
-          locations: { orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+          locations: {
+            orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+            select: { id: true, isPrimary: true, address: true, city: true, state: true, pincode: true, country: true },
+          },
         },
       },
       contact: true,
@@ -476,11 +502,29 @@ export async function getLead(id: string) {
    * record and locations, the contact, the whole activity trail — comes with it.
    */
   if (!(await mayAccess(user.id, "leads", "view", lead.id))) return null;
-  // The lead names its contact either way; how to reach them is `contacts.view`'s to give.
-  if (lead.contact && !(await hasEffectivePermission(user.id, "contacts.view"))) {
-    return toPlain({ ...lead, contact: { ...lead.contact, email: null, phone: null, linkedinUrl: null } });
-  }
-  return toPlain(lead);
+  // The lead names its contact either way; how to reach them is `contacts.view`'s to give — and the
+  // address last checked is how to reach them too.
+  const contact =
+    lead.contact && !(await hasEffectivePermission(user.id, "contacts.view"))
+      ? { ...lead.contact, email: null, phone: null, linkedinUrl: null, emailCheckedValue: null, emailCheckDetail: null }
+      : lead.contact;
+
+  // Field access, on the lead's own page (src/lib/leads/masking.ts): masked fields stay masked until
+  // the lead is unmasked today, restricted ones are never sent. The account's address is sent as the
+  // two lines the page shows, never as its locations.
+  const masker = await detailLeadMasker(user.id, lead.id);
+  const { locations, ...company } = lead.company;
+  const primary = locations.find((l) => l.isPrimary) ?? locations[0] ?? null;
+  const place = [primary?.city, primary?.state, primary?.country].filter(Boolean).join(", ") || null;
+  const address = {
+    place: place === null && masker.visibility("address") === "clear" ? null : masker.present("address", place),
+    line: masker.present("address", addressLine(primary)),
+  };
+  return toPlain({
+    ...maskLead(masker, { ...lead, company, contact }),
+    address,
+    masking: { concealed: masker.concealed, revealable: masker.revealable, revealed: masker.revealed },
+  });
 }
 
 /**
@@ -522,7 +566,10 @@ export async function leadDocumentDraft(leadId: string) {
       },
     },
   });
-  return lead ? toPlain(lead) : null;
+  if (!lead) return null;
+  // The title goes into the new document's reference: as the person sees it on the lead's page.
+  const masker = await detailLeadMasker(user.id, lead.id);
+  return toPlain({ ...lead, title: maskLeadTitle(masker, lead.title) });
 }
 
 /** A lead's own fields, read by name — none in a workspace still waiting for the column. */
@@ -672,14 +719,18 @@ export async function updateLeadDetails(input: unknown): Promise<ActionResult<nu
     select: { id: true, title: true, description: true, estimatedValue: true, expectedCloseDate: true, contactId: true, companyId: true },
   });
   if (!lead || !(await leadInScope(user.id, lead.id))) return { ok: false, error: "Lead not found." };
-  const contactId = data.contactId || null;
+  const masker = await detailLeadMasker(user.id, lead.id);
+  // Choosing a contact by a name one can't see would be choosing blind; the lead keeps its contact.
+  const contactId = masker.locked("contactName") ? lead.contactId : data.contactId || null;
   if (contactId && contactId !== lead.contactId) {
     const contact = await db.contact.findUnique({ where: { id: contactId }, select: { companyId: true } });
     if (!contact || contact.companyId !== lead.companyId) return { ok: false, error: "That contact isn't at this company." };
   }
+  // A field this person sees masked or not at all is one they can't change: what the form sent back for
+  // it is the mask, never the value. It keeps what it holds (src/lib/leads/masking.ts `locked`).
   const next = {
-    title: data.title,
-    description: data.description || null,
+    title: masker.locked("title") ? lead.title : data.title,
+    description: masker.locked("description") ? lead.description : data.description || null,
     estimatedValue: data.estimatedValue ?? null,
     // A calendar day, kept as its midnight UTC, as the new-lead form keeps it.
     expectedCloseDate: data.expectedCloseDate ? new Date(`${data.expectedCloseDate}T00:00:00Z`) : null,
@@ -775,8 +826,9 @@ export async function leadConnections(leadId: string): Promise<{
           carriedOnAs: { select: { id: true, leadSeq: true, title: true, pipelineId: true }, orderBy: { createdAt: "asc" } },
         },
       });
-      from = row?.fromLead ? { ...row.fromLead, pipeline: name(row.fromLead.pipelineId) } : null;
-      into = (row?.carriedOnAs ?? []).map((l) => ({ ...l, pipeline: name(l.pipelineId) }));
+      const masker = await listLeadMasker(user.id);
+      from = row?.fromLead ? { ...row.fromLead, title: maskLeadTitle(masker, row.fromLead.title), pipeline: name(row.fromLead.pipelineId) } : null;
+      into = (row?.carriedOnAs ?? []).map((l) => ({ ...l, title: maskLeadTitle(masker, l.title), pipeline: name(l.pipelineId) }));
     } catch (err) {
       if (!notMigratedYet(err)) throw err;
     }
@@ -802,7 +854,10 @@ export async function updateLeadCustomFields(leadId: string, input: unknown): Pr
     return { ok: false, error: "Lead not found." };
   }
 
-  const saved = await saveCustomFields("LEAD", lead.id, user.id, input);
+  // Masked fields not unmasked today keep what they hold — the form never had their values.
+  const masker = await detailLeadMasker(user.id, lead.id);
+  const locked = (await definitionsFor("LEAD")).filter((d) => masker.locked(customFieldKey(d.key))).map((d) => d.key);
+  const saved = await saveCustomFields("LEAD", lead.id, user.id, input, { skip: locked });
   if (!saved.ok) return saved;
   if (saved.changed.length > 0) {
     await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Lead", entityId: lead.id, entityLabel: `${lead.title}${changedLabel(saved.changed)}` });
@@ -832,7 +887,9 @@ export async function exportLeadsCsv(): Promise<ActionResult<{ csv: string; file
   });
 
   const clock = await workspaceClock();
-  const rows = leads.map((lead) => ({
+  // An export is a list that leaves the building: masked as the list is, never unmasked.
+  const masker = await listLeadMasker(user.id);
+  const rows = leads.map((raw) => maskLead(masker, raw)).map((lead) => ({
     title: sanitizeCsvCell(lead.title),
     company: sanitizeCsvCell(lead.company.name),
     contact: sanitizeCsvCell(lead.contact?.name ?? ""),
@@ -936,9 +993,10 @@ export async function bulkUpdateLeads(input: unknown): Promise<ActionResult<{ co
     }
     const refused = leads.filter((l) => !mayChangeLeadOwner(rights, user.id, l));
     if (refused.length) {
+      const masker = await listLeadMasker(user.id);
       return {
         ok: false,
-        error: `You can only hand off leads you own — ${refused.length === 1 ? `“${refused[0]!.title}” isn't yours` : `${refused.length} of these aren't yours`}.`,
+        error: `You can only hand off leads you own — ${refused.length === 1 ? `“${maskLeadTitle(masker, refused[0]!.title)}” isn't yours` : `${refused.length} of these aren't yours`}.`,
       };
     }
     if (!nextOwnerId && !mayLeaveUnassigned(rights)) {

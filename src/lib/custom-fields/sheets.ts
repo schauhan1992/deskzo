@@ -1,6 +1,6 @@
 import type { FieldChange } from "@/lib/portability/importers/types";
 import { exportValue, type CustomFieldDef, type CustomFieldEntityKey, type CustomFieldValues } from "@/lib/custom-fields/rules";
-import { fieldsFor, prepareCustomFields, valuesOf } from "@/lib/custom-fields/server";
+import { customTextMasker, fieldsFor, prepareCustomFields, valuesOf } from "@/lib/custom-fields/server";
 import { db } from "@/lib/db";
 import { PEOPLE_ONLY } from "@/lib/people";
 
@@ -62,6 +62,8 @@ export async function exportCells(
   const heads = headings(visible, builtInColumns);
   const values = await valuesOf(entity, ids);
   const names = await namesFor(visible, [...values.values()]);
+  // A lead's field masked for this person is masked in the file too: an export is a list.
+  const mask = await customTextMasker(entity, userId);
   return (id) => {
     const v = values.get(id) ?? {};
     const hidden = options.hiddenFor?.(id);
@@ -73,7 +75,10 @@ export async function exportCells(
       }
       const value = v[d.key];
       const numeric = (d.type === "NUMBER" || d.type === "MONEY") && typeof value === "number";
-      const text = numeric ? value : exportValue(d, value, (pid) => names.get(pid));
+      const raw = numeric ? value : exportValue(d, value, (pid) => names.get(pid));
+      // A number stays a number unless it is masked — a masked one is words.
+      const masked = mask ? mask(d.key, String(raw)) : null;
+      const text = masked === null || masked === String(raw) ? raw : masked;
       out[heads.get(d.key)!] = typeof text === "string" && options.sanitize ? options.sanitize(text) : text;
     }
     return out;

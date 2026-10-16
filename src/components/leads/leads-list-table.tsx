@@ -18,7 +18,7 @@ import { companyPath, leadPath } from "@/lib/record-links";
 import { LeadStatusBadge } from "@/components/leads/lead-status-badge";
 import { useColumns } from "@/components/ui/table-columns";
 import { LeadScoreBadge } from "@/components/leads/lead-score";
-import { LEAD_SOURCE_LABELS } from "@/lib/leads/source";
+import { leadSourceLabel } from "@/lib/leads/source";
 import { CustomFieldBodyCells, CustomFieldHeaderCells, type CustomColumn } from "@/components/custom-fields/custom-field-cells";
 
 type LeadRow = {
@@ -158,6 +158,9 @@ export function LeadsListTable({
                 {cols.show("expectedClose") && <th className="px-4 py-2.5">Expected close</th>}
                 {cols.show("updated") && <th className="px-4 py-2.5">Updated</th>}
                 <CustomFieldHeaderCells columns={fieldColumns} className="px-4 py-2.5" />
+                <th className="px-4 py-2.5 text-right">
+                  <span className="sr-only">Open</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -203,7 +206,7 @@ export function LeadsListTable({
                   )}
                   {cols.show("source") && (
                     <td className="px-4 py-2.5 text-muted" title={lead.sourceDetail ?? undefined}>
-                      {LEAD_SOURCE_LABELS[lead.source]}
+                      {leadSourceLabel(lead.source)}
                     </td>
                   )}
                   {cols.show("owner") && (
@@ -219,11 +222,21 @@ export function LeadsListTable({
                     <td className="px-4 py-2.5 text-muted">{clock.date(lead.updatedAt)}</td>
                   )}
                   <CustomFieldBodyCells columns={fieldColumns} texts={customColumns.texts[lead.id]} className="px-4 py-2.5 text-muted" />
+                  {/* View: the lead's page, where fields masked in this list are unmasked for those who may (src/components/leads/lead-unmask.tsx). */}
+                  <td className="px-4 py-2.5 text-right">
+                    <Link
+                      href={leadPath(lead.leadSeq)}
+                      className="inline-flex h-7 items-center rounded-base border border-line bg-surface px-2.5 text-xs font-medium text-text hover:bg-surface-sunken"
+                      aria-label={`View ${formatLeadId(lead.leadSeq)}`}
+                    >
+                      View
+                    </Link>
+                  </td>
                 </tr>
               ))}
               {leads.length === 0 && (
                 <tr>
-                  <td colSpan={cols.count + fieldColumns.length} className="px-4 py-8 text-center text-subtle">
+                  <td colSpan={cols.count + fieldColumns.length + 1} className="px-4 py-8 text-center text-subtle">
                     No leads yet.
                   </td>
                 </tr>

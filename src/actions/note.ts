@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { leadsInPlan, withoutHiddenLeads } from "@/lib/leads/shown";
+import { leadsSeenBy } from "@/lib/leads/shown";
 import { mayAttachTo } from "@/lib/authz/attachments";
 import { requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
@@ -233,7 +233,7 @@ export async function listNotes(params?: NoteListParams): Promise<NoteListItem[]
   });
 
   const now = Date.now();
-  return withoutHiddenLeads(rows, await leadsInPlan()).map(({ owner, ...note }) => ({
+  return (await leadsSeenBy(user.id, rows)).map(({ owner, ...note }) => ({
     ...note,
     ownerName: owner.name,
     canEdit: note.ownerUserId === user.id,

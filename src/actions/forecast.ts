@@ -29,6 +29,7 @@ import {
 } from "@/lib/forecast/compute";
 import type { ActionResult } from "@/actions/company";
 import { byStageDate, salesLeads } from "@/lib/pipeline/server";
+import { listLeadMasker, maskLead } from "@/lib/leads/masking";
 
 /**
  * The forecast: sales, renewals, collections and AMC opportunities, period by period.
@@ -212,7 +213,9 @@ export async function getForecast(params: ForecastParams = {}) {
   // Each row carries the bucket it lands in, worked out here on the workspace's clock, so the page's
   // lists and its table can never disagree about which month a deal belongs to. Every date handed on
   // is a moment on that clock — a calendar day as the moment it begins (`dayStart`).
-  const deals: (Deal & { bucket: string; weighted: number | null; title: string; ref: number; owner: { id: string; name: string } | null; company: { id: string; name: string }; valueSource: string | null })[] = leads.map((l) => {
+  // Each deal named as this person's field access names a lead in a list.
+  const leadMasker = await listLeadMasker(v.user.id);
+  const deals: (Deal & { bucket: string; weighted: number | null; title: string; ref: number; owner: { id: string; name: string } | null; company: { id: string; name: string }; valueSource: string | null })[] = leads.map((raw) => maskLead(leadMasker, raw)).map((l) => {
     const proposal = l.documents[0];
     const fromProposal = proposal ? money(proposal.taxableValue) * (Number(proposal.exchangeRate) || 1) : null;
     const value = fromProposal && fromProposal > 0 ? fromProposal : l.estimatedValue !== null ? money(l.estimatedValue) : null;

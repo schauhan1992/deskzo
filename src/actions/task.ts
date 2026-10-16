@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { leadsInPlan, withoutHiddenLeads } from "@/lib/leads/shown";
+import { leadsSeenBy } from "@/lib/leads/shown";
 import { requireModuleUser } from "@/lib/modules-access";
 import { taskAccess, type AccessAction } from "@/lib/authz/access";
 import { pageSlice } from "@/lib/pagination";
@@ -260,7 +260,7 @@ export async function listTasks(params?: TaskListParams) {
     orderBy: [{ done: "asc" }, { dueDate: "asc" }],
     include: taskListInclude,
   });
-  return withoutHiddenLeads(rows, await leadsInPlan());
+  return (await leadsSeenBy(user.id, rows));
 }
 
 export async function listTasksPaged(params: TaskListParams & { page: number; pageSize: number }) {
@@ -275,7 +275,7 @@ export async function listTasksPaged(params: TaskListParams & { page: number; pa
     }),
     db.task.count({ where }),
   ]);
-  return { rows: withoutHiddenLeads(rows, await leadsInPlan()), total };
+  return { rows: (await leadsSeenBy(user.id, rows)), total };
 }
 
 /** Open and overdue counts across the whole filtered set, so the header holds steady while paging. */
