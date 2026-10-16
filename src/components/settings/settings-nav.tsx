@@ -16,9 +16,13 @@ import { cn } from "@/lib/utils";
  *
  * Hidden on the index itself: that page is the map, and a map does not need a legend beside it.
  */
+const WIDE = ["/settings/users", "/settings/roles"];
+
 export function SettingsNav({ visibleKeys }: { visibleKeys: string[] }) {
   const pathname = usePathname();
-  if (pathname === "/settings") return null;
+  // The index is the map; Users and Roles & Permissions lay three columns out across the page and
+  // carry their own way back.
+  if (pathname === "/settings" || WIDE.some((p) => pathname === p || pathname.startsWith(`${p}/`))) return null;
 
   // Rebuilt here rather than handed over ready-made: each entry holds an icon component, and a
   // function cannot be serialised from a server component to a client one. Keys can.
