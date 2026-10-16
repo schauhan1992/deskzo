@@ -16,7 +16,7 @@ import { seesResellerContactDetails } from "@/lib/authz/contact-access";
 import { sanitizeCsvCell } from "@/lib/csv";
 import { isResellerManaged, redactContactDetails } from "@/lib/reseller";
 import { getExporter } from "./exporters";
-import { listLeadMasker, maskLead } from "@/lib/leads/masking";
+import { listLeadMasker, maskLeads } from "@/lib/leads/masking";
 
 /**
  * Turning the canonical entities into a file somebody can open.
@@ -266,7 +266,7 @@ export async function accountBundle(userId: string, companyId: string) {
       {
         name: "Leads",
         // Masked as the person's field access masks a lead in a list: a workbook is a list.
-        rows: leads.map((raw) => maskLead(leadMasker, raw)).map((l) => ({
+        rows: (await maskLeads(leadMasker, leads)).map((l) => ({
           Lead: formatLeadId(l.leadSeq),
           Title: l.title,
           Status: l.status,

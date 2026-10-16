@@ -208,23 +208,23 @@ export function RoleAccessEditor({
     .filter((c) => !term || c.label.toLowerCase().includes(term) || c.description.toLowerCase().includes(term));
 
   return (
-    <div className="overflow-hidden rounded-base border border-line">
-      <div className="grid md:grid-cols-[15rem_1fr]">
-        <nav aria-label="Modules" className="border-b border-line bg-surface-sunken md:border-b-0 md:border-r">
-          <ul className="max-h-[32rem] overflow-y-auto p-2">
+    <div className="@container overflow-hidden rounded-base border border-line">
+      <div className="grid grid-cols-[minmax(0,1fr)] @3xl:grid-cols-[13rem_minmax(0,1fr)]">
+        <nav aria-label="Modules" className="min-w-0 border-b border-line bg-surface-sunken @3xl:border-b-0 @3xl:border-r">
+          <ul className="flex gap-1 overflow-x-auto p-2 @3xl:block @3xl:max-h-[40rem] @3xl:space-y-0.5 @3xl:overflow-y-auto">
             {ACCESS_MODULES.map((m) => {
               const s = standing(m.key);
               return (
-                <li key={m.key}>
+                <li key={m.key} className="shrink-0 @3xl:shrink">
                   <button
                     type="button"
                     onClick={() => setActive(m.key)}
                     aria-current={active === m.key ? "true" : undefined}
-                    className={`flex w-full items-start justify-between gap-2 rounded-base px-2.5 py-2 text-left text-sm ${active === m.key ? "bg-brand/10 text-text ring-1 ring-brand/30" : "text-muted hover:bg-surface"}`}
+                    className={`flex w-full items-start justify-between gap-2 whitespace-nowrap rounded-base px-2.5 py-2 text-left text-sm @3xl:whitespace-normal ${active === m.key ? "bg-brand/10 text-text ring-1 ring-brand/30" : "text-muted hover:bg-surface"}`}
                   >
                     <span className="min-w-0">
                       <span className="block font-medium text-text">{m.label}</span>
-                      <span className="block truncate text-[11px] text-subtle">{m.description}</span>
+                      <span className="hidden truncate text-[11px] text-subtle @3xl:block">{m.description}</span>
                     </span>
                     <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${s === "full" ? "bg-success" : s === "limited" ? "bg-warning" : "bg-line-strong"}`} title={STANDING_WORDS[s]} />
                   </button>

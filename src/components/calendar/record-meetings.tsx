@@ -13,9 +13,23 @@ import { can } from "@/lib/authz/resolve";
  * it, who was asked, and the link to join. Shown only where the page has decided Calendar is on and the
  * viewer may see the record; `canSchedule` adds the button to book another.
  */
-export async function RecordMeetings({ record, viewerId, canSchedule = true, emptyText = "No meetings scheduled from here yet." }: { record: MeetingRecordRef; viewerId: string; canSchedule?: boolean; emptyText?: string }) {
+export async function RecordMeetings({
+  record,
+  viewerId,
+  canSchedule = true,
+  emptyText = "No meetings scheduled from here yet.",
+  redact,
+}: {
+  record: MeetingRecordRef;
+  viewerId: string;
+  canSchedule?: boolean;
+  emptyText?: string;
+  /** On a lead whose fields are masked for this person: their values masked in the meetings' titles and places too. */
+  redact?: <T>(value: T) => T;
+}) {
   // "Schedule meetings" (owner, 8 Oct 2026) decides the button and Reschedule; cancelling your own never needs it.
-  const [meetings, clock, mayBook] = await Promise.all([meetingsForRecord(viewerId, record), workspaceClock(), can(viewerId, "meetings.schedule")]);
+  const [found, clock, mayBook] = await Promise.all([meetingsForRecord(viewerId, record), workspaceClock(), can(viewerId, "meetings.schedule")]);
+  const meetings = redact ? found.map((m) => ({ ...m, title: redact(m.title), location: redact(m.location), attendees: redact(m.attendees) })) : found;
   const coming = meetings.filter((m) => m.upcoming).sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
   const rest = meetings.filter((m) => !m.upcoming);
 

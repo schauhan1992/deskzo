@@ -70,9 +70,11 @@ export default async function UnmaskingLogsPage({ searchParams }: { searchParams
         )}
       </Card>
 
-      <div className="mt-4">
-        <Pagination page={page} pageSize={pageSize} total={data.total} totalPages={totalPages(data.total, pageSize)} pageSizes={PAGE_SIZES} label="attempts" />
-      </div>
+      {data.total > 0 && (
+        <div className="mt-4">
+          <Pagination page={page} pageSize={pageSize} total={data.total} totalPages={totalPages(data.total, pageSize)} pageSizes={PAGE_SIZES} label="attempts" />
+        </div>
+      )}
     </div>
   );
 }

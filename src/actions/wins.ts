@@ -13,6 +13,7 @@ import { workspaceClock } from "@/lib/time/workspace";
 import { bookingsByPerson, detectSalesWins, winsSettings, withoutOrphanedWins } from "@/lib/wins/detect";
 import type { ActionResult } from "@/actions/company";
 import { salesLeadRelation } from "@/lib/pipeline/server";
+import { maskDealWins } from "@/lib/leads/masking";
 
 /**
  * The wins wall and the office TV: this month's leaderboard, the wins as they happened, and the
@@ -77,7 +78,8 @@ export async function getWinsWall() {
     can(user.id, "wins.manage"),
   ]);
   // A win for a customer or deal deleted since is not on the wall — see withoutOrphanedWins.
-  const wins = (await withoutOrphanedWins(allWins)).map(({ details, ...w }) => {
+  // A won deal's own words are masked for this viewer as their field access says (src/lib/leads/masking.ts).
+  const wins = (await maskDealWins(user.id, await withoutOrphanedWins(allWins))).map(({ details, ...w }) => {
     void details; // only needed to find the orphans; the wall has no use for it
     return w;
   });

@@ -35,15 +35,18 @@ export function LeadUnmask({
   usage: UnmaskUsageStatus | null;
 }) {
   const router = useRouter();
-  const asked = useRef<string | null>(null);
+  // One request per lead per visit. An effect that runs again for the same lead (React does this on
+  // purpose in development, and on a refresh) listens to the request already made instead of asking
+  // twice — or, worse, not listening at all.
+  const request = useRef<{ leadId: string; answer: Promise<UnmaskOutcome> } | null>(null);
   const [outcome, setOutcome] = useState<UnmaskOutcome | null>(null);
   const [pending, setPending] = useState(revealable);
 
   useEffect(() => {
-    if (!revealable || asked.current === leadId) return;
-    asked.current = leadId;
+    if (!revealable) return;
+    if (request.current?.leadId !== leadId) request.current = { leadId, answer: unmaskLead(leadId) };
     let live = true;
-    unmaskLead(leadId)
+    request.current.answer
       .then((result) => {
         if (!live) return;
         setOutcome(result);

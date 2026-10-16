@@ -42,7 +42,7 @@ import { CustomFieldsCard } from "@/components/custom-fields/custom-fields-card"
 import { EditCustomFields } from "@/components/custom-fields/edit-custom-fields";
 import { displayFields, formSetup, valuesFor } from "@/lib/custom-fields/server";
 import { companyPath, leadPath } from "@/lib/record-links";
-import { detailLeadMasker } from "@/lib/leads/masking";
+import { detailLeadMasker, redactorForLead } from "@/lib/leads/masking";
 import { customFieldKey } from "@/lib/authz/field-policy";
 import { unmaskUsageToday } from "@/lib/authz/unmask";
 import { LeadUnmask } from "@/components/leads/lead-unmask";
@@ -129,6 +129,9 @@ export async function LeadDetail({ id }: { id: string }) {
     lead.masking.revealable.length > 0 ? unmaskUsageToday(userId) : Promise.resolve(null),
   ]);
   const concealed = new Set(lead.masking.concealed);
+  // What people wrote about the lead elsewhere on this page — task and visit titles, documents,
+  // meetings — quotes its fields too; those are masked in that text as well.
+  const redact = await redactorForLead(userId, lead.id, masker);
 
   const company = lead.company;
   // The address the deal belongs to: the account's primary site, which is what a rep means by "where
@@ -265,7 +268,7 @@ export async function LeadDetail({ id }: { id: string }) {
           )}
 
           {salesDocsEnabled && (
-            <LeadDocuments documents={documents} leadId={lead.id} canCreate={canIssueDocuments} />
+            <LeadDocuments documents={redact.deep(documents)} leadId={lead.id} canCreate={canIssueDocuments} />
           )}
 
           {tasksEnabled && (
@@ -273,7 +276,7 @@ export async function LeadDetail({ id }: { id: string }) {
               <CardHeader className="text-sm font-medium text-text">Tasks</CardHeader>
               <CardContent>
                 <TaskList
-                  tasks={tasks}
+                  tasks={redact.deep(tasks)}
                   users={assignableUsers}
                   currentUserId={userId}
                   canDeleteAny={canDeleteAnyTask}
@@ -308,9 +311,9 @@ export async function LeadDetail({ id }: { id: string }) {
         </div>
 
         <div className="space-y-6">
-          {calendarEnabled && <RecordMeetings record={{ kind: "lead", id: lead.id }} viewerId={userId} />}
+          {calendarEnabled && <RecordMeetings record={{ kind: "lead", id: lead.id }} viewerId={userId} redact={redact.deep} />}
 
-          {visitsEnabled && <LeadVisits visits={visits} leadId={lead.id} companyId={company.id} />}
+          {visitsEnabled && <LeadVisits visits={redact.deep(visits)} leadId={lead.id} companyId={company.id} />}
 
           {domainBriefing && <DomainPanel companyId={company.id} briefing={domainBriefing} />}
 

@@ -110,6 +110,20 @@ async function restrictedByPolicy(entity: CustomFieldEntityKey, userId: string):
 }
 
 /**
+ * The fields one person may not search or filter on: those their field access doesn't show them in the
+ * clear in a list. A search that matched a masked value would say what it holds, so only what they
+ * see plainly can be matched. Nothing for other record types.
+ */
+export async function unsearchableByPolicy(entity: CustomFieldEntityKey, userId: string): Promise<Set<string>> {
+  if (entity !== "LEAD") return new Set();
+  const { leadMasker } = await import("@/lib/authz/fields");
+  const { customFieldKey } = await import("@/lib/authz/field-policy");
+  const masker = await leadMasker(userId, "list");
+  if (!masker.active) return new Set();
+  return new Set((await definitionsFor(entity)).filter((d) => masker.visibility(customFieldKey(d.key)) !== "clear").map((d) => d.key));
+}
+
+/**
  * Masks the words of a lead's custom field values for one person in one context — a list's columns and
  * an export's cells in the list answers. Nothing for other record types, or nothing masked.
  */
@@ -395,7 +409,8 @@ export async function customFieldsForCreate(
 export async function customSearchWhere(entity: CustomFieldEntityKey, userId: string, query: string | undefined): Promise<Record<string, unknown>[]> {
   const q = query?.trim() ?? "";
   if (q.length < 2) return [];
-  const { visible } = await fieldsFor(entity, userId);
+  const [{ visible: shown }, unsearchable] = await Promise.all([fieldsFor(entity, userId), unsearchableByPolicy(entity, userId)]);
+  const visible = shown.filter((d) => !unsearchable.has(d.key));
   if (visible.length === 0) return [];
   const lower = q.toLowerCase();
   const number = /^-?[\d,]*\.?\d+$/.test(q.replace(/[\s₹]/g, "")) ? Number(q.replace(/[\s,₹]/g, "")) : null;

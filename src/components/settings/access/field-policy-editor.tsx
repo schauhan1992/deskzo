@@ -124,17 +124,16 @@ export function FieldPolicyEditor(
           </label>
         </CardHeader>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px] text-sm">
+          <table className="w-full min-w-[600px] text-sm">
             <thead className="border-y border-line bg-surface-sunken text-left text-xs font-medium text-muted">
               <tr>
-                <th className="px-3 py-2">Field</th>
-                {props.mode === "person" && <th className="px-3 py-2">Use role default</th>}
-                <th className="px-3 py-2">View field</th>
-                <th className="px-3 py-2">Mask in list</th>
-                <th className="px-3 py-2">Mask in detail</th>
-                <th className="px-3 py-2">Allow unmask</th>
-                <th className="px-3 py-2">Mask format</th>
-                <th className="px-3 py-2">Effective</th>
+                <th className="px-3 py-2">Field · effective</th>
+                {props.mode === "person" && <th className="px-2 py-2">Role&apos;s</th>}
+                <th className="px-2 py-2">View</th>
+                <th className="px-2 py-2">Mask in list</th>
+                <th className="px-2 py-2">Mask in detail</th>
+                <th className="px-2 py-2">Unmask</th>
+                <th className="px-2 py-2">Format</th>
               </tr>
             </thead>
             <tbody>
@@ -150,9 +149,13 @@ export function FieldPolicyEditor(
                       <span className="font-medium text-text">{row.label}</span>
                       {row.custom && <Badge className="ml-1.5">Custom</Badge>}
                       <span className="block text-xs text-subtle">{row.description}</span>
+                      <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                        <Badge tone={eff.tone}>{eff.text}</Badge>
+                        <span className="text-[11px] text-subtle">{following && props.mode === "person" ? "Their role's." : row.why}</span>
+                      </span>
                     </td>
                     {props.mode === "person" && (
-                      <td className="px-3 py-2.5">
+                      <td className="px-2 py-2.5">
                         <input
                           type="checkbox"
                           className="h-4 w-4 accent-[var(--color-brand)]"
@@ -163,7 +166,7 @@ export function FieldPolicyEditor(
                         />
                       </td>
                     )}
-                    <td className="px-3 py-2.5">
+                    <td className="px-2 py-2.5">
                       <input
                         type="checkbox"
                         className="h-4 w-4 accent-[var(--color-brand)]"
@@ -173,13 +176,13 @@ export function FieldPolicyEditor(
                         onChange={(e) => edit(row, { view: e.target.checked })}
                       />
                     </td>
-                    <td className="px-3 py-2.5">
+                    <td className="px-2 py-2.5">
                       <Switch label={`${row.label}: masked in lists`} checked={p.maskInList} disabled={rowLocked || !p.view} onChange={(v) => edit(row, { maskInList: v })} />
                     </td>
-                    <td className="px-3 py-2.5">
+                    <td className="px-2 py-2.5">
                       <Switch label={`${row.label}: masked on the lead`} checked={p.maskInDetail} disabled={rowLocked || !p.view} onChange={(v) => edit(row, { maskInDetail: v })} />
                     </td>
-                    <td className="px-3 py-2.5">
+                    <td className="px-2 py-2.5">
                       <input
                         type="checkbox"
                         className="h-4 w-4 accent-[var(--color-brand)]"
@@ -189,13 +192,13 @@ export function FieldPolicyEditor(
                         onChange={(e) => edit(row, { unmask: e.target.checked })}
                       />
                     </td>
-                    <td className="px-3 py-2.5">
+                    <td className="px-2 py-2.5">
                       <Select
                         value={p.format}
                         disabled={rowLocked || !p.view}
                         aria-label={`${row.label}: mask format`}
                         onChange={(e) => edit(row, { format: e.target.value as MaskFormat })}
-                        className="h-8 text-xs"
+                        className="h-8 min-w-[7.5rem] text-xs"
                       >
                         {row.formats.map((f) => (
                           <option key={f} value={f}>
@@ -205,16 +208,12 @@ export function FieldPolicyEditor(
                       </Select>
                       <span className="mt-1 block font-mono text-[11px] text-subtle">{preview}</span>
                     </td>
-                    <td className="px-3 py-2.5">
-                      <Badge tone={eff.tone}>{eff.text}</Badge>
-                      <span className="mt-1 block max-w-[14rem] text-[11px] text-subtle">{following && props.mode === "person" ? "Their role's." : row.why}</span>
-                    </td>
                   </tr>
                 );
               })}
               {shown.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-3 py-6 text-center text-subtle">
+                  <td colSpan={7} className="px-3 py-6 text-center text-subtle">
                     No field matches “{search}”.
                   </td>
                 </tr>

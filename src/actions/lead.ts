@@ -42,7 +42,7 @@ import { chooseOwner } from "@/lib/leads/assign";
 import { mayChangeLeadOwner, mayLeaveUnassigned, reassignRights } from "@/lib/authz/reassign";
 import { refreshLeadScore } from "@/lib/leads/score-store";
 import { leadPath } from "@/lib/record-links";
-import { addressLine, detailLeadMasker, listLeadMasker, maskLead, maskLeadTitle } from "@/lib/leads/masking";
+import { addressLine, detailLeadMasker, leadRedactor, leadSecrets, listLeadMasker, maskLead, maskLeads, maskLeadTitle } from "@/lib/leads/masking";
 import { customFieldKey } from "@/lib/authz/field-policy";
 
 /** A person's name for the activity log — or "nobody". */
@@ -367,11 +367,11 @@ async function leadListWhere(userId: string, params?: LeadListParams): Promise<P
   // `OR` of its own, so they join the `AND` rather than meeting the search's. A pipeline key there isn't
   // shows nothing; a stage key the pipeline doesn't have narrows nothing. Without a pipeline asked for,
   // every pipeline's leads are listed — what search, the export and other callers have always had.
-  // A field this person's field access restricts is never searched or filtered on: a search that
-  // matched it would tell them what it holds. A masked field can still be searched — it is theirs to
-  // unmask on the lead's page.
+  // Only what this person sees in the clear in a list is searched or filtered on: a search that matched
+  // a masked or restricted field would tell them what it holds ("Redwo" finding the leads whose
+  // masked company is Redwood). Unmasking a lead on its page doesn't change what lists match.
   const masker = await listLeadMasker(userId);
-  const readable = (field: string) => masker.visibility(field) !== "restricted";
+  const readable = (field: string) => masker.visibility(field) === "clear";
   const pipeline = params?.stage || params?.pipeline ? await leadStages() : null;
   const shown = pipeline && params?.pipeline && params.pipeline !== "all" ? (pipeline.pipelines.find((p) => p.key === params.pipeline) ?? null) : undefined;
   const stage = pipeline?.stages.find((s) => s.key === params?.stage && s.pipelineId === (shown?.id ?? MAIN_PIPELINE_ID));
@@ -421,7 +421,7 @@ export async function listLeads(params?: LeadListParams) {
     }),
     listLeadMasker(user.id),
   ]);
-  return rows.map((row) => maskLead(masker, row));
+  return maskLeads(masker, rows);
 }
 
 /**
@@ -443,7 +443,7 @@ export async function listLeadsPaged(params: LeadListParams & { page: number; pa
     db.lead.count({ where }),
     listLeadMasker(user.id),
   ]);
-  return { rows: rows.map((row) => maskLead(masker, row)), total };
+  return { rows: await maskLeads(masker, rows), total };
 }
 
 export async function getLead(id: string) {
@@ -520,8 +520,10 @@ export async function getLead(id: string) {
     place: place === null && masker.visibility("address") === "clear" ? null : masker.present("address", place),
     line: masker.present("address", addressLine(primary)),
   };
+  // What people wrote about the lead — activity notes, why it was lost — quotes its fields too.
+  const redact = leadRedactor(masker, leadSecrets(lead));
   return toPlain({
-    ...maskLead(masker, { ...lead, company, contact }),
+    ...maskLead(masker, { ...lead, company, contact, activities: redact.deep(lead.activities), lostReason: redact(lead.lostReason) }),
     address,
     masking: { concealed: masker.concealed, revealable: masker.revealable, revealed: masker.revealed },
   });
@@ -889,7 +891,7 @@ export async function exportLeadsCsv(): Promise<ActionResult<{ csv: string; file
   const clock = await workspaceClock();
   // An export is a list that leaves the building: masked as the list is, never unmasked.
   const masker = await listLeadMasker(user.id);
-  const rows = leads.map((raw) => maskLead(masker, raw)).map((lead) => ({
+  const rows = (await maskLeads(masker, leads)).map((lead) => ({
     title: sanitizeCsvCell(lead.title),
     company: sanitizeCsvCell(lead.company.name),
     contact: sanitizeCsvCell(lead.contact?.name ?? ""),

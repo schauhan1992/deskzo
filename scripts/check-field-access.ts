@@ -92,6 +92,7 @@ async function run(db: PrismaClient) {
   const logs = require("../src/actions/unmask-log") as typeof import("../src/actions/unmask-log");
   const { businessDate, unmaskUsageToday } = require("../src/lib/authz/unmask") as typeof import("../src/lib/authz/unmask");
   const { resolveFieldPolicies } = require("../src/lib/authz/fields") as typeof import("../src/lib/authz/fields");
+  const { maskDealWins } = require("../src/lib/leads/masking") as typeof import("../src/lib/leads/masking");
   /* eslint-enable @typescript-eslint/no-require-imports */
 
   // ── People and records ──────────────────────────────────────────────────────────────────────────
@@ -177,7 +178,49 @@ async function run(db: PrismaClient) {
   as(superAdmin);
   await access.setRoleFieldAccess(ROLE, [{ field: "title", policy: null }]);
   as(vishal);
-  ok("a masked field can still be searched — it's theirs to unmask", (await leads.listLeadsPaged({ page: 1, pageSize: 50, search: "Acme" })).total > 0);
+  // Matching a masked value would say what it holds: "Acme" finding the leads whose masked company is Acme.
+  ok("a masked field isn't searched either: no match on the company they see masked", (await leads.listLeadsPaged({ page: 1, pageSize: 50, search: "Acme" })).total === 0);
+  ok("what they see in the clear still is: the title, now open again", (await leads.listLeadsPaged({ page: 1, pageSize: 50, search: "Firewall" })).total > 0);
+
+  section("What people wrote about a lead");
+  // A description, a meeting's note and a won deal's celebration quote the lead's fields as often as not.
+  await db.lead.update({ where: { id: l2.id }, data: { description: `${RAW.company} wants 40 seats; call ${RAW.contact} on ${RAW.phone}` } });
+  await db.activity.create({ data: { leadId: l2.id, userId: vishal.id, type: "MEETING", notes: `Meeting held — ${RAW.company.toUpperCase()} — firewall review` } });
+  const wonOn = new Date();
+  const won = await db.celebration.create({
+    data: { kind: "ACHIEVEMENT", source: "DEAL_WON", occasionKey: `deal:${l2.id}`, title: `₹2 lakh won — ${RAW.company}`, message: "Zz Vishal closed “Firewall upgrade”.", details: { leadId: l2.id }, startsOn: wonOn, endsOn: wonOn },
+  });
+  const described = (await leads.listLeadsPaged({ page: 1, pageSize: 50 })).rows.find((r) => r.id === l2.id)!;
+  ok("a list row's own description is masked where it quotes the company and the phone", leaks(described).length === 0 && described.description?.includes("A********") === true, described.description);
+  const written = (await leads.getLead(l2.id))!;
+  ok("the lead's activity notes are masked where they quote its company, in any case", written.activities.some((a) => a.notes === "Meeting held — A******** — firewall review"), written.activities.map((a) => a.notes));
+  ok("and the lead's page carries none of the raw values", leaks(written).length === 0, leaks(written));
+  const [celebrated] = await maskDealWins(vishal.id, [won]);
+  ok("a won deal's celebration is masked for Vishal", celebrated.title === "₹2 lakh won — A********" && leaks(celebrated).length === 0, celebrated.title);
+  const [plainWin] = await maskDealWins(admin.id, [won]);
+  ok("and left as it was for somebody whose role masks nothing", plainWin.title === won.title);
+  await db.celebration.delete({ where: { id: won.id } });
+
+  section("A custom field");
+  const def = await db.customFieldDefinition.create({ data: { entity: "LEAD", key: "zz_budget_note", label: "Budget note", type: "TEXT", showInList: true } });
+  await db.lead.update({ where: { id: l3.id }, data: { customFields: { zz_budget_note: "Approved by the CFO" } } });
+  as(superAdmin);
+  const customSet = await access.setRoleFieldAccess(ROLE, [{ field: "custom:zz_budget_note", policy: MASKED({ format: "stars" }) }]);
+  ok("a lead's custom field can be masked like any other", customSet.ok, customSet);
+  as(vishal);
+  const withCustom = (await leads.listLeadsPaged({ page: 1, pageSize: 50 })).rows.find((r) => r.id === l3.id)!;
+  ok("a list row read whole carries the custom value masked, not as it is", !JSON.stringify(withCustom).includes("CFO"), withCustom.customFields);
+  ok("and the masked custom field isn't searched", (await leads.listLeadsPaged({ page: 1, pageSize: 50, search: "CFO" })).total === 0);
+  as(superAdmin);
+  await access.setRoleFieldAccess(ROLE, [{ field: "custom:zz_budget_note", policy: { view: false, maskInList: false, maskInDetail: false, unmask: false, format: "stars" } }]);
+  as(vishal);
+  const hidden = (await leads.listLeadsPaged({ page: 1, pageSize: 50 })).rows.find((r) => r.id === l3.id)!;
+  ok("restricted, it isn't sent at all", !JSON.stringify(hidden).includes("zz_budget_note") && !JSON.stringify(hidden).includes("CFO"), hidden.customFields);
+  as(superAdmin);
+  await access.setRoleFieldAccess(ROLE, [{ field: "custom:zz_budget_note", policy: null }]);
+  as(vishal);
+  ok("cleared, it is searched and shown again", (await leads.listLeadsPaged({ page: 1, pageSize: 50, search: "CFO" })).total === 1);
+  await db.customFieldDefinition.delete({ where: { id: def.id } });
 
   section("Unmasking");
   const first = await unmaskLead(l1.id);

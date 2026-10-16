@@ -129,7 +129,7 @@ export type RoleFieldAccess = {
   limitStored: boolean;
   editable: boolean;
   why: string | null;
-  /** Doors masking leaves open for this role, in words — the contacts and companies they still reach. */
+  /** Doors masking leaves open for this role, in words — the contacts, companies, calls and visits they still reach. */
   warnings: string[];
 };
 
@@ -185,9 +185,9 @@ export async function roleFieldAccess(role: string): Promise<RoleFieldAccess | n
 
 /**
  * What masking a lead's contact or company leaves reachable another way. A lead's email and phone are
- * its contact's, and its company is a company: a role that still opens contacts and companies sees them
- * there, on their own screens, where lead field access doesn't reach. Said, rather than silently
- * widened into rules about other records.
+ * its contact's, and its company is a company: a role that still opens contacts and companies — or the
+ * calls and visits made with them — sees them there, on their own screens, where lead field access
+ * doesn't reach. Said, rather than silently widened into rules about other records.
  */
 async function roleWarnings(role: string, rows: FieldAccessRow[]): Promise<string[]> {
   const concealed = (key: string) => {
@@ -206,6 +206,14 @@ async function roleWarnings(role: string, rows: FieldAccessRow[]): Promise<strin
   }
   if ((concealed("companyName") || concealed("address")) && viewOf("companies") !== "NONE") {
     out.push("This role can still open customers (Record Access › Customers & companies), whose name and address are shown there unmasked.");
+  }
+  // Calls and visits are records of their own, made with an account: they name the account, the person
+  // called and the number, and a visit the address it was made at.
+  if ((concealed("companyName") || concealed("contactName") || concealed("phone")) && viewOf("activities") !== "NONE") {
+    out.push("This role can still see calls, notes & meetings (Record Access › Calls, notes & meetings), which name the account, the person called and the number dialled.");
+  }
+  if ((concealed("companyName") || concealed("address")) && viewOf("visits") !== "NONE") {
+    out.push("This role can still see field visits (Record Access › Field visits), which name the account and the address visited.");
   }
   return out;
 }

@@ -59,7 +59,7 @@ import { customFilterWhere, type CustomFilterInputs } from "@/lib/custom-fields/
 import { assignVendorCodes, vendorCodeHolder } from "@/lib/companies/vendor-code";
 import { hasLeft } from "@/lib/contacts/left";
 import { designationData } from "@/lib/contacts/designations";
-import { listLeadMasker, maskLead } from "@/lib/leads/masking";
+import { listLeadMasker, maskLeads } from "@/lib/leads/masking";
 
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -1703,7 +1703,7 @@ export async function getCompany(id: string) {
     ...company,
     contacts: seesContacts ? company.contacts.map((c) => redactContactDetails(c, { restricted, canViewRestricted })) : [],
     // The account's leads as this person's field access shows a lead in a list.
-    leads: seesLeads ? company.leads.map((lead) => maskLead(leadMasker, lead)) : [],
+    leads: seesLeads ? await maskLeads(leadMasker, company.leads) : [],
     products: seesOrders ? company.products : [],
     ordersAsEndCustomer: seesOrders ? company.ordersAsEndCustomer : [],
   });

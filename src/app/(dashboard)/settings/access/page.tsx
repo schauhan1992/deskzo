@@ -386,14 +386,16 @@ async function RolesTab({
           Compare roles side by side
         </Link>
       </div>
-      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[17rem_1fr] 2xl:grid-cols-[17rem_1fr_17rem]">
-        <RolesList roles={roles} selected={selected?.key ?? null} mayManage={mayManage} superAdmins={superAdmins} />
+      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[16rem_minmax(0,1fr)]">
+        <div className="space-y-5">
+          <RolesList roles={roles} selected={selected?.key ?? null} mayManage={mayManage} superAdmins={superAdmins} />
+          {selected && <RolePreview role={selected.key} />}
+        </div>
         {selected ? (
           <RoleWorkspace role={selected} tab={tab} mayManage={mayManage} viewerId={viewerId} viewerIsSuperAdmin={viewerIsSuperAdmin} />
         ) : (
           <Card className="p-6 text-sm text-muted">There are no roles yet.</Card>
         )}
-        {selected && <RolePreview role={selected.key} />}
       </div>
     </div>
   );
@@ -404,11 +406,7 @@ async function RolePreview({ role }: { role: string }) {
     accessPreview({ role }),
     db.user.findMany({ where: { role, active: true }, orderBy: { name: "asc" }, select: { id: true, name: true }, take: 200 }),
   ]);
-  return (
-    <div className="lg:col-start-2 2xl:col-start-3">
-      <AccessPreview role={role} people={people} initial={initial} />
-    </div>
-  );
+  return <AccessPreview role={role} people={people} initial={initial} />;
 }
 
 async function RoleWorkspace({
