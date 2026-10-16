@@ -7,6 +7,7 @@ export function TabNav({
   paramName = "tab",
   basePath,
   otherParams = {},
+  defaultKey = tabs[0]?.key,
 }: {
   /** `count`, when given, is a badge beside the label, read out as "Staff, 3". */
   tabs: { key: string; label: string; count?: number }[];
@@ -14,9 +15,10 @@ export function TabNav({
   paramName?: string;
   basePath: string;
   otherParams?: Record<string, string | undefined>;
+  /** The tab the page opens on without a `tab` in the address — its link leaves it out. The first, unless said. */
+  defaultKey?: string;
 }) {
   const baseQuery = Object.fromEntries(Object.entries(otherParams).filter(([, v]) => v)) as Record<string, string>;
-  const defaultKey = tabs[0]?.key;
 
   return (
     <div className="flex flex-wrap gap-x-1 border-b border-line">

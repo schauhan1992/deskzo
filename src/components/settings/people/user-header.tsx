@@ -32,7 +32,8 @@ export function UserHeader({
   const router = useRouter();
   const { pending, saveAll, discardAll } = useDraft();
   const [confirmReset, setConfirmReset] = useState(false);
-  const [saving, setSaving] = useState(false);
+  // The count as the dialog opened, so the title holds still while each editor saves in turn.
+  const [saving, setSaving] = useState<number | null>(null);
   const [reason, setReason] = useState("");
   const [until, setUntil] = useState("");
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
@@ -61,7 +62,7 @@ export function UserHeader({
   const save = () =>
     start(async () => {
       const error = await saveAll({ reason: reason.trim() || undefined, expiresAt: until || null });
-      setSaving(false);
+      setSaving(null);
       setNotice(error ? { tone: "error", text: error } : { tone: "success", text: "Saved." });
       if (!error) {
         setReason("");
@@ -114,7 +115,7 @@ export function UserHeader({
               View as user
             </Button>
           )}
-          <Button onClick={() => setSaving(true)} disabled={busy || pending === 0}>
+          <Button onClick={() => setSaving(pending)} disabled={busy || pending === 0}>
             <Save className="mr-1.5 h-4 w-4" aria-hidden />
             {pending ? `Save changes (${pending})` : "Save changes"}
           </Button>
@@ -122,8 +123,8 @@ export function UserHeader({
       </div>
       {notice && <ActionNotice tone={notice.tone}>{notice.text}</ActionNotice>}
 
-      {saving && (
-        <Dialog open onClose={() => setSaving(false)} title={`Save ${pending} change${pending === 1 ? "" : "s"} for ${person.name}`}>
+      {saving !== null && (
+        <Dialog open onClose={() => !busy && setSaving(null)} title={`Save ${saving} change${saving === 1 ? "" : "s"} for ${person.name}`}>
           <div className="space-y-3">
             <p className="text-sm text-muted">Exceptions to their role are written to the permission history with this reason. An end date makes them temporary.</p>
             <div className="space-y-1">
@@ -140,7 +141,7 @@ export function UserHeader({
                 size="sm"
                 onClick={() => {
                   discardAll();
-                  setSaving(false);
+                  setSaving(null);
                 }}
                 disabled={busy}
               >
