@@ -511,3 +511,24 @@ Tickets, projects, visits, calls/notes/meetings, tasks and expenses are rows on 
 4. **Direct-call reads closed:** the e-way register (every sales document), commission payouts and a party's payee accounts, and a reseller's onboarding, credit and prices.
 5. **A write needs the record's view as well, as for phase 1's records.** For example, a renewal stage change needs the order to be visible.
 6. **Inactive people and the Automation account reach nothing**, as in phase 1.
+
+### Phase 5, part one: inheritance from reports retired (16 Oct 2026)
+
+Decision 3 ("retire capability inheritance from reports, after the report"), done without anybody losing access on the day.
+
+- **The report is the migration.** `prisma/migrations/20261110120000_retire_report_inheritance` writes each permission somebody held *only* by inheritance as a grant of their own. Its reason names the report it came through. A history row is recorded by the Automation account (or, where there is none, the super admin), saying no person made it. Each one now shows as an exception on the person's page and in Exceptions, where an admin can keep or remove it.
+- **The rule is gone.** Rule 5 is out of `resolveUserPermissions` and `resolveEveryone`, and the `downline` source with it. The reporting line now decides only what "Team" means.
+- **Proof:**
+  - A differential test against the resolver as it was covered six random organisations, with 3,910 inherited grants between them. They had chains, cycles, inactive middle managers, admins, custom and switched-off roles, role allows and denies, and expired and live grants. The migration kept exactly what the resolver inherited, and afterwards everybody held without inheritance exactly what they held with it.
+  - `access:snapshot --compare` before and after on the local workspace: identical (13 roles, 56 people, 15 record types).
+- **Fixed along the way.** Who can grouped holders under `inherited` while the source was called `downline`, so people holding a key by inheritance were never listed there.
+- **Still retained, deliberately:**
+  - **The `*.viewAll` aliases.** They are still how a role's *derived* level reads ("See every account" → All).
+  - **Section switches.** They still decide the menu.
+  - **The `delegable` flag.** Nothing that decides access reads it any more. It stays as the record of which keys were never handed up a reporting line, and check:rbac still holds super-admin-only and critical keys to it.
+
+  Retiring the aliases means writing every role's derived levels as stored rows first. That is its own migration with its own snapshot, not part of this one.
+
+### Field access and the daily unmask limit (16 Oct 2026)
+
+Section 4.5's field access is built for leads. It is described in `docs/field-access.md`.
