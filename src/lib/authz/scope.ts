@@ -49,17 +49,3 @@ export const SCOPE_ANCHORS = {
 
 export type ScopeAnchor = keyof typeof SCOPE_ANCHORS;
 
-/**
- * A Prisma `where` fragment for "records this person may see", or `{}` when unrestricted.
- *
- * Spread it into an existing where: `where: { ...(await scopeWhere(...)), status: "OPEN" }`.
- */
-export async function scopeWhere(
-  userId: string,
-  viewAllKey: PermissionKey,
-  anchor: ScopeAnchor,
-): Promise<Record<string, unknown>> {
-  const ids = await scopeUserIds(userId, viewAllKey);
-  if (ids === null) return {};
-  return { [SCOPE_ANCHORS[anchor]]: { in: ids } };
-}

@@ -7,7 +7,7 @@ import { roleDefault, rolePermits } from "@/lib/authz/role-permission";
 import { requireUser } from "@/lib/session";
 import { roleExists, roleKeys } from "@/lib/authz/role-registry";
 import { PERMISSIONS, getPermissionDefinition, permissionGroup, type PermissionKey } from "@/lib/permissions";
-import { can, permissionsFor, explain, resolveUserPermissions, describeSource, isHeld } from "@/lib/authz/resolve";
+import { can, permissionsFor, resolveUserPermissions, describeSource, isHeld } from "@/lib/authz/resolve";
 import { holdsFrom, resolveEveryone } from "@/lib/authz/bulk";
 import { actorContext, assertGrantWithinOwnAuthority, assertKeepsOwnAccessAdmin, AuthzError } from "@/lib/authz/guards";
 import { recordPermissionChange } from "@/lib/authz/audit";
@@ -335,14 +335,6 @@ export async function effectivePermissionsFor(userId: string) {
   };
 }
 
-/** Why one specific permission resolves the way it does. */
-export async function explainPermission(userId: string, key: PermissionKey | string) {
-  const session = await requireUser();
-  if (userId !== session.id && !(await can(session.id, "permissions.view"))) return null;
-  const source = await explain(userId, key);
-  return { source, why: describeSource(source, await workspaceClock()) };
-}
-
 // ─── The reverse index ────────────────────────────────────────────────────────
 
 /**
@@ -350,7 +342,7 @@ export async function explainPermission(userId: string, key: PermissionKey | str
  *
  * The question an audit actually asks — "list everyone who can approve an invoice" — and the one
  * the role matrix cannot answer by construction. The matrix shows role defaults; it cannot show a
- * personal grant, a personal deny, `adminDefault`, or a key reaching somebody through a report. For
+ * personal grant, a personal deny or `adminDefault`. For
  * `payroll.manage`, whose `defaultRoles` is empty, the matrix shows the column off for all eight
  * roles, which reads as "nobody" while every admin in fact holds it.
  *

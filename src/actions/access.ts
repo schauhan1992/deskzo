@@ -291,8 +291,8 @@ export async function applyPreset(presetKey: string): Promise<ActionResult<{ gra
    * A preset states what a role *has*, not what it is forbidden.
    *
    * This used to write an explicit row for all seventy-four keys — `allowed: false` for every key
-   * the preset did not mention. An explicit deny outranks both the registry default and downline
-   * inheritance, so a single preset click permanently severed both for that role: a sales manager
+   * the preset did not mention. An explicit deny outranks both the registry default and what was then
+   * downline inheritance (since retired), so a single preset click permanently severed both: a sales manager
    * who reached `expenses.approve` by managing an accounts executive lost it, with no row anywhere
    * saying why, and no amount of re-granting the report's access brought it back.
    *

@@ -1,7 +1,6 @@
 import { cache } from "react";
 import { SUPPORT_READONLY_ROLE, type Role } from "@/lib/roles";
 import { db } from "@/lib/db";
-import { getDownlineUserIds } from "@/lib/org-chart";
 import { roleIsActive } from "@/lib/authz/role-registry";
 import { getPermissionDefinition, PERMISSIONS, type PermissionKey, heldByDefault } from "@/lib/permissions";
 import type { Clock } from "@/lib/time/zone";
@@ -24,14 +23,16 @@ import type { Clock } from "@/lib/time/zone";
  *  2b. Switched-off role      → DENY everything. `setRoleActive` refuses to switch a role off while
  *                               anybody active holds it; this is the backstop if somebody does.
  *   3. Per-user grant         → its `allowed`, final. A denial here beats the role.
- *   4. Own role               → an explicit override row is final; absence falls through.
- *   5. Downline inheritance   → ALLOW if a report's role grants it, for delegable keys only.
- *   6. Otherwise              → DENY.
+ *   4. Own role               → an explicit row is final; otherwise the registry's default for it.
+ *   5. Otherwise              → DENY.
  *
- * The asymmetry in rule 4 is the important one and it is deliberate: an **explicit** role denial is
- * final, while **implicit** absence from `defaultRoles` is not. Without it, an admin who unticks a
- * cell in the matrix would watch the downline silently put it back — which is what made the old
- * matrix a lie. Unticking now means something.
+ * There is no inheritance from reports any more (docs/permission-redesign.md, section 7.1; decided
+ * 8 Oct 2026). A manager used to hold every delegable permission anybody below them held through their
+ * role — a privilege nobody granted, which showed on neither the manager's role nor their page. The
+ * reporting line now decides whose records count as "Team", and nothing else. The migration that
+ * retired it (prisma/migrations/20261110120000_retire_report_inheritance) wrote each permission somebody
+ * held only that way as a grant of their own, with its origin as the reason, so nobody lost anything
+ * on the day and every one of them is now an exception an admin can see and remove.
  */
 
 export type PermissionSource =
@@ -43,7 +44,6 @@ export type PermissionSource =
   | { via: "roleDefault"; role: Role }
   | { via: "adminDefault" }
   | { via: "supportReadOnly"; allowed: boolean }
-  | { via: "downline"; role: Role; through: { id: string; name: string } }
   | { via: "none" };
 
 export type ResolvedPermissions = {
@@ -65,7 +65,6 @@ function allowed(source: PermissionSource): boolean {
     case "superAdmin":
     case "roleDefault":
     case "adminDefault":
-    case "downline":
       return true;
     case "userGrant":
       return source.allowed;
@@ -135,7 +134,7 @@ export const resolveUserPermissions = cache(async (userId: string): Promise<Reso
   /**
    * The platform's support staff on a read-only grant (src/lib/platform/support.ts): every "view"
    * permission and nothing else — computed, like the admin's, so each new view permission is theirs on
-   * the day it ships and each new change permission never is. No grant, override or downline applies.
+   * the day it ships and each new change permission never is. No grant or override applies.
    */
   if (user.role === SUPPORT_READONLY_ROLE) {
     for (const def of PERMISSIONS) sources.set(def.key, { via: "supportReadOnly", allowed: isViewPermission(def.key) });
@@ -152,39 +151,6 @@ export const resolveUserPermissions = cache(async (userId: string): Promise<Reso
 
   const userGrants = new Map(userRows.map((r) => [r.permission, r]));
   const roleOverrides = new Map(roleRows.map((r) => [r.permission, r.allowed]));
-
-  // The downline is walked at most once, and only if some key actually falls through to rule 5.
-  let downlineRoles: { role: Role; through: { id: string; name: string } }[] | null = null;
-  const loadDownline = async () => {
-    if (downlineRoles) return downlineRoles;
-    const ids = await getDownlineUserIds(userId);
-    if (ids.length === 0) {
-      downlineRoles = [];
-      return downlineRoles;
-    }
-    const reports = await db.user.findMany({
-      where: { id: { in: ids }, active: true },
-      select: { id: true, name: true, role: true },
-    });
-    downlineRoles = reports
-      // Never inherit upward from an admin. Previously `roles.includes("ADMIN") return true` meant
-      // that re-parenting a retiring admin under somebody made that person an admin in all but name.
-      .filter((r) => r.role !== "ADMIN")
-      .map((r) => ({ role: r.role, through: { id: r.id, name: r.name } }));
-    return downlineRoles;
-  };
-
-  // Downline role overrides are read in one query rather than per report.
-  let downlineOverrides: Map<string, boolean> | null = null;
-  const loadDownlineOverrides = async (roles: Role[]) => {
-    if (downlineOverrides) return downlineOverrides;
-    const rows = await db.rolePermission.findMany({
-      where: { role: { in: roles } },
-      select: { role: true, permission: true, allowed: true },
-    });
-    downlineOverrides = new Map(rows.map((r) => [`${r.role}:${r.permission}`, r.allowed]));
-    return downlineOverrides;
-  };
 
   for (const def of PERMISSIONS) {
     // Rule 3.
@@ -221,28 +187,7 @@ export const resolveUserPermissions = cache(async (userId: string): Promise<Reso
     }
 
     // Rule 5.
-    if (def.delegable === false) {
-      sources.set(def.key, { via: "none" });
-      continue;
-    }
-
-    const reports = await loadDownline();
-    if (reports.length === 0) {
-      sources.set(def.key, { via: "none" });
-      continue;
-    }
-
-    const overrides = await loadDownlineOverrides(Array.from(new Set(reports.map((r) => r.role))));
-    let inherited: PermissionSource | null = null;
-    for (const report of reports) {
-      const explicit = overrides.get(`${report.role}:${def.key}`);
-      const grants = explicit !== undefined ? explicit : heldByDefault(def, report.role);
-      if (grants) {
-        inherited = { via: "downline", role: report.role, through: report.through };
-        break;
-      }
-    }
-    sources.set(def.key, inherited ?? { via: "none" });
+    sources.set(def.key, { via: "none" });
   }
 
   return { userId, role: user.role, isSuperAdmin: false, active: true, sources };
@@ -278,11 +223,8 @@ export async function permissionsFor(userId: string): Promise<PermissionKey[]> {
 }
 
 /**
- * Why this user does or does not hold this permission.
- *
- * Powers the "effective permissions" drawer in Settings. An admin looking at somebody who
- * unexpectedly has payroll access needs to be told *where it came from* — a role default, a
- * personal grant, or a report they inherited it through — because each has a different fix.
+ * Why this user does or does not hold this permission — a role default, a role's own row, or a
+ * personal grant — because each has a different fix.
  */
 export async function explain(userId: string, key: PermissionKey | string): Promise<PermissionSource> {
   const resolved = await resolveUserPermissions(userId);
@@ -316,8 +258,6 @@ export function describeSource(source: PermissionSource, clock: Clock): string {
       return "Admins hold everything not explicitly switched off.";
     case "supportReadOnly":
       return source.allowed ? "Platform support on a read-only grant: may look." : "Platform support on a read-only grant: may not change anything.";
-    case "downline":
-      return `Inherited from ${source.through.name}, who reports to them and holds it as ${source.role}.`;
     case "none":
       return "Not held.";
   }

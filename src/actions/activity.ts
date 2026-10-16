@@ -39,11 +39,6 @@ export type ActivityFilters = {
   impersonatedOnly?: boolean;
 };
 
-export async function canViewAllActivity(): Promise<boolean> {
-  const user = await requireUser();
-  return hasEffectivePermission(user.id, "activity.viewAll");
-}
-
 /**
  * Turns the filter object into a Prisma `where`, with the scope decision baked in.
  *

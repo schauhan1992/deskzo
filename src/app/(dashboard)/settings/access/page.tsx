@@ -292,9 +292,10 @@ async function StaffTab({
               .
             </p>
             <p>
-              A manager automatically gets every permission their team has, direct and indirect, on top of their own
-              role — so a reporting line is an access decision, not just an org chart. Change one from the pencil on
-              a person&apos;s row.
+              A reporting line decides whose records count as a manager&apos;s team — what &ldquo;Team&rdquo; means
+              wherever a role&apos;s reach is set to it — so it is an access decision, not just an org chart. It
+              grants no permissions: a manager holds what their role and their own exceptions give them. Change one
+              from the pencil on a person&apos;s row.
             </p>
           </CardContent>
         </Card>
@@ -676,9 +677,8 @@ async function CompareRoles({ mayManage, viewerIsSuperAdmin }: { mayManage: bool
             what it would change. ADMIN is a real column, so a super admin can genuinely restrict what admins do.
           </p>
           <p className="text-subtle">
-            This screen does not show personal exceptions, the permissions an admin holds by default, or anything
-            somebody inherits from a report. For &ldquo;can this person do X&rdquo; use Staff; for &ldquo;who can do
-            X&rdquo; use Who can.
+            This screen does not show personal exceptions or the permissions an admin holds by default. For
+            &ldquo;can this person do X&rdquo; use Staff; for &ldquo;who can do X&rdquo; use Who can.
           </p>
         </div>
       </div>
@@ -721,8 +721,7 @@ async function WhoCanTab() {
     <div className="space-y-6">
       <p className="max-w-3xl text-sm text-muted">
         The reverse of every other screen here. The roles tab can only tell you what a role grants by default — it
-        cannot show you somebody who holds a key personally, or through a report, or because they are an admin. This
-        can.
+        cannot show you somebody who holds a key personally, or because they are an admin. This can.
       </p>
       <WhoCan catalogue={catalogue} />
     </div>

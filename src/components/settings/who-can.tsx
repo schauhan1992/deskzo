@@ -15,13 +15,15 @@ type Result = NonNullable<Awaited<ReturnType<typeof holdersOf>>>;
  * Who can do this, and how each of them came by it.
  *
  * The reverse of every other screen here, and the question an audit actually asks. The role matrix
- * cannot answer it: it shows role defaults, so it is blind to personal grants, personal denials,
- * `adminDefault` and anything reaching somebody through a report. For a key with no default role —
+ * cannot answer it: it shows role defaults, so it is blind to personal grants, personal denials and
+ * `adminDefault`. For a key with no default role —
  * `payroll.manage`, say — the matrix shows every column off, which reads as "nobody" while every
  * admin in fact holds it.
  *
  * Grouped by *how* rather than listed flat, because "three people hold this, one of them only
- * because she manages the person who does" is the shape of the answer somebody needs.
+ * because it was granted to them personally" is the shape of the answer somebody needs. (Managers
+ * used to inherit from their reports too; those are personal grants now, with where they came from as
+ * the reason — src/lib/authz/resolve.ts.)
  */
 
 const VIA_LABEL: Record<string, string> = {
@@ -30,10 +32,10 @@ const VIA_LABEL: Record<string, string> = {
   roleDefault: "Their role",
   roleOverride: "Their role, changed here",
   userGrant: "Granted to them personally",
-  inherited: "Inherited from somebody they manage",
+  supportReadOnly: "Platform support, read-only",
 };
 
-const VIA_ORDER = ["superAdmin", "adminDefault", "roleOverride", "roleDefault", "userGrant", "inherited"];
+const VIA_ORDER = ["superAdmin", "adminDefault", "roleOverride", "roleDefault", "userGrant", "supportReadOnly"];
 
 const TIER_TONE: Record<string, "red" | "amber" | "default"> = {
   critical: "red",
