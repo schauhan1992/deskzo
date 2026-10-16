@@ -5323,6 +5323,23 @@ model BiometricPunch {
  * Approving one writes the day and stamps `regularisedAt` on it, which is also what stops a
  * terminal re-sending its buffer from quietly undoing the correction.
  */
+/**
+ * The company's office hours (owner, 16 Oct 2026), one row (id "global"); no row is "not set". What the
+ * attendance grid measures clock-ins and clock-outs against: Late after the start plus the grace, Early
+ * before the end less it, Overtime past the day by more than half an hour, and hours worked against
+ * hours expected. Minutes from midnight on the workspace's clock (src/lib/hr/office-hours-rules.ts).
+ */
+model AttendanceSettings {
+  id           String   @id @default("global")
+  startMinute  Int
+  endMinute    Int
+  graceMinutes Int      @default(15)
+  updatedById  String?
+  updatedAt    DateTime @updatedAt
+
+  @@map("attendance_settings")
+}
+
 model AttendanceRegularisation {
   id     String   @id @default(cuid())
   userId String

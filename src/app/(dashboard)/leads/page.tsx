@@ -30,6 +30,7 @@ import { customFilterParams, customFilterSetup, parseCustomFilters, type CustomF
 import { CustomFieldFilters } from "@/components/custom-fields/custom-field-filters";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
+import { leadBoardExtras } from "@/lib/leads/board-extras";
 
 export default async function LeadsPage({
   searchParams,
@@ -101,6 +102,8 @@ export default async function LeadsPage({
   }));
 
   const selected = view === "list" && viewMode === "split" ? resolveSelected(leads, params.sel) : null;
+  // The board's cards: tasks, products, calls and notes, and the people on each (src/lib/leads/board-extras.ts).
+  const boardExtras = view === "board" ? await leadBoardExtras(result.rows.map((l) => ({ id: l.id, ownerUserId: l.ownerUserId }))) : {};
 
   // The workspace's own fields (src/lib/custom-fields): the columns the table can show — only the table
   // shows them, so neither the board nor the split list asks for values, though the picker still offers
@@ -219,7 +222,7 @@ export default async function LeadsPage({
               />
             </>
           ) : (
-            <LeadsBoard leads={leads} stages={activeStages} />
+            <LeadsBoard leads={leads} stages={activeStages} extras={boardExtras} />
           )}
         </div>
       )}
