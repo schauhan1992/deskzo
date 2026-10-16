@@ -13,6 +13,8 @@ import { Badge } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ActionNotice } from "@/components/ui/action-notice";
+import { FullViewButton, useFullView } from "@/components/ui/full-view";
+import { cn } from "@/lib/utils";
 import type { CatalogueEntry, ModuleStates } from "@/components/settings/staff/types";
 
 /**
@@ -66,6 +68,8 @@ export function RoleAccessEditor({
   const [search, setSearch] = useState("");
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [saving, start] = useTransition();
+  // The box can fill the screen — the record table needs the width (src/components/ui/full-view.tsx).
+  const fullView = useFullView();
 
   const byKey = useMemo(() => new Map(catalogue.map((c) => [c.key, c])), [catalogue]);
   const holds = useMemo(() => new Set(viewer.holds), [viewer.holds]);
@@ -180,12 +184,15 @@ export function RoleAccessEditor({
 
   if (view === "records") {
     return (
-      <div className="rounded-base border border-line">
-        <div className="space-y-3 p-4">
-          <p className="text-sm text-muted">
-            Which records people in this role reach, for each action. &ldquo;As its permissions&rdquo; follows what the role&apos;s permissions have always meant; a
-            level set here replaces it. Edit, delete and assign can&apos;t reach wider than view.
-          </p>
+      <div className={cn("rounded-base border border-line", fullView.frameClass)}>
+        <div className="flex-1 space-y-3 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <p className="text-sm text-muted">
+              Which records people in this role reach, for each action. &ldquo;As its permissions&rdquo; follows what the role&apos;s permissions have always meant; a
+              level set here replaces it. Edit, delete and assign can&apos;t reach wider than view.
+            </p>
+            <FullViewButton full={fullView.full} toggle={fullView.toggle} />
+          </div>
           {levelsLocked && <LockedNote text={levelsLocked} />}
           <RecordAccessGrid rows={grid} choices={levels} lockedWhy={levelsLocked} disabled={saving} onChange={chooseLevel} />
         </div>
@@ -208,8 +215,8 @@ export function RoleAccessEditor({
     .filter((c) => !term || c.label.toLowerCase().includes(term) || c.description.toLowerCase().includes(term));
 
   return (
-    <div className="@container overflow-hidden rounded-base border border-line">
-      <div className="grid grid-cols-[minmax(0,1fr)] @3xl:grid-cols-[13rem_minmax(0,1fr)]">
+    <div className={cn("@container overflow-hidden rounded-base border border-line", fullView.frameClass)}>
+      <div className="grid flex-1 grid-cols-[minmax(0,1fr)] @3xl:grid-cols-[13rem_minmax(0,1fr)]">
         <nav aria-label="Modules" className="min-w-0 border-b border-line bg-surface-sunken @3xl:border-b-0 @3xl:border-r">
           <ul className="flex gap-1 overflow-x-auto p-2 @3xl:block @3xl:max-h-[40rem] @3xl:space-y-0.5 @3xl:overflow-y-auto">
             {ACCESS_MODULES.map((m) => {
@@ -240,7 +247,10 @@ export function RoleAccessEditor({
               <h3 className="text-sm font-semibold text-text">{current.label}</h3>
               <p className="text-xs text-muted">{current.description}</p>
             </div>
-            <Badge tone={STANDING_TONE[standing(current.key)]}>{STANDING_WORDS[standing(current.key)]}</Badge>
+            <div className="flex items-center gap-1.5">
+              <Badge tone={STANDING_TONE[standing(current.key)]}>{STANDING_WORDS[standing(current.key)]}</Badge>
+              <FullViewButton full={fullView.full} toggle={fullView.toggle} />
+            </div>
           </div>
 
           {rowsHere.length > 0 && (
