@@ -34,7 +34,7 @@ export const MAIL_PROVIDERS: readonly MailProviderDef[] = [
   {
     key: "MICROSOFT_365",
     label: "Microsoft 365",
-    blurb: "Exchange Online, signing in as an Entra app (OAuth) — Microsoft is turning off SMTP passwords.",
+    blurb: "Exchange Online, signing in as an Entra app (OAuth): through Microsoft Graph with Mail.Send, or SMTP with SMTP.SendAsApp.",
     servers: [{ label: "Exchange Online", host: "smtp.office365.com" }],
     port: 587,
     security: "STARTTLS",
@@ -43,11 +43,10 @@ export const MAIL_PROVIDERS: readonly MailProviderDef[] = [
     secret: { label: "Client secret", hint: "Its value, not its ID — shown once, when it is made." },
     steps: [
       "Entra admin centre › App registrations › New registration: a name like “Deskzo mail”, single tenant. Copy the Application (client) ID and the Directory (tenant) ID.",
-      "API permissions › Add a permission › APIs my organization uses › Office 365 Exchange Online › Application permissions › SMTP.SendAsApp. Then Grant admin consent.",
+      "API permissions › Add a permission › Microsoft Graph › Application permissions › Mail.Send. Then Grant admin consent. That is all Graph needs — Deskzo sends through it whenever the app holds Mail.Send.",
       "Certificates & secrets › New client secret. Copy its value now — it is shown only once.",
-      "Enterprise applications › the same app: copy its Object ID (the enterprise application's, not the registration's).",
-      "In Exchange Online PowerShell (Connect-ExchangeOnline): New-ServicePrincipal -AppId <client ID> -ObjectId <enterprise object ID>. Then Add-MailboxPermission -Identity <mailbox> -User <the service principal's Identity, from Get-ServicePrincipal> -AccessRights FullAccess.",
-      "If SMTP AUTH is off for the mailbox: Set-CASMailbox -Identity <mailbox> -SmtpClientAuthenticationDisabled $false.",
+      "Optional: limit the app to the mailboxes it sends from — in Exchange Online PowerShell, New-ApplicationAccessPolicy -AppId <client ID> -PolicyScopeGroupId <a mail-enabled group holding the mailbox> -AccessRight RestrictAccess. Without it, Mail.Send can send as any mailbox in the tenant.",
+      "Only instead of Mail.Send — SMTP: Office 365 Exchange Online › Application permissions › SMTP.SendAsApp, admin consent, then in Exchange Online PowerShell New-ServicePrincipal -AppId <client ID> -ObjectId <the enterprise application's Object ID> and Add-MailboxPermission -Identity <mailbox> -User <its Identity, from Get-ServicePrincipal> -AccessRights FullAccess. If SMTP AUTH is off: Set-CASMailbox -Identity <mailbox> -SmtpClientAuthenticationDisabled $false.",
     ],
   },
   {
