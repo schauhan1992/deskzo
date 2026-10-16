@@ -140,14 +140,6 @@ export const SETTINGS: SettingsSection[] = [
             permission: "settings.manage",
           },
           {
-            key: "branches",
-            label: "Branches & GST registrations",
-            description: "Your offices, shops and warehouses, the GSTIN each one bills under, and which is the head office.",
-            href: "/settings/branches",
-            icon: MapPin,
-            permission: "settings.manage",
-          },
-          {
             key: "branding",
             label: "Branding",
             description: "The app's own name, logo, colour and default theme.",
@@ -265,6 +257,14 @@ export const SETTINGS: SettingsSection[] = [
             href: "/settings/departments",
             icon: Network,
             permission: "permissions.view",
+          },
+          {
+            key: "branches",
+            label: "Branches",
+            description: "Your offices, shops and warehouses, where each person works, the GSTIN each one bills under, and which is the head office.",
+            href: "/settings/branches",
+            icon: MapPin,
+            permission: "settings.manage",
           },
           {
             key: "unmasking-logs",

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft, Eye } from "lucide-react";
@@ -423,6 +424,25 @@ async function RoleTab({ person, account }: { person: PersonFacts; account: Acco
   );
 }
 
+/**
+ * Which of a person's own answers the editors were drawn from — the key that remounts them when a save
+ * brings different answers back, so their drafts start again from what is now stored.
+ */
+function versionOf(
+  userId: string,
+  permissions: PersonPermissionRow[] | null,
+  grid: Awaited<ReturnType<typeof personAccessGrid>>,
+  fields: Awaited<ReturnType<typeof personFieldAccess>>,
+): string {
+  const parts = [
+    userId,
+    (permissions ?? []).flatMap((p) => (p.own ? [`${p.key}:${p.own.allowed}:${p.own.expiresAt}:${p.own.expired}`] : [])).join(","),
+    (grid ?? []).flatMap((r) => r.actions.map((a) => `${r.key}:${a}:${r.cells[a].own?.level ?? ""}:${r.cells[a].own?.expiresAt ?? ""}`)).join(","),
+    JSON.stringify(fields ? [fields.rows.map((r) => r.stored), fields.limit.own] : null),
+  ];
+  return createHash("sha1").update(parts.join("|")).digest("hex").slice(0, 16);
+}
+
 /** Their permissions as the editors show them: what their role gives, their own answer, and what applies. */
 async function permissionRows(person: PersonFacts): Promise<PersonPermissionRow[]> {
   const [effective, overrides, grants] = await Promise.all([effectivePermissionsFor(person.id), userPermissionOverrides(person.id), roleGrants(person.role)]);
@@ -445,15 +465,16 @@ async function permissionRows(person: PersonFacts): Promise<PersonPermissionRow[
 }
 
 async function PermissionsTab({ person, canEdit, lockedWhy }: { person: PersonFacts; canEdit: boolean; lockedWhy: string | null }) {
-  const [permissions, grid, fields, preview] = await Promise.all([permissionRows(person), personAccessGrid(person.id), personFieldAccess(person.id), accessPreview({ userId: person.id })]);
+  const [permissions, grid, fields] = await Promise.all([permissionRows(person), personAccessGrid(person.id), personFieldAccess(person.id)]);
   return (
     <PersonPermissionsPanel
+      key={versionOf(person.id, permissions, grid, fields)}
       userId={person.id}
       name={person.name}
+      roleName={person.isSuperAdmin ? "Super Admin" : person.roleRef.name}
       permissions={permissions}
       grid={grid ?? []}
       fields={fields}
-      preview={preview}
       canEdit={canEdit}
       lockedWhy={lockedWhy ?? (fields && !fields.editable ? fields.why : null)}
     />
@@ -462,7 +483,7 @@ async function PermissionsTab({ person, canEdit, lockedWhy }: { person: PersonFa
 
 async function RecordsTab({ person, canEdit, lockedWhy }: { person: PersonFacts; canEdit: boolean; lockedWhy: string | null }) {
   const grid = await personAccessGrid(person.id);
-  return <PersonRecordAccess key={person.id} userId={person.id} name={person.name} grid={grid ?? []} canEdit={canEdit} lockedWhy={lockedWhy} />;
+  return <PersonRecordAccess key={versionOf(person.id, null, grid, null)} userId={person.id} name={person.name} grid={grid ?? []} canEdit={canEdit} lockedWhy={lockedWhy} />;
 }
 
 async function FieldsTab({ person, canEdit, lockedWhy }: { person: PersonFacts; canEdit: boolean; lockedWhy: string | null }) {
@@ -473,8 +494,8 @@ async function FieldsTab({ person, canEdit, lockedWhy }: { person: PersonFacts; 
     <div className="space-y-4">
       {(lockedWhy ?? data.why) && <p className="text-sm text-muted">{lockedWhy ?? data.why}</p>}
       <div className="grid grid-cols-1 items-start gap-4 2xl:grid-cols-[minmax(0,1fr)_24rem]">
-        <FieldMaskingPanel key={`fields:${person.id}`} userId={person.id} name={person.name} data={data} canEdit={editable} detailed />
-        <UnmaskLimitPanel key={`limit:${person.id}`} userId={person.id} name={person.name} data={data} canEdit={editable} />
+        <FieldMaskingPanel key={`fields:${versionOf(person.id, null, null, data)}`} userId={person.id} name={person.name} data={data} canEdit={editable} detailed />
+        <UnmaskLimitPanel key={`limit:${versionOf(person.id, null, null, data)}`} userId={person.id} name={person.name} data={data} canEdit={editable} />
       </div>
     </div>
   );

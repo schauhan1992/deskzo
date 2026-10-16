@@ -306,7 +306,11 @@ async function main() {
     ok("  nor on the super admin's, nor Edit profile for an admin who isn't one", !saLogin.includes("Switch off") && !(await renderUsers({ user: superAdmin.id, tab: "profile" })).includes("Edit profile"));
     const akashPermissions = await renderUsers({ user: akash.id });
     keep("users-akash-permissions-admin", akashPermissions);
-    ok("Permissions opens by default: CRM's actions, the daily limit, field masking and effective access", ["Permissions for", "Lead actions", "Unmasking limits (Daily)", "Sensitive field masking", "Effective access for"].every((t) => akashPermissions.includes(t)));
+    ok(
+      "Permissions opens by default: Individual Permissions — role default, override and effective for each action — the daily limit, field masking and effective access",
+      ["Individual Permissions", "Role default (Sales)", "Individual override", "Effective for", "Unmasking limits (Daily)", "Sensitive field masking", "Effective Access for", "Additional user-specific permissions", "Conditions (optional)", "How it works?"].every((t) => text(akashPermissions).includes(t)),
+    );
+    ok("  every action offers Use role default, Allow and Deny", akashPermissions.includes('aria-label="View leads: individual override"') && akashPermissions.includes(">Use role default</option><option value=\"allow\">Allow</option><option value=\"deny\">Deny</option>"));
 
     actorId = auditor.id;
     const usersReviewer = await renderUsers({ user: akash.id, tab: "profile" });

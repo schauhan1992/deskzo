@@ -112,7 +112,7 @@ export function UsersDirectory({
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search users…" className="h-9 pl-8 text-sm" />
         </label>
         <div className="grid grid-cols-2 gap-2">
-          <Select value={department} onChange={(e) => setDepartment(e.target.value)} aria-label="Filter by department" className="h-9 min-w-0 pl-2.5 text-[13px]">
+          <Select value={department} onChange={(e) => setDepartment(e.target.value)} aria-label="Filter by department" className="h-9 min-w-0 pl-2.5 pr-7 text-xs">
             <option value="">All departments</option>
             {departments.map((d) => (
               <option key={d.id} value={d.id}>
@@ -120,7 +120,7 @@ export function UsersDirectory({
               </option>
             ))}
           </Select>
-          <Select value={role} onChange={(e) => setRole(e.target.value)} aria-label="Filter by role" className="h-9 min-w-0 pl-2.5 text-[13px]">
+          <Select value={role} onChange={(e) => setRole(e.target.value)} aria-label="Filter by role" className="h-9 min-w-0 pl-2.5 pr-7 text-xs">
             <option value="">All roles</option>
             {roles.map((r) => (
               <option key={r.key} value={r.key}>

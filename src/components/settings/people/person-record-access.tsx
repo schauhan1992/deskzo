@@ -32,7 +32,13 @@ export function PersonRecordAccess({
   canEdit: boolean;
   lockedWhy: string | null;
 }) {
-  const [picked, setPicked] = useState<Map<string, AccessLevel | null>>(() => new Map());
+  const [picked, setPickedRaw] = useState<Map<string, AccessLevel | null>>(() => new Map());
+  // Saved and waiting for the page to bring the saved scopes back (it remounts this when they change).
+  const [committed, setCommitted] = useState(false);
+  const setPicked: typeof setPickedRaw = (v) => {
+    setCommitted(false);
+    setPickedRaw(v);
+  };
   const slot = (record: string, action: string) => `${record}:${action}`;
   const ownOf = (row: PersonLevelRow, action: AccessAction): AccessLevel | null => {
     const s = slot(row.key, action);
@@ -48,12 +54,12 @@ export function PersonRecordAccess({
     }),
   );
 
-  useDraftEditor("records", changes.length, {
+  useDraftEditor("records", committed ? 0 : changes.length, {
     label: "record access",
     save: async (options) => {
       const r = await setPersonAccessLevels(userId, changes, options);
       if (!r.ok) return r.error;
-      setPicked(new Map());
+      setCommitted(true);
       return null;
     },
     discard: () => setPicked(new Map()),
@@ -99,7 +105,7 @@ export function PersonRecordAccess({
                   }
                   const own = ownOf(row, a);
                   const now = own ?? cell.role;
-                  const changed = picked.has(slot(row.key, a)) && own !== (cell.own?.level ?? null);
+                  const changed = !committed && picked.has(slot(row.key, a)) && own !== (cell.own?.level ?? null);
                   return (
                     <td key={a} className="px-2 py-2">
                       <Select
