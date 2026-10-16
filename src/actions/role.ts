@@ -6,7 +6,8 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
 import { recordPermissionChange } from "@/lib/authz/audit";
 import { SYSTEM_ROLE_KEYS, type Role } from "@/lib/roles";
-import { listRoles, roleHeadcount, type RoleSummary } from "@/lib/authz/role-registry";
+import { inactiveRoleKeys, listRoles, roleHeadcount, type RoleSummary } from "@/lib/authz/role-registry";
+import { notMigratedYet } from "@/lib/not-migrated";
 import { tradeDocumentLabels } from "@/lib/trade-documents";
 import type { ActionResult } from "@/actions/company";
 
@@ -29,14 +30,16 @@ import type { ActionResult } from "@/actions/company";
 export type RoleRow = RoleSummary & {
   /** How many people hold it. A role with holders cannot be deleted, and the screen should say why. */
   headcount: number;
+  /** Switched on — offered to people (`setRoleActive`). */
+  active: boolean;
 };
 
 export async function listRolesForScreen(): Promise<ActionResult<RoleRow[]>> {
   const user = await requireUser();
   if (!(await can(user.id, "permissions.view"))) return { ok: false, error: "You can't see the access settings." };
 
-  const [roles, counts] = await Promise.all([listRoles(), roleHeadcount()]);
-  return { ok: true, data: roles.map((r) => ({ ...r, headcount: counts[r.key] ?? 0 })) };
+  const [roles, counts, off] = await Promise.all([listRoles(), roleHeadcount(), inactiveRoleKeys()]);
+  return { ok: true, data: roles.map((r) => ({ ...r, headcount: counts[r.key] ?? 0, active: !off.has(r.key) })) };
 }
 
 /**
@@ -228,4 +231,115 @@ export async function deleteRole(key: string): Promise<ActionResult<null>> {
 
   revalidatePath("/settings/access");
   return { ok: true, data: null };
+}
+
+/**
+ * Switches a role off or back on (`Role.active`).
+ *
+ * A role switched off is kept — its settings, its history, its name on old records — and offered to
+ * nobody: no new account, no role change, no import may give it (src/lib/authz/guards.ts
+ * `assertRoleAssignable`). It can only be switched off once nobody who can sign in holds it, so turning
+ * it off never quietly takes anybody's access away; the resolver refuses it anything regardless, as a
+ * backstop (src/lib/authz/resolve.ts rule 2b). The roles the application was built around stay on.
+ */
+export async function setRoleActive(key: string, active: boolean): Promise<ActionResult<null>> {
+  const user = await requireUser();
+  if (!(await can(user.id, "permissions.manage"))) return { ok: false, error: "You can't change roles." };
+  const role = await db.role.findUnique({ where: { key: String(key ?? "") }, select: { key: true, name: true, isSystem: true } });
+  if (!role) return { ok: false, error: "That role no longer exists." };
+  if (!active && (role.isSystem || (SYSTEM_ROLE_KEYS as readonly string[]).includes(role.key))) {
+    return { ok: false, error: `"${role.name}" is one of the roles this application was built around, so it stays on.` };
+  }
+  if (!active) {
+    const [holders, candidates] = await Promise.all([
+      db.user.count({ where: { role: role.key, active: true } }),
+      db.candidate.count({ where: { role: role.key } }),
+    ]);
+    if (holders > 0 || candidates > 0) {
+      const parts = [
+        holders > 0 ? `${holders} ${holders === 1 ? "person who can sign in holds" : "people who can sign in hold"} it` : null,
+        candidates > 0 ? `${candidates} ${candidates === 1 ? "candidate is" : "candidates are"} slated for it` : null,
+      ].filter(Boolean);
+      return { ok: false, error: `Can't switch off "${role.name}": ${parts.join(" and ")}. Move them to another role first.` };
+    }
+  }
+  let current: boolean;
+  try {
+    current = (await db.role.findUnique({ where: { key: role.key }, select: { active: true } }))?.active ?? true;
+  } catch (err) {
+    if (notMigratedYet(err)) return { ok: false, error: "This workspace is still being updated. Try again in a few minutes." };
+    throw err;
+  }
+  if (current === active) return { ok: true, data: null };
+  await db.role.update({ where: { key: role.key }, data: { active }, select: { key: true } });
+  await recordPermissionChange({
+    actorUserId: user.id,
+    subjectType: "ROLE",
+    subjectRole: role.key,
+    changeKind: active ? "ROLE_ACTIVATED" : "ROLE_DEACTIVATED",
+    detail: `${user.name} switched the role "${role.name}" ${active ? "back on" : "off"}`,
+  });
+  revalidatePath("/settings/access");
+  return { ok: true, data: null };
+}
+
+/**
+ * A new role that starts as a copy of another: what it grants, how far it reaches, its field access
+ * and its daily unmask limit. Copied through the same actions an admin would use to set each by hand,
+ * so the same rules hold — nobody copies a role holding more than they do, nor one reaching further.
+ * If any of it is refused, the new role is removed again: a half-copied role is worse than none.
+ */
+export async function duplicateRole(input: { from: string; name: string; description?: string }): Promise<ActionResult<{ key: Role }>> {
+  const user = await requireUser();
+  if (!(await can(user.id, "permissions.manage"))) return { ok: false, error: "You can't change roles." };
+  const source = await db.role.findUnique({ where: { key: String(input?.from ?? "") }, select: { key: true, name: true } });
+  if (!source) return { ok: false, error: "That role no longer exists." };
+
+  const created = await createRole({ name: input.name, description: input.description });
+  if (!created.ok) return created;
+  const key = created.data.key;
+
+  const undo = async (error: string): Promise<ActionResult<never>> => {
+    await db.role.delete({ where: { key } }).catch(() => {});
+    return { ok: false, error: `Nothing was copied: ${error}` };
+  };
+
+  const { PERMISSIONS } = await import("@/lib/permissions");
+  const { roleGrants } = await import("@/lib/authz/role-permission");
+  const { setRolePermissions } = await import("@/actions/permission");
+  const { setRoleAccessLevels } = await import("@/actions/access-levels");
+  const { roleFieldAccess, setRoleFieldAccess, setRoleUnmaskLimit } = await import("@/actions/field-access");
+
+  const grants = await roleGrants(source.key);
+  const permissions = await setRolePermissions(key, PERMISSIONS.map((def) => ({ key: def.key, allowed: grants(def.key) })));
+  if (!permissions.ok) return undo(permissions.error);
+
+  const levels = await db.roleAccessLevel.findMany({ where: { role: source.key }, select: { record: true, action: true, level: true } }).catch(() => []);
+  if (levels.length) {
+    const copied = await setRoleAccessLevels(key, levels);
+    if (!copied.ok) return undo(copied.error);
+  }
+
+  const fields = await roleFieldAccess(source.key);
+  if (fields) {
+    const stored = fields.rows.filter((r) => r.stored).map((r) => ({ field: r.key, policy: r.stored }));
+    if (stored.length) {
+      const copied = await setRoleFieldAccess(key, stored);
+      if (!copied.ok) return undo(copied.error);
+    }
+    if (fields.limitStored) {
+      const copied = await setRoleUnmaskLimit(key, fields.dailyLimit);
+      if (!copied.ok) return undo(copied.error);
+    }
+  }
+
+  await recordPermissionChange({
+    actorUserId: user.id,
+    subjectType: "ROLE",
+    subjectRole: key,
+    changeKind: "ROLE_CREATED",
+    detail: `${user.name} made "${input.name.trim()}" (${key}) as a copy of "${source.name}"`,
+  });
+  revalidatePath("/settings/access");
+  return { ok: true, data: { key } };
 }

@@ -8733,6 +8733,11 @@ enum PermissionChangeKind {
   ROLE_CREATED
   ROLE_RENAMED
   ROLE_DELETED
+  /**
+   * A role switched off or back on (`Role.active`, src/actions/role.ts `setRoleActive`).
+   */
+  ROLE_DEACTIVATED
+  ROLE_ACTIVATED
 }
 
 /**

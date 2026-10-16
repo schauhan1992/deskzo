@@ -2,8 +2,8 @@
 
 import type { Prisma, UnmaskResult } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser, viewAsContext } from "@/lib/session";
-import { actorContext } from "@/lib/authz/guards";
+import { requireUser } from "@/lib/session";
+import { actingAsSuperAdmin } from "@/lib/authz/super-admin";
 import { logActivity } from "@/lib/activity";
 import { notMigratedYet } from "@/lib/not-migrated";
 import { pageSlice } from "@/lib/pagination";
@@ -43,12 +43,7 @@ const EXPORT_CAP = 10_000;
 /** Whether the person asking may read the log: the super admin, as themselves. */
 export async function mayReadUnmaskLog(): Promise<boolean> {
   const user = await requireUser();
-  if (await viewAsContext()) return false;
-  try {
-    return (await actorContext(user.id)).isSuperAdmin;
-  } catch {
-    return false;
-  }
+  return actingAsSuperAdmin(user.id);
 }
 
 async function whereFor(filters: UnmaskLogFilters): Promise<Prisma.UnmaskEventWhereInput> {

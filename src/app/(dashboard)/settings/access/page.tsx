@@ -13,7 +13,7 @@ import { getModuleStates } from "@/actions/module";
 import { ROLE_PRESETS } from "@/lib/authz/presets";
 import { OWN_ACCESS_KEYS } from "@/lib/authz/guards";
 import { db } from "@/lib/db";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { TabNav } from "@/components/ui/tab-nav";
 import { PermissionMatrix } from "@/components/settings/permission-matrix";
 import { DepartmentsManager } from "@/components/settings/departments-manager";
@@ -21,8 +21,17 @@ import { ExceptionsTable } from "@/components/settings/exceptions-table";
 import { WhoCan } from "@/components/settings/who-can";
 import { ChangeHistory } from "@/components/settings/change-history";
 import { StaffTable } from "@/components/settings/staff/staff-table";
-import { RolesPanel } from "@/components/settings/staff/roles-panel";
-import type { CatalogueEntry, ModuleStates, RoleCard, StaffRow } from "@/components/settings/staff/types";
+import { RolesList, type RoleListItem } from "@/components/settings/roles/roles-list";
+import { RoleHeader } from "@/components/settings/roles/role-header";
+import { RoleAccessEditor } from "@/components/settings/roles/role-access-editor";
+import { RolePresets } from "@/components/settings/roles/role-presets";
+import { FieldPolicyEditor } from "@/components/settings/access/field-policy-editor";
+import { AccessPreview } from "@/components/settings/access/access-preview";
+import { roleAccessLevels } from "@/actions/access-levels";
+import { roleFieldAccess } from "@/actions/field-access";
+import { accessPreview } from "@/actions/person-access";
+import { STANDING_WORDS } from "@/lib/staff/access-modules";
+import type { CatalogueEntry, ModuleStates, StaffRow } from "@/components/settings/staff/types";
 import { can, permissionsFor, resolveUserPermissions } from "@/lib/authz/resolve";
 import { listUserBranchAssignments } from "@/actions/branch";
 import { isMultiBranch, listBranchChoices } from "@/lib/branches/identity";
@@ -67,7 +76,7 @@ const RENAMED_TABS: Record<string, string> = { people: "staff" };
 export default async function StaffAndRolesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string; view?: string }>;
+  searchParams: Promise<{ tab?: string; view?: string; role?: string; rtab?: string }>;
 }) {
   const sessionUser = await currentUser();
 
@@ -122,6 +131,8 @@ export default async function StaffAndRolesPage({
             viewerId={sessionUser.id}
             viewerIsSuperAdmin={viewerIsSuperAdmin}
             compare={sp.view === "compare"}
+            roleKey={sp.role}
+            rtab={sp.rtab}
           />
         )}
         {tab === "exceptions" && <ExceptionsTab mayManage={mayManage} />}
@@ -315,42 +326,147 @@ async function worksAtColumn(mayManage: boolean, viewerId: string) {
 
 // ─── Roles & permissions ─────────────────────────────────────────────────────────────────────────
 
+const ROLE_TABS = [
+  { key: "modules", label: "Module access" },
+  { key: "records", label: "Record access" },
+  { key: "fields", label: "Field permissions" },
+  { key: "rules", label: "Business rules" },
+  { key: "users", label: "Users" },
+  { key: "summary", label: "Summary" },
+] as const;
+
+/**
+ * Roles & permissions: the roles, searchable, beside the one open — what it may do by module, which
+ * records it reaches, which lead fields it sees and unmasks, its business rules, its people, and a
+ * summary — with a preview of what it (or one of its people) reaches. Every editor saves through the
+ * actions the old role dialog and matrix used, with their rules.
+ */
 async function RolesTab({
   mayManage,
   viewerId,
   viewerIsSuperAdmin,
   compare,
+  roleKey,
+  rtab,
 }: {
   mayManage: boolean;
   viewerId: string;
   viewerIsSuperAdmin: boolean;
   compare: boolean;
+  roleKey?: string;
+  rtab?: string;
 }) {
   if (compare) return <CompareRoles mayManage={mayManage} viewerIsSuperAdmin={viewerIsSuperAdmin} />;
 
-  const [matrix, history, roleRows, activeByRole, superAdmins, moduleStates, viewerHolds, resolved] = await Promise.all([
-    getPermissionMatrix(),
-    permissionChangeHistory({ limit: 8 }),
+  const [roleRows, activeByRole, superAdmins] = await Promise.all([
     listRolesForScreen(),
-    // Who holds each role and can sign in — the super admin counted on their own card, not Admin's.
+    // Who holds each role and can sign in — the super admin counted on their own, not Admin's.
     db.user.groupBy({ by: ["role"], where: { active: true, isSuperAdmin: false }, _count: { _all: true } }),
     db.user.count({ where: { isSuperAdmin: true, active: true } }),
-    getModuleStates(),
-    permissionsFor(viewerId),
-    resolveUserPermissions(viewerId),
   ]);
-
   const active = new Map(activeByRole.map((r) => [r.role, r._count._all]));
-  const roles: RoleCard[] = (roleRows.ok ? roleRows.data : []).map((r) => ({
+  const roles: RoleListItem[] = (roleRows.ok ? roleRows.data : []).map((r) => ({
     key: r.key,
     name: r.name,
     description: r.description,
     isSystem: r.isSystem,
-    headcount: r.headcount,
-    activeStaff: active.get(r.key) ?? 0,
-    held: matrix.filter((p) => p.roles[r.key]).map((p) => p.key),
+    active: r.active,
+    people: active.get(r.key) ?? 0,
   }));
+  const selected = roles.find((r) => r.key === roleKey) ?? roles[0] ?? null;
+  const tab = ROLE_TABS.some((t) => t.key === rtab) ? rtab! : "modules";
 
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="max-w-3xl text-sm text-muted">
+          A role is what everybody in it gets by default. For one person&apos;s exceptions — and what they can actually do — open them from Staff.
+        </p>
+        <Link href="/settings/access?tab=roles&view=compare" className="text-sm text-brand hover:underline">
+          Compare roles side by side
+        </Link>
+      </div>
+      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[17rem_1fr] 2xl:grid-cols-[17rem_1fr_17rem]">
+        <RolesList roles={roles} selected={selected?.key ?? null} mayManage={mayManage} superAdmins={superAdmins} />
+        {selected ? (
+          <RoleWorkspace role={selected} tab={tab} mayManage={mayManage} viewerId={viewerId} viewerIsSuperAdmin={viewerIsSuperAdmin} />
+        ) : (
+          <Card className="p-6 text-sm text-muted">There are no roles yet.</Card>
+        )}
+        {selected && <RolePreview role={selected.key} />}
+      </div>
+    </div>
+  );
+}
+
+async function RolePreview({ role }: { role: string }) {
+  const [initial, people] = await Promise.all([
+    accessPreview({ role }),
+    db.user.findMany({ where: { role, active: true }, orderBy: { name: "asc" }, select: { id: true, name: true }, take: 200 }),
+  ]);
+  return (
+    <div className="lg:col-start-2 2xl:col-start-3">
+      <AccessPreview role={role} people={people} initial={initial} />
+    </div>
+  );
+}
+
+async function RoleWorkspace({
+  role,
+  tab,
+  mayManage,
+  viewerId,
+  viewerIsSuperAdmin,
+}: {
+  role: RoleListItem;
+  tab: string;
+  mayManage: boolean;
+  viewerId: string;
+  viewerIsSuperAdmin: boolean;
+}) {
+  return (
+    <Card className="min-w-0">
+      <CardContent className="space-y-4 pt-4">
+        <RoleHeader role={role} mayManage={mayManage} />
+        <TabNav
+          tabs={ROLE_TABS.map((t) => ({ key: t.key, label: t.key === "users" ? `${t.label} (${role.people})` : t.label }))}
+          activeKey={tab}
+          paramName="rtab"
+          basePath="/settings/access"
+          otherParams={{ tab: "roles", role: role.key }}
+        />
+        {(tab === "modules" || tab === "records") && (
+          <RoleAccessTab role={role.key} view={tab} mayManage={mayManage} viewerId={viewerId} viewerIsSuperAdmin={viewerIsSuperAdmin} />
+        )}
+        {tab === "fields" && <RoleFieldsTab role={role.key} />}
+        {tab === "rules" && <RoleRulesTab role={role.key} mayManage={mayManage} />}
+        {tab === "users" && <RoleUsersTab role={role.key} />}
+        {tab === "summary" && <RoleSummaryTab role={role.key} />}
+      </CardContent>
+    </Card>
+  );
+}
+
+async function RoleAccessTab({
+  role,
+  view,
+  mayManage,
+  viewerId,
+  viewerIsSuperAdmin,
+}: {
+  role: string;
+  view: "modules" | "records";
+  mayManage: boolean;
+  viewerId: string;
+  viewerIsSuperAdmin: boolean;
+}) {
+  const [matrix, grid, moduleStates, viewerHolds, resolved] = await Promise.all([
+    getPermissionMatrix(),
+    roleAccessLevels(role),
+    getModuleStates(),
+    permissionsFor(viewerId),
+    resolveUserPermissions(viewerId),
+  ]);
   const catalogue: CatalogueEntry[] = matrix.map((p) => ({
     key: p.key,
     label: p.label,
@@ -360,46 +476,174 @@ async function RolesTab({
     superAdminOnly: p.superAdminOnly,
     modules: permissionModules(p.key),
   }));
-
   const modules: ModuleStates = Object.fromEntries(
     moduleStates.map((m) => [m.key, { key: m.key, label: m.label, entitled: m.entitled, switchedOn: m.switchedOn }]),
   );
-
   // Which of the two keys that open these screens the viewer holds *through their role*: those boxes
   // are locked on their own role, as `assertKeepsOwnAccessAdmin` would refuse unticking them.
   const ownAccessThroughRole = OWN_ACCESS_KEYS.filter((key) => {
     const source = resolved.sources.get(key);
     return source?.via === "roleDefault" || source?.via === "adminDefault" || (source?.via === "roleOverride" && source.allowed);
   });
-
   return (
-    <div className="space-y-6">
-      <RolesPanel
-        roles={roles}
-        superAdminStaff={superAdmins > 0 ? superAdmins : null}
-        compareHref="/settings/access?tab=roles&view=compare"
-        dialog={{
-          catalogue,
-          modules,
-          mayManage,
-          viewerIsSuperAdmin,
-          viewerHolds,
-          viewerRole: resolved.role ?? "",
-          ownAccessThroughRole: [...ownAccessThroughRole],
-        }}
-      />
+    <RoleAccessEditor
+      key={`${role}:${view}`}
+      view={view}
+      roleKey={role}
+      catalogue={catalogue}
+      selfExcluded={matrix.filter((p) => p.selfExcluded).map((p) => p.key)}
+      held={matrix.filter((p) => p.roles[role]).map((p) => p.key)}
+      grid={grid?.rows ?? []}
+      gridWhy={grid ? grid.why : "This role's records can't be read."}
+      modules={modules}
+      viewer={{ mayManage, isSuperAdmin: viewerIsSuperAdmin, holds: viewerHolds.map(String), role: resolved.role ?? "", ownAccessThroughRole: [...ownAccessThroughRole] }}
+    />
+  );
+}
 
-      <p className="max-w-3xl text-sm text-subtle">
-        {/*
-          The caption the audit asked for, carried over from the matrix: a role is what it gives by
-          default, and that is not the same question as what one person can do.
-        */}
-        A role shows what it gives everybody who holds it. It doesn&apos;t show personal exceptions or anything somebody
-        inherits from a report. For &ldquo;can this person do X&rdquo; open them from Staff; for &ldquo;who can do
-        X&rdquo; use Who can.
-      </p>
+async function RoleFieldsTab({ role }: { role: string }) {
+  const data = await roleFieldAccess(role);
+  if (!data) return <p className="text-sm text-muted">This role&apos;s field access can&apos;t be read.</p>;
+  return <FieldPolicyEditor key={role} mode="role" role={role} data={data} canEdit={data.editable} lockedWhy={data.why} />;
+}
 
-      <ChangeHistory rows={history} title="Recent role changes" />
+async function RoleRulesTab({ role, mayManage }: { role: string; mayManage: boolean }) {
+  const [matrix, fields] = await Promise.all([getPermissionMatrix(), roleFieldAccess(role)]);
+  const held = matrix.filter((p) => p.roles[role]);
+  const separated = held.filter((p) => p.selfExcluded);
+  const labels = Object.fromEntries(matrix.map((p) => [p.key, p.label]));
+  return (
+    <div className="space-y-5">
+      <section className="space-y-2">
+        <h3 className="text-sm font-semibold text-text">Separation of duties</h3>
+        <p className="text-sm text-muted">
+          These permissions are never used on a record the person raised themselves — an order they punched, a claim they made — whoever holds them. The rule
+          is the permission&apos;s own, enforced on the server.
+        </p>
+        {separated.length ? (
+          <ul className="flex flex-wrap gap-1.5">
+            {separated.map((p) => (
+              <li key={p.key}>
+                <Badge tone="blue">{p.label}</Badge>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-subtle">This role holds none of them.</p>
+        )}
+      </section>
+      <section className="space-y-2">
+        <h3 className="text-sm font-semibold text-text">Daily unmasking limit</h3>
+        <p className="text-sm text-muted">
+          {fields?.dailyLimit ? `${fields.dailyLimit} leads a day for each person in this role.` : "No limit set: people in this role may unmask as many leads as their field access allows."}{" "}
+          <Link href={`/settings/access?tab=roles&role=${encodeURIComponent(role)}&rtab=fields`} className="text-brand hover:underline">
+            Change it under Field permissions
+          </Link>
+        </p>
+      </section>
+      <section className="space-y-2">
+        <h3 className="text-sm font-semibold text-text">Sign-in rules</h3>
+        <p className="text-sm text-muted">
+          Which devices and networks this role may sign in from is set with the other sign-in rules, under{" "}
+          <Link href="/settings/security/access" className="text-brand hover:underline">
+            Devices, networks &amp; sign-ins
+          </Link>
+          .
+        </p>
+      </section>
+      <section className="space-y-2">
+        <h3 className="text-sm font-semibold text-text">Start from a preset</h3>
+        <RolePresets presets={ROLE_PRESETS.filter((p) => p.role === role).map((p) => ({ key: p.key, label: p.label, description: p.description }))} mayManage={mayManage} labels={labels} />
+      </section>
+    </div>
+  );
+}
+
+async function RoleUsersTab({ role }: { role: string }) {
+  const people = await db.user.findMany({
+    where: { role },
+    orderBy: [{ active: "desc" }, { name: "asc" }],
+    select: { id: true, name: true, email: true, active: true, _count: { select: { permissionGrants: true } } },
+  });
+  if (people.length === 0) return <p className="text-sm text-muted">Nobody holds this role.</p>;
+  return (
+    <div className="overflow-x-auto rounded-base border border-line">
+      <table className="w-full text-sm">
+        <thead className="border-b border-line bg-surface-sunken text-left text-xs font-medium text-muted">
+          <tr>
+            <th className="px-3 py-2">Person</th>
+            <th className="px-3 py-2">Status</th>
+            <th className="px-3 py-2">Exceptions</th>
+            <th className="px-3 py-2 text-right">
+              <span className="sr-only">Open</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {people.map((p) => (
+            <tr key={p.id} className="border-b border-line last:border-0">
+              <td className="px-3 py-2">
+                <span className="text-text">{p.name}</span>
+                <span className="block text-xs text-subtle">{p.email}</span>
+              </td>
+              <td className="px-3 py-2">{p.active ? <Badge tone="green">Active</Badge> : <Badge>Switched off</Badge>}</td>
+              <td className="px-3 py-2 text-muted">{p._count.permissionGrants || "—"}</td>
+              <td className="px-3 py-2 text-right">
+                <Link href={`/settings/access/users/${p.id}`} className="text-sm text-brand hover:underline">
+                  Permissions
+                </Link>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+async function RoleSummaryTab({ role }: { role: string }) {
+  const [preview, matrix, grid, fields, history] = await Promise.all([
+    accessPreview({ role }),
+    getPermissionMatrix(),
+    roleAccessLevels(role),
+    roleFieldAccess(role),
+    permissionChangeHistory({ role, limit: 12 }),
+  ]);
+  const held = matrix.filter((p) => p.roles[role] && p.group !== "Sections");
+  const masked = (fields?.rows ?? []).filter((r) => !r.effective.view || r.effective.maskInList || r.effective.maskInDetail);
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Card className="p-3">
+          <p className="text-xs uppercase tracking-wide text-subtle">Permissions</p>
+          <p className="mt-0.5 text-xl font-semibold text-text">
+            {held.length} <span className="text-sm font-normal text-muted">of {matrix.filter((p) => p.group !== "Sections").length}</span>
+          </p>
+        </Card>
+        <Card className="p-3">
+          <p className="text-xs uppercase tracking-wide text-subtle">Records it reaches</p>
+          <p className="mt-0.5 text-xl font-semibold text-text">
+            {(grid?.rows ?? []).filter((r) => (r.cells.view.stored ?? r.cells.view.derived) !== "NONE").length} <span className="text-sm font-normal text-muted">of {grid?.rows.length ?? 0} types</span>
+          </p>
+        </Card>
+        <Card className="p-3">
+          <p className="text-xs uppercase tracking-wide text-subtle">Lead fields masked</p>
+          <p className="mt-0.5 text-xl font-semibold text-text">
+            {masked.length} <span className="text-sm font-normal text-muted">· {fields?.dailyLimit ? `${fields.dailyLimit}/day` : "no daily limit"}</span>
+          </p>
+        </Card>
+      </div>
+      {preview && (
+        <ul className="grid gap-1.5 sm:grid-cols-2">
+          {preview.map((m) => (
+            <li key={m.key} className="flex items-center justify-between rounded-base border border-line px-3 py-2 text-sm">
+              <span className="text-text">{m.label}</span>
+              <Badge tone={m.standing === "full" ? "green" : m.standing === "limited" ? "amber" : "red"}>{STANDING_WORDS[m.standing]}</Badge>
+            </li>
+          ))}
+        </ul>
+      )}
+      <ChangeHistory rows={history} title="This role's history" />
     </div>
   );
 }

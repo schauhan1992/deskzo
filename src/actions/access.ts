@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import type { Role } from "@/lib/roles";
 import { db } from "@/lib/db";
-import { rolePermits } from "@/lib/authz/role-permission";
+import { roleDefault, rolePermits } from "@/lib/authz/role-permission";
 import { requireUser } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
 import {
@@ -16,7 +16,7 @@ import {
   OWN_ACCESS_KEYS,
 } from "@/lib/authz/guards";
 import { recordPermissionChange } from "@/lib/authz/audit";
-import { getPermissionDefinition, PERMISSIONS, type PermissionKey, heldByDefault, heldByDefaultKey } from "@/lib/permissions";
+import { getPermissionDefinition, PERMISSIONS, type PermissionKey } from "@/lib/permissions";
 import { getPreset, presetDiff } from "@/lib/authz/presets";
 import { workspaceClock } from "@/lib/time/workspace";
 
@@ -234,7 +234,8 @@ export async function previewPreset(presetKey: string) {
   const overrides = new Map(rows.map((r) => [r.permission, r.allowed]));
   const current: Record<string, boolean> = {};
   for (const def of PERMISSIONS) {
-    current[def.key] = overrides.get(def.key) ?? heldByDefault(def, preset.role);
+    // An admin preset starts from "everything", as the resolver reads an admin.
+    current[def.key] = overrides.get(def.key) ?? roleDefault(def, preset.role);
   }
 
   return { preset, ...presetDiff(preset, current) };
@@ -275,8 +276,8 @@ export async function applyPreset(presetKey: string): Promise<ActionResult<{ gra
   // leaves out falls back to its default below, so that is what the role holds afterwards.
   try {
     for (const key of OWN_ACCESS_KEYS) {
-      const byDefault =
-        preset.role === "ADMIN" || heldByDefaultKey(key, preset.role);
+      const def = getPermissionDefinition(key);
+      const byDefault = def ? roleDefault(def, preset.role) : false;
       await assertKeepsOwnAccessAdmin(actor, preset.role, key, wanted.has(key) || byDefault);
     }
   } catch (err) {

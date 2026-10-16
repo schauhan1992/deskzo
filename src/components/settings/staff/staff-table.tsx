@@ -2,7 +2,8 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { KeyRound, Pencil, Power, Search, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { KeyRound, Pencil, Power, Search, ShieldCheck, Trash2 } from "lucide-react";
 import { sendPasswordResetEmail, setUserActive } from "@/actions/user";
 import { issueDigitalCards } from "@/actions/card";
 import { ResetLinkOnce } from "@/components/settings/setup-link-once";
@@ -14,7 +15,6 @@ import { Dialog } from "@/components/ui/dialog";
 import { IconButton, RowActions } from "@/components/ui/icon-button";
 import { Input, Select } from "@/components/ui/input";
 import { ActionNoticeRegion, type NoticeTone } from "@/components/ui/action-notice";
-import { UserAccessDrawer } from "@/components/settings/user-access-drawer";
 import { EditStaffDialog } from "@/components/settings/staff/edit-staff-dialog";
 import type { DepartmentChoice, RoleChoice, StaffRow, WorkBranch } from "@/components/settings/staff/types";
 
@@ -340,7 +340,15 @@ export function StaffTable({
                         disabled={pending}
                       />
                     )}
-                    <UserAccessDrawer userId={r.id} userName={r.name} mayManage={mayManageAccess} />
+                    {/* Their access — role, exceptions, record and field access, daily limit — on a page of its own. */}
+                    <Link
+                      href={`/settings/access/users/${r.id}`}
+                      title={`${mayManageAccess ? "Permissions" : "Review access"} for ${r.name}`}
+                      aria-label={`${mayManageAccess ? "Permissions" : "Review access"} for ${r.name}`}
+                      className="inline-grid h-7 w-7 shrink-0 place-items-center rounded-base text-muted transition-colors duration-150 hover:bg-surface-sunken hover:text-text"
+                    >
+                      <ShieldCheck className="h-4 w-4" aria-hidden />
+                    </Link>
                     {canSwitchOff(r) && (
                       <IconButton
                         icon={Trash2}

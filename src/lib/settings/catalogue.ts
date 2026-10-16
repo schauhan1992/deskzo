@@ -48,6 +48,7 @@ import {
   CalendarCheck,
   ListChecks,
   ListPlus,
+  EyeOff,
 } from "lucide-react";
 
 /**
@@ -99,6 +100,11 @@ export type SettingsItem = {
   module?: string | readonly string[];
   /** Lives outside /settings, inside the module it configures. */
   external?: boolean;
+  /**
+   * Shown to the workspace's super admin alone — the account flag, not a permission, which is why it
+   * can't be said with `permission`: the super admin holds every key, and so does every admin.
+   */
+  superAdminOnly?: boolean;
 };
 
 export type SettingsGroup = {
@@ -284,6 +290,15 @@ export const SETTINGS: SettingsSection[] = [
             href: "/settings/security/access",
             icon: Fingerprint,
             permission: ["security.manage", "access.approveDevices", "access.viewSignIns"],
+          },
+          {
+            key: "unmasking-logs",
+            label: "Unmasking logs",
+            description: "Every time somebody unmasked a lead's hidden fields, or was refused — who, which lead, which fields, never what they held.",
+            href: "/settings/unmasking-logs",
+            icon: EyeOff,
+            permission: "permissions.view",
+            superAdminOnly: true,
           },
           {
             key: "activity",
@@ -740,14 +755,14 @@ function moduleShown(item: SettingsItem, enabledModules: string[]): boolean {
 }
 
 /** The catalogue as this person would see it: nothing they cannot open, nothing switched off. */
-export function visibleSettings(permissions: string[], enabledModules: string[]): SettingsSection[] {
+export function visibleSettings(permissions: string[], enabledModules: string[], viewer: { superAdmin?: boolean } = {}): SettingsSection[] {
   return SETTINGS.map((section) => ({
     ...section,
     groups: section.groups
       .map((group) => ({
         ...group,
         items: group.items.filter(
-          (item) => mayOpen(item, permissions) && moduleShown(item, enabledModules),
+          (item) => mayOpen(item, permissions) && moduleShown(item, enabledModules) && (!item.superAdminOnly || viewer.superAdmin === true),
         ),
       }))
       .filter((group) => group.items.length > 0),
@@ -775,9 +790,9 @@ export function activeSettingsKey(pathname: string): string | null {
  * may see and sends the keys; the sidebar imports this module itself and rebuilds the tree from
  * them. Nothing crosses the boundary but strings.
  */
-export function visibleSettingsKeys(permissions: string[], enabledModules: string[]): string[] {
+export function visibleSettingsKeys(permissions: string[], enabledModules: string[], viewer: { superAdmin?: boolean } = {}): string[] {
   return SETTINGS_ITEMS.filter(
-    (item) => mayOpen(item, permissions) && moduleShown(item, enabledModules),
+    (item) => mayOpen(item, permissions) && moduleShown(item, enabledModules) && (!item.superAdminOnly || viewer.superAdmin === true),
   ).map((item) => item.key);
 }
 

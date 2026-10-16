@@ -5,7 +5,9 @@ import { can } from "@/lib/authz/resolve";
 import {
   actorContext,
   assertMayActOnTarget,
+  assertMayStartInRole,
   assertNotSelf,
+  assertRoleAssignable,
   assertSuperAdminRemains,
   AuthzError,
 } from "@/lib/authz/guards";
@@ -324,6 +326,11 @@ async function resolve(row: Record<string, string>, ctx: ImportContext): Promise
           : `Only a super admin can create an ${role} account.`,
       };
     }
+    // The rules adding somebody by hand applies (src/actions/user.ts `createUser`): a role that is
+    // switched on, and no account starting with more than the person importing it holds.
+    const nextRole = role ?? existing?.role;
+    if (nextRole && (!existing || role !== existing.role)) await assertRoleAssignable(nextRole);
+    if (!existing && nextRole) await assertMayStartInRole(actor, nextRole);
     if (existing && writes) {
       assertMayActOnTarget(actor, existing);
       if (grantsRole) assertNotSelf(actor.id, existing.id, "role");
