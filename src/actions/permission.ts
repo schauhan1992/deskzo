@@ -7,7 +7,7 @@ import { rolePermits } from "@/lib/authz/role-permission";
 import { requireUser } from "@/lib/session";
 import { roleExists, roleKeys } from "@/lib/authz/role-registry";
 import { PERMISSIONS, getPermissionDefinition, permissionGroup, type PermissionKey, heldByDefault } from "@/lib/permissions";
-import { can, permissionsFor, explain, resolveUserPermissions, describeSource } from "@/lib/authz/resolve";
+import { can, permissionsFor, explain, resolveUserPermissions, describeSource, isHeld } from "@/lib/authz/resolve";
 import { holdsFrom, resolveEveryone } from "@/lib/authz/bulk";
 import { actorContext, assertGrantWithinOwnAuthority, assertKeepsOwnAccessAdmin, AuthzError } from "@/lib/authz/guards";
 import { recordPermissionChange } from "@/lib/authz/audit";
@@ -327,7 +327,7 @@ export async function effectivePermissionsFor(userId: string) {
         label: def.label,
         group: permissionGroup(def),
         tier: def.tier ?? "standard",
-        held: source.via !== "none" && source.via !== "inactive" && !(source.via === "userGrant" && !source.allowed) && !(source.via === "roleOverride" && !source.allowed),
+        held: isHeld(source),
         via: source.via,
         why: describeSource(source, clock),
       };

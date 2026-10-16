@@ -275,6 +275,9 @@ const NOT_YET_EVERYWHERE = {
   // 20261108100000_support_reply_from. Read by name in src/lib/support-mail/send.ts and
   // src/actions/support-mail.ts, which treat a workspace without them as replying through Deskzo.
   supportMailSettings: { replyFrom: true, companyFrom: true },
+  // 20261110100000_field_access_unmask. Read by name in src/lib/authz/role-registry.ts and
+  // src/actions/role.ts, which treat a workspace without it as having every role active.
+  role: { active: true },
 } satisfies Prisma.GlobalOmitConfig;
 
 /** The one client, made on first use. */

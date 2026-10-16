@@ -2,6 +2,7 @@ import { cache } from "react";
 import type { AccessLevel, CompanyRelationshipType, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { permissionsFor } from "@/lib/authz/resolve";
+import { roleIsActive } from "@/lib/authz/role-registry";
 import { getDownlineUserIds } from "@/lib/org-chart";
 import { SUPPORT_READONLY_ROLE } from "@/lib/roles";
 import { notMigratedYet } from "@/lib/not-migrated";
@@ -27,7 +28,7 @@ import { vendorRelationshipTypeValues } from "@/lib/validation/company";
  *
  *   0. No such person, or the Automation account → NONE.
  *   1. Super admin            → ALL.
- *   2. Inactive               → NONE.
+ *   2. Inactive, or their role switched off → NONE.
  *   3. Platform support on a read-only grant → view as derived below; edit, delete, assign NONE.
  *   4. The person's own level (`UserAccessLevel`, unexpired).
  *   5. Their role's level (`RoleAccessLevel`).
@@ -276,6 +277,7 @@ export type AccessSource =
   | { via: "automation" }
   | { via: "superAdmin" }
   | { via: "inactive" }
+  | { via: "roleInactive"; role: string }
   | { via: "supportReadOnly" }
   | { via: "userLevel"; reason: string | null; expiresAt: Date | null }
   | { via: "roleLevel"; role: string }
@@ -343,6 +345,10 @@ export const resolveAccess = cache(async (userId: string): Promise<ResolvedAcces
   }
   if (!user.active) {
     everything("NONE", { via: "inactive" });
+    return { person, levels };
+  }
+  if (!(await roleIsActive(user.role))) {
+    everything("NONE", { via: "roleInactive", role: user.role });
     return { person, levels };
   }
 

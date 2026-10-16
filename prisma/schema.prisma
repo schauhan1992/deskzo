@@ -44,13 +44,21 @@ model Role {
    */
   isSystem  Boolean @default(false)
   sortOrder Int     @default(100)
+  /**
+   * A retired role: kept with its settings and history, offered to nobody, and refused to anybody who
+   * still holds it — it can only be switched off once nobody active does (src/actions/role.ts). Read by
+   * name until every workspace has it (src/lib/tenancy/clients.ts NOT_YET_EVERYWHERE).
+   */
+  active    Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users        User[]
-  permissions  RolePermission[]
-  accessLevels RoleAccessLevel[]
+  users         User[]
+  permissions   RolePermission[]
+  accessLevels  RoleAccessLevel[]
+  fieldPolicies RoleFieldPolicy[]
+  unmaskLimit   RoleUnmaskLimit?
   signInRule   SignInRule?      @relation("RoleSignInRule")
   candidates   Candidate[]
   formGrants   FormAccessGrant[]
@@ -780,6 +788,11 @@ model User {
   permissionGrantsMade   UserPermission[]         @relation("UserPermissionGrantedBy")
   accessLevels           UserAccessLevel[]        @relation("UserAccessLevelSubject")
   accessLevelsGranted    UserAccessLevel[]        @relation("UserAccessLevelGrantedBy")
+  fieldPolicies          UserFieldPolicy[]        @relation("UserFieldPolicySubject")
+  fieldPoliciesGranted   UserFieldPolicy[]        @relation("UserFieldPolicyGrantedBy")
+  unmaskLimit            UserUnmaskLimit?         @relation("UserUnmaskLimitSubject")
+  unmaskLimitsGranted    UserUnmaskLimit[]        @relation("UserUnmaskLimitGrantedBy")
+  unmaskUsage            UnmaskUsage[]
   permissionChangesMade  PermissionChange[]       @relation("PermissionChangeActor")
   permissionChangesAbout PermissionChange[]       @relation("PermissionChangeSubject")
   activityAsImpersonator ActivityLog[]            @relation("ActivityImpersonatedBy")
@@ -8431,6 +8444,173 @@ model UserAccessLevel {
   @@id(name: "user_record_action", [userId, record, action])
   @@index([expiresAt])
   @@map("user_access_levels")
+}
+
+/**
+ * Field access for one role on one sensitive field (src/lib/authz/field-policy.ts): whether its
+ * people may read it, whether it is masked in lists and on the record's page, and whether they may
+ * unmask it. No row is the normal state — readable and unmasked, as every field was before field
+ * access existed — so nothing changes for anybody until an admin sets a policy.
+ */
+model RoleFieldPolicy {
+  role         String
+  roleRef      Role     @relation(fields: [role], references: [key], onDelete: Cascade)
+  /// A record type in src/lib/authz/field-policy.ts `FIELD_ENTITIES` — "leads".
+  entity       String
+  /// A field in `SENSITIVE_FIELDS`, or `custom:<key>` for a custom field.
+  field        String
+  /// Off: the value is never sent, masked or otherwise. Masking never grants reading.
+  view         Boolean  @default(true)
+  maskInList   Boolean  @default(false)
+  maskInDetail Boolean  @default(false)
+  /// May a masked value be revealed on the record's page, against the daily limit.
+  unmask       Boolean  @default(false)
+  /// A `MaskFormat`; null for the field's default.
+  format       String?
+  updatedById  String?
+  updatedAt    DateTime @updatedAt
+
+  @@id(name: "role_entity_field", [role, entity, field])
+  @@map("role_field_policies")
+}
+
+/**
+ * One person's own field access for one field, over their role's — an exception kept with who set it,
+ * why and until when, as a personal permission is (`UserPermission`). The whole row answers: a person
+ * either follows their role for a field or has a policy of their own for it.
+ */
+model UserFieldPolicy {
+  userId       String
+  entity       String
+  field        String
+  view         Boolean   @default(true)
+  maskInList   Boolean   @default(false)
+  maskInDetail Boolean   @default(false)
+  unmask       Boolean   @default(false)
+  format       String?
+  reason       String?
+  grantedById  String?
+  /// The midnight that ends its last day, on the workspace's clock, as a personal permission's is.
+  expiresAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  user      User  @relation("UserFieldPolicySubject", fields: [userId], references: [id], onDelete: Cascade)
+  grantedBy User? @relation("UserFieldPolicyGrantedBy", fields: [grantedById], references: [id], onDelete: SetNull)
+
+  @@id(name: "user_entity_field", [userId, entity, field])
+  @@index([expiresAt])
+  @@map("user_field_policies")
+}
+
+/**
+ * A role's daily unmask limit (src/lib/authz/unmask.ts): how many distinct leads each of its people
+ * may unmask in one business day. No row, or a null limit, is no limit.
+ */
+model RoleUnmaskLimit {
+  role        String   @id
+  roleRef     Role     @relation(fields: [role], references: [key], onDelete: Cascade)
+  dailyLimit  Int?
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("role_unmask_limits")
+}
+
+/**
+ * One person's own daily unmask limit, over their role's: `limited` false lifts the limit for them,
+ * true sets `dailyLimit`. Kept with who set it, why and until when.
+ */
+model UserUnmaskLimit {
+  userId      String    @id
+  limited     Boolean
+  dailyLimit  Int?
+  reason      String?
+  grantedById String?
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user      User  @relation("UserUnmaskLimitSubject", fields: [userId], references: [id], onDelete: Cascade)
+  grantedBy User? @relation("UserUnmaskLimitGrantedBy", fields: [grantedById], references: [id], onDelete: SetNull)
+
+  @@map("user_unmask_limits")
+}
+
+/**
+ * The leads one person has unmasked on one business day — the daily limit's counter. One row per
+ * person, lead and day, so revealing a lead's email, phone and company together counts once, and
+ * opening it again that day counts nothing. Written under a lock with the count it is checked against
+ * (src/lib/authz/unmask.ts), so requests at the same moment can't pass the limit between them.
+ *
+ * The lead is a bare id: a lead deleted later still counted that day.
+ */
+model UnmaskUsage {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  leadId       String
+  /// YYYY-MM-DD on the workspace's clock — the day the limit resets on.
+  businessDate String
+  /// Field keys revealed the first time — names only, never values.
+  fields       String[]
+  createdAt    DateTime @default(now())
+
+  @@unique([userId, businessDate, leadId])
+  @@index([businessDate])
+  @@map("unmask_usage")
+}
+
+/**
+ * Every attempt to unmask a lead, allowed or not — the Unmasking logs a super admin reads
+ * (src/lib/authz/unmask.ts, /settings/unmasking-logs).
+ *
+ * Append-only: a trigger refuses UPDATE and DELETE, so nobody edits or removes their own history from
+ * inside the application. People and leads are bare ids with the name frozen at the time, as in
+ * `PermissionChange`, so the log outlives both. It holds field names, never field values.
+ */
+model UnmaskEvent {
+  id                   String       @id @default(cuid())
+  at                   DateTime     @default(now())
+  businessDate         String
+  /// The workspace (control-plane id) the event happened in.
+  tenantId             String?
+  userId               String
+  userName             String
+  /// Set when an admin was viewing as `userId`.
+  impersonatedByUserId String?
+  leadId               String
+  /// The lead's number as the screens show it — an identifier, not lead content.
+  leadRef              String?
+  /// Field keys concerned, never their values.
+  fields               String[]
+  result               UnmaskResult
+  /// Whether this attempt used a unit of the daily limit.
+  consumed             Boolean      @default(false)
+  usedToday            Int?
+  dailyLimit           Int?
+  /// Why it was refused, in words; null when allowed.
+  reason               String?
+  requestId            String?
+  ip                   String?
+  userAgent            String?
+
+  @@index([at])
+  @@index([userId, at])
+  @@index([leadId, at])
+  @@index([result, at])
+  @@map("unmask_events")
+}
+
+enum UnmaskResult {
+  /// First reveal of the lead that day: one unit used.
+  ALLOWED
+  /// Already revealed that day: shown again, nothing used.
+  REPEAT
+  /// The daily limit was reached: kept masked.
+  QUOTA_EXHAUSTED
+  /// Not allowed to unmask — no reach, no permission, or while viewing as somebody.
+  DENIED
 }
 
 /**

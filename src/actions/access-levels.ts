@@ -268,6 +268,8 @@ function describeAccessSource(source: AccessSource, day: (d: Date) => string): s
       return "Super admin.";
     case "inactive":
       return "Their account is deactivated.";
+    case "roleInactive":
+      return `Their role (${source.role}) is switched off.`;
     case "supportReadOnly":
       return "Platform support on a read-only grant.";
     case "userLevel":

@@ -2,6 +2,7 @@ import { cache } from "react";
 import { SUPPORT_READONLY_ROLE, type Role } from "@/lib/roles";
 import { db } from "@/lib/db";
 import { getDownlineUserIds } from "@/lib/org-chart";
+import { roleIsActive } from "@/lib/authz/role-registry";
 import { getPermissionDefinition, PERMISSIONS, type PermissionKey, heldByDefault } from "@/lib/permissions";
 import type { Clock } from "@/lib/time/zone";
 
@@ -20,6 +21,8 @@ import type { Clock } from "@/lib/time/zone";
  *   0. Unknown key            → DENY, and throw in development.
  *   1. Super admin            → ALLOW everything. No table is read.
  *   2. Inactive account       → DENY everything.
+ *  2b. Switched-off role      → DENY everything. `setRoleActive` refuses to switch a role off while
+ *                               anybody active holds it; this is the backstop if somebody does.
  *   3. Per-user grant         → its `allowed`, final. A denial here beats the role.
  *   4. Own role               → an explicit override row is final; absence falls through.
  *   5. Downline inheritance   → ALLOW if a report's role grants it, for delegable keys only.
@@ -34,6 +37,7 @@ import type { Clock } from "@/lib/time/zone";
 export type PermissionSource =
   | { via: "superAdmin" }
   | { via: "inactive" }
+  | { via: "roleInactive"; role: Role }
   | { via: "userGrant"; allowed: boolean; grantedBy: string | null; expiresAt: Date | null; reason: string | null }
   | { via: "roleOverride"; role: Role; allowed: boolean }
   | { via: "roleDefault"; role: Role }
@@ -51,6 +55,11 @@ export type ResolvedPermissions = {
   sources: Map<string, PermissionSource>;
 };
 
+/** Whether a source means the permission is held — the one test every reader of a source uses. */
+export function isHeld(source: PermissionSource | undefined): boolean {
+  return source ? allowed(source) : false;
+}
+
 function allowed(source: PermissionSource): boolean {
   switch (source.via) {
     case "superAdmin":
@@ -65,6 +74,7 @@ function allowed(source: PermissionSource): boolean {
     case "supportReadOnly":
       return source.allowed;
     case "inactive":
+    case "roleInactive":
     case "none":
       return false;
   }
@@ -113,6 +123,12 @@ export const resolveUserPermissions = cache(async (userId: string): Promise<Reso
   // sitting under somebody kept handing that person every permission an admin has.
   if (!user.active) {
     for (const def of PERMISSIONS) sources.set(def.key, { via: "inactive" });
+    return { userId, role: user.role, isSuperAdmin: false, active: false, sources };
+  }
+
+  // Rule 2b. A role somebody switched off grants nothing, to anybody who still holds it.
+  if (!(await roleIsActive(user.role))) {
+    for (const def of PERMISSIONS) sources.set(def.key, { via: "roleInactive", role: user.role });
     return { userId, role: user.role, isSuperAdmin: false, active: false, sources };
   }
 
@@ -284,6 +300,8 @@ export function describeSource(source: PermissionSource, clock: Clock): string {
       return "Super admin — holds everything, and cannot be restricted.";
     case "inactive":
       return "The account is deactivated.";
+    case "roleInactive":
+      return `Their role (${source.role}) is switched off, so it grants nothing.`;
     case "userGrant":
       return source.allowed
         ? `Granted to this person directly${source.reason ? ` — ${source.reason}` : ""}${source.expiresAt ? `, until ${clock.date(new Date(source.expiresAt.getTime() - 1))}` : ""}.`

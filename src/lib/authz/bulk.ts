@@ -1,7 +1,8 @@
 import type { Role } from "@/lib/roles";
 import { db } from "@/lib/db";
 import { PERMISSIONS, heldByDefault } from "@/lib/permissions";
-import type { PermissionSource } from "@/lib/authz/resolve";
+import { isHeld, type PermissionSource } from "@/lib/authz/resolve";
+import { inactiveRoleKeys } from "@/lib/authz/role-registry";
 
 /**
  * Resolving everybody at once.
@@ -39,7 +40,7 @@ export type BulkResolved = {
 export async function resolveEveryone(): Promise<Map<string, BulkResolved>> {
   const now = new Date();
 
-  const [users, userRows, roleRows] = await Promise.all([
+  const [users, userRows, roleRows, switchedOff] = await Promise.all([
     db.user.findMany({
       select: { id: true, name: true, role: true, active: true, isSuperAdmin: true, managerId: true },
     }),
@@ -48,6 +49,7 @@ export async function resolveEveryone(): Promise<Map<string, BulkResolved>> {
       select: { userId: true, permission: true, allowed: true, grantedById: true, expiresAt: true, reason: true },
     }),
     db.rolePermission.findMany({ select: { role: true, permission: true, allowed: true } }),
+    inactiveRoleKeys(),
   ]);
 
   const byId = new Map(users.map((u) => [u.id, u]));
@@ -113,6 +115,12 @@ export async function resolveEveryone(): Promise<Map<string, BulkResolved>> {
       resolved.set(user.id, { userId: user.id, role: user.role, isSuperAdmin: false, active: false, sources });
       continue;
     }
+    // Rule 2b.
+    if (switchedOff.has(user.role)) {
+      for (const def of PERMISSIONS) sources.set(def.key, { via: "roleInactive", role: user.role });
+      resolved.set(user.id, { userId: user.id, role: user.role, isSuperAdmin: false, active: false, sources });
+      continue;
+    }
 
     const grants = grantsByUser.get(user.id);
     let reports: ReturnType<typeof downlineOf> | null = null;
@@ -173,13 +181,7 @@ export async function resolveEveryone(): Promise<Map<string, BulkResolved>> {
   return resolved;
 }
 
-/** The same "does this count as held" test the single-user path uses. */
+/** The single-user path's own "does this count as held" test, so the two can't drift apart. */
 export function holdsFrom(source: PermissionSource | undefined): boolean {
-  if (!source) return false;
-  return (
-    source.via !== "none" &&
-    source.via !== "inactive" &&
-    !(source.via === "userGrant" && !source.allowed) &&
-    !(source.via === "roleOverride" && !source.allowed)
-  );
+  return isHeld(source);
 }

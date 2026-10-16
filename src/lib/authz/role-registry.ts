@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { notMigratedYet } from "@/lib/not-migrated";
 import { ADMIN_ROLE, type Role } from "@/lib/roles";
 
 /**
@@ -55,6 +56,32 @@ export async function roleExists(key: string): Promise<boolean> {
 export async function roleHeadcount(): Promise<Record<string, number>> {
   const rows = await db.user.groupBy({ by: ["role"], _count: { _all: true } });
   return Object.fromEntries(rows.map((r) => [r.role, r._count._all]));
+}
+
+/**
+ * The roles switched off (`Role.active`). Read by name and on its own, so a workspace whose database
+ * hasn't got the column yet reads as having every role on.
+ */
+export async function inactiveRoleKeys(): Promise<Set<string>> {
+  try {
+    const rows = await db.role.findMany({ where: { active: false }, select: { key: true } });
+    return new Set(rows.map((r) => r.key));
+  } catch (err) {
+    if (notMigratedYet(err)) return new Set();
+    throw err;
+  }
+}
+
+/** Whether a role is switched on — false for one that doesn't exist. */
+export async function roleIsActive(key: string): Promise<boolean> {
+  if (!key) return false;
+  try {
+    const row = await db.role.findUnique({ where: { key }, select: { active: true } });
+    return row?.active ?? false;
+  } catch (err) {
+    if (notMigratedYet(err)) return roleExists(key);
+    throw err;
+  }
 }
 
 export { ADMIN_ROLE };
