@@ -14,7 +14,7 @@ What a person sees of a lead's sensitive fields, how they unmask one, how many t
 | Address | `address` | stars, city only, first letter | `********, Pune` |
 | Lead source | `source` (and its particulars) | stars, first letter | `********` |
 | Enquiry details | `description` | first letter, stars | `W********` |
-| Each custom field on leads | `custom:<key>` | as its type: an email, phone or text field's masks | `********` |
+| Each custom field on leads | `custom:<key>` | as its type: an email, phone, choice or text field's masks | `********` |
 
 Every mask is a fixed eight stars, so a mask never gives away how long the value is.
 
