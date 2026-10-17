@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { newLeadStage } from "@/lib/pipeline/server";
 import { runLeadAutomations } from "@/lib/pipeline/automations";
+import { emitLeadCreated } from "@/lib/automate/emit-leads";
+import type { EventCause } from "@/lib/automate/action-types";
 import { MAIN_PIPELINE_ID } from "@/lib/pipeline/rules";
 import { Prisma, type ContactDesignation, type LeadSource } from "@prisma/client";
 import { db } from "@/lib/db";
@@ -221,6 +223,14 @@ export type IntakeOptions = {
   notify?: boolean;
   /** The team pipeline it starts in (src/lib/pipeline) — a booking page's; the main one when not given. */
   pipelineId?: string | null;
+  /**
+   * For a workflow's step (src/lib/automate/actions/lead-create.ts): written in the same transaction as
+   * what it made, so the step's record and the lead stand or fall together — a retry finds the record
+   * instead of making a second lead. A workflow's lead has no key, so `external_id` can't do this.
+   */
+  inTransaction?: (tx: Prisma.TransactionClient, made: { leadId: string | null; companyId: string; contactId: string }) => Promise<void>;
+  /** The run whose step made it, for the `lead.created` event. */
+  cause?: EventCause | null;
 };
 
 export async function intakeLead(key: IntakeSource, p: LeadPayload, options: IntakeOptions = {}): Promise<IntakeResult> {
@@ -373,7 +383,10 @@ export async function intakeLead(key: IntakeSource, p: LeadPayload, options: Int
           select: { id: true },
         }));
 
-      if (!entry) return { lead: null, company, contactId: contact.id };
+      if (!entry) {
+        await options.inTransaction?.(tx, { leadId: null, companyId: company.id, contactId: contact.id });
+        return { lead: null, company, contactId: contact.id };
+      }
       const description = describe({ company: !existingCompany, contact: !matched });
       const lead = await tx.lead.create({
         data: {
@@ -396,6 +409,9 @@ export async function intakeLead(key: IntakeSource, p: LeadPayload, options: Int
         },
         select: { id: true, leadSeq: true },
       });
+      // How it came in — the API key, a booking page, a card — is the source's name.
+      await emitLeadCreated(tx, lead.id, actorId, key.name, options.cause ?? null);
+      await options.inTransaction?.(tx, { leadId: lead.id, companyId: company.id, contactId: contact.id });
       return { lead, company, contactId: contact.id };
     });
   } catch (error) {

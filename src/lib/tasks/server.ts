@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { emitTask } from "@/lib/automate/emit-records";
 import { workspaceClock } from "@/lib/time/workspace";
 import { closes, dayKeyOf, earnsXp, nextOccurrence, onlyWorks, type TaskStatusKey } from "@/lib/tasks/rules";
 import { getDownlineUserIds } from "@/lib/org-chart";
@@ -125,6 +126,8 @@ export async function moveTask(taskId: string, status: TaskStatusKey): Promise<{
     });
     const call = await tx.callLog.findUnique({ where: { followUpTaskId: taskId }, select: { id: true } });
     if (call) await tx.callLog.update({ where: { id: call.id }, data: { followUpDone: closing } });
+    // For Automate's workflows (src/lib/automate): done, the moment it becomes so.
+    if (status === "DONE" && task.status !== "DONE") await emitTask(tx, "task.completed", taskId, null);
 
     if (status !== "DONE" || !task.repeat) return { nextTaskId: null };
     if ((await tx.task.count({ where: { repeatedFromId: taskId } })) > 0) return { nextTaskId: null };

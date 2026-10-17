@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
+import { emitPaymentReceived } from "@/lib/automate/emit-records";
 import { syncInvoiceStatus } from "@/lib/receivables/sync";
 import { reverseAllocationExchange, reversePaymentPosting } from "@/lib/ledger/journal";
 import { bookingRate, takenFromPayment } from "@/lib/ledger/posting";
@@ -136,6 +137,7 @@ export async function recordPayment(
     await postPaymentToLedger(tx, created.id, user.id);
     // An in-hand order counts as booked from its first payment (O-D2).
     if (order) await bookOnFirstPayment(tx, { id: order.id }, new Date());
+    await emitPaymentReceived(tx, created.id, user.id);
     return created;
   });
   // A promise to pay this order, kept by this money (src/lib/collections/promises.ts). Never fails the payment.

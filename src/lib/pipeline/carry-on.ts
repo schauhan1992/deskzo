@@ -5,6 +5,7 @@ import { notMigratedYet } from "@/lib/custom-fields/server";
 import { leadPath } from "@/lib/record-links";
 import { refreshLeadScore } from "@/lib/leads/score-store";
 import { runLeadAutomations } from "@/lib/pipeline/automations";
+import { emitLeadCreated } from "@/lib/automate/emit-leads";
 import { leadStages, newLeadStage } from "@/lib/pipeline/server";
 import { pipelineById } from "@/lib/pipeline/rules";
 
@@ -82,6 +83,7 @@ async function carryOn(leadId: string, actorId: string) {
       select: { id: true, leadSeq: true },
     });
     await tx.activity.create({ data: { leadId: lead.id, userId: actorId, type: "NOTE", notes: `Carried on into ${next.name} as lead #${created.leadSeq}.` } });
+    await emitLeadCreated(tx, created.id, actorId, "carried-on");
     return created;
   });
 

@@ -57,3 +57,10 @@ export class ActionError extends Error {
 export function defineAction<I, O>(definition: ActionDefinition<I, O>): ActionDefinition<I, O> {
   return definition;
 }
+
+/** For an event a step's change records: caused by this run, one level deeper (src/lib/automate/engine.ts). */
+export type EventCause = { causedByRunId: string; depth: number };
+
+export function causedBy(ctx: ActionContext): EventCause {
+  return { causedByRunId: ctx.runId, depth: ctx.depth + 1 };
+}

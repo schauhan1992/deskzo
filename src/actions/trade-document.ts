@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma, type TradeDocumentType, type TradeDocumentStatus, type DocumentOrigin } from "@prisma/client";
 import { db } from "@/lib/db";
+import { emitDocumentIssued } from "@/lib/automate/emit-records";
 import { notifyUser } from "@/lib/notify";
 import { cancelReasonOrRefusal } from "@/lib/documents/cancellation";
 import { CATEGORY_SELECT } from "@/lib/customers/categories";
@@ -458,7 +459,10 @@ export async function issueTradeDocument(input: unknown): Promise<ActionResult<{
   // entry, and an entry must never exist for a document that then failed to issue.
   const posting = await db.$transaction(async (tx) => {
     await tx.tradeDocument.update({ where: { id }, data: { status: "ISSUED", issuedAt: new Date(), ...snapshot } });
-    return postDocumentToLedger(tx, id, user.id);
+    const posted = await postDocumentToLedger(tx, id, user.id);
+    // For Automate's workflows (src/lib/automate): issued, with its posting.
+    await emitDocumentIssued(tx, id, user.id);
+    return posted;
   });
 
   await recordAudit({

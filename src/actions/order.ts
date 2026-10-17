@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { detectSalesWins } from "@/lib/wins/detect";
 import { Prisma, type OrderStatus, type OrderBusinessType } from "@prisma/client";
 import { db } from "@/lib/db";
+import { emitOrder } from "@/lib/automate/emit-records";
 import { CATEGORY_SELECT } from "@/lib/customers/categories";
 import { requireModuleUser } from "@/lib/modules-access";
 import { leadsInPlan } from "@/lib/leads/shown";
@@ -296,60 +297,65 @@ export async function createOrder(input: unknown): Promise<ActionResult<{ id: st
   const custom = await customFieldsForCreate("ORDER", user.id, data.customFields, { checkRequired: true });
   if (!custom.ok) return { ok: false, error: custom.error };
 
-  const order = await db.companyProduct.create({
-    data: {
-      ...handoff,
-      dealRegStatus: data.dealRegStatus || null,
-      dealRegNumber: data.dealRegNumber || null,
-      dealRegValidTo,
-      dealPrice: data.dealPrice ?? null,
-      rebates:
-        rebateData.length > 0 ? { create: rebateData.map((r) => ({ ...r, createdById: user.id })) } : undefined,
-      ...(quote
-        ? {
-            ...quote,
-            quotedById: user.id,
-            priceChanges: {
-              create: {
-                event: "QUOTED",
-                toPrice: quote.quotedPurchasePrice,
-                vendorId: quote.quoteVendorId,
-                reason: quote.quoteRemarks,
-                byUserId: user.id,
-              },
-            },
-          }
-        : {}),
-      companyId: data.companyId,
-      locationId: data.locationId,
-      itemId: data.itemId,
-      quantity: data.quantity,
-      unitPrice: data.unitPrice ?? null,
-      businessType: data.businessType,
-      endCustomerId: data.endCustomerId || null,
-      poNumber: data.poNumber || null,
-      proposalId: data.proposalId || null,
-      paymentTerms: data.paymentTerms || null,
-      startDate: data.startDate ? new Date(data.startDate) : null,
-      endDate: data.endDate ? new Date(data.endDate) : null,
-      notes: data.notes || null,
-      addedByUserId: user.id,
-      orderStatus: "PENDING_APPROVAL",
-      watchers: data.watcherUserIds.length > 0 ? { connect: data.watcherUserIds.map((id) => ({ id })) } : undefined,
-      expenses:
-        data.expenses.length > 0
+  const order = await db.$transaction(async (tx) => {
+    const made = await tx.companyProduct.create({
+      data: {
+        ...handoff,
+        dealRegStatus: data.dealRegStatus || null,
+        dealRegNumber: data.dealRegNumber || null,
+        dealRegValidTo,
+        dealPrice: data.dealPrice ?? null,
+        rebates:
+          rebateData.length > 0 ? { create: rebateData.map((r) => ({ ...r, createdById: user.id })) } : undefined,
+        ...(quote
           ? {
-              create: data.expenses.map((e) => ({
-                type: e.type,
-                amount: e.amount,
-                notes: e.notes || null,
-                payeeCompanyId: e.payeeCompanyId || null,
-                payeeAccountId: e.payeeAccountId || null,
-              })),
+              ...quote,
+              quotedById: user.id,
+              priceChanges: {
+                create: {
+                  event: "QUOTED",
+                  toPrice: quote.quotedPurchasePrice,
+                  vendorId: quote.quoteVendorId,
+                  reason: quote.quoteRemarks,
+                  byUserId: user.id,
+                },
+              },
             }
-          : undefined,
-      ...custom.data,
-    },
+          : {}),
+        companyId: data.companyId,
+        locationId: data.locationId,
+        itemId: data.itemId,
+        quantity: data.quantity,
+        unitPrice: data.unitPrice ?? null,
+        businessType: data.businessType,
+        endCustomerId: data.endCustomerId || null,
+        poNumber: data.poNumber || null,
+        proposalId: data.proposalId || null,
+        paymentTerms: data.paymentTerms || null,
+        startDate: data.startDate ? new Date(data.startDate) : null,
+        endDate: data.endDate ? new Date(data.endDate) : null,
+        notes: data.notes || null,
+        addedByUserId: user.id,
+        orderStatus: "PENDING_APPROVAL",
+        watchers: data.watcherUserIds.length > 0 ? { connect: data.watcherUserIds.map((id) => ({ id })) } : undefined,
+        expenses:
+          data.expenses.length > 0
+            ? {
+                create: data.expenses.map((e) => ({
+                  type: e.type,
+                  amount: e.amount,
+                  notes: e.notes || null,
+                  payeeCompanyId: e.payeeCompanyId || null,
+                  payeeAccountId: e.payeeAccountId || null,
+                })),
+              }
+            : undefined,
+        ...custom.data,
+      },
+    });
+    // For Automate's workflows (src/lib/automate), with the order.
+    await emitOrder(tx, "order.created", made.id, user.id);
+    return made;
   });
 
   const held =
@@ -478,17 +484,20 @@ export async function approveOrder(input: unknown): Promise<ActionResult<{ id: s
   }
 
   const nextStatus: OrderStatus = approved ? "APPROVED" : "REJECTED";
-  await db.companyProduct.update({
-    where: { id: orderId },
-    data: {
-      orderStatus: nextStatus,
-      accountsApprovedByUserId: user.id,
-      accountsApprovedAt: new Date(),
-      accountsNotes: notes || null,
-      ...(lossApprovedAt !== null
-        ? { lossApprovedAt: new Date(), lossApprovedById: user.id, lossApprovedCost: lossApprovedAt, lossApprovalNote: notes || "Approved with the order" }
-        : {}),
-    },
+  await db.$transaction(async (tx) => {
+    await tx.companyProduct.update({
+      where: { id: orderId },
+      data: {
+        orderStatus: nextStatus,
+        accountsApprovedByUserId: user.id,
+        accountsApprovedAt: new Date(),
+        accountsNotes: notes || null,
+        ...(lossApprovedAt !== null
+          ? { lossApprovedAt: new Date(), lossApprovedById: user.id, lossApprovedCost: lossApprovedAt, lossApprovalNote: notes || "Approved with the order" }
+          : {}),
+      },
+    });
+    if (approved) await emitOrder(tx, "order.approved", orderId, user.id);
   });
 
   await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Order", entityId: orderId, entityLabel: formatOrderId(order.orderSeq) });
@@ -1045,9 +1054,12 @@ export async function fulfillOrder(orderId: string): Promise<ActionResult<null>>
     return { ok: false, error: "A higher price is waiting for sales to accept — settle that first." };
   }
 
-  await db.companyProduct.update({
-    where: { id: orderId },
-    data: { orderStatus: "FULFILLED", fulfilledAt: new Date() },
+  await db.$transaction(async (tx) => {
+    await tx.companyProduct.update({
+      where: { id: orderId },
+      data: { orderStatus: "FULFILLED", fulfilledAt: new Date() },
+    });
+    await emitOrder(tx, "order.fulfilled", orderId, user.id);
   });
 
   await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Order", entityId: orderId, entityLabel: formatOrderId(order.orderSeq) });

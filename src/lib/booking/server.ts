@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { db } from "@/lib/db";
+import { emitBookingMade } from "@/lib/automate/emit-records";
 import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
 import { notMigratedYet } from "@/lib/custom-fields/server";
@@ -232,7 +233,11 @@ export async function bookSlot(
     { ...links, ticketId: null, visitId: null },
     `Booking page ${page.title}`,
   );
-  await db.booking.update({ where: { id: booking.id }, data: { ...links, calendarEventId: meeting.ok ? meeting.eventId : null } });
+  await db.$transaction(async (tx) => {
+    await tx.booking.update({ where: { id: booking.id }, data: { ...links, calendarEventId: meeting.ok ? meeting.eventId : null } });
+    // For Automate's workflows (src/lib/automate): once the booking knows its lead.
+    await emitBookingMade(tx, { id: booking.id, pageId: page.id, pageTitle: page.title, hostUserId: hostId, startsAt: start, endsAt: end }, links);
+  });
 
   await notifyUser({
     userId: hostId,

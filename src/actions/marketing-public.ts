@@ -3,6 +3,8 @@
 import { createHash } from "node:crypto";
 import { newLeadStage } from "@/lib/pipeline/server";
 import { runLeadAutomations } from "@/lib/pipeline/automations";
+import { emitLeadCreated } from "@/lib/automate/emit-leads";
+import { emitEvent } from "@/lib/automate/events";
 import { MAIN_PIPELINE_ID } from "@/lib/pipeline/rules";
 import type { FormCategory, MarketingTopic, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
@@ -594,7 +596,7 @@ export async function submitForm(input: {
       update: {},
     });
 
-    await tx.formSubmission.create({
+    const submission = await tx.formSubmission.create({
       data: {
         formId: form.id,
         // Every answer as given. The named columns beside it are for searching and matching;
@@ -614,6 +616,14 @@ export async function submitForm(input: {
       select: { id: true },
     });
 
+    // For Automate's workflows: the form sent, and the lead it made. Ids only — the answers stay on the submission.
+    await emitEvent(tx, {
+      type: "form.submitted",
+      recordType: "form-submission",
+      recordId: submission.id,
+      payload: { form: { id: form.id, name: form.name }, submission: { id: submission.id }, companyId: company.id, contactId: contact.id, leadId: lead?.id ?? null, invited: false },
+    });
+    if (lead) await emitLeadCreated(tx, lead.id, null, "form");
     return { kind: "created" as const, company, lead };
   });
 
@@ -771,11 +781,15 @@ async function submitInvited(input: {
       // A "no" after a "yes" takes them off the register; there is nothing left to mark.
       ...(attending === false ? { attendance: null, attendanceMarkedAt: null, attendanceMarkedById: null } : {}),
     };
+    let submissionId: string;
     if (invite.submission) {
       await tx.formSubmission.update({ where: { id: invite.submission.id }, data });
+      submissionId = invite.submission.id;
     } else {
-      await tx.formSubmission.create({
-        data: {
+      submissionId = (
+        await tx.formSubmission.create({
+          select: { id: true },
+          data: {
           ...data,
           formId: form.id,
           inviteId: invite.id,
@@ -784,8 +798,16 @@ async function submitInvited(input: {
           leadId: lead?.id ?? null,
           sourceHash: createHash("sha256").update(`${invite.email}:${form.id}`).digest("hex").slice(0, 32),
         },
-      });
+        })
+      ).id;
     }
+    await emitEvent(tx, {
+      type: "form.submitted",
+      recordType: "form-submission",
+      recordId: submissionId,
+      payload: { form: { id: form.id, name: form.name }, submission: { id: submissionId }, companyId: invite.company.id, contactId: invite.contact.id, leadId: lead?.id ?? null, invited: true },
+    });
+    if (lead) await emitLeadCreated(tx, lead.id, null, "form");
     return { kind: "saved" as const, lead };
   });
 

@@ -19,6 +19,7 @@ import { actionByKey, actorRefusal } from "@/lib/automate/registry";
 import { delayUntil, nextFire } from "@/lib/automate/schedule";
 import { workspacePause } from "@/lib/automate/switches";
 import { applyTransform } from "@/lib/automate/transform";
+import { emitDateEvents, listensForDates } from "@/lib/automate/dates";
 import { requestWakeHere } from "@/lib/automate/wake";
 
 /**
@@ -552,6 +553,8 @@ export async function workTenant(options: { budgetMs?: number } = {}): Promise<T
   const clock = clockOfTenant(await currentTenant());
   const deadline = Date.now() + (options.budgetMs ?? 20_000);
   result.fired = await fireSchedules(clock);
+  // Once a day: invoices overdue, renewals coming, deals gone quiet (src/lib/automate/dates.ts).
+  await emitDateEvents(clock);
   const matched = await matchEvents();
   result.matched = matched.runs;
   result.runs = result.fired + result.matched;
@@ -576,7 +579,14 @@ export async function nextDueAt(now: Date = new Date()): Promise<Date | null> {
     db.automationRun.findFirst({ where: { status: "RUNNING" }, orderBy: { lockedUntil: "asc" }, select: { lockedUntil: true } }),
     db.automationTrigger.findFirst({ where: { type: "schedule", nextFireAt: { not: null }, workflow: { status: "ACTIVE" } }, orderBy: { nextFireAt: "asc" }, select: { nextFireAt: true } }),
   ]);
-  const times = [unmatched ? now : null, queued?.runAfter ?? null, held?.lockedUntil ?? null, schedule?.nextFireAt ?? null].filter((t): t is Date => !!t);
+  // Workflows on a date check wake a minute after the workspace's midnight, for the day's.
+  let tomorrow: Date | null = null;
+  if (await listensForDates()) {
+    const clock = clockOfTenant(await currentTenant());
+    const today = clock.parts(now);
+    tomorrow = clock.at(today.year, today.month, today.day + 1, 0, 1);
+  }
+  const times = [unmatched ? now : null, queued?.runAfter ?? null, held?.lockedUntil ?? null, schedule?.nextFireAt ?? null, tomorrow].filter((t): t is Date => !!t);
   if (!times.length) return null;
   return new Date(Math.min(...times.map((t) => t.getTime())));
 }

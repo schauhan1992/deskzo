@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { emitTicketCreated } from "@/lib/automate/emit-tickets";
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
 import { mayAccess, mayAccessContactsOf, mayAddTo, ticketAccess } from "@/lib/authz/access";
@@ -228,6 +229,7 @@ export async function createTicketFromEmail(input: { emailId: string; companyId:
       where: { id: email.id },
       data: { state: "NEW_TICKET", ticketId: made.id, contactId, handledById: user.id, handledAt: new Date() },
     });
+    await emitTicketCreated(tx, made.id, user.id, "inbox");
     return made;
   });
   await recordAudit({ userId: user.id, action: "CREATE", entityType: "Ticket", entityId: ticket.id, entityLabel: `${formatTicketId(ticket.ticketSeq)} — ${ticket.title} (from the Support inbox)` });

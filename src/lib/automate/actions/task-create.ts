@@ -2,9 +2,9 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
-import { ActionError, defineAction } from "@/lib/automate/action-types";
+import { ActionError, causedBy, defineAction } from "@/lib/automate/action-types";
 import { withEffect } from "@/lib/automate/effects";
-import { emitEvent } from "@/lib/automate/events";
+import { emitTask } from "@/lib/automate/emit-records";
 import type { Clock } from "@/lib/time/zone";
 
 /**
@@ -51,15 +51,7 @@ export const taskCreate = defineAction({
         data: { title: i.title, description: i.description || null, dueDate, assignedToUserId: assignee.id, createdByUserId: ctx.actorId, status: "TODO" },
         select: { id: true },
       });
-      await emitEvent(tx, {
-        type: "task.created",
-        recordType: "task",
-        recordId: task.id,
-        payload: { task: { id: task.id, title: i.title, assignedToUserId: assignee.id, dueDate: dueDate?.toISOString() ?? null } },
-        actorUserId: ctx.actorId,
-        causedByRunId: ctx.runId,
-        depth: ctx.depth + 1,
-      });
+      await emitTask(tx, "task.created", task.id, ctx.actorId, causedBy(ctx));
       return { output: { taskId: task.id, assignedToUserId: assignee.id }, recordType: "task", recordId: task.id };
     });
 

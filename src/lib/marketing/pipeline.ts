@@ -101,6 +101,8 @@ export async function resolveRecipients(params: {
   contactFilters?: unknown;
   /** An uploaded list, on its own or on top of the audience. */
   listId?: string | null;
+  /** Particular people, by id — a workflow's email to a lead's contact (src/lib/automate/actions). */
+  contactIds?: string[];
   channel: MessageChannel;
   topic: MarketingTopic;
   messageClass: MessageClass;
@@ -116,11 +118,13 @@ export async function resolveRecipients(params: {
   // A list is everyone on it. Whether each of them may be mailed is the verdict's job below, the
   // same as for anybody else — being uploaded earns nobody a way round the rules.
   const fromList: Prisma.ContactWhereInput | null = params.listId ? { marketingLists: { some: { listId: params.listId } } } : null;
-  if (!fromAudience && !fromList) return [];
+  const fromIds: Prisma.ContactWhereInput | null = params.contactIds?.length ? { id: { in: params.contactIds } } : null;
+  const sources = [fromAudience, fromList, fromIds].filter((w): w is Prisma.ContactWhereInput => !!w);
+  if (sources.length === 0) return [];
 
   const contacts = await db.contact.findMany({
-    // Nobody who has left their company (src/lib/contacts/left.ts), from an audience or from a list.
-    where: { AND: [fromAudience && fromList ? { OR: [fromAudience, fromList] } : (fromAudience ?? fromList)!, STILL_THERE] },
+    // Nobody who has left their company (src/lib/contacts/left.ts), from an audience, a list or by name.
+    where: { AND: [sources.length === 1 ? sources[0]! : { OR: sources }, STILL_THERE] },
     select: {
       id: true,
       name: true,
@@ -142,8 +146,8 @@ export async function resolveRecipients(params: {
     take: 5000,
   });
 
-  // The per-company cap is the audience's rule; a list was chosen person by person.
-  const capped = fromList ? contacts : capPerCompany(contacts, contactFilters.maxPerCompany);
+  // The per-company cap is the audience's rule; a list, or a name, was chosen person by person.
+  const capped = fromList || fromIds ? contacts : capPerCompany(contacts, contactFilters.maxPerCompany);
   if (capped.length === 0) return [];
 
   const contactIds = capped.map((c) => c.id);

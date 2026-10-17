@@ -9,6 +9,7 @@ import { notifyUser } from "@/lib/notify";
 import { PEOPLE_ONLY } from "@/lib/people";
 import { ticketPath } from "@/lib/record-links";
 import { formatTicketId } from "@/lib/tickets";
+import { emitTicketCreated } from "@/lib/automate/emit-tickets";
 import { inboundDomain } from "@/lib/support-mail/config";
 import type { IncomingEmail } from "@/lib/support-mail/parse";
 import { FLOOD_PER_HOUR, isForwardingConfirmation, normalizeAddress, ticketSeqFromSubject, visiblePart } from "@/lib/support-mail/rules";
@@ -200,6 +201,7 @@ export async function receiveEmail(mail: IncomingEmail, now = new Date()): Promi
       data: { ...base, state: "NEW_TICKET", ticketId: created.id, contactId: place.contactId, note: place.note, attachments: { create: mail.attachments } },
       select: { id: true },
     });
+    await emitTicketCreated(tx, created.id, null, "email");
     return { ticket: created, emailId: row.id };
   });
   const ref = formatTicketId(made.ticketSeq);

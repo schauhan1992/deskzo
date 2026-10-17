@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { emitTicketStatusChanged } from "@/lib/automate/emit-tickets";
 import { Prisma, type TicketStatus, type TicketPriority, type TicketType } from "@prisma/client";
 import { db } from "@/lib/db";
 import { getWording } from "@/lib/terms/server";
@@ -8,7 +9,7 @@ import { slot, upperFirst } from "@/lib/terms/dictionary";
 import { CATEGORY_SELECT } from "@/lib/customers/categories";
 import { requireModuleUser } from "@/lib/modules-access";
 import { isModuleEnabled } from "@/actions/module";
-import { mayAddTo, orderAccess, ticketAccess, type AccessAction } from "@/lib/authz/access";
+import { orderAccess, ticketAccess, type AccessAction } from "@/lib/authz/access";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
@@ -25,15 +26,7 @@ import {
 } from "@/lib/validation/ticket";
 import type { ActionResult } from "@/actions/company";
 import { filteredWordsRefusal } from "@/lib/word-filter/server";
-
-/** Only users in a department marked as a support team can be assigned tickets. */
-async function isSupportAgent(userId: string): Promise<boolean> {
-  const user = await db.user.findUnique({
-    where: { id: userId },
-    select: { department: { select: { isSupportTeam: true } } },
-  });
-  return user?.department?.isSupportTeam ?? false;
-}
+import { isSupportAgent, newTicketRefusal, writeTicket } from "@/lib/ticket-open";
 
 /** Active users belonging to a department marked as a support team — the only people a ticket can be assigned to. */
 export async function listSupportAgents() {
@@ -59,43 +52,10 @@ export async function createTicket(input: unknown): Promise<ActionResult<{ id: s
   }
   const data = parsed.data;
 
-  const company = await db.company.findUnique({ where: { id: data.companyId } });
-  // A ticket is logged on a company the person reaches — one they couldn't then open is refused as missing.
-  if (!company || !(await mayAddTo(user.id, "tickets", company))) {
-    return { ok: false, error: "Company not found." };
-  }
-  if (data.contactId) {
-    const contact = await db.contact.findUnique({ where: { id: data.contactId } });
-    if (!contact || contact.companyId !== data.companyId) {
-      return { ok: false, error: "That contact does not belong to the selected company." };
-    }
-  }
-  if (data.companyProductId) {
-    const order = await db.companyProduct.findUnique({ where: { id: data.companyProductId } });
-    if (!order || order.companyId !== data.companyId) {
-      return { ok: false, error: "That order does not belong to the selected company." };
-    }
-  }
-  if (data.assignedToUserId && !(await isSupportAgent(data.assignedToUserId))) {
-    return { ok: false, error: "Tickets can only be assigned to someone in the Tech Support department." };
-  }
-  // Words the workspace keeps out of tickets (src/lib/word-filter): not saved, and only the writer is told.
-  const filtered = await filteredWordsRefusal("TICKETS", [data.title, data.description]);
-  if (filtered) return { ok: false, error: filtered };
-
-  const ticket = await db.ticket.create({
-    data: {
-      companyId: data.companyId,
-      contactId: data.contactId || null,
-      companyProductId: data.companyProductId || null,
-      title: data.title,
-      description: data.description || null,
-      ticketType: data.ticketType,
-      priority: data.priority,
-      assignedToUserId: data.assignedToUserId || null,
-      createdByUserId: user.id,
-    },
-  });
+  // The rules about this ticket, and writing it, are shared with Automate's workflows (src/lib/ticket-open.ts).
+  const refused = await newTicketRefusal(user.id, data);
+  if (refused) return { ok: false, error: refused };
+  const ticket = await db.$transaction((tx) => writeTicket(tx, user.id, data, "person"));
 
   await recordAudit({
     userId: user.id,
@@ -243,13 +203,16 @@ export async function updateTicketStatus(input: unknown): Promise<ActionResult<{
   const isResolved = status === "RESOLVED" || status === "CLOSED";
   const isClosed = status === "CLOSED";
 
-  await db.ticket.update({
-    where: { id: ticketId },
-    data: {
-      status,
-      resolvedAt: isResolved ? (ticket.resolvedAt ?? new Date()) : null,
-      closedAt: isClosed ? (ticket.closedAt ?? new Date()) : null,
-    },
+  await db.$transaction(async (tx) => {
+    await tx.ticket.update({
+      where: { id: ticketId },
+      data: {
+        status,
+        resolvedAt: isResolved ? (ticket.resolvedAt ?? new Date()) : null,
+        closedAt: isClosed ? (ticket.closedAt ?? new Date()) : null,
+      },
+    });
+    await emitTicketStatusChanged(tx, ticketId, user.id, ticket.status, status);
   });
 
   if (ticket.assignedToUserId && ticket.assignedToUserId !== user.id) {

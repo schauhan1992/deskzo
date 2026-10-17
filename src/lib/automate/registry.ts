@@ -4,14 +4,36 @@ import { moduleAccessFor } from "@/lib/modules-access";
 import { ActionError, type ActionDefinition } from "@/lib/automate/action-types";
 import { notifyPerson } from "@/lib/automate/actions/notify-person";
 import { taskCreate } from "@/lib/automate/actions/task-create";
+import { leadAssign } from "@/lib/automate/actions/lead-assign";
+import { leadCreate } from "@/lib/automate/actions/lead-create";
+import { leadMove } from "@/lib/automate/actions/lead-move";
+import { leadNote } from "@/lib/automate/actions/lead-note";
+import { ticketCreate } from "@/lib/automate/actions/ticket-create";
+import { emailSend } from "@/lib/automate/actions/email-send";
+import { meetingSchedule } from "@/lib/automate/actions/meeting-schedule";
+import { documentEmail } from "@/lib/automate/actions/document-email";
+import { reportEmail } from "@/lib/automate/actions/report-email";
 
 /**
- * Every action a workflow can take (Deskzo Automate). Phase 2 adds the Deskzo actions — assign a lead,
- * email, change a stage — and Phase 4 the outside ones; each goes through `checkActor` here before
- * it runs, so a workflow can never do more than its owner may do now.
+ * Every action a workflow can take (Deskzo Automate): Phase 1 a task and a notification, Phase 2 the
+ * Deskzo actions — leads, tickets, email, documents, meetings, reports — and Phase 4 the outside ones.
+ * Each goes through `checkActor` here before it runs, so a workflow can never do more than its owner
+ * may do now.
  */
 
-export const ACTIONS: readonly ActionDefinition<never, unknown>[] = [taskCreate, notifyPerson] as unknown as ActionDefinition<never, unknown>[];
+export const ACTIONS: readonly ActionDefinition<never, unknown>[] = [
+  taskCreate,
+  notifyPerson,
+  leadCreate,
+  leadAssign,
+  leadMove,
+  leadNote,
+  ticketCreate,
+  emailSend,
+  meetingSchedule,
+  documentEmail,
+  reportEmail,
+] as unknown as ActionDefinition<never, unknown>[];
 
 export function actionByKey(key: string): ActionDefinition<unknown, unknown> | null {
   return (ACTIONS.find((a) => a.key === key) as ActionDefinition<unknown, unknown> | undefined) ?? null;

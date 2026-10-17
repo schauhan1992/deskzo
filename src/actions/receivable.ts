@@ -14,13 +14,13 @@ import { bookingRate, crossCurrencyPaymentAmount, settlementRateError, takenFrom
 import { formatMoney, formatRate, isBaseCurrency } from "@/lib/currency";
 import { firstOpenDate } from "@/lib/ledger/period";
 import { ensureHeadOffice } from "@/lib/branches/identity";
-import { syncBillingMilestones } from "@/lib/projects/billing-sync";
+import { syncInvoiceStatus } from "@/lib/receivables/sync";
+import { emitPaymentReceived } from "@/lib/automate/emit-records";
 import { bookOnFirstPayment } from "@/lib/orders/handoff";
 import { settlePromisesFor } from "@/lib/collections/promises";
 import { loadFollowUps, mayLogFollowUps, receivableFollowUps } from "@/lib/collections/load";
 import {
   settleInvoice,
-  settledStatus,
   agingBucket,
   daysOverdue,
   emptyAging,
@@ -47,28 +47,6 @@ type SettlementRow = {
 function settlementOf(invoice: SettlementRow) {
   const sum = (rows: { amount: Prisma.Decimal | number }[]) => rows.reduce((t, r) => t + Number(r.amount), 0);
   return settleInvoice(Number(invoice.total), sum(invoice.payments), sum(invoice.creditsReceived));
-}
-
-/**
- * Brings an invoice's stored status in line with what's been settled against it. The status is a
- * cache of the applications, so it's recomputed after every one rather than nudged by hand — that's
- * how an invoice ends up marked PAID with money still outstanding.
- *
- * A cancelled invoice is left alone: it isn't collectable, and re-deriving would resurrect it.
- */
-async function syncInvoiceStatus(invoiceId: string) {
-  const invoice = await db.tradeDocument.findUnique({
-    where: { id: invoiceId },
-    select: { id: true, status: true, total: true, ...invoiceSettlementInclude },
-  });
-  if (!invoice || invoice.status === "CANCELLED" || invoice.status === "DRAFT") return;
-
-  const next = settledStatus(settlementOf(invoice));
-  if (next !== invoice.status) {
-    await db.tradeDocument.update({ where: { id: invoiceId }, data: { status: next } });
-  }
-  // The project billing stage raised on this invoice, if any — see src/lib/projects/billing-sync.ts.
-  await syncBillingMilestones(invoiceId);
 }
 
 /**
@@ -161,6 +139,7 @@ export async function recordInvoicePayment(input: unknown): Promise<ActionResult
       allocatedAmount: amount,
       userId: user.id,
     });
+    await emitPaymentReceived(tx, created.id, user.id, invoiceId);
     return created;
   });
 

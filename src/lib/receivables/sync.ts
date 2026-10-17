@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { emitInvoicePaid } from "@/lib/automate/emit-records";
 import { settleInvoice, settledStatus } from "@/lib/receivables";
 import { syncBillingMilestones } from "@/lib/projects/billing-sync";
 
@@ -45,7 +46,11 @@ export async function syncInvoiceStatus(invoiceId: string) {
 
   const next = settledStatus(settlementOf(invoice));
   if (next !== invoice.status) {
-    await db.tradeDocument.update({ where: { id: invoiceId }, data: { status: next } });
+    await db.$transaction(async (tx) => {
+      await tx.tradeDocument.update({ where: { id: invoiceId }, data: { status: next } });
+      // For Automate's workflows: paid in full, the moment it becomes so.
+      if (next === "PAID") await emitInvoicePaid(tx, invoiceId, null);
+    });
   }
   // A project billing stage raised on this invoice follows it: paid, or back to invoiced.
   await syncBillingMilestones(invoiceId);

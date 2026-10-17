@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { detectSalesWins } from "@/lib/wins/detect";
 import Papa from "papaparse";
 import { Prisma, type LeadSource, type LeadStatus } from "@prisma/client";
 import { db } from "@/lib/db";
@@ -19,9 +18,10 @@ import { changedLabel, customFieldsForCreate, customSearchWhere, definitionsFor,
 import { customFilterWhere, type CustomFilterInputs } from "@/lib/custom-fields/filters";
 import { exportCells } from "@/lib/custom-fields/sheets";
 import { inPipelineWhere, inStageWhere, leadStages, newLeadStage, stageWrite, stagesOfLeads } from "@/lib/pipeline/server";
-import { MAIN_PIPELINE_ID, kindOf, missingForStage, pipelineById, ruleFieldLabel, ruleRefusal, stageChangeNote, stageForStatus } from "@/lib/pipeline/rules";
+import { MAIN_PIPELINE_ID, kindOf, pipelineById, stageChangeNote, stageForStatus } from "@/lib/pipeline/rules";
 import { runLeadAutomations } from "@/lib/pipeline/automations";
-import { carryOnWonLead } from "@/lib/pipeline/carry-on";
+import { emitLeadCreated, emitLeadMoved } from "@/lib/automate/emit-leads";
+import { afterStageMove, planStageMove, ruleStops, writeStageMove } from "@/lib/leads/stage-move";
 import { sanitizeCsvCell, csvFilename } from "@/lib/csv";
 import { workspaceClock } from "@/lib/time/workspace";
 import { calendarDayRange } from "@/lib/time/zone";
@@ -204,6 +204,8 @@ export async function createLead(input: unknown): Promise<ActionResult<{ id: str
       await tx.company.update({ where: { id: company.id }, data: { stage: "LEAD" } });
     }
 
+    // For Automate's workflows (src/lib/automate), with the lead: no lead, no event.
+    await emitLeadCreated(tx, created.id, user.id, "person");
     return created;
   });
 
@@ -581,31 +583,6 @@ export async function leadDocumentDraft(leadId: string) {
   return toPlain({ ...lead, title: maskLeadTitle(masker, lead.title) });
 }
 
-/** A lead's own fields, read by name — none in a workspace still waiting for the column. */
-async function leadCustomFields(leadId: string): Promise<unknown> {
-  try {
-    return (await db.lead.findUnique({ where: { id: leadId }, select: { customFields: true } }))?.customFields ?? {};
-  } catch (err) {
-    if (notMigratedYet(err)) return {};
-    throw err;
-  }
-}
-
-/**
- * Why a lead can't move into this stage under its rule (Settings → Pipeline), in words — or null. The
- * rule asks for fields before the lead moves there: a value and a close date before "Proposal sent".
- */
-async function ruleStops(
-  target: { label: string; requiredFields: string[] },
-  lead: { id: string; estimatedValue: unknown; expectedCloseDate: unknown; contactId: string | null; ownerUserId: string | null; description: string | null },
-): Promise<string | null> {
-  if (target.requiredFields.length === 0) return null;
-  const missing = missingForStage(target, { ...lead, customFields: await leadCustomFields(lead.id) });
-  if (missing.length === 0) return null;
-  const labels = new Map((await definitionsFor("LEAD")).map((d) => [d.key, d.label]));
-  return ruleRefusal(target.label, missing.map((k) => ruleFieldLabel(k, labels)));
-}
-
 export async function updateLeadStatus(input: unknown): Promise<ActionResult<{ id: string }>> {
   const user = await requireModuleUser("leads");
   if (!(await canViewLeads(user.id))) return { ok: false, error: NO_LEADS };
@@ -613,102 +590,22 @@ export async function updateLeadStatus(input: unknown): Promise<ActionResult<{ i
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
-  const { leadId, stageId, status: named, lostReason } = parsed.data;
+  const { leadId, stageId, status, lostReason } = parsed.data;
 
-  const lead = await db.lead.findUnique({ where: { id: leadId } });
   // Scoped like the lead page: moving another account's lead through the pipeline by id was open.
-  if (!lead || !(await leadInScope(user.id, leadId))) {
-    return { ok: false, error: "Lead not found." };
-  }
-  // Where it is now, as the board shows it — which says which pipeline it is in.
-  const from = (await stagesOfLeads([{ id: leadId, status: lead.status }])).get(leadId)!;
+  if (!(await leadInScope(user.id, leadId))) return { ok: false, error: "Lead not found." };
 
-  // The stage it moves to, in its own pipeline (Settings → Pipeline, src/lib/pipeline) — or, from a caller
-  // that still names a status, that pipeline's first stage in use with that meaning. Its status is always
-  // the stage's meaning. Another pipeline's stage is a move between pipelines, which is its own action.
-  const pipeline = await leadStages();
-  const inUse = pipeline.stages.filter((s) => !s.archived && s.pipelineId === from.pipelineId);
-  const target = stageId ? inUse.find((s) => s.id === stageId) : named ? stageForStatus(inUse, named, from.pipelineId) : null;
-  if (!target) {
-    const elsewhere = stageId ? pipeline.stages.find((s) => s.id === stageId && !s.archived) : undefined;
-    return {
-      ok: false,
-      error: elsewhere
-        ? `${elsewhere.label} is a stage of ${pipelineById(pipeline.pipelines, elsewhere.pipelineId).name}. Move the lead to that pipeline first.`
-        : "That stage is no longer in use. Refresh the page and choose another.",
-    };
-  }
-  const status = target.status;
-
-  if ((status === "LOST" || status === "DISQUALIFIED") && !lostReason) {
-    return { ok: false, error: "A reason is required when marking a lead lost or disqualified." };
-  }
-
-  // Already there, nothing is recorded — a bulk change used to log "from WON to WON" — unless it is a lost
-  // lead being given a new reason.
-  if (from.id === target.id && lead.status === status && !(lostReason && lostReason !== lead.lostReason)) {
-    return { ok: true, data: { id: leadId } };
-  }
-  const moves = from.id !== target.id;
-  if (moves) {
-    const stop = await ruleStops(target, lead);
-    if (stop) return { ok: false, error: stop };
-  }
-  // A win is a sale only in a pipeline that counts as sales; a partner onboarding finished is not one.
-  const sales = pipelineById(pipeline.pipelines, target.pipelineId).sales;
-  const won = status === "WON" && lead.status !== "WON";
-
-  const now = new Date();
-  await db.$transaction(async (tx) => {
-    await tx.lead.update({
-      where: { id: leadId },
-      data: {
-        status,
-        ...stageWrite(pipeline, target, now),
-        lostReason: status === "LOST" || status === "DISQUALIFIED" ? lostReason : null,
-        qualifiedByUserId:
-          status === "QUALIFIED" && !lead.qualifiedByUserId ? user.id : lead.qualifiedByUserId,
-      },
-    });
-
-    await tx.activity.create({
-      data: {
-        leadId,
-        userId: user.id,
-        type: "STAGE_CHANGE",
-        // The forecast and wins read this note; the timeline shows it in the stages' names (`readStageNote`).
-        notes: stageChangeNote(from, target, lostReason),
-      },
-    });
-
-    if (status === "WON" && sales) {
-      await tx.company.update({ where: { id: lead.companyId }, data: { stage: "CUSTOMER" } });
-    }
-  });
-
-  if (lead.ownerUserId && lead.ownerUserId !== user.id) {
-    await notifyUser({
-      userId: lead.ownerUserId,
-      type: "LEAD_STATUS_CHANGED",
-      title: "Your lead's status changed",
-      message: `${lead.title} — now ${target.label}`,
-      link: leadPath(lead.leadSeq),
-    });
-  }
-
-  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Lead", entityId: leadId, entityLabel: lead.title });
-
-  await refreshLeadScore(leadId);
-  // A deal just won may be one to celebrate, and may have taken somebody past their target. Now,
-  // rather than at the next tick, so the room hears about it while it is news.
-  if (status === "WON" && sales) await detectSalesWins().catch((err) => console.error("sales wins could not be detected", err));
-  // Connected pipelines: a lead won here may start again in the next one (src/lib/pipeline/carry-on.ts).
-  if (won) await carryOnWonLead(leadId, user.id);
-  // The stage's automations (Settings → Pipeline → Automations).
-  if (moves) await runLeadAutomations({ leadId, trigger: "STAGE_ENTERED", pipelineId: target.pipelineId, stageId: target.id });
+  // What a move is — where to, the stage's rule, what it writes and what follows — is shared with
+  // Automate's workflows (src/lib/leads/stage-move.ts).
+  const planned = await planStageMove({ leadId, stageId, status, lostReason });
+  if (!planned.ok) return planned;
+  const move = planned.move;
+  if (!move) return { ok: true, data: { id: leadId } };
+  await db.$transaction((tx) => writeStageMove(tx, move, user.id));
+  await afterStageMove(move, user.id);
   revalidatePath("/leads");
   revalidatePath(`/leads/${leadId}`);
-  revalidatePath(`/companies/${lead.companyId}`);
+  revalidatePath(`/companies/${move.lead.companyId}`);
   return { ok: true, data: { id: leadId } };
 }
 
@@ -800,6 +697,7 @@ export async function moveLeadToPipeline(input: unknown): Promise<ActionResult<{
         notes: stageChangeNote({ status: from.status, label: `${was.name}: ${from.label}` }, { status: target.status, label: `${into.name}: ${target.label}` }, `moved from ${was.name} to ${into.name}`),
       },
     });
+    await emitLeadMoved(tx, leadId, user.id, { stageId: from.id, status: from.status, pipelineId: from.pipelineId }, { stageId: target.id, status: target.status, pipelineId: into.id });
   });
   await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Lead", entityId: leadId, entityLabel: `${lead.title} — moved from ${was.name} to ${into.name}` });
   await refreshLeadScore(leadId);

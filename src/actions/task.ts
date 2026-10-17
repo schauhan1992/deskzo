@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { emitTask } from "@/lib/automate/emit-records";
 import { leadsSeenBy } from "@/lib/leads/shown";
 import { requireModuleUser } from "@/lib/modules-access";
 import { companyAccess, leadAccess, taskAccess, ticketAccess, type AccessAction } from "@/lib/authz/access";
@@ -157,19 +158,24 @@ export async function createTask(input: unknown): Promise<ActionResult<{ id: str
   if (data.remindAt && !remindAt) return { ok: false, error: "That reminder time isn't a time." };
   if (remindAt && remindAt.getTime() <= Date.now()) return { ok: false, error: "Set the reminder for a time still to come." };
 
-  const task = await db.task.create({
-    data: {
-      title: data.title,
-      description: data.description || null,
-      dueDate,
-      assignedToUserId: data.assignedToUserId || null,
-      createdByUserId: user.id,
-      ...about.link,
-      status,
-      ...fields,
-      ...((fields.xp ?? 0) > 0 ? { xpSetById: user.id } : {}),
-    },
-    select: { id: true, companyId: true, leadId: true, ticketId: true },
+  const task = await db.$transaction(async (tx) => {
+    const made = await tx.task.create({
+      data: {
+        title: data.title,
+        description: data.description || null,
+        dueDate,
+        assignedToUserId: data.assignedToUserId || null,
+        createdByUserId: user.id,
+        ...about.link,
+        status,
+        ...fields,
+        ...((fields.xp ?? 0) > 0 ? { xpSetById: user.id } : {}),
+      },
+      select: { id: true, companyId: true, leadId: true, ticketId: true },
+    });
+    // For Automate's workflows (src/lib/automate), with the task.
+    await emitTask(tx, "task.created", made.id, user.id);
+    return made;
   });
   // Its checklist, typed with it — in the order typed.
   const steps = (data.steps ?? []).filter(Boolean);

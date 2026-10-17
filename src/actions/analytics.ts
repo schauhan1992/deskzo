@@ -1,18 +1,20 @@
 "use server";
 
 import { workspaceClock } from "@/lib/time/workspace";
-import type { Clock } from "@/lib/time/zone";
 import { requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { isModuleEnabled } from "@/actions/module";
 import { logActivity } from "@/lib/activity";
-import { FACT_SOURCES, getSource } from "@/lib/analytics/sources";
+import { FACT_SOURCES } from "@/lib/analytics/sources";
 import { effectiveSource } from "@/lib/analytics/custom";
-import { dimensionOptions, runReport, type ReportResult } from "@/lib/analytics/run";
-import { GRAINS, ROW_CAP, resolveDateColumn, type FactSource, type Grain } from "@/lib/analytics/types";
+import { dimensionOptions, type ReportResult } from "@/lib/analytics/run";
+import { GRAINS, ROW_CAP, resolveDateColumn } from "@/lib/analytics/types";
 import { csvRow } from "@/lib/csv";
 import type { WorkbookFilters } from "@/lib/workspace/filters";
 import type { ActionResult } from "@/actions/company";
+import { reportWindow, runReportAs, sourceFor, type ReportRequest } from "@/lib/analytics/request";
+
+export type { ReportRequest } from "@/lib/analytics/request";
 
 /**
  * Running a report.
@@ -64,58 +66,6 @@ export async function reportOptions(): Promise<{ sources: SourceOption[]; grains
 }
 
 /**
- * The source a request names, as this person may report on it: its module on, and the workspace's
- * own fields theirs to see added to it (src/lib/analytics/custom.ts). Every action below starts here,
- * so the explorer, the filter panel, the CSV, the printed sheet and the Copilot all see one source.
- */
-async function sourceFor(key: string, userId: string): Promise<{ ok: true; source: FactSource<never> } | { ok: false; error: string }> {
-  const source = getSource(key);
-  if (!source) return { ok: false, error: "Unknown report." };
-  if (source.moduleKey && !(await isModuleEnabled(source.moduleKey))) {
-    return { ok: false, error: `The ${source.label} module is switched off.` };
-  }
-  return { ok: true, source: await effectiveSource(source, userId) };
-}
-
-/**
- * The two dates off the form, as the instants the workspace means by them — its days, on its clock.
- *
- * This was `new Date(input.from)` and `to.setHours(23, 59, 59, 999)`, which is wrong twice over:
- *
- *   · A date-only string is parsed as **UTC** midnight, so "2026-09-01" was 05:30 IST on the 1st —
- *     wrong on every machine, Indian laptops included. Orders punched in the first five and a half
- *     hours of the opening day were simply absent, and no total said so.
- *   · `setHours` writes the **host's** clock, so on a UTC server the closing bound landed at 05:29
- *     IST the *following* morning and swept in a chunk of the next month.
- *
- * Both ends now come from the workspace's clock (src/lib/time/zone.ts). `to` is the midnight that
- * *begins* the day after the one asked for, which is why the sources compare with `lt` rather than
- * `lte` — an exclusive bound has no ".999 of a second" edge to fall through.
- */
-function reportWindow(clock: Clock, fromText: string, toText: string): { from: Date; to: Date } | { error: string } {
-  const from = clock.startOfDay(fromText);
-  const to = clock.endOfDay(toText);
-  if (!from || !to) return { error: "That date range isn't valid." };
-  if (from >= to) return { error: "The start date is after the end date." };
-  return { from, to };
-}
-
-export type ReportRequest = {
-  source: string;
-  measure: string;
-  dimension: string;
-  column?: string;
-  grain: Grain;
-  dateField: string;
-  from: string;
-  to: string;
-  /** Narrows the query — the same filter set the workspace lists use. */
-  companyFilters?: WorkbookFilters;
-  /** Narrows what came back, by any dimension of this source. */
-  filters?: Record<string, string[]>;
-};
-
-/**
  * What you can narrow a report to, before you run it.
  *
  * The engine has always been able to filter on any dimension — `runReport` applies them and reports
@@ -147,7 +97,7 @@ export async function reportFilterOptions(input: {
   }>
 > {
   const user = await requireModuleUser("reports");
-  const found = await sourceFor(input.source, user.id);
+  const found = await sourceFor(input.source, user.id, isModuleEnabled);
   if (!found.ok) return found;
   const { source } = found;
 
@@ -176,101 +126,9 @@ export async function reportFilterOptions(input: {
   };
 }
 
-/**
- * The first thing in a request that this source doesn't offer this person, as the sentence to refuse
- * it with — or null when everything it names is there.
- *
- * The engine is lenient by design: an unknown measure falls back to the first one, an unknown
- * breakdown puts every row in a single "Total", an unknown filter keeps nothing. None of that
- * depends on the data behind the key, so none of it can leak a field — but each answers a different
- * question under the heading of the one asked. An old print link naming a restricted amount, opened
- * by somebody who may not see it, would print the order value as "cf:order:landed_cost by customer".
- *
- * So it is refused instead, and in the same words whether the thing never existed, was retired, or
- * is a field this person may not see — a refusal that told those apart would be a way of finding out
- * what the restricted fields are called. The key is the request's own, so naming it gives nothing away.
- */
-function unknownKey(source: FactSource<never>, input: ReportRequest): string | null {
-  const breakdowns = new Set(["time", ...source.dimensions.map((d) => d.key)]);
-  const missing = [
-    ...(source.measures.some((m) => m.key === input.measure) ? [] : [input.measure]),
-    ...[input.dimension, input.column].filter((key): key is string => !!key && !breakdowns.has(key)),
-    // An empty list filters nothing (runReport skips it), so it is not a question about that key.
-    ...Object.entries(input.filters ?? {})
-      .filter(([key, values]) => values.length > 0 && !breakdowns.has(key))
-      .map(([key]) => key),
-  ];
-  if (missing.length === 0) return null;
-  return `“${missing[0]}” isn't something you can report ${source.label.toLowerCase()} by — it may have been removed, or not be open to you.`;
-}
-
-/**
- * A report, run as this person, with the source it was run against — the export needs that source's
- * labels, and building it a second time could disagree with the first if a field changed in between.
- */
-async function runAs(
-  user: { id: string; name: string },
-  input: ReportRequest,
-): Promise<ActionResult<{ result: ReportResult; source: FactSource<never> }>> {
-  const found = await sourceFor(input.source, user.id);
-  if (!found.ok) return found;
-  const { source } = found;
-  const refused = unknownKey(source, input);
-  if (refused) return { ok: false, error: refused };
-
-  const clock = await workspaceClock();
-  const window = reportWindow(clock, input.from, input.to);
-  if ("error" in window) return { ok: false, error: window.error };
-  const { from, to } = window;
-
-  const ctx = {
-    userId: user.id,
-    from,
-    to,
-    companyFilters: input.companyFilters,
-    // The column the "Dated on" control names. Resolved here because this is where the source and
-    // the request are both in hand — see resolveDateColumn.
-    dateColumn: resolveDateColumn(source, input.dateField),
-  };
-  const rows = await source.load(ctx);
-
-  const result = runReport({
-    source,
-    rows,
-    measureKey: input.measure,
-    dimensionKey: input.dimension,
-    columnKey: input.column,
-    grain: input.grain,
-    // Time buckets are the workspace's days, weeks and months.
-    clock,
-    dateKey: input.dateField,
-    filters: input.filters,
-    scopeNote: await source.scopeNote(ctx),
-  });
-
-  // A report is the largest read in the application — thousands of rows, deliberately, across every
-  // account somebody can see. The DLP layer treats volume as the one signal a scraper cannot hide,
-  // so this is recorded like any other bulk read rather than being exempt for being a feature.
-  await logActivity({
-    kind: "SEARCH",
-    severity: "INFO",
-    summary: `${user.name} ran a ${source.label.toLowerCase()} report over ${result.rowCount.toLocaleString("en-IN")} rows`,
-    metadata: {
-      source: input.source,
-      measure: input.measure,
-      by: input.dimension,
-      across: input.column ?? null,
-      rows: result.rowCount,
-      truncated: result.truncated,
-    },
-  });
-
-  return { ok: true, data: { result, source } };
-}
-
 export async function runAnalyticsReport(input: ReportRequest): Promise<ActionResult<ReportResult>> {
   const user = await requireModuleUser("reports");
-  const ran = await runAs(user, input);
+  const ran = await runReportAs(user, input, { moduleOn: isModuleEnabled });
   return ran.ok ? { ok: true, data: ran.data.result } : ran;
 }
 
@@ -318,7 +176,7 @@ export async function exportReportCsv(input: ReportRequest): Promise<ActionResul
     };
   }
 
-  const ran = await runAs(user, input);
+  const ran = await runReportAs(user, input, { moduleOn: isModuleEnabled });
   if (!ran.ok) return ran;
   // Labelled from the source the report ran against, the workspace's own fields included — so a
   // breakdown by one is headed "Customer · Region", not with its key.
