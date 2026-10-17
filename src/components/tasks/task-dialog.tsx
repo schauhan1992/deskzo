@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import { Bell, CalendarClock, Link2, ListChecks, Repeat, Trophy, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createTask, updateTask } from "@/actions/task";
 import { Button } from "@/components/ui/button";
@@ -121,6 +122,36 @@ export function TaskDialog({
   // — what the task already carries goes back unchanged (src/actions/task.ts, OWN_XP).
   const ownTask = assignee === viewerId;
 
+  // The form's essentials stay in view; the rest is a click away (owner, 17 Oct 2026: the whole form
+  // didn't fit without scrolling). A section already holding something starts open, so an edit shows it.
+  type SectionKey = "schedule" | "xp" | "repeat" | "reminder" | "about" | "checklist";
+  const sections = [
+    { key: "schedule", label: "Start & estimate", icon: CalendarClock },
+    ...(ownTask ? [] : [{ key: "xp", label: "XP & badge", icon: Trophy }]),
+    { key: "repeat", label: "Repeat", icon: Repeat },
+    ...(task ? [] : [{ key: "reminder", label: "Reminder", icon: Bell }]),
+    ...(madeOnRecord ? [] : [{ key: "about", label: "About", icon: Link2 }]),
+    ...(task ? [] : [{ key: "checklist", label: "Checklist", icon: ListChecks }]),
+  ] as { key: SectionKey; label: string; icon: LucideIcon }[];
+  const [shown, setShown] = useState<Set<SectionKey>>(
+    () =>
+      new Set<SectionKey>([
+        ...(task?.startDate || task?.estimateMinutes ? (["schedule"] as const) : []),
+        ...((task?.xp ?? 0) > 0 || task?.badge ? (["xp"] as const) : []),
+        ...(task?.repeat ? (["repeat"] as const) : []),
+        ...(aboutOf(task) ? (["about"] as const) : []),
+      ]),
+  );
+  // Only what this form offers opens — an own task's XP stays shut though it carries some.
+  const isOpen = (key: SectionKey) => shown.has(key) && sections.some((s) => s.key === key);
+  const toggle = (key: SectionKey) =>
+    setShown((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
   function save() {
     setError(null);
     const fields = {
@@ -165,9 +196,36 @@ export function TaskDialog({
           save();
         }}
       >
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Task name" required>
-            <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What needs doing" autoFocus disabled={pending} />
+        {/* What it is: the name, and a line or two about it. */}
+        <div className="space-y-2">
+          <Input aria-label="Task name" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Task name — what needs doing" autoFocus disabled={pending} className="h-11 text-base font-medium" />
+          <Textarea aria-label="Description" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Description — what done looks like (optional)" disabled={pending} />
+        </div>
+
+        {/* Who, when and how urgent; where it sits. */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <Field label="Assigned to">
+            <Select value={assignee} onChange={(e) => setAssignee(e.target.value)} disabled={pending}>
+              <option value="">Nobody yet</option>
+              {people.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                  {p.id === viewerId ? " (you)" : ""}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Due date">
+            <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} disabled={pending} />
+          </Field>
+          <Field label="Priority">
+            <Select value={priority} onChange={(e) => setPriority(e.target.value as TaskPriorityKey)} disabled={pending}>
+              {TASK_PRIORITIES.map((p) => (
+                <option key={p} value={p}>
+                  {PRIORITY_LABELS[p]}
+                </option>
+              ))}
+            </Select>
           </Field>
           <Field label="Status">
             <Select value={status} onChange={(e) => setStatus(e.target.value as TaskStatusKey)} disabled={pending}>
@@ -198,102 +256,99 @@ export function TaskDialog({
               ))}
             </Select>
           </Field>
-          <Field label="Assigned to">
-            <Select value={assignee} onChange={(e) => setAssignee(e.target.value)} disabled={pending}>
-              <option value="">Nobody yet</option>
-              {people.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                  {p.id === viewerId ? " (you)" : ""}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Priority">
-            <Select value={priority} onChange={(e) => setPriority(e.target.value as TaskPriorityKey)} disabled={pending}>
-              {TASK_PRIORITIES.map((p) => (
-                <option key={p} value={p}>
-                  {PRIORITY_LABELS[p]}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Start date" hint="Before it, the task shows as Upcoming.">
-            <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} disabled={pending} />
-          </Field>
-          <Field label="Due date">
-            <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} disabled={pending} />
-          </Field>
-          <Field label="Estimate (minutes)" hint={estimate && Number(estimate) >= 60 ? `${(Number(estimate) / 60).toFixed(1)} hours` : undefined}>
-            <Input type="number" min={0} step={5} value={estimate} onChange={(e) => setEstimate(e.target.value)} placeholder="e.g. 90" disabled={pending} />
-          </Field>
-          {ownTask ? (
-            <p className="self-end rounded-base bg-surface-sunken px-3 py-2 text-xs text-muted">
-              It&apos;s your task, so its XP and badge are for somebody else to set.
-            </p>
-          ) : (
-            <>
-              <Field label="Earned XP" hint="Earned by whoever it's assigned to, when it's done by its due date.">
-                <Input type="number" min={0} max={XP_MAX} value={xp} onChange={(e) => setXp(e.target.value)} disabled={pending} />
-              </Field>
-              <Field label="Badge" hint="Earned with the XP — say, “Bug squasher”.">
-                <Input value={badge} onChange={(e) => setBadge(e.target.value)} placeholder="Optional" maxLength={40} disabled={pending} />
-              </Field>
-            </>
-          )}
-          <Field label="Repeats">
-            <div className="flex gap-2">
-              <Select value={repeat} onChange={(e) => setRepeat(e.target.value)} disabled={pending}>
-                <option value="">Doesn&apos;t repeat</option>
-                {TASK_REPEATS.map((r) => (
-                  <option key={r} value={r}>
-                    {REPEAT_LABELS[r]}
-                  </option>
-                ))}
-              </Select>
-              {repeat && (
-                <Input type="date" aria-label="Repeat until" title="Until (optional)" value={repeatUntil} onChange={(e) => setRepeatUntil(e.target.value)} disabled={pending} />
-              )}
-            </div>
-          </Field>
         </div>
-        {!madeOnRecord && (
-          // Not a <label>: the picker holds a choice, a search and its results.
-          <div className="space-y-1.5">
-            <span className="block text-sm font-medium text-text">About</span>
-            <TaskAboutPicker value={about} onChange={setAbout} disabled={pending} />
-            <span className="block text-xs text-subtle">A company, lead or ticket — the task shows on it, and it on the task.</span>
+
+        {/* The rest, a click away — each opens where it is; one already holding something starts open. */}
+        <div className="flex flex-wrap gap-2">
+          {sections.map((s) => (
+            <button
+              key={s.key}
+              type="button"
+              onClick={() => toggle(s.key)}
+              aria-expanded={isOpen(s.key)}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${isOpen(s.key) ? "border-brand bg-brand-soft text-brand" : "border-line text-muted hover:border-line-strong hover:text-text"}`}
+            >
+              <s.icon className="h-3.5 w-3.5" />
+              {s.label}
+            </button>
+          ))}
+        </div>
+
+        {sections.some((s) => isOpen(s.key)) && (
+          <div className="space-y-3 rounded-base border border-line bg-surface-sunken/50 p-3">
+            {isOpen("schedule") && (
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Start date" hint="Before it, the task shows as Upcoming.">
+                  <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} disabled={pending} />
+                </Field>
+                <Field label="Estimate (minutes)" hint={estimate && Number(estimate) >= 60 ? `${(Number(estimate) / 60).toFixed(1)} hours` : undefined}>
+                  <Input type="number" min={0} step={5} value={estimate} onChange={(e) => setEstimate(e.target.value)} placeholder="e.g. 90" disabled={pending} />
+                </Field>
+              </div>
+            )}
+            {isOpen("xp") && (
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Earned XP" hint="When it's done by its due date.">
+                  <Input type="number" min={0} max={XP_MAX} value={xp} onChange={(e) => setXp(e.target.value)} disabled={pending} />
+                </Field>
+                <Field label="Badge">
+                  <Input value={badge} onChange={(e) => setBadge(e.target.value)} placeholder="e.g. Bug squasher" maxLength={40} disabled={pending} />
+                </Field>
+              </div>
+            )}
+            {isOpen("repeat") && (
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Repeats">
+                  <Select value={repeat} onChange={(e) => setRepeat(e.target.value)} disabled={pending}>
+                    <option value="">Doesn&apos;t repeat</option>
+                    {TASK_REPEATS.map((r) => (
+                      <option key={r} value={r}>
+                        {REPEAT_LABELS[r]}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                {repeat && (
+                  <Field label="Until (optional)">
+                    <Input type="date" value={repeatUntil} onChange={(e) => setRepeatUntil(e.target.value)} disabled={pending} />
+                  </Field>
+                )}
+              </div>
+            )}
+            {isOpen("reminder") && (
+              // Not a <label>: a time and how often.
+              <div className="space-y-1">
+                <span className="block text-xs font-medium text-muted">Remind me</span>
+                <div className="grid grid-cols-2 gap-3">
+                  <Input type="datetime-local" aria-label="Remind me at" value={remindAt} onChange={(e) => setRemindAt(e.target.value)} disabled={pending} />
+                  <Select aria-label="How often" value={remindRepeat} onChange={(e) => setRemindRepeat(e.target.value as TaskReminderRepeatKey)} disabled={pending || !remindAt}>
+                    {TASK_REMINDER_REPEATS.map((r) => (
+                      <option key={r} value={r}>
+                        {REMINDER_REPEAT_LABELS[r]}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              </div>
+            )}
+            {isOpen("about") && (
+              // Not a <label>: the picker holds a choice, a search and its results.
+              <div className="space-y-1">
+                <span className="block text-xs font-medium text-muted">About — a company, lead or ticket</span>
+                <TaskAboutPicker value={about} onChange={setAbout} disabled={pending} />
+              </div>
+            )}
+            {isOpen("checklist") && (
+              <Field label="Checklist — a step a line">
+                <Textarea rows={3} value={steps} onChange={(e) => setSteps(e.target.value)} placeholder={"Collect the documents\nPrepare the working\nSend it for review"} disabled={pending} />
+              </Field>
+            )}
           </div>
         )}
-        <Field label="Description">
-          <Textarea rows={4} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What it's about, and what done looks like" disabled={pending} />
-        </Field>
-        {!task && (
-          // Not a <label>: a time and how often.
-          <div className="space-y-1.5">
-            <span className="block text-sm font-medium text-text">Remind me</span>
-            <div className="flex flex-wrap gap-2">
-              <Input type="datetime-local" aria-label="Remind me at" value={remindAt} onChange={(e) => setRemindAt(e.target.value)} className="w-56" disabled={pending} />
-              {remindAt && (
-                <Select aria-label="How often" value={remindRepeat} onChange={(e) => setRemindRepeat(e.target.value as TaskReminderRepeatKey)} className="w-60" disabled={pending}>
-                  {TASK_REMINDER_REPEATS.map((r) => (
-                    <option key={r} value={r}>
-                      {REMINDER_REPEAT_LABELS[r]}
-                    </option>
-                  ))}
-                </Select>
-              )}
-            </div>
-            <span className="block text-xs text-subtle">Optional — a notification for you, once or again until the task is done.</span>
-          </div>
-        )}
-        {!task && (
-          <Field label="Checklist" hint="A step a line — ticked off in the task. More can be added there later.">
-            <Textarea rows={3} value={steps} onChange={(e) => setSteps(e.target.value)} placeholder={"Collect the documents\nPrepare the working\nSend it for review"} disabled={pending} />
-          </Field>
-        )}
+
         {error && <p className="text-sm text-danger">{error}</p>}
-        <div className="flex justify-end gap-2">
+        <div className="flex items-center justify-end gap-2 border-t border-line pt-3">
+          {ownTask && <span className="mr-auto text-xs text-subtle">It&apos;s your task — its XP is for somebody else to set.</span>}
           <Button type="button" variant="secondary" onClick={onClose} disabled={pending}>
             Cancel
           </Button>
@@ -309,13 +364,13 @@ export function TaskDialog({
 function Field({ label, required = false, hint, children }: { label: string; required?: boolean; hint?: string; children: React.ReactNode }) {
   return (
     // One <label> round its input names it; the text inside is a span, not a second label.
-    <label className="block space-y-1.5">
-      <span className="flex items-center gap-0.5 text-sm font-medium text-text">
+    <label className="block space-y-1">
+      <span className="flex items-center gap-0.5 text-xs font-medium text-muted">
         {label}
         {required && <span className="text-danger">*</span>}
       </span>
       {children}
-      {hint && <span className="block text-xs text-subtle">{hint}</span>}
+      {hint && <span className="block text-[11px] text-subtle">{hint}</span>}
     </label>
   );
 }

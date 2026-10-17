@@ -356,10 +356,8 @@ async function main() {
 
     section("Reminders");
 
-    /* eslint-disable @typescript-eslint/no-require-imports */
     const { syncSystemNotifications } = require("../src/lib/notify") as typeof import("../src/lib/notify");
     const { workspaceClock: clockOf } = require("../src/lib/time/workspace") as typeof import("../src/lib/time/workspace");
-    /* eslint-enable @typescript-eslint/no-require-imports */
     const clock = await clockOf();
     actorId = worker.id;
     const remindMe = await tasks.createTask({ title: `${TAG} Chase the PO`, assignedToUserId: worker.id, remindAt: clock.input(new Date(Date.now() + 2 * 3_600_000)), remindRepeat: "DAILY" });
@@ -405,10 +403,11 @@ async function main() {
     const options = await extras.taskFormOptions();
     const { TaskDialog } = require("../src/components/tasks/task-dialog") as typeof import("../src/components/tasks/task-dialog");
     const dialog = renderToStaticMarkup(createElement(TaskDialog, { open: true, onClose: () => {}, options, viewerId: worker.id, task: null }));
-    ok("the form has every field", ["Task name", "Status", "Team", "Challenge", "Assigned to", "Priority", "Start date", "Due date", "Estimate (minutes)", "Earned XP", "Badge", "Repeats", "About", "Description", "Checklist"].every((l) => dialog.includes(l)));
+    ok("the form shows its essentials", ["Task name", "Description", "Assigned to", "Due date", "Priority", "Status", "Team", "Challenge"].every((l) => dialog.includes(l)));
+    ok("  and the rest a click away", ["Start &amp; estimate", "XP &amp; badge", "Repeat", "Reminder", "About", "Checklist"].every((l) => dialog.includes(l)) && !dialog.includes("Estimate (minutes)") && !dialog.includes("Earned XP"));
     const ownRow = (await tasks.listTasks({ search: TAG })).find((t) => t.assignedToUserId === worker.id);
     const ownDialog = ownRow ? renderToStaticMarkup(createElement(TaskDialog, { open: true, onClose: () => {}, options, viewerId: worker.id, task: { ...ownRow, status: "TODO" } })) : "";
-    ok("  on a task assigned to the viewer, no XP or badge — somebody else sets them", !!ownRow && !ownDialog.includes("Earned XP") && !ownDialog.includes(">Badge<") && ownDialog.includes("its XP and badge are for somebody else to set"));
+    ok("  on a task assigned to the viewer, no XP or badge — somebody else sets them", !!ownRow && !ownDialog.includes("XP &amp; badge") && !ownDialog.includes("Earned XP") && ownDialog.includes("its XP is for somebody else to set"));
     const { TasksWorkspace } = require("../src/components/tasks/tasks-workspace") as typeof import("../src/components/tasks/tasks-workspace");
     const rows = await tasks.listTasks({ search: TAG });
     const challenges = await extras.listTaskChallenges();
