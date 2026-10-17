@@ -24,6 +24,16 @@ export function googleScopes(calendar: boolean): string {
   return calendar ? `${GOOGLE_MAIL_SCOPES} ${GOOGLE_CALENDAR_SCOPE}` : GOOGLE_MAIL_SCOPES;
 }
 
+/**
+ * Asked for only when a person connects Google Sheets for Automate (Automate › Connections), so a
+ * workflow of theirs can add rows to a sheet they can edit. Nobody else is asked for it.
+ */
+export const GOOGLE_SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
+
+export function grantsGoogleSheets(scope: string): boolean {
+  return scope.split(/\s+/).includes(GOOGLE_SHEETS_SCOPE);
+}
+
 /** Google lets a person untick the calendar on its consent screen and still connect. */
 export function grantsGoogleCalendar(scope: string): boolean {
   return scope.split(/\s+/).includes(GOOGLE_CALENDAR_SCOPE);
@@ -35,12 +45,18 @@ const LIVE = {
   openid: "https://openidconnect.googleapis.com",
   gmail: "https://gmail.googleapis.com",
   calendar: "https://www.googleapis.com",
+  sheets: "https://sheets.googleapis.com",
 };
 let endpoints = { ...LIVE };
 
 /** For check scripts only: point every call at a local stand-in. One not named stays Google's own. */
 export function setTestGoogleEndpoints(next: Partial<typeof LIVE> | null) {
   endpoints = next ? { ...LIVE, ...next } : { ...LIVE };
+}
+
+/** The Sheets API's address, for Automate's "Add a Google Sheets row" — the stand-in's in a check. */
+export function googleSheetsBase(): string {
+  return endpoints.sheets;
 }
 
 /** The Calendar API's address, for src/lib/calendar/google.ts — the stand-in's in a check. */

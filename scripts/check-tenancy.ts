@@ -142,6 +142,7 @@ const STATE: Record<string, Allowed> = {
   "src/lib/mail/google.ts:endpoints": { reason: "test override of Google's addresses, set only by check scripts" },
   "src/lib/mail/zoho.ts:regions": { reason: "test override of Zoho's data centres, set only by check scripts" },
   "src/lib/signatures/google.ts:hosts": { reason: "test override of Google's token and Gmail addresses, set only by check scripts" },
+  "src/lib/automate/outbound.ts:testOutbound": { reason: "test override of Automate's outbound guard (a 127.0.0.1 stand-in), set only by check scripts" },
   "src/lib/time/zone.ts:partsFormatters": { reason: "Intl formatters keyed by time zone name — the same for every workspace in that zone; no workspace data" },
   "src/lib/time/zone.ts:clocks": { reason: "a clock per time zone name — pure functions of the zone; no workspace data" },
   "src/lib/platform/mailer.ts:testSender": { reason: "test override, set only by check scripts — no check sends platform mail" },

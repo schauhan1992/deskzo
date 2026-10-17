@@ -242,7 +242,7 @@ export async function testDraft(workflowId: string, testerId: string, live: bool
   if (!workflow) return { ok: false, error: "That workflow no longer exists." };
   const checked = validateDefinition(workflow.draft);
   if (!checked.ok) return { ok: false, error: "Fix the problems marked before testing.", problems: checked.problems };
-  const sample = await sampleTrigger(testerId, checked.definition.trigger.type);
+  const sample = await sampleTrigger(testerId, checked.definition.trigger.type, new Date(), workflowId);
   const runId = await createRun({
     workflowId,
     versionId: null,

@@ -4,6 +4,13 @@ import { startConnect } from "@/lib/mail/connect";
 import { CONNECT_COOKIE, CONNECT_COOKIE_PATH, CONNECT_TTL_SECONDS, newState, publicOrigin, safeNext, sealState } from "@/lib/mail/connect-state";
 import { MAIL_SLUGS, mailCallbackPath, providerOfMailSlug } from "@/lib/workplace/providers";
 import { mayConnectSignatures, startZohoSignatureConnect } from "@/lib/signatures/connect";
+import { grantsGoogleSheets } from "@/lib/mail/google";
+import { db } from "@/lib/db";
+
+async function hasGoogleSheets(userId: string): Promise<boolean> {
+  const c = await db.mailConnection.findUnique({ where: { userId }, select: { provider: true, scopes: true } });
+  return c?.provider === "GOOGLE" && grantsGoogleSheets(c.scopes);
+}
 
 /**
  * Step one of connecting somebody's own mailbox — off to Microsoft, Google or Zoho, to approve sending
@@ -29,7 +36,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ prov
   if (forSignatures && (provider !== "ZOHO" || !(await mayConnectSignatures(user.id)))) return back("failed");
   const started = forSignatures
     ? await startZohoSignatureConnect({ redirectUri: `${origin}${mailCallbackPath(provider)}`, state }).then((s) => (s.ok ? { ...s, verifier: "" } : s))
-    : await startConnect(provider, { redirectUri: `${origin}${mailCallbackPath(provider)}`, state, email: user.email ?? null });
+    : await startConnect(provider, {
+        redirectUri: `${origin}${mailCallbackPath(provider)}`,
+        state,
+        email: user.email ?? null,
+        // ?purpose=sheets: the mailbox again, with Google Sheets for Automate (Automate › Connections).
+        // A plain reconnect keeps Sheets if it had it — Google forgets what the new consent leaves out.
+        sheets: provider === "GOOGLE" && (req.nextUrl.searchParams.get("purpose") === "sheets" || (await hasGoogleSheets(user.id))),
+      });
   if (!started.ok) return back(started.outcome);
 
   const res = NextResponse.redirect(started.url);

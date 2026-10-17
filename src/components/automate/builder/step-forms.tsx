@@ -6,6 +6,8 @@ import type { Catalog } from "@/lib/automate/catalog";
 import type { DefinitionProblem } from "@/lib/automate/validate";
 import { DataPicker, FieldInput, FilterEditor } from "@/components/automate/builder/fields";
 import type { DataRef } from "@/components/automate/builder/tree";
+import { WebhookPanel } from "@/components/automate/builder/webhook-panel";
+import type { WebhookView } from "@/lib/automate/webhooks";
 
 /**
  * The form for whatever is selected in the builder (Deskzo Automate, Phase 3): what starts the
@@ -109,12 +111,18 @@ export function TriggerForm({
   catalog,
   data,
   problems,
+  workflowId,
+  webhook,
+  demo = false,
 }: {
   draft: Definition;
   onChange: (d: Definition) => void;
   catalog: Catalog;
   data: DataRef[];
   problems: DefinitionProblem[];
+  workflowId: string;
+  webhook: WebhookView | null;
+  demo?: boolean;
 }) {
   const groups = [...new Set(catalog.triggers.map((t) => t.group))];
   const trigger = draft.trigger;
@@ -142,6 +150,7 @@ export function TriggerForm({
           ))}
         </Select>
       </div>
+      {trigger.type === "webhook" && <WebhookPanel workflowId={workflowId} initial={webhook} demo={demo} />}
       {trigger.type === "schedule" && <ScheduleFields schedule={trigger.schedule} onChange={(schedule) => onChange({ ...draft, trigger: { ...trigger, schedule } })} />}
       {trigger.type !== "schedule" && trigger.type !== "manual" && (
         <div className="space-y-1">

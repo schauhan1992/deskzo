@@ -14242,6 +14242,8 @@ model AutomationEvent {
 
   @@index([matchedAt, occurredAt])
   @@index([occurredAt])
+  /// A webhook call found again by its Idempotency-Key (src/lib/automate/webhooks.ts).
+  @@index([type, recordId])
   @@map("automation_events")
 }
 
@@ -14354,6 +14356,8 @@ model AutomationWebhook {
   workflow            AutomationWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
   tokenHash           String             @unique
   signingSecretCipher String?
+  /// Only calls signed with its secret are taken; otherwise the address alone is enough (Phase 4).
+  requireSignature    Boolean            @default(false)
   lastReceivedAt      DateTime?
   createdAt           DateTime           @default(now())
 

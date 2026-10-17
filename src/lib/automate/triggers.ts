@@ -18,6 +18,7 @@ export type TriggerDefinition = {
 export const TRIGGERS: readonly TriggerDefinition[] = [
   { type: "schedule", label: "On a schedule", fields: ["scheduledFor", "firedAt"], event: false },
   { type: "manual", label: "When somebody presses Run", fields: ["startedById", "data"], event: false },
+  { type: "webhook", label: "An outside app calls its webhook address", fields: ["body", "query", "headers", "receivedAt"], event: true },
   { type: "lead.created", label: "A lead is created", fields: ["lead", "company", "contact", "via"], event: true },
   { type: "lead.arrived", label: "A lead arrives in a pipeline (made there, carried on or moved in)", fields: ["lead", "company", "contact", "via", "from", "to"], event: true },
   { type: "lead.stage_changed", label: "A lead moves stage", fields: ["lead", "company", "contact", "from", "to"], event: true },

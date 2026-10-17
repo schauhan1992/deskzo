@@ -1,5 +1,5 @@
 import { authorizeUrl, exchangeCode, fetchMe, grantsCalendar, mailboxFor, microsoftApp, microsoftScopes, pkcePair, saveConnection } from "@/lib/mail/microsoft";
-import { fetchGoogleMe, googleAuthorizeUrl, googleExchangeCode, googleScopes, grantsGmailSend, grantsGoogleCalendar } from "@/lib/mail/google";
+import { GOOGLE_SHEETS_SCOPE, fetchGoogleMe, googleAuthorizeUrl, googleExchangeCode, googleScopes, grantsGmailSend, grantsGoogleCalendar } from "@/lib/mail/google";
 import { accountsServerOf, fetchZohoMe, regionOfAccountsServer, zohoAuthorizeUrl, zohoExchangeCode, zohoMailAccount, zohoScopes } from "@/lib/mail/zoho";
 import { saveMailbox } from "@/lib/mail/store";
 import { calendarsWanted, forgetCalendar, saveCalendarAccount } from "@/lib/calendar/account";
@@ -26,7 +26,7 @@ import type { WorkplaceProvider } from "@/lib/workplace/providers";
 export type ConnectStart = { ok: true; url: string; verifier: string } | { ok: false; outcome: "not-configured" };
 
 /** Where to send the browser to approve it, and the PKCE verifier to keep for the way back. */
-export async function startConnect(provider: WorkplaceProvider, p: { redirectUri: string; state: string; email: string | null }): Promise<ConnectStart> {
+export async function startConnect(provider: WorkplaceProvider, p: { redirectUri: string; state: string; email: string | null; sheets?: boolean }): Promise<ConnectStart> {
   if (!(await mailProviders()).includes(provider)) return { ok: false, outcome: "not-configured" };
   const calendar = await calendarsWanted();
   const { verifier, challenge } = pkcePair();
@@ -39,7 +39,7 @@ export async function startConnect(provider: WorkplaceProvider, p: { redirectUri
   if (provider === "GOOGLE") {
     const app = await googleApp();
     return app
-      ? { ok: true, verifier, url: googleAuthorizeUrl(app, { redirectUri: p.redirectUri, state: p.state, challenge, loginHint: p.email, scope: googleScopes(calendar) }) }
+      ? { ok: true, verifier, url: googleAuthorizeUrl(app, { redirectUri: p.redirectUri, state: p.state, challenge, loginHint: p.email, scope: `${googleScopes(calendar)}${p.sheets ? ` ${GOOGLE_SHEETS_SCOPE}` : ""}` }) }
       : { ok: false, outcome: "not-configured" };
   }
   const app = await zohoApp();

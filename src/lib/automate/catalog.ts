@@ -25,6 +25,7 @@ export type FieldSpec = {
   options?: { value: string; label: string }[];
   special?: { value: string; label: string }[];
   showWhen?: Record<string, string[]>;
+  provider?: string;
   min?: number;
   max?: number;
 };
@@ -36,9 +37,11 @@ export type Catalog = {
   actions: ActionSpec[];
   people: { id: string; name: string }[];
   pipelines: { id: string; name: string; stages: { id: string; label: string }[] }[];
+  /** Outside apps the owner may use: their own, and those shared with the workspace. */
+  connections: { id: string; name: string; provider: string }[];
 };
 
-const GROUPS: Record<string, string> = { schedule: "Time", manual: "Time", lead: "Leads", ticket: "Tickets", document: "Money", invoice: "Money", payment: "Money", order: "Orders", renewal: "Orders", form: "Forms and bookings", booking: "Forms and bookings", task: "Tasks" };
+const GROUPS: Record<string, string> = { schedule: "Time", manual: "Time", webhook: "Outside apps", lead: "Leads", ticket: "Tickets", document: "Money", invoice: "Money", payment: "Money", order: "Orders", renewal: "Orders", form: "Forms and bookings", booking: "Forms and bookings", task: "Tasks" };
 
 type JsonProp = { type?: string; enum?: string[]; default?: unknown; minimum?: number; maximum?: number; maxLength?: number; format?: string; items?: JsonProp };
 
@@ -76,6 +79,7 @@ export function fieldsOf(key: string, input: z.ZodType): FieldSpec[] {
       ...(prop.enum ? { options: prop.enum.map((value) => ({ value, label: hint.options?.[value] ?? humanize(value) })) } : {}),
       ...(hint.special ? { special: hint.special } : {}),
       ...(hint.showWhen ? { showWhen: hint.showWhen } : {}),
+      ...(hint.provider ? { provider: hint.provider } : {}),
       ...(prop.minimum !== undefined ? { min: prop.minimum } : {}),
       ...(prop.maximum !== undefined ? { max: prop.maximum } : {}),
     };
@@ -84,9 +88,10 @@ export function fieldsOf(key: string, input: z.ZodType): FieldSpec[] {
 
 /** The builder's catalogue, for a workflow owned by `ownerId` (whose access decides what is available). */
 export async function builderCatalog(ownerId: string): Promise<Catalog> {
-  const [people, pipeline] = await Promise.all([
+  const [people, pipeline, connections] = await Promise.all([
     db.user.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
     leadStages().catch(() => null),
+    db.automationConnection.findMany({ where: { OR: [{ ownerUserId: ownerId }, { sharedWithWorkspace: true }] }, orderBy: { name: "asc" }, select: { id: true, name: true, provider: true } }).catch(() => []),
   ]);
   const actions: ActionSpec[] = [];
   for (const action of ACTIONS) {
@@ -108,6 +113,7 @@ export async function builderCatalog(ownerId: string): Promise<Catalog> {
     triggers: TRIGGERS.map((t) => ({ type: t.type, label: t.label, group: GROUPS[t.type.split(".")[0]!] ?? "Other", event: t.event, paths: triggerPaths(t.type) })),
     actions,
     people,
+    connections,
     pipelines: pipeline
       ? pipeline.pipelines.filter((p) => !p.archived).map((p) => ({ id: p.id, name: p.name, stages: pipeline.stages.filter((s) => s.pipelineId === p.id && !s.archived).map((s) => ({ id: s.id, label: s.label })) }))
       : [],

@@ -173,6 +173,25 @@ export function FieldInput({ field, value, onChange, catalog, data }: { field: F
     case "people":
       control = <PeopleField value={value} onChange={onChange} field={field} catalog={catalog} />;
       break;
+    case "connection": {
+      const mine = catalog.connections.filter((c) => !field.provider || c.provider === field.provider);
+      control = (
+        <div className="space-y-1">
+          <Select value={text} onChange={(e) => onChange(e.target.value || undefined)}>
+            <option value="">{mine.length ? "Choose…" : "None yet"}</option>
+            {mine.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </Select>
+          <a href="/automate/connections" target="_blank" rel="noreferrer" className="text-xs text-brand hover:underline">
+            Add or change connections →
+          </a>
+        </div>
+      );
+      break;
+    }
     case "stage":
       control = (
         <Select value={text} onChange={(e) => onChange(e.target.value || undefined)}>

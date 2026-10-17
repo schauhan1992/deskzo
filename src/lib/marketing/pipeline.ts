@@ -544,12 +544,14 @@ export async function emailRouteFor(messageClass: MessageClass): Promise<{ label
 export async function deliverNow(
   message: OutboundMessage,
   messageClass: MessageClass,
-  options: { delivering?: boolean } = {},
+  /** `kind`: WhatsApp's chain instead of email's — a workflow's WhatsApp template (src/lib/automate). */
+  options: { delivering?: boolean; kind?: "EMAIL" | "WHATSAPP" } = {},
 ): Promise<{ ok: true; provider: string; fromEmail: string | null } | { ok: false; error: string }> {
   // `delivering`: only a provider that puts mail on the wire. Mock "sends" by recording, which is
   // right for a test send and wrong for mail somebody has to receive.
-  const chain = routeFor(await loadProviders(), { kind: "EMAIL", messageClass }).filter((p) => !options.delivering || p.key !== "mock");
-  if (chain.length === 0) return { ok: false, error: `No email provider is set up for ${messageClass.toLowerCase()} mail — add one in Settings › Mail & messaging.` };
+  const kind = options.kind ?? "EMAIL";
+  const chain = routeFor(await loadProviders(), { kind, messageClass }).filter((p) => !options.delivering || p.key !== "mock");
+  if (chain.length === 0) return { ok: false, error: `No ${kind === "WHATSAPP" ? "WhatsApp" : "email"} provider is set up for ${messageClass.toLowerCase()} messages — add one in Settings › Mail & messaging.` };
   let last = "No provider accepted it.";
   for (const candidate of chain) {
     const implementation = providerByKey[candidate.key];

@@ -247,6 +247,8 @@ const NOT_YET_EVERYWHERE = {
   // 20261112100000_automate_builder. Read by name in src/lib/automate (refs, the builder, converting
   // pipeline automations); Automate tolerates a workspace not migrated yet.
   automationWorkflow: { workflowSeq: true, migratedFrom: true },
+  // 20261114100000_automate_webhooks. Read by name in src/lib/automate/webhooks.ts.
+  automationWebhook: { requireSignature: true },
   // 20261013100000_deskzo_updates_seen. Read by name in src/actions/help.ts only.
   user: { deskzoUpdatesSeenAt: true, reminderSounds: true },
   // 20261014100000_custom_fields. Read by name (`select` or `omit: { customFields: false }`) through

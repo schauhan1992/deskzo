@@ -211,7 +211,7 @@ export function WorkflowBuilder({ workflow, demo = false }: { workflow: BuilderW
 
   const form =
     selected === "trigger" ? (
-      <TriggerForm draft={draft} onChange={setDraft} catalog={catalog} data={data} problems={problems.filter((p) => p.stepId === null)} />
+      <TriggerForm draft={draft} onChange={setDraft} catalog={catalog} data={data} problems={problems.filter((p) => p.stepId === null)} workflowId={workflow.id} webhook={workflow.webhook} demo={demo} />
     ) : step ? (
       <StepForm step={step} onChange={(s) => setDraft((d) => updateStep(d, step.id, () => s))} catalog={catalog} data={data} problems={problemsOf(step.id)} />
     ) : null;

@@ -5,7 +5,7 @@
  * (src/lib/automate/actions/*), and what isn't named here is shown from the schema alone.
  */
 
-export type FieldKind = "text" | "longText" | "number" | "boolean" | "enum" | "person" | "people" | "list" | "json" | "datetime" | "stage";
+export type FieldKind = "text" | "longText" | "number" | "boolean" | "enum" | "person" | "people" | "list" | "json" | "datetime" | "stage" | "connection";
 
 /** What a record-id field is the id of — so the data picker offers that record's id first. */
 export type RecordKind = "lead" | "ticket" | "company" | "contact" | "document" | "order";
@@ -21,6 +21,8 @@ export type FieldHint = {
   options?: Record<string, string>;
   /** Shown only while another field holds one of these values — "Contact" only when sending to a contact. */
   showWhen?: Record<string, string[]>;
+  /** For a connection field: which kind it picks — "slack", "teams", "http". */
+  provider?: string;
 };
 
 const OWNER = { value: "owner", label: "The workflow's owner" };
@@ -118,6 +120,35 @@ export const FIELD_HINTS: Record<string, Record<string, FieldHint>> = {
     to: { label: "Send to", kind: "people", special: [OWNER] },
   },
 };
+
+const TO_WHOM = { lead_contact: "The lead's contact", contact: "A contact", company_contact: "A customer's main contact" };
+
+Object.assign(FIELD_HINTS, {
+  "http.request": {
+    connectionId: { label: "Saved outside API", kind: "connection", provider: "http", hint: "Its base address and headers (an API key) are kept encrypted. Or give a full address below." },
+    url: { label: "Or an address", hint: "https only. Not one inside our network." },
+    path: { label: "Path", hint: "With a saved API: added to its address — /v1/orders." },
+    method: { label: "Method" },
+    headers: { kind: "json", hint: 'Extra headers: {"X-Source": "Deskzo"}.' },
+    body: { label: "Body", kind: "json", hint: 'Sent as JSON: {"lead": "{{trigger.lead.title}}"}.' },
+    sign: { label: "Sign it with the workspace's secret" },
+  },
+  "slack.post": { connectionId: { label: "Slack channel", kind: "connection", provider: "slack" }, text: { label: "Message", kind: "longText" } },
+  "teams.post": { connectionId: { label: "Teams channel", kind: "connection", provider: "teams" }, text: { label: "Message", kind: "longText" } },
+  "whatsapp.send": {
+    to: { label: "To", options: TO_WHOM },
+    leadId: { label: "Lead", record: "lead", showWhen: { to: ["lead_contact"] } },
+    contactId: { label: "Contact", record: "contact", showWhen: { to: ["contact"] } },
+    companyId: { label: "Customer", record: "company", showWhen: { to: ["company_contact"] } },
+    template: { label: "Approved template", hint: "Its name as Meta has it: order_update." },
+    parameters: { label: "Its values, in order", kind: "list", hint: "{{1}}, {{2}}… — comma-separated." },
+  },
+  "sheets.append": {
+    spreadsheet: { hint: "Its address, or its id. The workflow's owner must be able to edit it." },
+    sheet: { label: "Tab", hint: "The first one when empty." },
+    values: { label: "The row", kind: "list", hint: "One value a column, comma-separated." },
+  },
+} satisfies Record<string, Record<string, FieldHint>>);
 
 /** "dueInDays" → "Due in days". */
 export function humanize(name: string): string {

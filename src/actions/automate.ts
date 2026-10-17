@@ -16,6 +16,12 @@ import { nudgeAutomate } from "@/lib/automate/worker";
 import { validateDefinition, type DefinitionProblem } from "@/lib/automate/validate";
 import { builderCatalog, type Catalog } from "@/lib/automate/catalog";
 import type { Definition } from "@/lib/automate/definition";
+import { ensureWebhook, setRequireSignature, webhookOf, type WebhookView } from "@/lib/automate/webhooks";
+import { PROVIDER_LABELS, deleteConnection, listConnections, saveConnection, connectionFor, noteConnectionUse, type ConnectionRow } from "@/lib/automate/connections";
+import { automateSigningSecret, outboundFetch, statusKind } from "@/lib/automate/outbound";
+import { grantsGoogleSheets } from "@/lib/mail/google";
+import { mailProviders } from "@/lib/workplace/settings";
+import { randomUUID } from "node:crypto";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -381,6 +387,8 @@ export type BuilderWorkflow = {
   versions: { id: string; number: number; note: string | null; publishedAt: Date; publishedBy: string }[];
   problems: DefinitionProblem[];
   catalog: Catalog;
+  /** Its webhook address, once it has one (an outside app calls it). */
+  webhook: WebhookView | null;
 };
 
 /** Everything the builder shows for one workflow, by its number (WF-0042, or 42). */
@@ -407,6 +415,12 @@ export async function getWorkflowForBuilder(ref: string): Promise<BuilderWorkflo
   if (!w || w.status === "ARCHIVED") return null;
   const names = new Map((await db.user.findMany({ where: { id: { in: [w.ownerUserId, ...w.versions.map((v) => v.publishedById)] } }, select: { id: true, name: true } })).map((u) => [u.id, u.name]));
   const checked = validateDefinition(w.draft);
+  const [catalog, webhook] = await Promise.all([builderCatalog(w.ownerUserId), webhookOf(w.id).catch(() => null)]);
+  // What the last call to its address carried, offered field by field in the data picker.
+  if (webhook?.sampleKeys.length) {
+    const spec = catalog.triggers.find((t) => t.type === "webhook");
+    if (spec) spec.paths = [...spec.paths, ...webhook.sampleKeys.map((k) => ({ ref: `trigger.body.${k}`, label: `Body › ${k}` }))];
+  }
   return {
     id: w.id,
     seq: w.workflowSeq,
@@ -421,7 +435,8 @@ export async function getWorkflowForBuilder(ref: string): Promise<BuilderWorkflo
     pausedReason: w.pausedReason,
     versions: w.versions.map((v) => ({ id: v.id, number: v.number, note: v.note, publishedAt: v.publishedAt, publishedBy: names.get(v.publishedById) ?? "Someone who has left" })),
     problems: checked.ok ? [] : checked.problems,
-    catalog: await builderCatalog(w.ownerUserId),
+    catalog,
+    webhook,
   };
 }
 
@@ -546,6 +561,125 @@ export async function createPipelineWorkflow(pipelineId: string, stageId: string
     await recordAudit({ userId: user.id, action: "CREATE", entityType: "Workflow", entityId: workflow.id, entityLabel: "A workflow for a pipeline" });
     revalidateAutomate();
     return { ok: true, data: { path: await pathOf(workflow.id) } };
+  } catch (err) {
+    return refused(err);
+  }
+}
+
+// ─── Outside apps (Phase 4) ─────────────────────────────────────────────────────────────────────
+
+/** A workflow's webhook address and secret — made the first time; `fresh` replaces the old one. */
+export async function workflowWebhook(id: string, fresh = false): Promise<ActionResult<WebhookView>> {
+  try {
+    const user = await changer();
+    const workflow = await db.automationWorkflow.findUnique({ where: { id }, select: { name: true } });
+    if (!workflow) return { ok: false, error: "That workflow no longer exists." };
+    const hook = await ensureWebhook(id, fresh);
+    if (fresh) await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Workflow", entityId: id, entityLabel: `${workflow.name} — a new webhook address; the old one stops` });
+    return { ok: true, data: hook };
+  } catch (err) {
+    return refused(err);
+  }
+}
+
+export async function setWorkflowWebhookSigned(id: string, required: boolean): Promise<ActionResult<WebhookView | null>> {
+  try {
+    await changer();
+    await setRequireSignature(id, required === true);
+    return { ok: true, data: await webhookOf(id) };
+  } catch (err) {
+    return refused(err);
+  }
+}
+
+export type ConnectionsPage = {
+  connections: (ConnectionRow & { ownerName: string; mine: boolean })[];
+  /** This person's mailbox: Sheets rides on a Google one. `available`: Google is set up for mailboxes here. */
+  sheets: { provider: string | null; connected: boolean; available: boolean };
+  /** A WhatsApp provider is on and carries transactional messages (Settings › Messaging). */
+  whatsappReady: boolean;
+};
+
+/** Automate › Connections: the outside apps, and whether this person has Google Sheets and the workspace WhatsApp. */
+export async function getAutomationConnections(): Promise<ConnectionsPage> {
+  const user = await admin();
+  const [rows, mailbox, providers, whatsapp] = await Promise.all([
+    listConnections(),
+    db.mailConnection.findUnique({ where: { userId: user.id }, select: { provider: true, scopes: true } }),
+    mailProviders(),
+    db.messagingProvider.count({ where: { kind: "WHATSAPP", enabled: true, classes: { has: "TRANSACTIONAL" } } }),
+  ]);
+  const names = new Map((await db.user.findMany({ where: { id: { in: rows.map((r) => r.ownerUserId) } }, select: { id: true, name: true } })).map((u) => [u.id, u.name]));
+  return {
+    connections: rows.map((r) => ({ ...r, ownerName: names.get(r.ownerUserId) ?? "Someone who has left", mine: r.ownerUserId === user.id })),
+    sheets: { provider: mailbox?.provider ?? null, connected: mailbox?.provider === "GOOGLE" && grantsGoogleSheets(mailbox.scopes), available: providers.includes("GOOGLE") },
+    whatsappReady: whatsapp > 0,
+  };
+}
+
+/** The workspace's signing secret, asked for on purpose — it signs every outside call a workflow makes. */
+export async function revealAutomationSigningSecret(): Promise<ActionResult<{ secret: string }>> {
+  try {
+    await changer();
+    return { ok: true, data: { secret: await automateSigningSecret() } };
+  } catch (err) {
+    return refused(err);
+  }
+}
+
+export async function saveAutomationConnection(input: unknown): Promise<ActionResult<{ id: string }>> {
+  try {
+    const user = await changer();
+    const i = (input ?? {}) as { id?: unknown; provider?: unknown; name?: unknown; shared?: unknown; secret?: unknown };
+    if (i.id) {
+      const row = await db.automationConnection.findUnique({ where: { id: String(i.id) }, select: { ownerUserId: true } });
+      if (row && row.ownerUserId !== user.id) return { ok: false, error: "Only the person who added a connection changes it." };
+    }
+    const saved = await saveConnection({ id: i.id ? String(i.id) : undefined, provider: String(i.provider ?? ""), name: String(i.name ?? ""), shared: i.shared === true, secret: i.secret }, user.id);
+    if (!saved.ok) return saved;
+    await recordAudit({ userId: user.id, action: i.id ? "UPDATE" : "CREATE", entityType: "AutomationConnection", entityId: saved.id, entityLabel: `${PROVIDER_LABELS[String(i.provider) as keyof typeof PROVIDER_LABELS] ?? "Connection"}: ${String(i.name ?? "")}` });
+    revalidatePath("/automate/connections");
+    return { ok: true, data: { id: saved.id } };
+  } catch (err) {
+    return refused(err);
+  }
+}
+
+export async function deleteAutomationConnection(id: string): Promise<ActionResult<null>> {
+  try {
+    const user = await changer();
+    const row = await db.automationConnection.findUnique({ where: { id }, select: { ownerUserId: true, name: true } });
+    if (!row) return { ok: false, error: "That connection no longer exists." };
+    if (row.ownerUserId !== user.id) return { ok: false, error: "Only the person who added a connection removes it." };
+    await deleteConnection(id);
+    await recordAudit({ userId: user.id, action: "DELETE", entityType: "AutomationConnection", entityId: id, entityLabel: row.name });
+    revalidatePath("/automate/connections");
+    return { ok: true, data: null };
+  } catch (err) {
+    return refused(err);
+  }
+}
+
+/** Sends a test message to a Slack or Teams connection, as its owner would — to see it arrive. */
+export async function testAutomationConnection(id: string): Promise<ActionResult<{ status: number }>> {
+  try {
+    const user = await changer();
+    const row = await db.automationConnection.findUnique({ where: { id }, select: { provider: true } });
+    if (!row || (row.provider !== "slack" && row.provider !== "teams")) return { ok: false, error: "Only Slack and Teams connections send a test message." };
+    const connection = await connectionFor(user.id, id, row.provider);
+    const text = "A test from Deskzo Automate — this connection works.";
+    const body = row.provider === "slack" ? { text } : { type: "message", attachments: [{ contentType: "application/vnd.microsoft.card.adaptive", content: { type: "AdaptiveCard", version: "1.4", body: [{ type: "TextBlock", text, wrap: true }] } }] };
+    try {
+      const response = await outboundFetch({ key: `test:${randomUUID()}` }, { method: "POST", url: connection.secret.url, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const ok = statusKind(response.status) === "ok";
+      await noteConnectionUse(id, ok ? null : `It answered ${response.status}: ${response.body.slice(0, 200)}`);
+      revalidatePath("/automate/connections");
+      return ok ? { ok: true, data: { status: response.status } } : { ok: false, error: `It answered ${response.status}: ${response.body.slice(0, 200) || "no reason given"}` };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await noteConnectionUse(id, message);
+      return { ok: false, error: message };
+    }
   } catch (err) {
     return refused(err);
   }

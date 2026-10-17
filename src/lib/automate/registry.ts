@@ -15,10 +15,12 @@ import { documentEmail } from "@/lib/automate/actions/document-email";
 import { reportEmail } from "@/lib/automate/actions/report-email";
 import { leadGet, ticketGet } from "@/lib/automate/actions/record-get";
 import { ticketUpdate } from "@/lib/automate/actions/ticket-update";
+import { httpRequest, sheetsAppend, slackPost, teamsPost, whatsappSend } from "@/lib/automate/actions/outside";
 
 /**
  * Every action a workflow can take (Deskzo Automate): Phase 1 a task and a notification, Phase 2 the
- * Deskzo actions — leads, tickets, email, documents, meetings, reports — and Phase 4 the outside ones.
+ * Deskzo actions — leads, tickets, email, documents, meetings, reports — and Phase 4 the outside ones:
+ * webhooks and APIs, Slack, Teams, WhatsApp, Google Sheets.
  * Each goes through `checkActor` here before it runs, so a workflow can never do more than its owner
  * may do now.
  */
@@ -38,6 +40,11 @@ export const ACTIONS: readonly ActionDefinition<never, unknown>[] = [
   meetingSchedule,
   documentEmail,
   reportEmail,
+  httpRequest,
+  slackPost,
+  teamsPost,
+  whatsappSend,
+  sheetsAppend,
 ] as unknown as ActionDefinition<never, unknown>[];
 
 export function actionByKey(key: string): ActionDefinition<unknown, unknown> | null {

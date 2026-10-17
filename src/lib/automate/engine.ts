@@ -152,6 +152,8 @@ export async function matchEvents(now: Date = new Date(), limit = 200): Promise<
   for (const event of events) {
     for (const trigger of triggers) {
       if (trigger.type !== event.type || trigger.versionId !== trigger.workflow.activeVersionId) continue;
+      // A webhook call is for the one workflow whose address it came to.
+      if (event.type === "webhook" && (event.payload as { workflowId?: string } | null)?.workflowId !== trigger.workflowId) continue;
       // Workflows feeding workflows stop three deep, and none ever sets itself off.
       if (event.depth >= ENGINE_LIMITS.depth || (event.causedByRunId && causes.get(event.causedByRunId) === trigger.workflowId)) {
         skipped += 1;

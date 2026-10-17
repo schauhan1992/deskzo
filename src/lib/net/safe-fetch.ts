@@ -20,7 +20,8 @@ import { DNS_TIMEOUT_MS, resolver, withTimeout } from "@/lib/dns";
  *   · **The connection goes to that address.** The request's `lookup` hands back the address that
  *     was checked, so a name that answers differently a moment later (DNS rebinding) can't swap it.
  *   · **Every redirect is a new request.** Followed by hand, at most `maxRedirects`, each hop
- *     checked as the first was.
+ *     checked as the first was. One to another site drops the caller's headers that could be a
+ *     credential — an API key, a bearer token — as browsers drop Authorization.
  *   · **Bounded.** One deadline for the whole chain, a cap on the bytes read, http(s) only, and
  *     only the ports the caller allows (80 and 443 unless told otherwise).
  *
@@ -78,7 +79,12 @@ export class SafeFetchError extends Error {
 }
 
 export type SafeFetchOptions = {
+  /** GET when not given. A body goes with anything else. */
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  body?: string;
   headers?: Record<string, string>;
+  /** The schemes a URL may use — Automate's calls say https only. Both when not given. */
+  protocols?: readonly ("http:" | "https:")[];
   /** For the whole chain, redirects included. */
   timeoutMs?: number;
   /** Bytes of body kept, after decompression; the rest is never read. */
@@ -104,6 +110,9 @@ export type SafeResponse = {
 
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 
+/** The caller's headers a redirect to another site still gets: none that could be a credential. */
+const CROSS_ORIGIN_HEADERS = new Set(["user-agent", "accept", "accept-language", "content-type", "idempotency-key"]);
+
 async function publicDnsAddresses(hostname: string): Promise<string[]> {
   const [v4, v6] = await Promise.all([
     withTimeout(resolver.resolve4(hostname), DNS_TIMEOUT_MS),
@@ -121,6 +130,7 @@ async function checkedTarget(raw: string, options: SafeFetchOptions): Promise<{ 
     throw new SafeFetchError("bad-url", `"${raw}" isn't a web address.`);
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new SafeFetchError("bad-url", "Only http and https addresses can be fetched.");
+  if (options.protocols && !options.protocols.includes(url.protocol as "http:" | "https:")) throw new SafeFetchError("bad-url", `Only ${options.protocols.map((p) => p.replace(":", "")).join(" or ")} addresses can be called.`);
   if (url.username || url.password) throw new SafeFetchError("bad-url", "An address with a username or password in it isn't fetched.");
   const port = url.port ? Number(url.port) : url.protocol === "https:" ? 443 : 80;
   if (!(options.ports ?? [80, 443]).includes(port)) throw new SafeFetchError("bad-port", `Port ${port} isn't allowed.`);
@@ -171,6 +181,7 @@ function requestOnce(
   target: { url: URL; address: string; family: 4 | 6 },
   headers: Record<string, string>,
   deadline: number,
+  send: { method: string; body: string | null } = { method: "GET", body: null },
 ): Promise<{ response: http.IncomingMessage; abort: () => void }> {
   return new Promise((resolvePromise, reject) => {
     const remaining = deadline - Date.now();
@@ -188,8 +199,8 @@ function requestOnce(
       hostname: host,
       port: url.port || undefined,
       path: `${url.pathname}${url.search}`,
-      method: "GET",
-      headers: { "accept-encoding": "gzip, deflate, br", ...headers, host: url.host },
+      method: send.method,
+      headers: { "accept-encoding": "gzip, deflate, br", ...headers, ...(send.body !== null ? { "content-length": String(Buffer.byteLength(send.body)) } : {}), host: url.host },
       lookup,
       // The certificate is checked against the name, not the address it was reached at.
       ...(url.protocol === "https:" && !isIP(host) ? { servername: host } : {}),
@@ -210,6 +221,7 @@ function requestOnce(
       clearTimeout(timer);
       reject(error instanceof SafeFetchError ? error : new SafeFetchError("network", error.message));
     });
+    if (send.body !== null) request.write(send.body);
     request.end();
   });
 }
@@ -238,24 +250,36 @@ async function readBody(response: http.IncomingMessage, maxBytes: number, abort:
   return { body: new TextDecoder().decode(Buffer.concat(chunks)), truncated };
 }
 
-/** A GET to a URL somebody else supplied, refused if it — or any redirect — leads inside our network. */
+/**
+ * A request to a URL somebody else supplied, refused if it — or any redirect — leads inside our
+ * network. A redirect is followed as browsers do: 307 and 308 keep the method and body; 301, 302 and
+ * 303 become a GET without one.
+ */
 export async function safeFetch(rawUrl: string, options: SafeFetchOptions = {}): Promise<SafeResponse> {
   const deadline = Date.now() + (options.timeoutMs ?? 8_000);
   const maxRedirects = options.maxRedirects ?? 3;
   let current = rawUrl;
+  let send = { method: options.method ?? "GET", body: options.method && options.method !== "GET" ? (options.body ?? "") : null };
+  let headers = options.headers ?? {};
   for (let hop = 0; ; hop += 1) {
     const target = await checkedTarget(current, options);
-    const { response, abort } = await requestOnce(target, options.headers ?? {}, deadline);
+    const { response, abort } = await requestOnce(target, headers, deadline, send);
     const status = response.statusCode ?? 0;
     const location = response.headers.location;
     if (REDIRECTS.has(status) && location) {
       abort();
       if (hop >= maxRedirects) throw new SafeFetchError("too-many-redirects", "The site redirected too many times.");
+      if (status !== 307 && status !== 308) send = { method: "GET", body: null };
+      let next: URL;
       try {
-        current = new URL(location, target.url).toString();
+        next = new URL(location, target.url);
       } catch {
         throw new SafeFetchError("bad-url", "The site redirected to an address that isn't one.");
       }
+      // Sent somewhere else, a call keeps only the headers that carry nothing secret — an API key or
+      // a bearer token is for the site it was given to, not wherever that site points.
+      if (next.origin !== target.url.origin) headers = Object.fromEntries(Object.entries(headers).filter(([name]) => CROSS_ORIGIN_HEADERS.has(name.toLowerCase())));
+      current = next.toString();
       continue;
     }
     const { body, truncated } = await readBody(response, options.maxBytes ?? 1_000_000, abort);

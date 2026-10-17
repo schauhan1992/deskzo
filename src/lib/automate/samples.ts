@@ -29,12 +29,19 @@ async function noneOrReached(userId: string): Promise<{ OR?: ({ companyId: null 
   return Object.keys(reached).length === 0 ? {} : { OR: [{ companyId: null }, { company: { is: reached } }] };
 }
 
-export async function sampleTrigger(userId: string, type: string, now: Date = new Date()): Promise<Sample | null> {
+export async function sampleTrigger(userId: string, type: string, now: Date = new Date(), workflowId: string | null = null): Promise<Sample | null> {
   const clock = await workspaceClock();
   const day = clock.calendarDate(now);
 
   if (type === "schedule") return { payload: { scheduledFor: now.toISOString(), firedAt: now.toISOString() }, about: "this moment, as if the schedule came due" };
   if (type === "manual") return { payload: { startedById: userId, data: {} }, about: "you pressing Run" };
+  if (type === "webhook") {
+    // The last call this workflow's address took — or none yet.
+    const last = workflowId
+      ? await db.automationEvent.findFirst({ where: { type: "webhook", payload: { path: ["workflowId"], equals: workflowId } }, orderBy: { occurredAt: "desc" }, select: { payload: true } })
+      : null;
+    return last ? { payload: last.payload as Record<string, unknown>, about: "the last call to its webhook address" } : null;
+  }
 
   if (type.startsWith("lead.")) {
     const where: Prisma.LeadWhereInput = {
