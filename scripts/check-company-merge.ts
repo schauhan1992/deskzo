@@ -215,12 +215,16 @@ async function main() {
   // branches_one_head_office and organisation_bank_accounts_one_primary: no company or contact link, so
   // a merge never moves a row under them — known, and nothing for the merge to settle.
   // company_bank_accounts_one_primary is settled as the primary address is (check:vendor-banking, 10).
+  // card_templates_one_default and signature_templates_one_default: the workspace's one default card and
+  // signature design — no company or contact link either (only who made it), so nothing for a merge.
   const known = new Set([
     "company_locations_one_primary_per_company",
     "users_one_super_admin",
     "branches_one_head_office",
     "company_bank_accounts_one_primary",
     "organisation_bank_accounts_one_primary",
+    "card_templates_one_default",
+    "signature_templates_one_default",
   ]);
   ok(
     "the only filtered unique indexes are ones the merge knows about (Prisma can't describe them)",
