@@ -36,14 +36,20 @@ function filterRefs(filter: Filter | undefined): string[] {
 
 function refsOfStep(step: Step): string[] {
   switch (step.type) {
-    case "action":
-      return referencesIn(step.input);
+    case "action": {
+      // An action's own merge fields, in the fields it names, are its to fill — not references.
+      const own = actionByKey(step.action)?.ownMergeFields;
+      if (!own) return referencesIn(step.input);
+      return Object.entries(step.input).flatMap(([field, value]) => referencesIn(value).filter((ref) => !(own.fields.includes(field) && own.names.includes(ref))));
+    }
     case "condition":
       return filterRefs(step.if);
     case "branch":
       return step.paths.flatMap((p) => filterRefs(p.if));
     case "transform":
       return Object.values(step.set).flatMap((expr) => referencesIn(expr.args));
+    case "delay":
+      return step.on ? referencesIn(step.on.value) : [];
     default:
       return [];
   }
@@ -66,7 +72,7 @@ export function validateDefinition(raw: unknown): Validated {
       if (step.paths.length + (step.else ? 1 : 0) > LIMITS.branchPaths) problems.push({ stepId: step.id, field: "paths", message: `A branch has at most ${LIMITS.branchPaths} paths, its else included.` });
     }
     if (step.type === "delay") {
-      if (!step.for === !step.until) problems.push({ stepId: step.id, field: null, message: "A delay waits either for a length of time or until a time of day." });
+      if ([step.for, step.until, step.on].filter(Boolean).length !== 1) problems.push({ stepId: step.id, field: null, message: "A delay waits for a length of time, until a time of day, or until a time the data names." });
       if (step.for) {
         const minutes = (step.for.days ?? 0) * 1440 + (step.for.hours ?? 0) * 60 + (step.for.minutes ?? 0);
         if (minutes <= 0) problems.push({ stepId: step.id, field: "for", message: "A delay needs a length." });

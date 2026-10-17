@@ -4,16 +4,16 @@ import { automateSwitches, listAutomationWorkflows } from "@/actions/automate";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { Card } from "@/components/ui/card";
 import { StatusBadge } from "@/components/automate/status-badge";
-import { WorkflowControls, WorkspacePauseSwitch } from "@/components/automate/automate-controls";
+import { NewWorkflowButton, WorkflowControls, WorkspacePauseSwitch } from "@/components/automate/automate-controls";
 import { triggerByType } from "@/lib/automate/triggers";
-import { runPath, runRef } from "@/lib/automate/refs";
+import { runPath, runRef, workflowPath, workflowRef } from "@/lib/automate/refs";
 import { notMigratedYet } from "@/lib/not-migrated";
 import { workspaceClock } from "@/lib/time/workspace";
 
 /**
- * Automate › Workflows (Phase 1): each workflow, whether it is on, what starts it, who it runs as, and
- * how its last run went — with pause, switch on and run now, and the workspace's kill switch. The
- * builder that makes workflows arrives in Phase 3.
+ * Automate › Workflows: each workflow, whether it is on, what starts it, who it runs as, and how its
+ * last run went — with pause, switch on and run now, and the workspace's kill switch. A name opens it
+ * in the builder (Phase 3); a new one starts empty or from a template.
  */
 export default async function AutomateWorkflowsPage() {
   if (!(await isModuleEnabled("automate"))) return <ModuleDisabledNotice moduleKey="automate" />;
@@ -36,7 +36,13 @@ export default async function AutomateWorkflowsPage() {
             Work that runs on its own — on a schedule, when something happens, or when somebody presses Run — as the person who owns it, with every run recorded.
           </p>
         </div>
-        <WorkspacePauseSwitch paused={switches.workspacePaused} />
+        <div className="flex flex-wrap items-start gap-2">
+          <Link href="/automate/templates" className="inline-flex h-8 items-center rounded-base border border-line-strong bg-surface px-3 text-[13px] font-medium text-text shadow-sm hover:bg-surface-sunken">
+            From a template
+          </Link>
+          <NewWorkflowButton />
+          <WorkspacePauseSwitch paused={switches.workspacePaused} />
+        </div>
       </div>
 
       {switches.platformPaused && (
@@ -50,7 +56,13 @@ export default async function AutomateWorkflowsPage() {
 
       <Card className="overflow-x-auto p-0">
         {workflows.length === 0 ? (
-          <p className="p-6 text-sm text-muted">No workflows yet. Building them on screen comes with the next stage of Automate; this page will list each one with its runs.</p>
+          <p className="p-6 text-sm text-muted">
+            No workflows yet.{" "}
+            <Link href="/automate/templates" className="text-brand hover:underline">
+              Start from a template
+            </Link>{" "}
+            or make a new one.
+          </p>
         ) : (
           <table className="w-full min-w-[760px] text-sm">
             <thead className="border-b border-line bg-surface-sunken text-left text-xs font-medium text-muted">
@@ -67,8 +79,14 @@ export default async function AutomateWorkflowsPage() {
               {workflows.map((w) => (
                 <tr key={w.id} className="border-b border-line align-top last:border-0">
                   <td className="px-4 py-3">
-                    <span className="font-medium text-text">{w.name}</span>
-                    {w.version !== null && <span className="ml-1.5 text-xs text-subtle">v{w.version}</span>}
+                    <Link href={workflowPath(w.seq)} className="font-medium text-text hover:underline">
+                      {w.name}
+                    </Link>
+                    <span className="ml-1.5 text-xs text-subtle">
+                      {workflowRef(w.seq)}
+                      {w.version !== null ? ` · v${w.version}` : ""}
+                      {w.source === "MIGRATED" ? " · from a pipeline" : ""}
+                    </span>
                     {w.description && <span className="block text-xs text-muted">{w.description}</span>}
                     {w.pausedReason && <span className="mt-1 block text-xs text-warning">{w.pausedReason}</span>}
                   </td>

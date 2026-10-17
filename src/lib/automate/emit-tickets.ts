@@ -10,7 +10,8 @@ import type { EventCause } from "@/lib/automate/action-types";
  * behind the event's savepoint (`emitEvents`), so reading it can never fail the change.
  */
 
-async function ticketFacts(tx: Prisma.TransactionClient, ticketId: string) {
+/** A ticket's part of an event's payload — also what a test run starts from (src/lib/automate/samples.ts). */
+export async function ticketFacts(tx: Prisma.TransactionClient, ticketId: string) {
   const ticket = await tx.ticket.findUnique({
     where: { id: ticketId },
     select: {

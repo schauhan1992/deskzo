@@ -18,3 +18,20 @@ export function parseRunRef(ref: string): number | null {
   const n = Number(m[1]);
   return Number.isSafeInteger(n) && n > 0 ? n : null;
 }
+
+/** A workflow: WF-0042, at /automate/workflows/WF-0042 — the builder. */
+export function workflowRef(seq: number): string {
+  return `WF-${String(seq).padStart(4, "0")}`;
+}
+
+export function workflowPath(seq: number): string {
+  return `/automate/workflows/${workflowRef(seq)}`;
+}
+
+/** The workflow number in "WF-0042" or "42", or null. */
+export function parseWorkflowRef(ref: string): number | null {
+  const m = /^(?:WF-)?0*(\d{1,10})$/i.exec(ref.trim());
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+}

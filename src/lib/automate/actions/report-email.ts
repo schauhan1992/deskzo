@@ -130,6 +130,7 @@ export const reportEmail = defineAction({
   permission: null,
   risk: "irreversible",
   input,
+  outputs: ["period", "sentTo", "skipped"],
   preview: (i) => `Would email the ${i.source} report for ${PERIOD_LABELS[i.period]} to ${i.to.length} ${i.to.length === 1 ? "person" : "people"}.`,
   async run(ctx, i): Promise<Output> {
     const done = await priorOutput<Output>(ctx);

@@ -46,7 +46,7 @@ export default async function AutomateRunPage({ params }: { params: Promise<{ re
             {runRef(run.seq)} <StatusBadge status={run.status} />
           </h1>
           <p className="mt-1 text-sm text-muted">
-            Version {run.version} · {triggerByType(run.trigger)?.label ?? run.trigger} · created {clock.dateTimeShort(run.createdAt)}
+            {run.version === null ? "A test of the draft" : `Version ${run.version}`} · {triggerByType(run.trigger)?.label ?? run.trigger} · created {clock.dateTimeShort(run.createdAt)}
             {run.finishedAt ? ` · finished ${clock.dateTimeShort(run.finishedAt)}` : ""}
             {run.status === "WAITING" ? ` · waiting until ${clock.dateTimeShort(run.runAfter)}` : ""}
             {` · ${run.stepsUsed} step${run.stepsUsed === 1 ? "" : "s"} counted`}

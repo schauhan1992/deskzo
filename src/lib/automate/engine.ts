@@ -12,7 +12,7 @@ import type { Clock } from "@/lib/time/zone";
 import { ActionError, type FailureKind } from "@/lib/automate/action-types";
 import { filterHolds } from "@/lib/automate/conditions";
 import { advance, currentStep, enterBranch, isCursor, startCursor, type Cursor } from "@/lib/automate/cursor";
-import { definitionSchema, type Definition, type Step } from "@/lib/automate/definition";
+import { LIMITS, definitionSchema, delayMs, type Definition, type Step } from "@/lib/automate/definition";
 import { resolveValue, type RunContext } from "@/lib/automate/references";
 import { summarize } from "@/lib/automate/redact";
 import { actionByKey, actorRefusal } from "@/lib/automate/registry";
@@ -21,6 +21,7 @@ import { workspacePause } from "@/lib/automate/switches";
 import { applyTransform } from "@/lib/automate/transform";
 import { emitDateEvents, listensForDates } from "@/lib/automate/dates";
 import { requestWakeHere } from "@/lib/automate/wake";
+import { workflowPath } from "@/lib/automate/refs";
 
 /**
  * Deskzo Automate's engine: events and schedules become runs, and runs are carried out a step at a
@@ -65,7 +66,7 @@ async function sealContext(context: RunContext): Promise<string> {
 
 async function openContext(cipher: string): Promise<RunContext> {
   const parsed = JSON.parse(await decryptSecret(cipher)) as RunContext;
-  return { trigger: parsed.trigger ?? {}, steps: parsed.steps ?? {} };
+  return { trigger: parsed.trigger ?? {}, steps: parsed.steps ?? {}, ...(parsed.test ? { test: parsed.test } : {}) };
 }
 
 export function parseDefinition(raw: unknown): Definition {
@@ -76,7 +77,8 @@ export function parseDefinition(raw: unknown): Definition {
 
 export type NewRun = {
   workflowId: string;
-  versionId: string;
+  /** None for a test of a draft: `test.definition` is what it runs. */
+  versionId: string | null;
   idempotencyKey: string;
   trigger: Record<string, unknown>;
   eventId?: string | null;
@@ -84,14 +86,26 @@ export type NewRun = {
   depth?: number;
   isTest?: boolean;
   startedById?: string | null;
+  /** A test run's draft, and whether its safe steps run for real (`LIVE_IN_TEST`). */
+  test?: { definition?: Definition; live: boolean };
+  /** Held by this process from the start — a test run carried out in the request that asked for it. */
+  claimed?: boolean;
 };
+
+/**
+ * The steps a test may do for real when the person testing ticks "live": a task, a note on the lead, a
+ * notification — each undone by hand in a moment, and none of them reaching a customer.
+ */
+export const LIVE_IN_TEST: ReadonlySet<string> = new Set(["task.create", "lead.note", "notify.person"]);
 
 /** A new run, or null when one with the same key exists — the same cause never makes two. */
 export async function createRun(input: NewRun): Promise<string | null> {
-  const contextCipher = await sealContext({ trigger: input.trigger, steps: {} });
+  const contextCipher = await sealContext({ trigger: input.trigger, steps: {}, ...(input.test ? { test: input.test } : {}) });
+  const now = new Date();
   try {
     const run = await db.automationRun.create({
       data: {
+        ...(input.claimed ? { status: "RUNNING" as const, lockedBy: HOLDER, lockedUntil: new Date(now.getTime() + ENGINE_LIMITS.leaseMs), startedAt: now } : {}),
         workflowId: input.workflowId,
         versionId: input.versionId,
         idempotencyKey: input.idempotencyKey,
@@ -252,10 +266,21 @@ async function checkpoint(run: Held, data: Prisma.AutomationRunUpdateManyMutatio
   return saved.count === 1;
 }
 
+/** The workflow's page in the builder; the list, in a workspace not migrated to its number yet. */
+async function workflowLink(workflowId: string): Promise<string> {
+  try {
+    const row = await db.automationWorkflow.findUnique({ where: { id: workflowId }, select: { workflowSeq: true } });
+    return row ? workflowPath(row.workflowSeq) : "/automate/workflows";
+  } catch (err) {
+    if (notMigratedYet(err)) return "/automate/workflows";
+    throw err;
+  }
+}
+
 async function pauseWorkflow(workflowId: string, reason: string, tell: string | null) {
   const paused = await db.automationWorkflow.updateMany({ where: { id: workflowId, status: "ACTIVE" }, data: { status: "PAUSED", pausedReason: reason } });
   if (paused.count && tell) {
-    await notifyUser({ userId: tell, type: "WORKFLOW_PAUSED", title: "A workflow of yours paused itself", message: reason, link: `/automate/workflows` });
+    await notifyUser({ userId: tell, type: "WORKFLOW_PAUSED", title: "A workflow of yours paused itself", message: reason, link: await workflowLink(workflowId) });
   }
 }
 
@@ -330,6 +355,7 @@ async function load(runId: string): Promise<Held | null> {
     },
   });
   if (!row || row.status !== "RUNNING" || row.lockedBy !== HOLDER) return null;
+  const context = await openContext(row.contextCipher);
   return {
     id: row.id,
     workflowId: row.workflowId,
@@ -340,9 +366,10 @@ async function load(runId: string): Promise<Held | null> {
     attempts: row.attempts,
     stepsUsed: row.stepsUsed,
     createdAt: row.createdAt,
-    definition: parseDefinition(row.version.definition),
+    // A test of a draft runs the draft it carries; everything else, its published version.
+    definition: parseDefinition(row.version ? row.version.definition : context.test?.definition),
     cursor: isCursor(row.cursor) ? row.cursor : startCursor(),
-    context: await openContext(row.contextCipher),
+    context,
   };
 }
 
@@ -381,7 +408,10 @@ export async function advanceRun(runId: string, clock: Clock): Promise<Automatio
     run.cursor = here.cursor;
     const step = here.step;
     if (!step) {
-      await finish(run, "SUCCEEDED", null, { cursor: run.cursor as unknown as Prisma.InputJsonValue });
+      // A workflow that carries on past failures still says which steps failed.
+      const failed = Object.entries(run.context.steps).filter(([, s]) => s.failed);
+      const note = failed.length ? `${failed.length} step${failed.length === 1 ? "" : "s"} failed and ${failed.length === 1 ? "was" : "were"} passed over: ${failed.map(([id, s]) => `${id} — ${s.failed}`).join("; ")}` : null;
+      await finish(run, "SUCCEEDED", note, { cursor: run.cursor as unknown as Prisma.InputJsonValue });
       return "SUCCEEDED";
     }
     if (taken >= ENGINE_LIMITS.stepsPerTurn || Date.now() > turnEnds) {
@@ -429,7 +459,36 @@ async function runStep(run: Held, step: Step, clock: Clock): Promise<"NEXT" | Au
     }
     case "delay": {
       const row = await startStep(run, step, null);
-      const until = delayUntil(step, clock, now);
+      let until = delayUntil(step, clock, now);
+      if (run.isTest) {
+        // A test says when it would go on, and goes on now.
+        const would = step.on ? String(resolveValue(step.on.value, run.context) ?? "") : until.toISOString();
+        await db.automationRunStep.update(stepDone(row, "SUCCEEDED", { wouldWaitUntil: would, waited: false }));
+        run.context.steps[step.id] = { output: { until: would, waited: false } };
+        return (await save(run, advance(run.cursor))) ? "NEXT" : "LOST";
+      }
+      if (step.on) {
+        // A time the data names, moved before or after it; never past the longest delay.
+        const named = resolveValue(step.on.value, run.context);
+        const at = typeof named === "string" || named instanceof Date ? new Date(named) : null;
+        if (!at || Number.isNaN(at.getTime())) {
+          const message = `"${step.on.value}" isn't a time to wait for.`;
+          await db.automationRunStep.update(stepDone(row, "FAILED", undefined, message, "PERMANENT"));
+          await finish(run, "FAILED", message);
+          return "FAILED";
+        }
+        const moved = at.getTime() - (step.on.before ? delayMs(step.on.before) : 0) + (step.on.after ? delayMs(step.on.after) : 0);
+        until = new Date(Math.min(moved, now.getTime() + LIMITS.delayDays * 86_400_000));
+        if (until <= now) {
+          // Already gone: nothing to wait for, on to the next step.
+          await db.automationRunStep.update(stepDone(row, "SUCCEEDED", { until: until.toISOString(), waited: false }));
+          run.context.steps[step.id] = { output: { until: until.toISOString(), waited: false } };
+          const cursor = advance(run.cursor);
+          if (!(await checkpoint(run, { cursor: cursor as unknown as Prisma.InputJsonValue, contextCipher: await sealContext(run.context), attempts: 0 }))) return "LOST";
+          run.cursor = cursor;
+          return "NEXT";
+        }
+      }
       await db.automationRunStep.update(stepDone(row, "SUCCEEDED", { until: until.toISOString() }));
       run.context.steps[step.id] = { output: { until: until.toISOString() } };
       const saved = await checkpoint(run, {
@@ -466,8 +525,8 @@ async function runAction(run: Held, step: Extract<Step, { type: "action" }>, clo
   const action = actionByKey(step.action);
   const resolved = resolveValue(step.input, run.context);
   const row = await startStep(run, step, summarize(resolved));
-  const fail = async (kind: FailureKind, message: string): Promise<AutomationRunStatus | "LOST"> => {
-    if (kind === "TRANSIENT" && run.attempts < ENGINE_LIMITS.retryDelaysMs.length) {
+  const fail = async (kind: FailureKind, message: string): Promise<"NEXT" | AutomationRunStatus | "LOST"> => {
+    if (kind === "TRANSIENT" && !run.isTest && run.attempts < ENGINE_LIMITS.retryDelaysMs.length) {
       const retryAt = new Date(Date.now() + ENGINE_LIMITS.retryDelaysMs[run.attempts]!);
       await db.automationRunStep.update(stepDone(row, "FAILED", undefined, message, "TRANSIENT", retryAt));
       const saved = await checkpoint(run, { status: "QUEUED", runAfter: retryAt, attempts: run.attempts + 1, lockedBy: null, lockedUntil: null });
@@ -480,8 +539,17 @@ async function runAction(run: Held, step: Extract<Step, { type: "action" }>, clo
       await finish(run, "NEEDS_ATTENTION", message);
       return "NEEDS_ATTENTION";
     }
-    await db.automationRunStep.update(stepDone(row, "FAILED", undefined, message, kind === "TRANSIENT" ? "TRANSIENT" : "PERMANENT"));
-    await finish(run, "FAILED", kind === "TRANSIENT" ? `${message} (gave up after ${run.attempts + 1} tries)` : message);
+    const said = kind === "TRANSIENT" ? `${message} (gave up after ${run.attempts + 1} tries)` : message;
+    await db.automationRunStep.update(stepDone(row, "FAILED", undefined, said, kind === "TRANSIENT" ? "TRANSIENT" : "PERMANENT"));
+    if (run.definition.settings?.onError === "continue") {
+      // Recorded on the step and the run, then on to the next step, as a pipeline automation did.
+      run.context.steps[step.id] = { output: null, failed: said.slice(0, 300) };
+      const cursor = advance(run.cursor);
+      if (!(await checkpoint(run, { cursor: cursor as unknown as Prisma.InputJsonValue, contextCipher: await sealContext(run.context), attempts: 0 }))) return "LOST";
+      run.cursor = cursor;
+      return "NEXT";
+    }
+    await finish(run, "FAILED", said);
     return "FAILED";
   };
 
@@ -492,12 +560,15 @@ async function runAction(run: Held, step: Extract<Step, { type: "action" }>, clo
   const refusal = await actorRefusal(run.ownerUserId, action);
   if (refusal) {
     // An owner who has gone, or lost what the step needs, can't run any of it: the workflow pauses.
-    await pauseWorkflow(run.workflowId, refusal, null);
+    if (!run.isTest) await pauseWorkflow(run.workflowId, refusal, null);
     return fail("PERMANENT", refusal);
   }
 
+  // A test reads for real and says what the rest would do — except the safe steps, done for real
+  // when the person testing asked for it (`LIVE_IN_TEST`).
+  const really = !run.isTest || action.risk === "read" || (run.context.test?.live === true && LIVE_IN_TEST.has(action.key));
   let output: unknown;
-  if (run.isTest) {
+  if (!really) {
     output = { preview: action.preview(input.data as never) };
   } else {
     try {
@@ -549,6 +620,10 @@ export async function workTenant(options: { budgetMs?: number } = {}): Promise<T
   if (!(await migrated())) return { ...result, skipped: "not-migrated" };
   if ((await workspacePause()).paused) return { ...result, skipped: "paused" };
   if (!(await moduleAvailableForTenant("automate"))) return { ...result, skipped: "off" };
+  // Pipeline automations not moved onto Automate yet, moved first — before the events they wait for are matched.
+  // Loaded here: the conversion publishes through the store, which starts runs through this file.
+  const { convertPipelineAutomations } = await import("@/lib/automate/migrate-pipeline");
+  await convertPipelineAutomations().catch((err) => console.error("[automate] pipeline automations could not be moved", err instanceof Error ? err.message : err));
 
   const clock = clockOfTenant(await currentTenant());
   const deadline = Date.now() + (options.budgetMs ?? 20_000);

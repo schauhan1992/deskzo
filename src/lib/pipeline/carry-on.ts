@@ -4,7 +4,6 @@ import { notifyUser } from "@/lib/notify";
 import { notMigratedYet } from "@/lib/custom-fields/server";
 import { leadPath } from "@/lib/record-links";
 import { refreshLeadScore } from "@/lib/leads/score-store";
-import { runLeadAutomations } from "@/lib/pipeline/automations";
 import { emitLeadCreated } from "@/lib/automate/emit-leads";
 import { leadStages, newLeadStage } from "@/lib/pipeline/server";
 import { pipelineById } from "@/lib/pipeline/rules";
@@ -92,6 +91,5 @@ async function carryOn(leadId: string, actorId: string) {
     await notifyUser({ userId: lead.ownerUserId, type: "LEAD_ASSIGNED", title: `Carried on into ${next.name}`, message: lead.title, link: leadPath(made.leadSeq) });
   }
   await refreshLeadScore(made.id);
-  await runLeadAutomations({ leadId: made.id, trigger: "LEAD_CREATED", pipelineId: next.id });
   return made;
 }

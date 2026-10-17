@@ -19,7 +19,6 @@ import { customFilterWhere, type CustomFilterInputs } from "@/lib/custom-fields/
 import { exportCells } from "@/lib/custom-fields/sheets";
 import { inPipelineWhere, inStageWhere, leadStages, newLeadStage, stageWrite, stagesOfLeads } from "@/lib/pipeline/server";
 import { MAIN_PIPELINE_ID, kindOf, pipelineById, stageChangeNote, stageForStatus } from "@/lib/pipeline/rules";
-import { runLeadAutomations } from "@/lib/pipeline/automations";
 import { emitLeadCreated, emitLeadMoved } from "@/lib/automate/emit-leads";
 import { afterStageMove, planStageMove, ruleStops, writeStageMove } from "@/lib/leads/stage-move";
 import { sanitizeCsvCell, csvFilename } from "@/lib/csv";
@@ -221,8 +220,6 @@ export async function createLead(input: unknown): Promise<ActionResult<{ id: str
 
   await recordAudit({ userId: user.id, action: "CREATE", entityType: "Lead", entityId: lead.id, entityLabel: data.title });
   await refreshLeadScore(lead.id);
-  // The pipeline's automations for a lead arriving (Settings → Pipeline → Automations).
-  await runLeadAutomations({ leadId: lead.id, trigger: "LEAD_CREATED", pipelineId: entry.pipelineId ?? MAIN_PIPELINE_ID });
 
   revalidatePath("/leads");
   revalidatePath(`/companies/${data.companyId}`);
@@ -701,7 +698,6 @@ export async function moveLeadToPipeline(input: unknown): Promise<ActionResult<{
   });
   await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Lead", entityId: leadId, entityLabel: `${lead.title} — moved from ${was.name} to ${into.name}` });
   await refreshLeadScore(leadId);
-  await runLeadAutomations({ leadId, trigger: "LEAD_CREATED", pipelineId: into.id });
   revalidatePath("/leads");
   revalidatePath(`/leads/${leadId}`);
   return { ok: true, data: { stageId: target.id } };

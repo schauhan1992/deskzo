@@ -37,6 +37,7 @@ export const leadAssign = defineAction({
   permission: null,
   risk: "change",
   input,
+  outputs: ["leadId", "ownerUserId", "changed"],
   preview: (i) => `Would give the lead to ${i.to === "rules" ? "whoever the assignment rules choose" : i.to === "owner" ? "the workflow's owner" : "a person"}.`,
   async run(ctx, i): Promise<Output> {
     const done = await priorOutput<Output>(ctx);

@@ -14155,6 +14155,8 @@ enum AutomationErrorKind {
 /** A workflow: what people edit (`draft`) and which published version runs (`activeVersionId`). */
 model AutomationWorkflow {
   id              String                   @id @default(cuid())
+  /// WF-0042 — the readable address of the builder (src/lib/automate/refs.ts).
+  workflowSeq     Int                      @unique @default(autoincrement())
   name            String
   description     String?
   /// Whose permissions every step runs with, checked when it runs.
@@ -14165,6 +14167,8 @@ model AutomationWorkflow {
   activeVersionId String?
   source          AutomationSource         @default(BUILDER)
   templateKey     String?
+  /// The pipeline automation it was converted from (Phase 3), so converting runs once.
+  migratedFrom    String?                  @unique
   /// Why it stopped on its own — its owner left, or it failed too often — in words.
   pausedReason    String?
   /// Failed runs in a row; twenty pause it. A run that succeeds sets it back to nought.
@@ -14248,8 +14252,9 @@ model AutomationRun {
   runSeq          Int                 @unique @default(autoincrement())
   workflowId      String
   workflow        AutomationWorkflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-  versionId       String
-  version         AutomationVersion   @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  /// The published version it runs; none for a test of a draft, which carries the draft in its context.
+  versionId       String?
+  version         AutomationVersion?  @relation(fields: [versionId], references: [id], onDelete: Cascade)
   eventId         String?
   /// workflow + event, or workflow + schedule slot: the same cause never makes two runs.
   idempotencyKey  String              @unique

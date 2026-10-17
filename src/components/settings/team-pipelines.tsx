@@ -31,6 +31,7 @@ export function TeamPipelines({
   automations,
   people,
   automationsReady,
+  canAutomate = false,
 }: {
   pipelines: ManagedPipeline[];
   stages: ManagedStage[];
@@ -40,6 +41,8 @@ export function TeamPipelines({
   automations: ManagedAutomation[];
   people: { id: string; name: string }[];
   automationsReady: boolean;
+  /** May open Automate, where the pipeline's automations are made and changed now. */
+  canAutomate?: boolean;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -188,8 +191,8 @@ export function TeamPipelines({
             Automations
           </h3>
           <p className="mt-1 text-sm text-muted">
-            When a lead arrives in {chosen.name} or moves into one of its stages: make a task, email the contact from the owner&apos;s mailbox, give the lead to someone, or tell
-            someone.
+            When a lead arrives in {chosen.name} or moves into one of its stages, workflows in Automate can make a task, email the contact, give the lead to
+            someone, tell someone — and more. Each automation made here before has become one.
           </p>
         </div>
         <PipelineAutomations
@@ -198,6 +201,7 @@ export function TeamPipelines({
           automations={automations.filter((a) => a.pipelineId === chosen.id)}
           people={people}
           ready={automationsReady}
+          canAutomate={canAutomate}
         />
       </section>
 

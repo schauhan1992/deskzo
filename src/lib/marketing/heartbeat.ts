@@ -9,6 +9,8 @@ import { runOrderReleases } from "@/lib/orders/handoff";
 import { runCollectionsDaily } from "@/lib/collections/daily";
 import { runRecurringBilling } from "@/lib/recurring-billing/run";
 import { calendarChores } from "@/lib/calendar/chores";
+import { workTenant } from "@/lib/automate/engine";
+import { platformPausedForWorker } from "@/lib/automate/switches";
 import { signatureChores } from "@/lib/signatures/sync";
 import { purgeExpiredChat } from "@/lib/chat/retention";
 import { purgeOldDeskzoSends } from "@/lib/documents/deskzo-mail-allowance";
@@ -129,6 +131,17 @@ export async function runHeartbeat() {
     console.error("chat retention failed", err);
     return null;
   });
+  /**
+   * Deskzo Automate's workflows: the platform worker carries them out as they fall due; here too, so they
+   * run — at most a beat late — wherever the worker isn't running. Every run is claimed under a lease and
+   * every event and schedule once, so the two never do one twice. It asks for its module and switches.
+   */
+  const automate = (await platformPausedForWorker())
+    ? null
+    : await workTenant({ budgetMs: 45_000 }).catch((err) => {
+        console.error("automate failed", err);
+        return null;
+      });
   // The count of documents sent through Deskzo's mail only matters for today; older rows go.
   await purgeOldDeskzoSends().catch((err) => console.error("deskzo send count purge failed", err));
   return {
@@ -146,5 +159,6 @@ export async function runHeartbeat() {
     meetingsHeld: calendars?.held ?? 0,
     signaturesSynced: signatures?.synced ?? 0,
     chatMessagesPurged: chatPurge?.deleted ?? 0,
+    workflowRuns: automate?.runs ?? 0,
   };
 }

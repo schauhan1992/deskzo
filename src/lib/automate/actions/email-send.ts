@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { can } from "@/lib/authz/resolve";
+import { STILL_THERE } from "@/lib/contacts/left";
 import { moduleAccessFor } from "@/lib/modules-access";
 import { getOrganisation } from "@/lib/organisation";
 import { mailboxState, sendAsUser } from "@/lib/mail/mailbox";
@@ -36,10 +37,14 @@ const optionalId = z.string().trim().min(1).max(60).optional();
 
 const input = z
   .object({
-    /** Who to: the lead's contact, a contact by id, or a colleague by id ("owner" for the workflow's owner). */
-    to: z.enum(["lead_contact", "contact", "person"]).default("lead_contact"),
+    /**
+     * Who to: the lead's contact, a contact by id, a customer's main contact (the primary one, else
+     * whoever receives documents), or a colleague by id ("owner" for the workflow's owner).
+     */
+    to: z.enum(["lead_contact", "contact", "company_contact", "person"]).default("lead_contact"),
     leadId: optionalId,
     contactId: optionalId,
+    companyId: optionalId,
     userId: personField.optional(),
     /** From: the workflow owner's mailbox, the lead owner's, or the company's mail server. */
     from: z.enum(["owner", "lead_owner", "company"]).default("owner"),
@@ -55,6 +60,7 @@ const input = z
   .superRefine((i, issue) => {
     if ((i.to === "lead_contact" || i.from === "lead_owner") && !i.leadId) issue.addIssue({ code: "custom", path: ["leadId"], message: "Say which lead." });
     if (i.to === "contact" && !i.contactId) issue.addIssue({ code: "custom", path: ["contactId"], message: "Say which contact." });
+    if (i.to === "company_contact" && !i.companyId) issue.addIssue({ code: "custom", path: ["companyId"], message: "Say which customer." });
     if (i.to === "person" && !i.userId) issue.addIssue({ code: "custom", path: ["userId"], message: "Say which person." });
   });
 
@@ -73,6 +79,15 @@ async function recipientFor(ctx: ActionContext, i: Input): Promise<Recipient> {
     await reach(ctx, "leads", "view", i.leadId!, "lead");
     contactId = (await db.lead.findUnique({ where: { id: i.leadId! }, select: { contactId: true } }))?.contactId ?? null;
     if (!contactId) throw new ActionError("The lead has no contact to email.", "PERMANENT");
+  } else if (i.to === "company_contact") {
+    await reach(ctx, "companies", "view", i.companyId!, "customer");
+    const main = await db.contact.findFirst({
+      where: { companyId: i.companyId!, email: { not: null }, ...STILL_THERE },
+      orderBy: [{ isPrimary: "desc" }, { receivesDocuments: "desc" }, { createdAt: "asc" }],
+      select: { id: true },
+    });
+    if (!main) throw new ActionError("The customer has nobody with an email address to send it to.", "PERMANENT");
+    contactId = main.id;
   } else {
     await reach(ctx, "contacts", "view", contactId!, "contact");
   }
@@ -118,8 +133,9 @@ export const emailSend = defineAction({
   permission: null,
   risk: "irreversible",
   input,
+  outputs: ["sent", "via", "from", "recipient", "contactId", "userId"],
   preview: (i) =>
-    `Would email ${i.to === "lead_contact" ? "the lead's contact" : i.to === "contact" ? "a contact" : "a colleague"} from ${i.from === "company" ? "the company's mail server" : i.from === "lead_owner" ? "the lead owner's mailbox" : "the workflow owner's mailbox"}: "${i.subject}".`,
+    `Would email ${i.to === "lead_contact" ? "the lead's contact" : i.to === "contact" ? "a contact" : i.to === "company_contact" ? "the customer's main contact" : "a colleague"} from ${i.from === "company" ? "the company's mail server" : i.from === "lead_owner" ? "the lead owner's mailbox" : "the workflow owner's mailbox"}: "${i.subject}".`,
   async run(ctx, i): Promise<Output> {
     // Sent on an earlier try: that stands, whatever has changed since.
     const done = await priorOutput<Output>(ctx);

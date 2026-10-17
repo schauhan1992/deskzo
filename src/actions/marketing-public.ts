@@ -2,10 +2,8 @@
 
 import { createHash } from "node:crypto";
 import { newLeadStage } from "@/lib/pipeline/server";
-import { runLeadAutomations } from "@/lib/pipeline/automations";
 import { emitLeadCreated } from "@/lib/automate/emit-leads";
 import { emitEvent } from "@/lib/automate/events";
-import { MAIN_PIPELINE_ID } from "@/lib/pipeline/rules";
 import type { FormCategory, MarketingTopic, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
@@ -650,8 +648,6 @@ export async function submitForm(input: {
 
   if (result.lead) {
     await refreshLeadScore(result.lead.id);
-    // The pipeline's automations for a lead arriving (src/lib/pipeline/automations.ts).
-    await runLeadAutomations({ leadId: result.lead.id, trigger: "LEAD_CREATED", pipelineId: entry?.pipelineId ?? MAIN_PIPELINE_ID });
   }
 
   // A lead goes to whoever owns it. Without one the link is to the form's answers, so it goes to
@@ -816,7 +812,6 @@ async function submitInvited(input: {
   }
   if (outcome.lead) {
     await refreshLeadScore(outcome.lead.id);
-    await runLeadAutomations({ leadId: outcome.lead.id, trigger: "LEAD_CREATED", pipelineId: entry?.pipelineId ?? MAIN_PIPELINE_ID });
   }
 
   // Whoever sent the invitation hears about it, then whoever the form routes to, then its owner.

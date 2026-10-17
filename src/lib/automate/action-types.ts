@@ -36,6 +36,13 @@ export type ActionDefinition<I = unknown, O = unknown> = {
   permission: string | null;
   risk: ActionRisk;
   input: z.ZodType<I>;
+  /** The top-level fields of what it hands back, for the steps after: `{{steps.<id>.output.<field>}}`. */
+  outputs?: readonly string[];
+  /**
+   * Merge fields of the action's own, in its own fields — a document email's {{document.number}} — left
+   * for the action to fill rather than read as references. Any other {{…}} in them is still checked.
+   */
+  ownMergeFields?: { fields: readonly string[]; names: readonly string[] };
   /** What a test run says it would do, without doing it. */
   preview(input: I): string;
   run(ctx: ActionContext, input: I): Promise<O>;

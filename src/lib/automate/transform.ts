@@ -77,6 +77,11 @@ export function applyTransform(expr: TransformExpr, context: RunContext, clock: 
       const t = time(a);
       return t === null ? null : clock.dateKey(new Date(t));
     }
+    case "date.text": {
+      // A moment as people read it, on the workspace's clock: "18 Oct 2026, 3:00 pm" — for a message.
+      const t = time(a);
+      return t === null ? null : clock.dateTimeShort(new Date(t));
+    }
     case "value.default":
       return a === null || a === undefined || a === "" ? b : a;
   }

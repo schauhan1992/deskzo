@@ -1,9 +1,7 @@
 import { z } from "zod";
 import { newLeadStage } from "@/lib/pipeline/server";
-import { runLeadAutomations } from "@/lib/pipeline/automations";
 import { emitLeadCreated } from "@/lib/automate/emit-leads";
 import type { EventCause } from "@/lib/automate/action-types";
-import { MAIN_PIPELINE_ID } from "@/lib/pipeline/rules";
 import { Prisma, type ContactDesignation, type LeadSource } from "@prisma/client";
 import { db } from "@/lib/db";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
@@ -467,8 +465,6 @@ export async function intakeLead(key: IntakeSource, p: LeadPayload, options: Int
     entityId: created.id,
     entityLabel: key.id ? `Website lead via “${key.name}”` : `Lead from ${key.name}`,
   });
-  // The pipeline's automations for a lead arriving (src/lib/pipeline/automations.ts).
-  await runLeadAutomations({ leadId: created.id, trigger: "LEAD_CREATED", pipelineId: entry?.pipelineId ?? MAIN_PIPELINE_ID });
 
   return { status: "created", leadId: created.id, reference: formatLeadId(created.leadSeq), assigned: Boolean(owner), notSaved };
 }

@@ -4,11 +4,13 @@ import { db } from "@/lib/db";
 import { currentTenant } from "@/lib/tenancy/resolve";
 import { clockOfTenant } from "@/lib/time/workspace";
 import { blankDefinition, eachStep, type Definition } from "@/lib/automate/definition";
-import { createRun, ENGINE_LIMITS } from "@/lib/automate/engine";
+import { advanceRun, createRun, ENGINE_LIMITS } from "@/lib/automate/engine";
 import { actionByKey, actorRefusal } from "@/lib/automate/registry";
 import { nextFire } from "@/lib/automate/schedule";
 import { validateDefinition, type DefinitionProblem } from "@/lib/automate/validate";
 import { requestWakeHere } from "@/lib/automate/wake";
+import { sampleTrigger } from "@/lib/automate/samples";
+import { blankProblem, templateByKey, type BlankValues } from "@/lib/automate/templates";
 
 /**
  * Making and changing workflows, and the person-led things done to runs (Deskzo Automate). Server-only,
@@ -18,7 +20,19 @@ import { requestWakeHere } from "@/lib/automate/wake";
 
 export type StoreResult<T> = { ok: true; data: T } | { ok: false; error: string; problems?: DefinitionProblem[] };
 
-export async function createWorkflow(input: { name: string; description?: string | null; ownerUserId: string; createdById: string; draft?: Definition }): Promise<{ id: string }> {
+export type NewWorkflow = {
+  name: string;
+  description?: string | null;
+  ownerUserId: string;
+  createdById: string;
+  draft?: Definition;
+  /** Where it came from: built, a template's (`templateKey`), drafted by AI, or converted (`migratedFrom`). */
+  source?: "BUILDER" | "TEMPLATE" | "AI" | "MIGRATED";
+  templateKey?: string | null;
+  migratedFrom?: string | null;
+};
+
+export async function createWorkflow(input: NewWorkflow): Promise<{ id: string }> {
   return db.automationWorkflow.create({
     data: {
       name: input.name.trim().slice(0, 120) || "Untitled workflow",
@@ -26,6 +40,9 @@ export async function createWorkflow(input: { name: string; description?: string
       ownerUserId: input.ownerUserId,
       createdById: input.createdById,
       draft: (input.draft ?? blankDefinition()) as unknown as Prisma.InputJsonValue,
+      ...(input.source ? { source: input.source } : {}),
+      ...(input.templateKey ? { templateKey: input.templateKey } : {}),
+      ...(input.migratedFrom ? { migratedFrom: input.migratedFrom } : {}),
     },
     select: { id: true },
   });
@@ -165,6 +182,78 @@ export async function retryRun(runId: string): Promise<StoreResult<null>> {
     data: { status: "QUEUED", runAfter: new Date(), attempts: 0, error: null, finishedAt: null, cancelRequested: false, lockedBy: null, lockedUntil: null },
   });
   if (!retried.count) return { ok: false, error: "That run changed meanwhile; look again." };
+  // A person has looked and says it didn't happen: the step's "under way" mark goes, so it is done now.
+  if (run.status === "NEEDS_ATTENTION") await db.automationEffect.deleteMany({ where: { runId, output: { path: ["$sending"], equals: true } } });
   await requestWakeHere();
   return { ok: true, data: null };
+}
+
+// ─── The builder (Phase 3) ──────────────────────────────────────────────────────────────────────
+
+/** A template's workflows, as drafts owned by `ownerId` — nothing runs until somebody publishes them. */
+export async function createFromTemplate(key: string, values: BlankValues, ownerId: string): Promise<StoreResult<{ ids: string[] }>> {
+  const template = templateByKey(key);
+  if (!template) return { ok: false, error: "That template isn't one Deskzo has." };
+  const problem = blankProblem(template, values);
+  if (problem) return { ok: false, error: problem };
+  for (const blank of template.blanks) {
+    const person = values[blank.key];
+    if (blank.kind === "person" && typeof person === "string" && person && person !== "owner") {
+      const found = await db.user.findUnique({ where: { id: person }, select: { active: true } });
+      if (!found?.active) return { ok: false, error: `The person for "${blank.label}" isn't an active user.` };
+    }
+  }
+  const ids: string[] = [];
+  for (const made of template.build(values)) {
+    const workflow = await createWorkflow({ name: made.name, description: made.description, ownerUserId: ownerId, createdById: ownerId, draft: made.definition, source: "TEMPLATE", templateKey: key });
+    ids.push(workflow.id);
+  }
+  return { ok: true, data: { ids } };
+}
+
+/** A copy of a workflow's draft, as a new draft of `byUserId`'s. */
+export async function duplicateWorkflow(workflowId: string, byUserId: string): Promise<StoreResult<{ id: string }>> {
+  const workflow = await db.automationWorkflow.findUnique({ where: { id: workflowId }, select: { name: true, description: true, draft: true } });
+  if (!workflow) return { ok: false, error: "That workflow no longer exists." };
+  const copy = await createWorkflow({ name: `Copy of ${workflow.name}`.slice(0, 120), description: workflow.description, ownerUserId: byUserId, createdById: byUserId, draft: workflow.draft as unknown as Definition });
+  return { ok: true, data: copy };
+}
+
+/** A published version, back in the draft to work from. What runs doesn't change until it is published again. */
+export async function restoreVersion(workflowId: string, versionId: string): Promise<StoreResult<null>> {
+  const version = await db.automationVersion.findFirst({ where: { id: versionId, workflowId }, select: { definition: true } });
+  if (!version) return { ok: false, error: "That version isn't one of this workflow's." };
+  const workflow = await db.automationWorkflow.findUnique({ where: { id: workflowId }, select: { status: true } });
+  if (!workflow || workflow.status === "ARCHIVED") return { ok: false, error: "An archived workflow can't be changed." };
+  await db.automationWorkflow.update({ where: { id: workflowId }, data: { draft: version.definition as Prisma.InputJsonValue } });
+  return { ok: true, data: null };
+}
+
+export type TestOutcome = { runId: string; status: string; about: string | null };
+
+/**
+ * Tests the draft as it stands, now, on the latest real record of its kind that `testerId` can see
+ * (src/lib/automate/samples.ts): conditions and branches for real, delays not waited for, reads done,
+ * every other step said and not done — except the safe ones when `live` (engine.ts `LIVE_IN_TEST`).
+ * Carried out here rather than by the worker, so the builder shows the result straight away.
+ */
+export async function testDraft(workflowId: string, testerId: string, live: boolean): Promise<StoreResult<TestOutcome>> {
+  const workflow = await db.automationWorkflow.findUnique({ where: { id: workflowId }, select: { draft: true, status: true } });
+  if (!workflow) return { ok: false, error: "That workflow no longer exists." };
+  const checked = validateDefinition(workflow.draft);
+  if (!checked.ok) return { ok: false, error: "Fix the problems marked before testing.", problems: checked.problems };
+  const sample = await sampleTrigger(testerId, checked.definition.trigger.type);
+  const runId = await createRun({
+    workflowId,
+    versionId: null,
+    idempotencyKey: `${workflowId}:test:${randomUUID()}`,
+    trigger: sample?.payload ?? {},
+    isTest: true,
+    startedById: testerId,
+    test: { definition: checked.definition, live },
+    claimed: true,
+  });
+  if (!runId) return { ok: false, error: "The test could not be started." };
+  const status = await advanceRun(runId, clockOfTenant(await currentTenant()));
+  return { ok: true, data: { runId, status, about: sample?.about ?? null } };
 }

@@ -55,6 +55,7 @@ export const leadCreate = defineAction({
   permission: null,
   risk: "change",
   input,
+  outputs: ["status", "leadId", "reference", "ownerAssigned", "companyId", "contactId"],
   preview: (i) => `Would create a lead for ${i.name}${i.company ? ` at ${i.company}` : ""}.`,
   async run(ctx, i): Promise<Output> {
     const done = await priorOutput<Output>(ctx);

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { findTradeDocumentFor } from "@/lib/documents/load";
-import { isEmailable } from "@/lib/documents/email-template";
+import { MERGE_FIELDS, isEmailable } from "@/lib/documents/email-template";
 import { deliverDocumentSend, prepareDocumentSend, preselectedRecipients, recipientsFor, templateFor, unsendable } from "@/lib/documents/send-email";
 import { ActionError, defineAction } from "@/lib/automate/action-types";
 import { priorOutput, withOutsideEffect } from "@/lib/automate/effects";
@@ -36,6 +36,9 @@ export const documentEmail = defineAction({
   permission: "documents.send",
   risk: "irreversible",
   input,
+  outputs: ["documentId", "sentTo", "via", "from"],
+  // The workspace's own document wording: {{recipient.names}}, {{document.dueDate}}…, filled as it sends.
+  ownMergeFields: { fields: ["subject", "body"], names: MERGE_FIELDS.map((f) => f.key) },
   preview: (i) => `Would email the document to ${i.contactIds?.length ? `${i.contactIds.length} named contact${i.contactIds.length === 1 ? "" : "s"}` : "the customer's document contacts"}${i.subject ? `: "${i.subject}"` : ", in the workspace's wording"}.`,
   async run(ctx, i): Promise<Output> {
     // Sent on an earlier try: that stands, whatever has changed since.

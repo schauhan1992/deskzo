@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   cancelAutomationRun,
+  createBlankWorkflow,
   retryAutomationRun,
   runAutomationWorkflowNow,
   setAutomationPaused,
@@ -81,6 +82,31 @@ export function RunControls({ id, status }: { id: string; status: string }) {
           </Button>
         )}
       </div>
+      <Refusal error={error} />
+    </div>
+  );
+}
+
+/** A new, empty workflow, opened in the builder. */
+export function NewWorkflowButton() {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div>
+      <Button
+        size="sm"
+        disabled={pending}
+        onClick={() =>
+          start(async () => {
+            const made = await createBlankWorkflow();
+            if (made.ok) router.push(made.data.path);
+            else setError(made.error);
+          })
+        }
+      >
+        New workflow
+      </Button>
       <Refusal error={error} />
     </div>
   );

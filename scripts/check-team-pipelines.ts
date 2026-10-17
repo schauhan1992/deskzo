@@ -20,8 +20,9 @@
  *     what it asks for, edited from the lead; moved to another pipeline with a note;
  *   · connected: a lead won in Sales carries on into Onboarding once, with its company, contact, owner and
  *     value; a lead done in a pipeline that isn't sales makes nobody a customer and counts as no sale;
- *   · automations: on arriving and on entering a stage — a task, an assignment, a notification, and an
- *     email that can't be sent noted on the automation, never undoing the move;
+ *   · automations: rows the old settings screen saved, moved onto Automate once as workflows, then run by
+ *     the engine on arriving and on entering a stage — a task, an assignment, a notification, and an email
+ *     that can't be sent noted on the run while the rest is done, never undoing the move;
  *   · booking pages: only hosts active here; times from their hours less what is busy; a booking
  *     opening a lead in the page's pipeline, owned by the host, and a meeting with the customer invited;
  *     the same time never taken twice; too many from one place refused;
@@ -322,6 +323,8 @@ async function run(scratchUrl: string) {
   const leads = require("../src/actions/lead") as typeof import("../src/actions/lead");
   const settings = require("../src/actions/pipeline") as typeof import("../src/actions/pipeline");
   const automationsActions = require("../src/actions/pipeline-automations") as typeof import("../src/actions/pipeline-automations");
+  const engine = require("../src/lib/automate/engine") as typeof import("../src/lib/automate/engine");
+  const { convertPipelineAutomations } = require("../src/lib/automate/migrate-pipeline") as typeof import("../src/lib/automate/migrate-pipeline");
   const booking = require("../src/actions/booking") as typeof import("../src/actions/booking");
   const bookingPublic = require("../src/actions/booking-public") as typeof import("../src/actions/booking-public");
   const bookingServer = require("../src/lib/booking/server") as typeof import("../src/lib/booking/server");
@@ -399,32 +402,53 @@ async function run(scratchUrl: string) {
     ok("Proposal sent asks for a value and a close date first", rule.ok && (await db.leadStage.findUniqueOrThrow({ where: { id: proposal.id }, select: { requiredFields: true } })).requiredFields.join() === "estimatedValue,expectedCloseDate", errorOf(rule));
     ok("  only the fields there are", !(await settings.saveLeadStage({ id: proposal.id, label: proposal.label, status: proposal.status, color: proposal.color, requiredFields: ["cf:nothing_here"] })).ok);
 
-    section("Automations");
+    section("Automations, moved onto Automate");
     const wonStage = await db.leadStage.findFirstOrThrow({ where: { pipelineId: MAIN_PIPELINE_ID, status: "WON" }, select: { id: true } });
-    const onWin = await automationsActions.saveAutomation({
-      pipelineId: MAIN_PIPELINE_ID,
-      name: "Won: kick-off",
-      trigger: "STAGE_ENTERED",
-      stageId: wonStage.id,
-      actions: [
-        { type: "TASK", title: "Kick-off with {{company}}", dueInDays: 2, assignTo: "OWNER" },
-        { type: "NOTIFY", to: "OWNER", message: "{{lead}} is won" },
-      ],
+    // As a workspace has them from before Automate: saved by the pipeline's old settings screen.
+    await db.pipelineAutomation.create({
+      data: {
+        pipelineId: MAIN_PIPELINE_ID,
+        name: "Won: kick-off",
+        trigger: "STAGE_ENTERED",
+        stageId: wonStage.id,
+        createdById: owner.id,
+        actions: [
+          { type: "TASK", title: "Kick-off with {{company}}", dueInDays: 2, assignTo: "OWNER" },
+          { type: "NOTIFY", to: "OWNER", message: "{{lead}} is won" },
+        ],
+      },
     });
-    const onArrive = await automationsActions.saveAutomation({
-      pipelineId: onboardingId,
-      name: "Onboard",
-      trigger: "LEAD_CREATED",
-      actions: [
-        { type: "ASSIGN", userId: onboarder.id },
-        { type: "TASK", title: "Onboard {{company}} ({{pipeline}})", dueInDays: 0, assignTo: "OWNER" },
-        { type: "EMAIL", subject: "Welcome, {{contact}}", body: "Hello {{contact}}" },
-      ],
+    await db.pipelineAutomation.create({
+      data: {
+        pipelineId: onboardingId,
+        name: "Onboard",
+        trigger: "LEAD_CREATED",
+        createdById: owner.id,
+        actions: [
+          { type: "ASSIGN", userId: onboarder.id },
+          { type: "TASK", title: "Onboard {{company}} ({{pipeline}})", dueInDays: 0, assignTo: "OWNER" },
+          { type: "EMAIL", subject: "Welcome, {{contact}}", body: "Hello {{contact}}" },
+        ],
+      },
     });
-    ok("an automation on entering a stage, and one on arriving", onWin.ok && onArrive.ok, `${errorOf(onWin)} ${errorOf(onArrive)}`);
-    ok("  a stage of another pipeline refused", !(await automationsActions.saveAutomation({ pipelineId: onboardingId, name: "x", trigger: "STAGE_ENTERED", stageId: wonStage.id, actions: [{ type: "NOTIFY", to: "OWNER", message: "x" }] })).ok);
+    const converted = await convertPipelineAutomations();
+    const again = await convertPipelineAutomations();
+    ok("each becomes a workflow marked Migrated, switched on — once", converted.converted === 2 && again.converted === 0, JSON.stringify({ converted, again }));
+    const migrated = await db.automationWorkflow.findMany({ where: { source: "MIGRATED" }, select: { name: true, status: true, ownerUserId: true, migratedFrom: true } });
+    ok("  running as the person who made it", migrated.length === 2 && migrated.every((w) => w.status === "ACTIVE" && w.ownerUserId === owner.id), JSON.stringify(migrated));
+    // Runs happen in the worker; here, a pass of the engine after each change.
+    const drain = async () => {
+      for (let i = 0; i < 30; i++) {
+        await engine.workTenant({ budgetMs: 15_000 });
+        const due = (await db.automationRun.count({ where: { status: { in: ["QUEUED", "RUNNING"] } } })) + (await db.automationEvent.count({ where: { matchedAt: null } }));
+        if (!due) break;
+      }
+    };
     as(rep);
-    ok("  only a pipeline manager makes them", !(await automationsActions.saveAutomation({ pipelineId: onboardingId, name: "x", trigger: "LEAD_CREATED", actions: [{ type: "NOTIFY", to: "OWNER", message: "x" }] })).ok);
+    ok("  the old list is for pipeline managers only", (await automationsActions.listAutomationsForManage()) === null);
+    as(manager);
+    const oldList = await automationsActions.listAutomationsForManage();
+    ok("  and shows each with the workflow it became — for an admin to open", oldList?.automations.length === 2 && oldList.automations.every((x) => x.workflow !== null) && oldList.canAutomate === false, JSON.stringify(oldList?.automations.map((x) => x.workflow)));
 
     section("A lead moving through Sales");
     as(rep);
@@ -443,6 +467,7 @@ async function run(scratchUrl: string) {
     section("Won in Sales, carried on into Onboarding");
     const won = await leads.updateLeadStatus({ leadId, stageId: wonStage.id });
     ok("won", won.ok, errorOf(won));
+    await drain();
     ok("  its company a customer — Sales counts as sales", (await db.company.findUniqueOrThrow({ where: { id: acme.id }, select: { stage: true } })).stage === "CUSTOMER");
     const next = await db.lead.findFirst({ where: { fromLeadId: leadId }, select: { id: true, pipelineId: true, stageId: true, status: true, companyId: true, contactId: true, estimatedValue: true, ownerUserId: true } });
     ok("a new lead in Onboarding, at Start", next?.pipelineId === onboardingId && next.stageId === onbStages[0]!.id && next.status === "NEW", JSON.stringify(next));
@@ -450,12 +475,12 @@ async function run(scratchUrl: string) {
     ok("  the won lead noting where it went", (await db.activity.count({ where: { leadId, type: "NOTE", notes: { contains: "Carried on into Onboarding" } } })) === 1);
     const kickOff = await db.task.findFirst({ where: { leadId, title: `Kick-off with ${TAG} Acme Builders` }, select: { assignedToUserId: true } });
     ok("Won's automation: a task for the owner, named for the company", kickOff?.assignedToUserId === rep.id, JSON.stringify(kickOff));
-    ok("  and a notification", (await db.notification.count({ where: { userId: rep.id, type: "LEAD_ACTIVITY", title: "Won: kick-off" } })) === 1);
+    ok("  and a notification", (await db.notification.count({ where: { userId: rep.id, type: "WORKFLOW_MESSAGE", title: "Won: kick-off" } })) === 1);
     const handed = await db.lead.findUniqueOrThrow({ where: { id: next!.id }, select: { ownerUserId: true, assignmentNote: true } });
-    ok("Onboarding's automation on arriving: given to the onboarder", handed.ownerUserId === onboarder.id && /Automation: Onboard/.test(handed.assignmentNote ?? ""), handed.assignmentNote);
+    ok("Onboarding's automation on arriving: given to the onboarder", handed.ownerUserId === onboarder.id && /Onboard/.test(handed.assignmentNote ?? ""), handed.assignmentNote);
     ok("  a task for them, the pipeline's name filled in", (await db.task.count({ where: { leadId: next?.id, title: `Onboard ${TAG} Acme Builders (Onboarding)`, assignedToUserId: onboarder.id } })) === 1);
-    const arriveRow = await db.pipelineAutomation.findFirstOrThrow({ where: { pipelineId: onboardingId, name: "Onboard" }, select: { runs: true, lastError: true } });
-    ok("  and the email it couldn't send noted on it — nobody's mailbox is connected", arriveRow.runs === 1 && /No email/.test(arriveRow.lastError ?? ""), arriveRow.lastError);
+    const arriveRuns = await db.automationRun.findMany({ where: { workflow: { name: "Onboard", source: "MIGRATED" } }, select: { status: true, error: true } });
+    ok("  and the email it couldn't send noted on its run, the rest done — nobody's mailbox is connected", arriveRuns.length === 1 && arriveRuns[0]!.status === "SUCCEEDED" && /mailbox/.test(arriveRuns[0]!.error ?? ""), JSON.stringify(arriveRuns));
     // Reopened and won again: no second onboarding.
     const negotiation = await db.leadStage.findFirstOrThrow({ where: { pipelineId: MAIN_PIPELINE_ID, status: "NEGOTIATION" }, select: { id: true } });
     await leads.updateLeadStatus({ leadId, stageId: negotiation.id });

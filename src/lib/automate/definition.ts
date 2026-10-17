@@ -99,6 +99,7 @@ export const TRANSFORM_FNS = [
   "number.round",
   "date.addDays",
   "date.day",
+  "date.text",
   "value.default",
 ] as const;
 export type TransformFn = (typeof TRANSFORM_FNS)[number];
@@ -111,7 +112,11 @@ export type ActionStep = StepBase & { type: "action"; action: string; input: Rec
 export type ConditionStep = StepBase & { type: "condition"; if: Filter };
 export type BranchPath = { name: string; if: Filter; steps: Step[] };
 export type BranchStep = StepBase & { type: "branch"; paths: BranchPath[]; else?: Step[] };
-export type DelayStep = StepBase & { type: "delay"; for?: Duration; until?: { at: string; days?: number[] } };
+/**
+ * A delay: `for` a while, `until` the next hh:mm here, or `on` a time the data names — a booking's
+ * start, "{{trigger.booking.startsAt}}" — moved `before` or `after` it. A time already gone waits for nothing.
+ */
+export type DelayStep = StepBase & { type: "delay"; for?: Duration; until?: { at: string; days?: number[] }; on?: { value: string; before?: Duration; after?: Duration } };
 export type TransformStep = StepBase & { type: "transform"; set: Record<string, TransformExpr> };
 export type StopStep = StepBase & { type: "stop"; outcome: "succeeded" | "failed"; message?: string };
 export type Step = ActionStep | ConditionStep | BranchStep | DelayStep | TransformStep | StopStep;
@@ -136,8 +141,10 @@ export const stepSchema: z.ZodType<Step> = z.lazy(() =>
         type: z.literal("delay"),
         for: durationSchema.optional(),
         until: z.object({ at: z.string().regex(TIME, "A time is hh:mm, 24-hour."), days: z.array(z.number().int().min(0).max(6)).min(1).max(7).optional() }).strict().optional(),
+        on: z.object({ value: z.string().min(1).max(200), before: durationSchema.optional(), after: durationSchema.optional() }).strict().optional(),
       })
-      .strict(),
+      .strict()
+      .refine((d) => [d.for, d.until, d.on].filter(Boolean).length === 1, "A delay waits for a while, until a time of day, or until a time the data names — one of them."),
     z.object({ ...base, type: z.literal("transform"), set: z.record(z.string().regex(/^[a-z][a-zA-Z0-9_]{0,39}$/), transformExprSchema) }).strict(),
     z.object({ ...base, type: z.literal("stop"), outcome: z.enum(["succeeded", "failed"]), message: z.string().max(300).optional() }).strict(),
   ]),
@@ -148,7 +155,12 @@ export const definitionSchema = z
     schema: z.literal(1),
     trigger: triggerSchema,
     steps: z.array(stepSchema).min(1),
-    settings: z.object({ onError: z.literal("stop").optional() }).strict().optional(),
+    /**
+     * What a step that fails does to the run: "stop" (the default) ends it as failed; "continue" records
+     * the step as failed and goes on to the next — as a pipeline automation always did, and what the
+     * converted ones keep doing. A step that may have been done already still waits for a person.
+     */
+    settings: z.object({ onError: z.enum(["stop", "continue"]).optional() }).strict().optional(),
   })
   .strict();
 export type Definition = z.infer<typeof definitionSchema>;

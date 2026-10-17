@@ -37,6 +37,7 @@ export const leadMove = defineAction({
   permission: null,
   risk: "change",
   input,
+  outputs: ["leadId", "stageId", "status", "moved"],
   preview: (i) => `Would move the lead to ${i.stageId ? "the chosen stage" : `its pipeline's ${String(i.status).toLowerCase()} stage`}.`,
   async run(ctx, i): Promise<Output> {
     const done = await priorOutput<Output>(ctx);

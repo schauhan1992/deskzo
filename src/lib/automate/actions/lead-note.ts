@@ -29,6 +29,7 @@ export const leadNote = defineAction({
   permission: null,
   risk: "change",
   input,
+  outputs: ["activityId", "leadId"],
   preview: (i) => `Would add a ${i.type.toLowerCase()} to the lead's timeline: "${i.note.slice(0, 80)}".`,
   async run(ctx, i) {
     await reach(ctx, "leads", "edit", i.leadId, "lead");

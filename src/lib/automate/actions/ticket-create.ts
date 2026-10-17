@@ -42,6 +42,7 @@ export const ticketCreate = defineAction({
   permission: "tickets.create",
   risk: "change",
   input,
+  outputs: ["ticketId", "ticketSeq", "ref"],
   preview: (i) => `Would open the ticket "${i.title}" (${i.priority.toLowerCase()} priority).`,
   async run(ctx, i): Promise<Output> {
     const done = await priorOutput<Output>(ctx);

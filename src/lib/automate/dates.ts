@@ -9,6 +9,7 @@ import type { Clock } from "@/lib/time/zone";
  * workspace (claimed through `DailyJobRun`), and only for the kinds an active workflow listens for,
  * each record that qualifies gets one event for that day, carrying how many days it is:
  *
+ *   · invoice.due_soon — an invoice issued and not settled, due within 7 days (today is 0). `daysUntilDue`.
  *   · invoice.overdue — an invoice issued and not settled, past its due date. `daysOverdue`.
  *   · renewal.due     — a subscription ending within 60 days, not cancelled. `daysLeft`.
  *   · lead.quiet      — an open lead that hasn't moved stage in 3 days or more. `daysQuiet`.
@@ -18,10 +19,11 @@ import type { Clock } from "@/lib/time/zone";
  * reminder and a journey agree about what "overdue" and "quiet" mean.
  */
 
-export const DATE_TRIGGERS = ["invoice.overdue", "renewal.due", "lead.quiet"] as const;
+export const DATE_TRIGGERS = ["invoice.due_soon", "invoice.overdue", "renewal.due", "lead.quiet"] as const;
 const JOB = "automate-dates";
 const CAP = 1_000;
 const RENEWAL_WINDOW_DAYS = 60;
+const DUE_SOON_DAYS = 7;
 const QUIET_FROM_DAYS = 3;
 const DAY_MS = 86_400_000;
 
@@ -45,10 +47,32 @@ export async function emitDateEvents(clock: Clock, now: Date = new Date()): Prom
   const key = clock.dateKey(now);
   const rows: Row[] = [];
   try {
+    const invoiceSelect = { id: true, docNumber: true, status: true, companyId: true, total: true, currency: true, issueDate: true, dueDate: true, salespersonId: true, company: { select: { name: true } } } as const;
+    if (wanted.has("invoice.due_soon")) {
+      const invoices = await db.tradeDocument.findMany({
+        // A typed day, held at UTC midnight: one due today is due soon, not overdue.
+        where: { docType: "INVOICE", status: { notIn: ["DRAFT", "CANCELLED", "PAID"] }, dueDate: { gte: day, lte: new Date(day.getTime() + DUE_SOON_DAYS * DAY_MS) } },
+        select: invoiceSelect,
+        orderBy: { dueDate: "asc" },
+        take: CAP,
+      });
+      for (const d of invoices) {
+        rows.push({
+          type: "invoice.due_soon",
+          recordType: "document",
+          recordId: `${d.id}@${key}`,
+          payload: {
+            document: { id: d.id, number: d.docNumber, type: "INVOICE", status: d.status, companyId: d.companyId, total: Number(d.total), currency: d.currency, issueDate: d.issueDate.toISOString(), dueDate: d.dueDate?.toISOString() ?? null, salespersonId: d.salespersonId },
+            company: { id: d.companyId, name: d.company.name },
+            daysUntilDue: d.dueDate ? Math.round((d.dueDate.getTime() - day.getTime()) / DAY_MS) : null,
+          },
+        });
+      }
+    }
     if (wanted.has("invoice.overdue")) {
       const invoices = await db.tradeDocument.findMany({
         where: { docType: "INVOICE", status: { notIn: ["DRAFT", "CANCELLED", "PAID"] }, dueDate: { lt: day } },
-        select: { id: true, docNumber: true, status: true, companyId: true, total: true, currency: true, issueDate: true, dueDate: true, salespersonId: true, company: { select: { name: true } } },
+        select: invoiceSelect,
         orderBy: { dueDate: "asc" },
         take: CAP,
       });

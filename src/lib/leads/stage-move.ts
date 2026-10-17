@@ -5,7 +5,6 @@ import { recordAudit } from "@/lib/audit";
 import { definitionsFor, notMigratedYet } from "@/lib/custom-fields/server";
 import { leadStages, stageWrite, stagesOfLeads, type Pipeline } from "@/lib/pipeline/server";
 import { missingForStage, pipelineById, ruleFieldLabel, ruleRefusal, stageChangeNote, stageForStatus, type LeadStageDef } from "@/lib/pipeline/rules";
-import { runLeadAutomations } from "@/lib/pipeline/automations";
 import { carryOnWonLead } from "@/lib/pipeline/carry-on";
 import { emitLeadMoved } from "@/lib/automate/emit-leads";
 import type { EventCause } from "@/lib/automate/action-types";
@@ -21,8 +20,8 @@ import { leadPath } from "@/lib/record-links";
  *   · `planStageMove` — where to, and whether the stage's rule lets it in. Reads only.
  *   · `writeStageMove` — the change, inside the caller's transaction: the stage, the stage-change note
  *     the forecast and wins read, the customer a sales win makes, and the event for workflows.
- *   · `afterStageMove` — what follows once it is saved: the owner told, the audit, the score, wins,
- *     connected pipelines and the stage's own automations.
+ *   · `afterStageMove` — what follows once it is saved: the owner told, the audit, the score, wins and
+ *     connected pipelines. The stage's automations are workflows now, set off by the event the move records.
  */
 
 export type StageMoveRequest = { leadId: string; stageId?: string | null; status?: LeadStatus | null; lostReason?: string | null };
@@ -166,6 +165,4 @@ export async function afterStageMove(move: StageMove, actorId: string, byline: s
   if (move.status === "WON" && move.sales) await detectSalesWins().catch((err) => console.error("sales wins could not be detected", err));
   // Connected pipelines: a lead won here may start again in the next one (src/lib/pipeline/carry-on.ts).
   if (move.won) await carryOnWonLead(lead.id, actorId);
-  // The stage's automations (Settings → Pipeline → Automations).
-  if (move.moves) await runLeadAutomations({ leadId: lead.id, trigger: "STAGE_ENTERED", pipelineId: target.pipelineId, stageId: target.id });
 }

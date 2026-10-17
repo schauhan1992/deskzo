@@ -41,6 +41,7 @@ export default async function Page() {
               automations={automations?.automations ?? []}
               people={automations?.people ?? []}
               automationsReady={automations?.ready ?? false}
+              canAutomate={automations?.canAutomate ?? false}
             />
           </section>
         )}

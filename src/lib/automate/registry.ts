@@ -13,6 +13,8 @@ import { emailSend } from "@/lib/automate/actions/email-send";
 import { meetingSchedule } from "@/lib/automate/actions/meeting-schedule";
 import { documentEmail } from "@/lib/automate/actions/document-email";
 import { reportEmail } from "@/lib/automate/actions/report-email";
+import { leadGet, ticketGet } from "@/lib/automate/actions/record-get";
+import { ticketUpdate } from "@/lib/automate/actions/ticket-update";
 
 /**
  * Every action a workflow can take (Deskzo Automate): Phase 1 a task and a notification, Phase 2 the
@@ -28,7 +30,10 @@ export const ACTIONS: readonly ActionDefinition<never, unknown>[] = [
   leadAssign,
   leadMove,
   leadNote,
+  leadGet,
   ticketCreate,
+  ticketUpdate,
+  ticketGet,
   emailSend,
   meetingSchedule,
   documentEmail,

@@ -10,7 +10,10 @@
 
 export type RunContext = {
   trigger: Record<string, unknown>;
-  steps: Record<string, { output: unknown }>;
+  /** `failed`: why a step failed, in a workflow that carries on past failures. Never read by a reference. */
+  steps: Record<string, { output: unknown; failed?: string }>;
+  /** A test run's own: the draft it tests (it has no version), and whether its safe steps really run. */
+  test?: { definition?: unknown; live?: boolean };
 };
 
 const TEMPLATE = /\{\{\s*([^{}]+?)\s*\}\}/g;
@@ -62,12 +65,15 @@ export function isTemplate(value: unknown): boolean {
   return typeof value === "string" && /\{\{[^{}]+\}\}/.test(value);
 }
 
-/** A value with its references filled in from the run, deep. */
+/**
+ * A value with its references filled in from the run, deep. Something in braces that isn't a reference —
+ * an action's own merge field, {{document.number}} — is left as typed, for the action to fill.
+ */
 export function resolveValue(value: unknown, context: RunContext): unknown {
   if (typeof value === "string") {
     const whole = WHOLE.exec(value);
-    if (whole) return readPath(context, whole[1]!.trim());
-    return value.replace(TEMPLATE, (_, path: string) => asText(readPath(context, path.trim())));
+    if (whole) return isReference(whole[1]!.trim()) ? readPath(context, whole[1]!.trim()) : value;
+    return value.replace(TEMPLATE, (typed, path: string) => (isReference(path.trim()) ? asText(readPath(context, path.trim())) : typed));
   }
   if (Array.isArray(value)) return value.map((item) => resolveValue(item, context));
   if (value && typeof value === "object") {

@@ -19,6 +19,7 @@ export const TRIGGERS: readonly TriggerDefinition[] = [
   { type: "schedule", label: "On a schedule", fields: ["scheduledFor", "firedAt"], event: false },
   { type: "manual", label: "When somebody presses Run", fields: ["startedById", "data"], event: false },
   { type: "lead.created", label: "A lead is created", fields: ["lead", "company", "contact", "via"], event: true },
+  { type: "lead.arrived", label: "A lead arrives in a pipeline (made there, carried on or moved in)", fields: ["lead", "company", "contact", "via", "from", "to"], event: true },
   { type: "lead.stage_changed", label: "A lead moves stage", fields: ["lead", "company", "contact", "from", "to"], event: true },
   { type: "lead.won", label: "A lead is won", fields: ["lead", "company", "contact", "from", "to"], event: true },
   { type: "lead.lost", label: "A lead is lost or disqualified", fields: ["lead", "company", "contact", "from", "to"], event: true },
@@ -27,6 +28,7 @@ export const TRIGGERS: readonly TriggerDefinition[] = [
   { type: "ticket.status_changed", label: "A ticket's status changes", fields: ["ticket", "company", "from", "to"], event: true },
   { type: "document.issued", label: "A document is issued (quote, proforma, invoice…)", fields: ["document", "company"], event: true },
   { type: "invoice.paid", label: "An invoice is paid in full", fields: ["document", "company"], event: true },
+  { type: "invoice.due_soon", label: "An invoice falls due within a week (daily)", fields: ["document", "company", "daysUntilDue"], event: true },
   { type: "invoice.overdue", label: "An invoice is overdue (daily)", fields: ["document", "company", "daysOverdue"], event: true },
   { type: "payment.received", label: "A payment comes in", fields: ["payment", "company"], event: true },
   { type: "order.created", label: "An order is placed", fields: ["order", "company"], event: true },
@@ -41,4 +43,62 @@ export const TRIGGERS: readonly TriggerDefinition[] = [
 
 export function triggerByType(type: string): TriggerDefinition | null {
   return TRIGGERS.find((t) => t.type === type) ?? null;
+}
+
+// ─── The fields inside a payload, for the builder's data picker ───────────────────────────────────
+
+type Field = { key: string; label: string };
+const f = (key: string, label: string): Field => ({ key, label });
+
+/** The fields of each part of a payload, as src/lib/automate/emit-*.ts and dates.ts build them. */
+const PARTS: Record<string, readonly Field[]> = {
+  lead: [f("id", "id"), f("ref", "number"), f("title", "title"), f("status", "status"), f("stageId", "stage id"), f("pipelineId", "pipeline id"), f("source", "source"), f("ownerUserId", "owner"), f("companyId", "customer id"), f("contactId", "contact id"), f("value", "value"), f("expectedCloseDate", "expected close date"), f("lostReason", "lost reason")],
+  company: [f("id", "id"), f("name", "name"), f("ownerUserId", "account manager")],
+  contact: [f("id", "id"), f("name", "name")],
+  stage: [f("stageId", "stage id"), f("status", "status"), f("pipelineId", "pipeline id")],
+  ticket: [f("id", "id"), f("ref", "number"), f("title", "title"), f("type", "type"), f("priority", "priority"), f("status", "status"), f("companyId", "customer id"), f("contactId", "contact id"), f("assignedToUserId", "assigned to")],
+  document: [f("id", "id"), f("number", "number"), f("type", "type"), f("status", "status"), f("companyId", "customer id"), f("total", "total"), f("currency", "currency"), f("issueDate", "issue date"), f("dueDate", "due date"), f("salespersonId", "salesperson")],
+  payment: [f("id", "id"), f("ref", "number"), f("amount", "amount"), f("currency", "currency"), f("method", "method"), f("reference", "reference"), f("companyId", "customer id"), f("invoiceId", "invoice id")],
+  order: [f("id", "id"), f("ref", "number"), f("status", "status"), f("companyId", "customer id"), f("itemId", "product id"), f("itemName", "product"), f("quantity", "quantity"), f("unitPrice", "unit price"), f("endDate", "ends on"), f("addedByUserId", "added by")],
+  booking: [f("id", "id"), f("pageId", "booking page id"), f("page", "booking page"), f("hostUserId", "host"), f("startsAt", "starts at"), f("endsAt", "ends at")],
+  task: [f("id", "id"), f("title", "title"), f("status", "status"), f("priority", "priority"), f("dueDate", "due date"), f("assignedToUserId", "assigned to"), f("createdByUserId", "created by"), f("companyId", "customer id"), f("leadId", "lead id"), f("ticketId", "ticket id")],
+  form: [f("id", "id"), f("name", "name")],
+  submission: [f("id", "id")],
+};
+
+const LABELS: Record<string, string> = {
+  lead: "Lead",
+  company: "Customer",
+  contact: "Contact",
+  ticket: "Ticket",
+  document: "Document",
+  payment: "Payment",
+  order: "Order",
+  booking: "Booking",
+  task: "Task",
+  form: "Form",
+  submission: "Response",
+  from: "From",
+  to: "To",
+};
+
+/**
+ * Every reference a trigger offers — "trigger.lead.title", labelled "Lead › title" — so the builder's
+ * data picker inserts them and nobody types `{{…}}` by hand. A lead move's from and to are stages; a
+ * ticket's are statuses.
+ */
+export function triggerPaths(type: string): { ref: string; label: string }[] {
+  const trigger = triggerByType(type);
+  if (!trigger) return [];
+  const out: { ref: string; label: string }[] = [];
+  for (const field of trigger.fields) {
+    const part = (field === "from" || field === "to") && type.startsWith("lead.") ? "stage" : PARTS[field] ? field : null;
+    const title = LABELS[field] ?? field.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase());
+    if (!part) {
+      out.push({ ref: `trigger.${field}`, label: title });
+      continue;
+    }
+    for (const sub of PARTS[part]!) out.push({ ref: `trigger.${field}.${sub.key}`, label: `${title} › ${sub.label}` });
+  }
+  return out;
 }
