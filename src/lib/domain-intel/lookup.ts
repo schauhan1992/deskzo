@@ -1,4 +1,5 @@
 import { DNS_TIMEOUT_MS, resolver, withTimeout } from "@/lib/dns";
+import { safeFetch } from "@/lib/net/safe-fetch";
 import {
   dmarcPolicyFrom,
   dnsProviderFromNs,
@@ -100,21 +101,23 @@ export async function lookupSite(domain: string, cnames: string[]): Promise<Site
 
   // HTTPS first; a site that only answers on HTTP is itself a finding, so the fallback is kept.
   for (const url of [`https://${domain}`, `http://${domain}`]) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
     try {
-      const response = await fetch(url, {
-        redirect: "follow",
-        signal: controller.signal,
+      // The website is whatever somebody typed on the company, so it is fetched through the guard:
+      // an address inside our network — typed, resolved to, or redirected to — is refused, not read
+      // (src/lib/net/safe-fetch.ts). A refusal reads as "no response", like any unreachable site.
+      const response = await safeFetch(url, {
+        timeoutMs: HTTP_TIMEOUT_MS,
+        maxBytes: 200_000,
+        maxRedirects: 5,
         headers: { "user-agent": USER_AGENT, accept: "text/html,application/xhtml+xml" },
       });
 
-      const html = (await response.text()).slice(0, 200_000);
+      const html = response.body;
       const platform = platformFrom(html, response.headers);
       const host = hostFrom(response.headers, cnames);
 
       return {
-        finalUrl: response.url || url,
+        finalUrl: response.url,
         httpStatus: response.status,
         siteTitle: trimDescription(matchOne(html, /<title[^>]*>([\s\S]*?)<\/title>/i), 160),
         siteDescription: trimDescription(
@@ -129,8 +132,6 @@ export async function lookupSite(domain: string, cnames: string[]): Promise<Site
     } catch {
       // Try the next scheme; if both fail the site is unreachable from here, which is reported as
       // "no response" rather than as an error on the profile.
-    } finally {
-      clearTimeout(timer);
     }
   }
   return empty;

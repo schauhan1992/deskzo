@@ -169,6 +169,7 @@
     "check:document-mail-routes": "tsx scripts/check-document-mail-routes.ts",
     "check:geonames": "tsx scripts/check-geonames.ts",
     "check:tenancy": "tsx scripts/check-tenancy.ts",
+    "check:safe-fetch": "tsx scripts/check-safe-fetch.ts",
     "check:tenancy-isolation": "tsx scripts/check-tenancy-isolation.ts",
     "check:auth-tenancy": "tsx scripts/check-auth-tenancy.ts",
     "check:fanout": "tsx scripts/check-fanout.ts",
