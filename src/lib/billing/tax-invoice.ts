@@ -93,6 +93,57 @@ export async function saveSeller(input: Partial<Seller>, by: string): Promise<{ 
 
 export class TaxInvoiceRefused extends Error {}
 
+// ─── Where a bank transfer goes ──────────────────────────────────────────────────────────────────
+
+/** Deskzo's bank account, printed on every proforma (src/lib/billing/proforma.ts). UPI is optional. */
+export type BankDetails = { accountName: string; bankName: string; account: string; ifsc: string; upi: string | null };
+
+const IFSC = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+const ACCOUNT = /^[0-9]{9,18}$/;
+const UPI = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/;
+
+export async function readBank(): Promise<Partial<BankDetails>> {
+  const [accountName, bankName, account, ifsc, upi] = await Promise.all([
+    getSetting("invoice.bankAccountName"),
+    getSetting("invoice.bankName"),
+    getSetting("invoice.bankAccount"),
+    getSetting("invoice.bankIfsc"),
+    getSetting("invoice.bankUpi"),
+  ]);
+  return { accountName: accountName ?? undefined, bankName: bankName ?? undefined, account: account ?? undefined, ifsc: ifsc ?? undefined, upi: upi ?? null };
+}
+
+/** Why these can't go on a proforma, in the words the console shows; null when they can. */
+export function bankProblem(b: Partial<BankDetails>): string | null {
+  if (!b.accountName?.trim()) return "Enter the name the bank account is in.";
+  if (!b.bankName?.trim()) return "Enter the bank and branch.";
+  if (!ACCOUNT.test(b.account ?? "")) return "The account number is 9 to 18 digits.";
+  if (!IFSC.test(b.ifsc ?? "")) return "An IFSC is 11 characters, like HDFC0001234.";
+  if (b.upi && !UPI.test(b.upi)) return "A UPI ID looks like deskzo@hdfcbank — or leave it empty.";
+  return null;
+}
+
+/** Saves the bank account — all of it, checked as a whole — or clears it when every field is empty. */
+export async function saveBank(input: Partial<BankDetails>, by: string): Promise<void> {
+  const b: Partial<BankDetails> = {
+    accountName: String(input.accountName ?? "").trim().slice(0, 120),
+    bankName: String(input.bankName ?? "").trim().slice(0, 120),
+    account: String(input.account ?? "").replace(/\s+/g, ""),
+    ifsc: String(input.ifsc ?? "").trim().toUpperCase(),
+    upi: String(input.upi ?? "").trim() || null,
+  };
+  const empty = !b.accountName && !b.bankName && !b.account && !b.ifsc && !b.upi;
+  if (!empty) {
+    const problem = bankProblem(b);
+    if (problem) throw new TaxInvoiceRefused(problem);
+  }
+  await setSetting("invoice.bankAccountName", empty ? null : b.accountName!, by);
+  await setSetting("invoice.bankName", empty ? null : b.bankName!, by);
+  await setSetting("invoice.bankAccount", empty ? null : b.account!, by);
+  await setSetting("invoice.bankIfsc", empty ? null : b.ifsc!, by);
+  await setSetting("invoice.bankUpi", empty ? null : (b.upi ?? null), by);
+}
+
 // ─── Numbers ─────────────────────────────────────────────────────────────────────────────────────
 
 const INDIA = "Asia/Kolkata";
@@ -104,15 +155,18 @@ export function financialYear(at: Date): string {
   return `${start}-${String((start + 1) % 100).padStart(2, "0")}`;
 }
 
-/** The next number in a series, under the row's lock: none shared, none skipped (the transaction rolls back together). */
-async function takeNumber(tx: Prisma.TransactionClient, kind: "INV" | "CN", at: Date, prefix: string): Promise<string> {
+/**
+ * The next number in a series, under the row's lock: none shared, none skipped (the transaction rolls
+ * back together). Tax invoices "DZ/2026-27/0001", credit notes "DZ/CN/…", proformas "DZ/PF/…".
+ */
+export async function takeNumber(tx: Prisma.TransactionClient, kind: "INV" | "CN" | "PF", at: Date, prefix: string): Promise<string> {
   const fy = financialYear(at);
   const rows = await tx.$queryRaw<{ taken: number }[]>`
     INSERT INTO "document_series" ("key", "next") VALUES (${`${kind}|${fy}`}, 2)
     ON CONFLICT ("key") DO UPDATE SET "next" = "document_series"."next" + 1
     RETURNING ("next" - 1)::int AS "taken"`;
   const n = String(Number(rows[0]!.taken)).padStart(4, "0");
-  return kind === "INV" ? `${prefix}/${fy}/${n}` : `${prefix}/CN/${fy}/${n}`;
+  return kind === "INV" ? `${prefix}/${fy}/${n}` : `${prefix}/${kind}/${fy}/${n}`;
 }
 
 // ─── What an invoice says ────────────────────────────────────────────────────────────────────────
@@ -120,7 +174,8 @@ async function takeNumber(tx: Prisma.TransactionClient, kind: "INV" | "CN", at: 
 export type TaxParty = { name: string; address: string | null; state: string; stateName: string; gstin: string | null; email: string | null };
 export type TaxLine = { description: string; quantity: number; unitPrice: number; taxable: number };
 export type TaxDocument = {
-  kind: "invoice" | "credit-note";
+  /** A proforma (src/lib/billing/proforma.ts) is laid out the same, but is not a tax invoice. */
+  kind: "invoice" | "credit-note" | "proforma";
   number: string;
   issuedAt: string;
   seller: TaxParty & { pan: string | null };
@@ -145,6 +200,9 @@ export type TaxDocument = {
   /** A credit note's invoice, and why. */
   against: { number: string; issuedAt: string } | null;
   reason: string | null;
+  /** A proforma's: where to pay, and until when it holds. */
+  bank?: BankDetails | null;
+  validUntil?: string | null;
 };
 
 /** The GST in an amount, split by where it is supplied: half each within the seller's state, all IGST across. */
@@ -201,13 +259,20 @@ function buyerOf(inv: InvoiceRow, seller: Seller): { buyer: TaxParty; endUser: T
       endUser: { name: inv.tenant.billingName ?? inv.tenant.name, host: subdomainHost(inv.tenant.slug) },
     };
   }
-  const t = inv.tenant;
-  const gstin = validGstin(t.taxId);
-  const state = stateCodeFromGstin(gstin) ?? (t.billingState && GST_STATE_CODES[t.billingState] ? t.billingState : seller.state);
-  return { buyer: { name: t.billingName ?? t.name, address: t.billingAddress, state, stateName: stateName(state), gstin, email: t.billingEmail ?? t.ownerEmail }, endUser: null };
+  return { buyer: tenantBuyer(inv.tenant, seller), endUser: null };
 }
 
-const lineText = (name: string, quantity: number, perSeat: boolean, periods: number, interval: string) => {
+/** A workspace as the buyer: its registered name and address, its GSTIN, and its state — from the GSTIN, as chosen, or the seller's. */
+export function tenantBuyer(
+  t: { name: string; billingName: string | null; billingAddress: string | null; billingState: string | null; taxId: string | null; billingEmail: string | null; ownerEmail: string | null },
+  seller: Pick<Seller, "state">,
+): TaxParty {
+  const gstin = validGstin(t.taxId);
+  const state = stateCodeFromGstin(gstin) ?? (t.billingState && GST_STATE_CODES[t.billingState] ? t.billingState : seller.state);
+  return { name: t.billingName ?? t.name, address: t.billingAddress, state, stateName: GST_STATE_CODES[state] ?? state, gstin, email: t.billingEmail ?? t.ownerEmail };
+}
+
+export const lineText = (name: string, quantity: number, perSeat: boolean, periods: number, interval: string) => {
   const per = interval === "YEAR" ? "year" : "month";
   return `${name}${perSeat ? ` — ${quantity} ${quantity === 1 ? "person" : "people"}` : quantity > 1 ? ` ×${quantity}` : ""}${periods > 1 ? `, ${periods} ${per}s` : `, a ${per}`}`;
 };
@@ -283,7 +348,7 @@ function documentOf(inv: InvoiceRow, seller: Seller, number: string, at: Date): 
 // ─── Issuing ─────────────────────────────────────────────────────────────────────────────────────
 
 /** Seller's details as they must be to issue — or null while they aren't. */
-async function completeSeller(): Promise<Seller | null> {
+export async function completeSeller(): Promise<Seller | null> {
   const s = await readSeller();
   return sellerProblem(s) ? null : (s as Seller);
 }
@@ -371,11 +436,11 @@ export async function creditRefunds(invoiceId: string): Promise<string | null> {
 
 // ─── The private link, and the mail ──────────────────────────────────────────────────────────────
 
-/** "i" an invoice, "c" a credit note. */
-type Kind = "i" | "c";
+/** "i" an invoice, "c" a credit note, "p" a proforma. */
+type Kind = "i" | "c" | "p";
 
 /** The public site's address, where the document page is — as src/lib/platform/site-content.ts makes it, without its weight. */
-function siteOrigin(): string {
+export function siteOrigin(): string {
   const host = `${PLATFORM_DOMAIN}${process.env.PLATFORM_PORT?.trim() ? `:${process.env.PLATFORM_PORT.trim()}` : ""}`;
   return `${protocolFor(host)}://${host}`;
 }
@@ -394,13 +459,17 @@ export function documentUrl(kind: Kind, id: string): string {
 /** The document a token names, as issued — or null for anything else, a forged or mistyped token included. */
 export async function documentByToken(token: string): Promise<TaxDocument | null> {
   const [kind, id, mac] = String(token ?? "").split(".");
-  if ((kind !== "i" && kind !== "c") || !id || !mac || !/^[a-z0-9]{20,40}$/.test(id)) return null;
+  if ((kind !== "i" && kind !== "c" && kind !== "p") || !id || !mac || !/^[a-z0-9]{20,40}$/.test(id)) return null;
   const want = Buffer.from(macOf(kind, id));
   const got = Buffer.from(mac);
   if (want.length !== got.length || !timingSafeEqual(want, got)) return null;
   if (kind === "i") {
     const inv = await controlDb().invoice.findUnique({ where: { id }, select: { taxDetails: true } });
     return (inv?.taxDetails as unknown as TaxDocument | null) ?? null;
+  }
+  if (kind === "p") {
+    const proforma = await controlDb().platformProforma.findUnique({ where: { id }, select: { details: true } });
+    return (proforma?.details as unknown as TaxDocument | null) ?? null;
   }
   const note = await controlDb().platformCreditNote.findUnique({ where: { id }, select: { details: true } });
   return (note?.details as unknown as TaxDocument | null) ?? null;

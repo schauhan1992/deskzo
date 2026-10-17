@@ -144,7 +144,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // Wishes on the shown person's birthday or work anniversary today — an admin viewing as them sees
   // theirs, read-only. Empty on any other day; never throws (src/lib/hr/wishes.ts).
   const wishes = shownUser ? await wishesForLayout(shownUser.id) : [];
-  // The owner's reminder while a trial or a grace period runs — null for everybody else.
+  // The reminder while a trial or a grace period runs, to whoever manages billing — null for everybody else.
   const billing = session?.user && !viewAs ? await billingNotice().catch(() => null) : null;
   // The platform's announcements for this workspace. Cached for a minute and never throws, so a
   // control plane that is down or slow costs a page nothing (src/lib/platform/announcements.ts).

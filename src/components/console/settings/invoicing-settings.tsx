@@ -11,11 +11,25 @@ import { GST_STATE_OPTIONS } from "@/lib/gst-engine";
 
 /**
  * The seller's details on Deskzo's own GST tax invoices (src/lib/billing/tax-invoice.ts): the
- * registered name, address and state, the GSTIN and PAN, the SAC and the series' prefix. An owner
- * sets them; saving issues every paid invoice that was waiting for them, oldest first. The server
- * checks them as a whole — the GSTIN must be the chosen state's.
+ * registered name, address and state, the GSTIN and PAN, the SAC and the series' prefix — and the bank
+ * account a proforma asks workspaces to pay into (src/lib/billing/proforma.ts). An owner sets them;
+ * saving issues every paid invoice that was waiting for them, oldest first. The server checks them as
+ * a whole — the GSTIN must be the chosen state's; the bank account all of it, or none.
  */
-export type SellerValues = { name: string; address: string; state: string; gstin: string; pan: string; sac: string; prefix: string };
+export type SellerValues = {
+  name: string;
+  address: string;
+  state: string;
+  gstin: string;
+  pan: string;
+  sac: string;
+  prefix: string;
+  bankAccountName: string;
+  bankName: string;
+  bankAccount: string;
+  bankIfsc: string;
+  bankUpi: string;
+};
 
 export function InvoicingSettingsForm({ initial, waiting }: { initial: SellerValues; waiting: number }) {
   const id = useId();
@@ -74,9 +88,35 @@ export function InvoicingSettingsForm({ initial, waiting }: { initial: SellerVal
         <div className="space-y-1.5">
           <Label htmlFor={`${id}-prefix`}>Number prefix</Label>
           <Input id={`${id}-prefix`} value={v.prefix} onChange={(e) => set("prefix")({ target: { value: e.target.value.toUpperCase() } })} maxLength={6} className="font-mono" />
-          <p className="text-[11px] text-muted">{`Invoices are ${v.prefix || "DZ"}/2026-27/0001 onwards, credit notes ${v.prefix || "DZ"}/CN/2026-27/0001 — a new series each financial year.`}</p>
+          <p className="text-[11px] text-muted">{`Invoices are ${v.prefix || "DZ"}/2026-27/0001 onwards, credit notes ${v.prefix || "DZ"}/CN/2026-27/0001, proformas ${v.prefix || "DZ"}/PF/2026-27/0001 — a new series each financial year.`}</p>
         </div>
       </div>
+      <fieldset className="space-y-3 border-t border-line pt-4">
+        <legend className="text-sm font-medium text-text">Bank account, for proformas</legend>
+        <p className="text-xs text-muted">Printed on every proforma a workspace in India asks for, to pay by bank transfer. Until it is set, workspaces can only pay online.</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor={`${id}-bank-holder`}>Account name</Label>
+            <Input id={`${id}-bank-holder`} value={v.bankAccountName} onChange={set("bankAccountName")} maxLength={120} autoComplete="off" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`${id}-bank-name`}>Bank and branch</Label>
+            <Input id={`${id}-bank-name`} value={v.bankName} onChange={set("bankName")} maxLength={120} autoComplete="off" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`${id}-bank-account`}>Account number</Label>
+            <Input id={`${id}-bank-account`} value={v.bankAccount} onChange={set("bankAccount")} maxLength={24} inputMode="numeric" autoComplete="off" className="font-mono" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`${id}-bank-ifsc`}>IFSC</Label>
+            <Input id={`${id}-bank-ifsc`} value={v.bankIfsc} onChange={(e) => set("bankIfsc")({ target: { value: e.target.value.toUpperCase() } })} maxLength={11} autoComplete="off" className="font-mono" />
+          </div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label htmlFor={`${id}-bank-upi`}>UPI ID (optional)</Label>
+            <Input id={`${id}-bank-upi`} value={v.bankUpi} onChange={set("bankUpi")} maxLength={120} autoComplete="off" className="font-mono" />
+          </div>
+        </div>
+      </fieldset>
       <div className="flex items-center justify-end gap-2 border-t border-line pt-4">
         {dirty && (
           <Button type="button" variant="ghost" size="sm" onClick={() => setV(initial)} disabled={action.pending}>

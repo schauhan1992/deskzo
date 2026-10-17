@@ -1,5 +1,6 @@
 import type { BillingGateway, Prisma, SubscriptionStatus, SuspendedFor, TenantStatus } from "@deskzo/control-client";
 import { controlDb } from "@/lib/platform/control-db";
+import { refreshEntitlements } from "@/lib/platform/entitlements";
 import { deprovisionTenant, liftBillingHold, suspendTenant } from "@/lib/platform/lifecycle";
 import { sendPlatformMail } from "@/lib/platform/mailer";
 import { autoDeprovision } from "@/lib/platform/settings";
@@ -267,7 +268,9 @@ export async function applyStanding(tenantId: string, now = new Date()): Promise
       const reason = standing.kind === "trial-over" ? "trial ended" : standing.kind === "past-due" ? "payment overdue" : "subscription ended";
       await suspendTenant(tenantId, "billing", reason, "BILLING");
       // A trial that has run out is over, not merely paused: buying a plan starts the paid one.
-      await control.subscription.updateMany({ where: { tenantId, gateway: "MANUAL", status: "TRIALING" }, data: { status: "CANCELLED", cancelledAt: now } });
+      const ended = await control.subscription.updateMany({ where: { tenantId, gateway: "MANUAL", status: "TRIALING" }, data: { status: "CANCELLED", cancelledAt: now } });
+      // Its plans are what is live now — the trial's no longer among them.
+      if (ended.count) await refreshEntitlements(tenantId);
       out.action = "held";
       break;
     }

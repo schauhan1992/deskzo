@@ -3,7 +3,8 @@
 import type { BillingInterval, OfflinePaymentMethod, StaffRole } from "@deskzo/control-client";
 import type { ConsoleResult } from "@/actions/platform/console";
 import { OFFLINE_METHODS, quoteOffline, recordOfflinePayment, voidOfflinePayment, type OfflineQuote, type RecordedPayment } from "@/lib/billing/offline";
-import { saveSeller } from "@/lib/billing/tax-invoice";
+import { saveBank, saveSeller } from "@/lib/billing/tax-invoice";
+import { cancelProforma } from "@/lib/billing/proforma";
 import { applyStanding } from "@/lib/billing/lifecycle";
 import { MANAGERS, OWNERS, SELLERS, cleanText, consoleAudit, consoleRefusal, revalidateConsole } from "@/lib/platform/console-guard";
 import { ConsoleRefused } from "@/lib/platform/refused";
@@ -63,6 +64,8 @@ export type OfflinePaymentForm = {
   receivedOn: string;
   partnerId: string;
   note: string;
+  /** The workspace's proforma this pays, when it pays one; empty: none. */
+  proformaId?: string;
 };
 
 /** "1,77,000.50" → paise; null when it isn't an amount. */
@@ -95,6 +98,7 @@ export async function consoleRecordOfflinePayment(form: OfflinePaymentForm): Pro
         receivedOn: cleanText(f.receivedOn, 10),
         partnerId: partnerId ? idOf(partnerId, "Choose a partner from the directory.") : null,
         note: cleanText(f.note, 500) || null,
+        proformaId: cleanText(f.proformaId, 64) ? idOf(cleanText(f.proformaId, 64), "That proforma no longer exists.") : null,
       },
       staff.id,
     );
@@ -113,7 +117,29 @@ export async function consoleVoidOfflinePayment(paymentId: string, reason: strin
   });
 }
 
-export type InvoicingForm = { name: string; address: string; state: string; gstin: string; pan: string; sac: string; prefix: string };
+/** A proforma a workspace asked for, closed unpaid — asked for by mistake, or settled another way. */
+export async function consoleCancelProforma(proformaId: string): Promise<ConsoleResult<null>> {
+  return asStaff(SELLERS, async (staff) => {
+    await cancelProforma(idOf(proformaId, "That proforma no longer exists."), staff.id);
+    return null;
+  });
+}
+
+export type InvoicingForm = {
+  name: string;
+  address: string;
+  state: string;
+  gstin: string;
+  pan: string;
+  sac: string;
+  prefix: string;
+  /** Where a bank transfer goes, printed on every proforma — all of it, or none. */
+  bankAccountName?: string;
+  bankName?: string;
+  bankAccount?: string;
+  bankIfsc?: string;
+  bankUpi?: string;
+};
 
 /** The seller's details on every tax invoice. Owners only; saving issues every invoice waiting for them. */
 export async function consoleSaveInvoicing(form: InvoicingForm): Promise<ConsoleResult<{ issued: number }>> {
@@ -128,8 +154,11 @@ export async function consoleSaveInvoicing(form: InvoicingForm): Promise<Console
       sac: cleanText(f.sac, 8),
       prefix: cleanText(f.prefix, 6),
     };
+    const bank = { accountName: cleanText(f.bankAccountName, 120), bankName: cleanText(f.bankName, 120), account: cleanText(f.bankAccount, 24), ifsc: cleanText(f.bankIfsc, 11), upi: cleanText(f.bankUpi, 120) || null };
+    // The bank account first: a mistake there leaves the seller's details as they were.
+    await saveBank(bank, staff.id);
     const done = await saveSeller(input, staff.id);
-    await consoleAudit(staff, "invoicing.settings", { name: input.name, state: input.state, gstin: input.gstin, sac: input.sac, prefix: input.prefix, issued: done.issued });
+    await consoleAudit(staff, "invoicing.settings", { name: input.name, state: input.state, gstin: input.gstin, sac: input.sac, prefix: input.prefix, issued: done.issued, bank: bank.account ? `…${bank.account.slice(-4)} ${bank.ifsc}` : null });
     return done;
   });
 }

@@ -29,6 +29,12 @@ export const PLAIN_KEYS = [
   "invoice.sellerPan",
   "invoice.sac",
   "invoice.prefix",
+  // Where a bank transfer goes, printed on every proforma (src/lib/billing/proforma.ts).
+  "invoice.bankAccountName",
+  "invoice.bankName",
+  "invoice.bankAccount",
+  "invoice.bankIfsc",
+  "invoice.bankUpi",
   "billing.autoDeprovision",
   "billing.dailyRanOn",
   "staff.twoFactor",

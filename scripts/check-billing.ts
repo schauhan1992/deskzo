@@ -9,13 +9,17 @@
  *   · settings: gateway keys sealed and never shown back; open signup; the trial's length;
  *   · prices made at the gateway, with the parameters each needs; a new one replaces the old;
  *   · checkout: Stripe Checkout with tax collected, Razorpay a subscription per plan; what can be bought;
+ *     never fewer people than have an account; one Razorpay attempt waiting at a time;
+ *   · paying through Razorpay, a change from the next renewal: authorised now, counting for nothing
+ *     until it starts, the current plan cancelled at its end only once all of it is authorised;
  *   · webhooks: refused unsigned, late or forged; processed once however often they come; the
  *     subscription, its items, invoices and the workspace's entitlements written from them;
  *   · the lifecycle: a trial, its reminders, its grace, the hold; a failed payment's grace; paying
  *     again lifting the hold at once; a cancellation running to its end; a staff hold never lifted by
  *     billing; closing after ninety days only when turned on;
  *   · a held workspace answering only its sign-in and billing page;
- *   · the workspace's billing page and actions — its owner's alone; open signup starting a trial;
+ *   · the workspace's billing page and actions — its owner's, and whoever holds "Manage the plan and
+ *     billing" (an admin by default), a 404 for anybody else; open signup starting a trial;
  *   · the platform tick and the webhook routes answering only on the platform's address, and what the
  *     tick did kept for the console;
  *   · the console: a workspace paying at a gateway given no plans or trial by hand; a webhook that
@@ -99,9 +103,9 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.host === "api.razorpay.com") {
     if (method === "POST" && p === "/v1/plans") return answer(200, { id: `plan_zz${++seq}` });
     if (method === "POST" && p === "/v1/subscriptions") {
-      const b = JSON.parse(body) as { plan_id: string; quantity: number; notes: Record<string, string> };
+      const b = JSON.parse(body) as { plan_id: string; quantity: number; notes: Record<string, string>; start_at?: number };
       const id = `sub_zz${++seq}`;
-      const made = { id, entity: "subscription", plan_id: b.plan_id, status: "created", quantity: b.quantity, short_url: `https://rzp.test/${id}`, notes: b.notes, customer_id: null };
+      const made = { id, entity: "subscription", plan_id: b.plan_id, status: "created", quantity: b.quantity, short_url: `https://rzp.test/${id}`, notes: b.notes, customer_id: null, start_at: b.start_at ?? null };
       razorSubs.set(id, made);
       return answer(200, made);
     }
@@ -328,6 +332,12 @@ async function main() {
     const US2 = await makeTenant("zzbill-us2", "US", "USD", 14);
     await checkout.startCheckout(US2, { interval: "MONTH", items: [{ planKey: "zz-pro", quantity: 1 }] }, "https://zzbill-us2.test/settings/billing");
     ok("the next payment uses the copies already made — none made twice", callsTo("POST", "/v1/prices").length === 2 && (await control.gatewayPrice.count({ where: { gateway: "STRIPE" } })) === 2);
+    const callsBeforeShort = calls.length;
+    const short = await refused(() => checkout.startCheckout(US2, { interval: "MONTH", items: [{ planKey: "zz-pro", quantity: 1 }] }, "https://zzbill-us2.test/settings/billing", { seatsInUse: 8 }));
+    ok("fewer people than have an account: refused, before the gateway hears of it", /8 people have an account.*for 5/.test(short) && calls.length === callsBeforeShort, short);
+    const flat = (kind: "EDITION" | "ADDON", seats: number | null, quantity = 1, perSeat = false) => ({ quantity, price: { perSeat }, plan: { kind, seats } });
+    ok("  five more people on top make it enough", checkout.seatShortfall([flat("EDITION", 5), flat("ADDON", 5)], 8) === null);
+    ok("  per person: as many as bought; a plan without a limit, any number", /4 people have an account/.test(checkout.seatShortfall([flat("EDITION", null, 3, true)], 4) ?? "") && checkout.seatShortfall([flat("EDITION", null)], 500) === null);
     const keptRazorpay = await control.platformSetting.findMany({ where: { key: { startsWith: "razorpay." } } });
     await control.platformSetting.deleteMany({ where: { key: { startsWith: "razorpay." } } });
     const IN2 = await makeTenant("zzbill-in2", "IN", "INR", 14);
@@ -506,6 +516,63 @@ async function main() {
     const cancelCall = JSON.parse(callsTo("POST", `/v1/subscriptions/${firstRzp}/cancel`)[0]!.body) as { cancel_at_cycle_end: number };
     ok("cancelled from the workspace: at the end of the cycle, at Razorpay and here", cancelCall.cancel_at_cycle_end === 1 && (await control.subscription.findUniqueOrThrow({ where: { externalId: firstRzp! } })).cancelAtPeriodEnd);
 
+    section("Razorpay: a change of plan or people from the next renewal");
+    const IN3 = await makeTenant("zzbill-in3", "IN", "INR", 14);
+    const seatsOf = async (id: string) => rules.parseEntitlements((await control.tenant.findUniqueOrThrow({ where: { id } })).entitlements).seats;
+    ok("not for a workspace paying through Stripe, nor one not paying yet", /Manage billing/.test(await refused(() => checkout.scheduleRazorpayChange(US, { interval: "MONTH", items: [{ planKey: "zz-pro", quantity: 1 }] }))) && /isn't paying through Razorpay/.test(await refused(() => checkout.scheduleRazorpayChange(IN3, { interval: "MONTH", items: [{ planKey: "zz-pro", quantity: 1 }] }))));
+    await checkout.startCheckout(IN3, { interval: "MONTH", items: [{ planKey: "zz-pro", quantity: 1 }] }, "https://zzbill-in3.test/settings/billing");
+    const oldRzp = [...razorSubs.keys()].at(-1)!;
+    const renewsAt = Math.floor((Date.now() + 20 * DAY) / 1000);
+    Object.assign(razorSubs.get(oldRzp)!, { status: "active", current_end: renewsAt });
+    const oldOn = razorSigned(rzpEvent("subscription.activated", oldRzp));
+    await webhooks.receiveRazorpayWebhook(oldOn.raw, oldOn.signature, "evt_rzp_in3_1");
+    ok("paying through Razorpay: five people, renewing in twenty days", (await seatsOf(IN3)) === 5 && (await control.subscription.findUniqueOrThrow({ where: { externalId: oldRzp } })).status === "ACTIVE");
+    ok("  in the middle of its term it can't be bought again — it is changed instead", /from the next renewal/.test(await refused(() => checkout.startCheckout(IN3, { interval: "MONTH", items: [{ planKey: "zz-pro", quantity: 1 }] }, "https://zzbill-in3.test/settings/billing"))));
+    const change = await checkout.scheduleRazorpayChange(IN3, { interval: "MONTH", items: [{ planKey: "zz-pro", quantity: 1 }, { planKey: "zz-seats", quantity: 2 }] }, { seatsInUse: 3 });
+    const changeBodies = callsTo("POST", "/v1/subscriptions").slice(-2).map((c) => JSON.parse(c.body) as { start_at?: number; quantity: number });
+    const [newA, newB] = [...razorSubs.keys()].slice(-2) as [string, string];
+    ok("a change: a subscription per plan, starting the day the current one renews", change.authorisations.length === 2 && changeBodies.every((b) => b.start_at === renewsAt) && change.startsAt.getTime() === renewsAt * 1000);
+    ok(
+      "  remembered as waiting, starting then — and the workspace keeps what it has",
+      (await control.subscription.count({ where: { tenantId: IN3, status: "INCOMPLETE", startsAt: new Date(renewsAt * 1000) } })) === 2 && (await seatsOf(IN3)) === 5,
+    );
+    razorSubs.get(newA)!.status = "authenticated";
+    const authA = razorSigned(rzpEvent("subscription.authenticated", newA));
+    await webhooks.receiveRazorpayWebhook(authA.raw, authA.signature, "evt_rzp_in3_2");
+    const rowA = await control.subscription.findUniqueOrThrow({ where: { externalId: newA } });
+    ok(
+      "one of the two authorised: it waits to start, and the current plan still renews — half a change changes nothing",
+      rowA.status === "ACTIVE" && rowA.startsAt?.getTime() === renewsAt * 1000 && !(await control.subscription.findUniqueOrThrow({ where: { externalId: oldRzp } })).cancelAtPeriodEnd && (await seatsOf(IN3)) === 5,
+    );
+    razorSubs.get(newB)!.status = "authenticated";
+    const authB = razorSigned(rzpEvent("subscription.authenticated", newB));
+    await webhooks.receiveRazorpayWebhook(authB.raw, authB.signature, "evt_rzp_in3_3");
+    const oldCancel = callsTo("POST", `/v1/subscriptions/${oldRzp}/cancel`).map((c) => JSON.parse(c.body) as { cancel_at_cycle_end: number });
+    ok("both authorised: the current plan is cancelled at the end of its period, at Razorpay and here", oldCancel.length === 1 && oldCancel[0]!.cancel_at_cycle_end === 1 && (await control.subscription.findUniqueOrThrow({ where: { externalId: oldRzp } })).cancelAtPeriodEnd);
+    ok("  until then nothing changes: five people, still paid", (await seatsOf(IN3)) === 5 && (await lifecycle.billingStanding(IN3)).kind === "paid");
+    const changeAgain = await checkout.scheduleRazorpayChange(IN3, { interval: "MONTH", items: [{ planKey: "zz-pro", quantity: 1 }, { planKey: "zz-seats", quantity: 1 }] }, { seatsInUse: 3 });
+    const [lastA, lastB] = [...razorSubs.keys()].slice(-2) as [string, string];
+    ok(
+      "a newer change replaces one waiting: the earlier ones cancelled at Razorpay at once, and here",
+      changeAgain.authorisations.length === 2 && razorSubs.get(newA)!.status === "cancelled" && razorSubs.get(newB)!.status === "cancelled" && (await control.subscription.count({ where: { externalId: { in: [newA, newB] }, status: "CANCELLED" } })) === 2,
+    );
+    for (const id of [lastA, lastB]) {
+      razorSubs.get(id)!.status = "authenticated";
+      const signed = razorSigned(rzpEvent("subscription.authenticated", id));
+      await webhooks.receiveRazorpayWebhook(signed.raw, signed.signature, `evt_auth_${id}`);
+    }
+    // The day it starts: the new ones charged and active, the old one ended.
+    const startedAt = Math.floor(Date.now() / 1000) - 60;
+    for (const id of [lastA, lastB]) {
+      Object.assign(razorSubs.get(id)!, { status: "active", start_at: startedAt, current_end: startedAt + 30 * 86_400 });
+      const signed = razorSigned(rzpEvent("subscription.activated", id));
+      await webhooks.receiveRazorpayWebhook(signed.raw, signed.signature, `evt_start_${id}`);
+    }
+    razorSubs.get(oldRzp)!.status = "cancelled";
+    const ended = razorSigned(rzpEvent("subscription.cancelled", oldRzp));
+    await webhooks.receiveRazorpayWebhook(ended.raw, ended.signature, "evt_rzp_in3_end");
+    ok("on the day: the new plans count — ten people — and the old one has ended", (await seatsOf(IN3)) === 10 && (await control.subscription.findUniqueOrThrow({ where: { externalId: oldRzp } })).status === "CANCELLED" && (await control.subscription.count({ where: { tenantId: IN3, status: "ACTIVE", startsAt: null } })) === 2);
+
     section("A trial: reminders, grace, the hold");
     const T = await makeTenant("zzbill-trial", "IN", "INR", 3);
     mail.length = 0;
@@ -519,8 +586,9 @@ async function main() {
     ok("  with a reminder that it will be held", (await lifecycle.applyStanding(T, new Date(trialEnd.getTime() + 5 * DAY))).reminded && /held/.test(mail.at(-1)!.subject));
     const trialHeld = await lifecycle.applyStanding(T, new Date(trialEnd.getTime() + 8 * DAY));
     ok("after the grace: held for billing, and the trial is over", trialHeld.action === "held" && (await control.subscription.count({ where: { tenantId: T, status: "TRIALING" } })) === 0);
+    ok("  its plans are no longer the trial's", rules.parseEntitlements((await control.tenant.findUniqueOrThrow({ where: { id: T } })).entitlements).plans.length === 0);
     await plans.setTrialEnd(T, new Date(Date.now() + 10 * DAY), "script:check");
-    ok("staff can give it more time — and it opens again", (await lifecycle.applyStanding(T)).action === "lifted" && (await lifecycle.billingStanding(T)).kind === "trial");
+    ok("staff can give it more time — and it opens again", (await lifecycle.applyStanding(T)).action === "lifted" && (await lifecycle.billingStanding(T)).kind === "trial" && rules.parseEntitlements((await control.tenant.findUniqueOrThrow({ where: { id: T } })).entitlements).plans.includes("zz-pro"));
     await plans.giveTrialPlans(T, "script:check");
     ok("  or give it its plan for nothing: billing leaves it alone", (await lifecycle.billingStanding(T)).kind === "exempt");
 
@@ -563,23 +631,40 @@ async function main() {
     const owner = await inWs(() => db.user.findFirstOrThrow({ where: { isSuperAdmin: true } }));
     const member = await inWs(async () => db.user.create({ data: { email: "member@zzbill.example", name: "Zz Member", role: "ADMIN", passwordHash: await bcrypt.hash(randomBytes(8).toString("hex"), 10) } }));
     actor = { id: member.id, name: member.name, email: member.email, role: member.role };
-    const byMember = await inWs(() => billingActions.checkoutPlan({ interval: "MONTH", items: [{ planKey: "zz-pro", quantity: 1 }] }));
-    ok("an administrator who is not the owner sees nothing, and buys nothing", (await inWs(() => billingActions.getBilling())) === null && !byMember.ok);
+    ok("an administrator who is not the owner manages billing too, by default", (await inWs(() => billingActions.getBilling())) !== null);
+    await inWs(() => db.userPermission.create({ data: { userId: member.id, permission: "billing.manage", allowed: false, reason: "zz check" } }));
+    const byDenied = await inWs(() => billingActions.checkoutPlan({ interval: "MONTH", items: [{ planKey: "zz-pro", quantity: 1 }] }));
+    ok("  unless it is taken from them: then they see nothing, and buy nothing", (await inWs(() => billingActions.getBilling())) === null && !byDenied.ok);
+    const clerk = await inWs(async () => db.user.create({ data: { email: "clerk@zzbill.example", name: "Zz Clerk", role: "SALES", passwordHash: await bcrypt.hash(randomBytes(8).toString("hex"), 10) } }));
+    actor = { id: clerk.id, name: clerk.name, email: clerk.email, role: clerk.role };
+    const BillingPageForClerk = (require("../src/app/(dashboard)/settings/billing/page") as { default: Page }).default;
+    ok("somebody else: nothing, and the page is not found", (await inWs(() => billingActions.getBilling())) === null && /notFound/.test(await thrown(() => inWs(() => render(BillingPageForClerk)))));
+    await inWs(() => db.userPermission.create({ data: { userId: clerk.id, permission: "billing.manage", allowed: true, reason: "zz accounts" } }));
+    ok("  until they are given it — an accounts person, say", (await inWs(() => billingActions.getBilling())) !== null);
     actor = { id: owner.id, name: owner.name, email: owner.email, role: owner.role };
     const view = await inWs(() => billingActions.getBilling());
-    ok("the owner sees the trial, the plans on sale in rupees, and the use", view?.standing.kind === "trial" && view.gateway === "RAZORPAY" && view.offer.some((p) => p.key === "zz-pro") && view.usage.seatsUsed === 2, JSON.stringify(view?.usage));
+    ok("the owner sees the trial, the plans on sale in rupees, and the use", view?.standing.kind === "trial" && view.gateway === "RAZORPAY" && view.offer.some((p) => p.key === "zz-pro") && view.usage.seatsUsed === 3, JSON.stringify(view?.usage));
+    ok("  no bank transfer until the console has the bank account", view?.bankTransfer === false && /isn't open yet/.test(((r) => (r.ok ? "" : r.error))(await inWs(() => billingActions.askForProforma({ interval: "MONTH", items: [{ planKey: "zz-pro", quantity: 1 }], periods: 1 })))));
     ok("  no banner while the trial has more than a week to go", (await inWs(() => billingActions.billingNotice())) === null);
     await plans.setTrialEnd(WS, new Date(Date.now() + 3 * DAY), "script:check");
     ok("  a banner in its last week", /ends in 3 day/.test((await inWs(() => billingActions.billingNotice()))?.text ?? ""));
     const bought = await inWs(() => billingActions.checkoutPlan({ interval: "MONTH", items: [{ planKey: "zz-pro", quantity: 1 }] }));
     ok("buying: Razorpay's page for the plan", bought.ok && bought.data.gateway === "RAZORPAY" && bought.data.authorisations.length === 1);
     ok("  and the page lists it as waiting", ((await inWs(() => billingActions.getBilling()))?.authorisations ?? []).some((a) => a.url?.startsWith("https://rzp.test/")));
+    const firstPage = [...razorSubs.keys()].at(-1)!;
+    const boughtAgain = await inWs(() => billingActions.checkoutPlan({ interval: "MONTH", items: [{ planKey: "zz-pro", quantity: 1 }] }));
+    ok(
+      "clicked twice: the earlier page is cancelled at Razorpay and here — one waits at a time",
+      boughtAgain.ok && razorSubs.get(firstPage)!.status === "cancelled" && (await control.subscription.count({ where: { tenantId: WS, gateway: "RAZORPAY", status: "INCOMPLETE" } })) === 1,
+    );
     const details = await inWs(() => billingActions.saveBillingDetails({ billingEmail: "Accounts@ZZBill.example", taxId: "27aaaaa0000a1z5" }));
     const detailRow = await control.tenant.findUniqueOrThrow({ where: { id: WS } });
     ok("billing details kept: where mail goes, the GSTIN", details.ok && detailRow.billingEmail === "accounts@zzbill.example" && detailRow.taxId === "27AAAAA0000A1Z5");
     const BillingPage = (require("../src/app/(dashboard)/settings/billing/page") as { default: Page }).default;
     const page = await inWs(() => render(BillingPage));
     ok("the page renders: the trial, the plan to buy, the payment waiting", /free trial/.test(page) && /Pay for Pro/.test(page) && /GSTIN/.test(page), page.slice(0, 200));
+    const back = await inWs(async () => (await renderHtml(BillingPage({ params: Promise.resolve({}), searchParams: Promise.resolve({ checkout: "done" }) } as never))).replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'"));
+    ok("  back from paying: it says the payment is being switched on", /Payment received/.test(back));
     const usage = await reconcile.snapshotUsage();
     ok("the day's use is recorded for the console", usage.some((u) => u.slug === "zzbill-ws" && "ok" in u && u.ok) && (await control.tenantUsage.count({ where: { tenantId: WS } })) === 1);
 

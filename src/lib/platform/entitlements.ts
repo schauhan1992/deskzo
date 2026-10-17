@@ -59,6 +59,17 @@ export type EntItem = {
 
 type PlanForSum = { kind: PlanKind; seats: number | null; copilotTokens: number | null; customDomains: number | null };
 
+/**
+ * The people a set of plans allows, as a workspace on them would be allowed — for checking a purchase
+ * before it is made (src/lib/billing/checkout.ts). Null: no limit.
+ */
+export function seatsFrom(items: { quantity: number; perSeat?: boolean; plan: { kind: PlanKind; seats: number | null } }[]): number | null {
+  return sumLimit(
+    items.map((i) => ({ ...i, plan: { ...i.plan, copilotTokens: null, customDomains: null } })),
+    "seats",
+  );
+}
+
 function sumLimit(items: { quantity: number; perSeat?: boolean; plan: PlanForSum }[], field: "seats" | "copilotTokens" | "customDomains"): number | null {
   // People charged per person are counted, whatever the plan says (one each, when it says nothing).
   const counted = (i: { perSeat?: boolean }) => field === "seats" && !!i.perSeat;
@@ -117,7 +128,8 @@ export async function computeEntitlements(tenantId: string): Promise<Entitlement
   const [tenant, items, overrides, trialCap] = await Promise.all([
     control.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { country: true, seatOverride: true, copilotTokenOverride: true, customDomainOverride: true } }),
     control.subscriptionItem.findMany({
-      where: { subscription: { tenantId, status: { in: [...LIVE_STATUSES] } } },
+      // Not one authorised to start at the next renewal (a change of plan) — it counts from then.
+      where: { subscription: { tenantId, status: { in: [...LIVE_STATUSES] }, OR: [{ startsAt: null }, { startsAt: { lte: new Date() } }] } },
       select: { quantity: true, price: { select: { perSeat: true } }, subscription: { select: { gateway: true, status: true } }, plan: { select: ENTITLEMENT_PLAN_SELECT } },
     }),
     control.tenantModuleOverride.findMany({ where: { tenantId }, select: { moduleKey: true, granted: true } }),

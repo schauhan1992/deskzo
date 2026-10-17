@@ -19,6 +19,10 @@
  *     its tax invoice credited; the last one voided ending the subscription;
  *   · numbers under concurrency: none shared, none skipped; never more credited than invoiced;
  *   · Razorpay: a charge gets its tax invoice once, a refund its credit note once;
+ *   · a proforma a workspace asks for, to pay by bank transfer: closed until the bank account is set,
+ *     for at least the people with an account, numbered in its own series, IGST or CGST + SGST, mailed
+ *     with the bank account; a newer one replacing it; a transfer recorded against it closing it as paid;
+ *     a few a day; refused for a workspace paying at a gateway, or abroad;
  *   · the page a link opens, kept out of search engines;
  *   · the console: sellers record, managers void, owners set the seller's details; the pages show it.
  */
@@ -442,6 +446,58 @@ async function main() {
     const notesR2 = await control.platformCreditNote.findMany({ where: { invoiceId: invR.id }, orderBy: { issuedAt: "asc" } });
     ok("  refunded more later: a credit note for the difference", notesR2.length === 2 && notesR2[1]!.amount === 30000 && (await control.invoice.findUniqueOrThrow({ where: { id: invR.id } })).amountCredited === 80000);
 
+    section("A proforma: paying by bank transfer, asked for from the workspace");
+    const proforma = require("../src/lib/billing/proforma") as typeof import("../src/lib/billing/proforma");
+    process.env.PLATFORM_SALES_EMAIL = "sales@zzoffline.example";
+    // A business in Maharashtra: across the state line from the seller in Karnataka.
+    const P = await makeTenant("zzoff-proforma", "IN", { billingEmail: "accounts@zzoff-proforma.example", taxId: "27AAACZ9876K1Z2" });
+    const asker = { name: "Zz Accounts", email: "asker@zzoff-proforma.example" };
+    const askP = (extra: Partial<Parameters<typeof proforma.requestProforma>[0]> = {}) =>
+      proforma.requestProforma({ tenantId: P, items: [{ planKey: "zz-pro", quantity: 1 }], interval: "MONTH", periods: 3, requestedBy: asker, seatsInUse: 2, ...extra });
+    ok("closed until the bank account is set in the console", !(await proforma.bankTransferOpen()) && /isn't open yet/.test(await refused(() => askP())));
+    const bank = { accountName: "Deskzo Technologies Private Limited", bankName: "HDFC Bank, Residency Road", account: "50200012345678", ifsc: "HDFC0001234", upi: "deskzo@hdfcbank" };
+    ok(
+      "a bank account out of shape is refused: the account number, the IFSC",
+      /account number/.test(await refused(() => taxInvoice.saveBank({ ...bank, account: "12ab" }, "script:check"))) && /IFSC/.test(await refused(() => taxInvoice.saveBank({ ...bank, ifsc: "HDFC1234" }, "script:check"))),
+    );
+    await taxInvoice.saveBank({ ...bank, ifsc: "hdfc0001234" }, "script:check");
+    ok("  set: paying by transfer opens", (await proforma.bankTransferOpen()) && (await taxInvoice.readBank()).ifsc === "HDFC0001234");
+    ok("fewer people than have an account: refused", /7 people have an account/.test(await refused(() => askP({ seatsInUse: 7 }))));
+    ok("a workspace paying through Razorpay: refused", /pays through Razorpay/.test(await refused(() => askP({ tenantId: GW }))));
+    ok("  as is one abroad", /rupees/.test(await refused(() => askP({ tenantId: US }))));
+    const invoicesBefore = await control.invoice.count();
+    mail.length = 0;
+    const pf1 = await askP();
+    const row1 = await control.platformProforma.findUniqueOrThrow({ where: { id: pf1.id } });
+    const doc1 = (await taxInvoice.documentByToken(taxInvoice.documentToken("p", pf1.id)))!;
+    ok("asked for: numbered in its own series, for three months, GST on top", pf1.number === `DZ/PF/${fy}/0001` && pf1.total === gst.withPlatformGst(149900 * 3) && row1.status === "OPEN" && row1.periods === 3, `${pf1.number} ${pf1.total}`);
+    ok(
+      "  across states: IGST; made out to the workspace's GSTIN; the lines adding up",
+      doc1.kind === "proforma" && doc1.supply === "inter" && doc1.igst === pf1.total - 449700 && doc1.buyer.gstin === "27AAACZ9876K1Z2" && doc1.lines.reduce((sum, l) => sum + l.taxable, 0) === doc1.taxable && doc1.lines[0]!.description === "Pro, 3 months",
+    );
+    ok("  carrying the bank account, and holding for thirty days", doc1.bank?.account === bank.account && Math.round((new Date(doc1.validUntil!).getTime() - Date.now()) / DAY) === 30);
+    ok("  no tax invoice: no number taken from that series", (await control.invoice.count()) === invoicesBefore);
+    const toBuyer = mail.filter((m) => m.type === "BILLING" && /^Proforma DZ\/PF\//.test(m.subject));
+    ok(
+      "  mailed to the billing address and whoever asked, with where to pay and what to quote",
+      toBuyer.map((m) => m.to).sort().join() === "accounts@zzoff-proforma.example,asker@zzoff-proforma.example" && toBuyer[0]!.text.includes("IFSC HDFC0001234") && toBuyer[0]!.text.includes(`Quote ${pf1.number}`) && toBuyer[0]!.text.includes("/invoice/p."),
+      mail.map((m) => `${m.type}:${m.to}`).join(", "),
+    );
+    ok("  and staff are told, to watch for the transfer", mail.some((m) => m.type === "ALERTS" && m.to === "sales@zzoffline.example" && m.subject.includes(pf1.number)));
+    const pf2 = await askP({ items: [{ planKey: "zz-pro", quantity: 1 }, { planKey: "zz-seats", quantity: 1 }], periods: 1 });
+    ok("a newer request replaces the open one", (await control.platformProforma.findUniqueOrThrow({ where: { id: pf1.id } })).status === "CANCELLED" && pf2.number === `DZ/PF/${fy}/0002` && (await proforma.proformasOf(P, { openOnly: true })).map((p) => p.id).join() === pf2.id);
+    const closedRefusal = await refused(() => offline.recordOfflinePayment({ tenantId: P, items: [{ planKey: "zz-pro", quantity: 1 }], interval: "MONTH", periods: 3, amount: pf1.total, method: "NEFT", reference: "UTR-ZZ-PF1", receivedOn: today, proformaId: pf1.id }, billingStaff));
+    ok("a transfer against a proforma that was replaced: refused", /closed already/.test(closedRefusal), closedRefusal);
+    ok("  as is one against another workspace's", /isn't this workspace's/.test(await refused(() => offline.recordOfflinePayment({ ...payA, proformaId: pf2.id }, billingStaff))));
+    const paidPf = await offline.recordOfflinePayment({ tenantId: P, items: [{ planKey: "zz-pro", quantity: 1 }, { planKey: "zz-seats", quantity: 1 }], interval: "MONTH", periods: 1, amount: pf2.total, method: "NEFT", reference: pf2.number, receivedOn: today, proformaId: pf2.id }, billingStaff);
+    const row2 = await control.platformProforma.findUniqueOrThrow({ where: { id: pf2.id } });
+    ok("the transfer recorded against it: the proforma paid, the tax invoice issued, the plans on", row2.status === "PAID" && row2.paymentId === paidPf.paymentId && /^DZ\//.test(paidPf.taxNumber ?? "") && rules.parseEntitlements((await control.tenant.findUniqueOrThrow({ where: { id: P } })).entitlements).seats === 10);
+    const P2 = await makeTenant("zzoff-proforma-busy", "IN");
+    await control.platformProforma.createMany({
+      data: Array.from({ length: proforma.PROFORMAS_PER_DAY }, (_, i) => ({ tenantId: P2, number: `ZZ-BUSY-${i}`, status: "CANCELLED" as const, items: [], interval: "MONTH" as const, periods: 1, total: 1, details: {}, validUntil: new Date(Date.now() + DAY), requestedBy: "zz" })),
+    });
+    ok("a few a day at most", /Several proformas/.test(await refused(() => askP({ tenantId: P2 }))));
+
     section("The page a link opens");
     const invoiceModule = require("../src/app/platform-site/invoice/[token]/page") as { default: Page; metadata: { robots?: { index?: boolean } } };
     const pageA1 = await render(invoiceModule.default, { token: tokenA1 });
@@ -453,6 +509,8 @@ async function main() {
     ok("the distributor's: IGST, and the workspace it is for", /IGST/.test(pageB) && pageB.includes("Zz Distribution LLP") && pageB.includes("zzoff-beta"));
     ok("a forged link: not found", /notFound/.test(await refused(() => render(invoiceModule.default, { token: forged }))));
     ok("kept out of search engines", invoiceModule.metadata.robots?.index === false);
+    const pagePf = await render(invoiceModule.default, { token: taxInvoice.documentToken("p", pf2.id) });
+    ok("a proforma: called one, with the bank account to pay into — and not a tax invoice", /Proforma invoice/.test(pagePf) && pagePf.includes(pf2.number) && pagePf.includes("IFSC HDFC0001234") && /This is not a tax invoice/.test(pagePf), pagePf.slice(0, 200));
 
     section("The console");
     const actAs = async (userId: string) => {
@@ -473,6 +531,10 @@ async function main() {
     ok("  and record one, in rupees as typed", byBilling.ok && (await control.offlinePayment.findUniqueOrThrow({ where: { id: byBilling.data.paymentId } })).amount === 176882 && /^DZ\//.test(byBilling.data.taxNumber ?? ""), byBilling.ok ? byBilling.data.taxNumber : byBilling.error);
     const paymentId = byBilling.ok ? byBilling.data.paymentId : "";
     ok("  but not void one", !(await consoleOffline.consoleVoidOfflinePayment(paymentId, "Wrong workspace")).ok);
+    const pf3 = await askP({ periods: 1 });
+    const cancelled = await consoleOffline.consoleCancelProforma(pf3.id);
+    ok("  they cancel a proforma, audited", cancelled.ok && (await control.platformProforma.findUniqueOrThrow({ where: { id: pf3.id } })).status === "CANCELLED" && (await control.platformAuditLog.count({ where: { action: "billing.proforma.cancel" } })) === 1);
+    ok("  once", !(await consoleOffline.consoleCancelProforma(pf3.id)).ok);
     ok("  nor set the seller's details", !(await consoleOffline.consoleSaveInvoicing({ ...seller, pan: seller.pan })).ok);
     await actAs(adminStaff);
     ok("an admin voids it", (await consoleOffline.consoleVoidOfflinePayment(paymentId, "Wrong workspace")).ok && !!(await control.offlinePayment.findUniqueOrThrow({ where: { id: paymentId } })).voidedAt);
@@ -483,7 +545,7 @@ async function main() {
     const dRow = await control.tenant.findUniqueOrThrow({ where: { id: D } });
     ok("  set with its registered name and address, audited", goodState.ok && dRow.billingName === "Delhi Traders" && dRow.billingAddress === "4 Ring Road\nNew Delhi" && (await control.platformAuditLog.count({ where: { action: "tenant.billing-details", tenantId: D } })) === 1);
     await actAs(ownerStaff);
-    const ownerSave = await consoleOffline.consoleSaveInvoicing({ ...seller, pan: seller.pan, prefix: "dz" });
+    const ownerSave = await consoleOffline.consoleSaveInvoicing({ ...seller, pan: seller.pan, prefix: "dz", bankAccountName: bank.accountName, bankName: bank.bankName, bankAccount: bank.account, bankIfsc: bank.ifsc, bankUpi: bank.upi });
     ok("the owner sets the seller's details, audited", ownerSave.ok && (await control.platformAuditLog.count({ where: { action: "invoicing.settings" } })) === 1, ownerSave.ok ? "" : ownerSave.error);
     const WorkspacePage = (require("../src/app/platform-console/(console)/workspaces/[slug]/page") as { default: Page }).default;
     const wsA = await render(WorkspacePage, { slug: "zzoff-acme" }, { tab: "billing" });
@@ -493,6 +555,7 @@ async function main() {
     const SettingsPage = (require("../src/app/platform-console/(console)/settings/page") as { default: Page }).default;
     const settingsRaw = await renderHtml(SettingsPage(pageProps({})));
     ok("console settings: the owner's Invoicing form, filled in", settingsRaw.includes("Invoicing") && settingsRaw.includes(`value="${seller.gstin}"`) && settingsRaw.includes(`value="${seller.name}"`));
+    ok("  with the bank account for proformas", settingsRaw.includes("Bank account, for proformas") && settingsRaw.includes(`value="${bank.ifsc}"`) && settingsRaw.includes(`value="${bank.account}"`));
     await actAs(billingStaff);
     const settingsBilling = await render(SettingsPage);
     ok("  billing staff read it, without the form", settingsBilling.includes(`Karnataka · ${seller.gstin}`) && !(await renderHtml(SettingsPage(pageProps({})))).includes(`value="${seller.gstin}"`));

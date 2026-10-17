@@ -705,6 +705,19 @@ export const PERMISSION_REGISTRY = [
     tier: "critical",
   },
   {
+    // Owner, 17 Oct 2026: the workspace owner, and whoever they let pay — an accounts person, say. An
+    // admin holds it like every key; only the owner hands it to anybody else, because it spends money.
+    key: "billing.manage",
+    label: "Manage the plan and billing",
+    description:
+      "Choose and pay for the workspace's plan, change or cancel it, ask for a proforma to pay by bank transfer, and keep the billing details its invoices are made out to.",
+    defaultRoles: [],
+    group: "Administration",
+    delegable: false,
+    superAdminOnly: true,
+    tier: "critical",
+  },
+  {
     key: "security.manage",
     label: "Change the security and DLP policy",
     description: "Sign-in policy, data-loss-prevention settings, crawler blocking and log retention.",

@@ -137,6 +137,7 @@ model Tenant {
   moduleOverrides  TenantModuleOverride[]
   invoices         Invoice[]
   offlinePayments  OfflinePayment[]
+  proformas        PlatformProforma[]
   usage            TenantUsage[]
   billingNotices   BillingNotice[]
   notes            TenantNote[]
@@ -650,6 +651,10 @@ model Subscription {
   cancelAtPeriodEnd Boolean           @default(false)
   /// When a payment first failed, for the grace period; cleared once it is paid.
   pastDueSince     DateTime?
+  /// Authorised now but starting later — a change of plan or people from the next renewal (owner, 17 Oct
+  /// 2026; Razorpay can't change a UPI or e-mandate subscription, so the new one replaces the old there).
+  /// Counts for nothing until then; null: it counts from when it is live.
+  startsAt         DateTime?
   /// The subscription at the gateway (Stripe's sub_…, Razorpay's sub_…), and its customer there.
   externalId         String?          @unique
   externalCustomerId String?
@@ -2429,10 +2434,50 @@ model OfflinePayment {
   voidedAt       DateTime?
   voidedBy       String?
   voidReason     String?
+  /// The proforma it paid, when it paid one.
+  proforma       PlatformProforma?
 
   @@index([tenantId, createdAt])
   @@index([subscriptionId])
   @@map("offline_payments")
+}
+
+/// A proforma invoice a workspace asked for, to pay by bank transfer (owner, 17 Oct 2026): what to pay for
+/// which plans and how long, and where to pay it — not a tax invoice. Numbered in its own series
+/// ("DZ/PF/2026-27/0001") and frozen as issued. Staff record the transfer against it (OfflinePayment),
+/// which issues the GST tax invoice and switches the plans on. A newer request from the same workspace
+/// replaces an open one.
+model PlatformProforma {
+  id          String          @id @default(cuid())
+  tenantId    String
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  number      String          @unique
+  status      ProformaStatus  @default(OPEN)
+  /// What it is for: `[{ planKey, quantity }]`, at `interval` for `periods` of them.
+  items       Json
+  interval    BillingInterval
+  periods     Int
+  /// What to pay, in paise, GST included.
+  total       Int
+  /// The document as issued: seller, buyer, lines, tax, the bank account.
+  details     Json
+  validUntil  DateTime
+  /// Who asked, as name and address: a workspace's user id means nothing here.
+  requestedBy String
+  paymentId   String?         @unique
+  payment     OfflinePayment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  closedAt    DateTime?
+  createdAt   DateTime        @default(now())
+
+  @@index([tenantId, status])
+  @@map("platform_proformas")
+}
+
+/// Open until it is paid, or replaced by a newer request, or cancelled by staff.
+enum ProformaStatus {
+  OPEN
+  PAID
+  CANCELLED
 }
 
 /// A credit note against one of the platform's tax invoices — a refund, or a payment voided — numbered

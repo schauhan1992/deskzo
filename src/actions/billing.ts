@@ -4,9 +4,11 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireUser, viewAsContext } from "@/lib/session";
 import { recordAudit } from "@/lib/audit";
+import { can } from "@/lib/authz/resolve";
 import { GatewayError } from "@/lib/billing/gateway";
 import { billingStanding, applyStanding, type Standing } from "@/lib/billing/lifecycle";
-import { CheckoutRefused, billingPortal, cancelAtPeriodEnd, offerFor, pendingAuthorisations, startCheckout, type CheckoutStart, type OfferPlan, type Selection } from "@/lib/billing/checkout";
+import { CheckoutRefused, billingPortal, cancelAtPeriodEnd, offerFor, pendingAuthorisations, scheduleRazorpayChange, startCheckout, type CheckoutStart, type OfferPlan, type Selection } from "@/lib/billing/checkout";
+import { ProformaRefused, bankTransferOpen, proformasOf, requestProforma } from "@/lib/billing/proforma";
 import { getRazorpaySubscription } from "@/lib/billing/razorpay";
 import { usedThisMonth } from "@/lib/copilot/settings";
 import { controlDb } from "@/lib/platform/control-db";
@@ -17,21 +19,24 @@ import { currentTenant, tenantOrigin } from "@/lib/tenancy/resolve";
 import type { ActionResult } from "@/actions/company";
 
 /**
- * The workspace's plan and billing (Settings → Plan & billing) — its super admin's alone: choosing a
- * plan, paying for it, cancelling it. Not while "viewing as" somebody. Everything here acts on the
- * control plane and the gateways (src/lib/billing), for this workspace only.
+ * The workspace's plan and billing (Settings → Plan & billing): choosing a plan, paying for it,
+ * changing or cancelling it. The super admin's, and whoever holds "Manage the plan and billing" (owner,
+ * 17 Oct 2026 — an accounts person, say; an admin holds it like every key). Never a support account,
+ * and not while "viewing as" somebody. Everything here acts on the control plane and the gateways
+ * (src/lib/billing), for this workspace only.
  */
 
-async function owner(): Promise<{ ok: true; me: { id: string; name: string } } | { ok: false; error: string }> {
+async function manager(): Promise<{ ok: true; me: { id: string; name: string; email: string } } | { ok: false; error: string }> {
   const user = await requireUser();
   if (await viewAsContext()) return { ok: false, error: "Switch back to your own account first." };
-  const me = await db.user.findUnique({ where: { id: user.id }, select: { id: true, name: true, isSuperAdmin: true, kind: true } });
-  if (!me || !me.isSuperAdmin || me.kind !== "MEMBER") return { ok: false, error: "Only the workspace owner manages its plan and billing." };
-  return { ok: true, me: { id: me.id, name: me.name } };
+  const me = await db.user.findUnique({ where: { id: user.id }, select: { id: true, name: true, email: true, kind: true } });
+  // A super admin holds every key (src/lib/authz/resolve.ts), so the owner is never shut out of paying.
+  if (!me || me.kind !== "MEMBER" || !(await can(me.id, "billing.manage"))) return { ok: false, error: "You can't manage this workspace's plan and billing." };
+  return { ok: true, me: { id: me.id, name: me.name, email: me.email } };
 }
 
 const refusal = (err: unknown): { ok: false; error: string } | null =>
-  err instanceof CheckoutRefused || err instanceof GatewayError ? { ok: false, error: err.message } : null;
+  err instanceof CheckoutRefused || err instanceof GatewayError || err instanceof ProformaRefused ? { ok: false, error: err.message } : null;
 
 type Iso<T> = T extends Date ? string : T extends object ? { [K in keyof T]: Iso<T[K]> } : T;
 const iso = (standing: Standing): Iso<Standing> => JSON.parse(JSON.stringify(standing)) as Iso<Standing>;
@@ -45,13 +50,19 @@ export type BillingView = {
     id: string;
     gateway: string;
     status: string;
-    plans: { name: string; quantity: number }[];
+    plans: { key: string; name: string; quantity: number }[];
     currentPeriodEnd: string | null;
     trialEndsAt: string | null;
     cancelAtPeriodEnd: boolean;
     interval: string | null;
+    /** A change from the next renewal, authorised and waiting to start then. */
+    startsAt: string | null;
   }[];
-  authorisations: { id: string; plan: string; url: string | null }[];
+  /** Razorpay pages to authorise — and, for a change from the next renewal, the day it starts. */
+  authorisations: { id: string; plan: string; url: string | null; startsAt: string | null }[];
+  /** In India: whether a proforma can be asked for (src/lib/billing/proforma.ts), and the latest asked for. */
+  bankTransfer: boolean;
+  proformas: { id: string; number: string; status: string; total: number; validUntil: string; expired: boolean; url: string }[];
   invoices: {
     id: string;
     number: string | null;
@@ -78,7 +89,7 @@ export type BillingView = {
 };
 
 export async function getBilling(): Promise<BillingView | null> {
-  const a = await owner();
+  const a = await manager();
   if (!a.ok) return null;
   const tenant = await currentTenant();
   const control = controlDb();
@@ -88,7 +99,7 @@ export async function getBilling(): Promise<BillingView | null> {
     control.subscription.findMany({
       where: { tenantId: tenant.id, status: { not: "CANCELLED" } },
       orderBy: { createdAt: "asc" },
-      include: { items: { include: { plan: { select: { name: true } } } } },
+      include: { items: { include: { plan: { select: { key: true, name: true } } } } },
     }),
     control.invoice.findMany({ where: { tenantId: tenant.id }, orderBy: { issuedAt: "desc" }, take: 24, include: { creditNotes: { orderBy: { issuedAt: "asc" }, select: { id: true, number: true } } } }),
     offerFor(tenant.id),
@@ -96,9 +107,11 @@ export async function getBilling(): Promise<BillingView | null> {
     seatsInUse(),
     usedThisMonth(),
   ]);
+  const india = tenant.country === "IN";
+  const [bankTransfer, proformas] = india ? await Promise.all([bankTransferOpen(), proformasOf(tenant.id, { take: 5 })]) : [false, []];
   // Where each Razorpay page is, asked of Razorpay — only for those still waiting.
   const authorisations = await Promise.all(
-    pending.map(async (p) => ({ id: p.id, plan: p.plan, url: (await getRazorpaySubscription(p.externalId).catch(() => null))?.short_url ?? null })),
+    pending.map(async (p) => ({ id: p.id, plan: p.plan, startsAt: p.startsAt?.toISOString() ?? null, url: (await getRazorpaySubscription(p.externalId).catch(() => null))?.short_url ?? null })),
   );
   return {
     standing: iso(standing),
@@ -111,13 +124,16 @@ export async function getBilling(): Promise<BillingView | null> {
         id: s.id,
         gateway: s.gateway,
         status: s.status,
-        plans: s.items.map((i) => ({ name: i.plan.name, quantity: i.quantity })),
+        plans: s.items.map((i) => ({ key: i.plan.key, name: i.plan.name, quantity: i.quantity })),
         currentPeriodEnd: s.currentPeriodEnd?.toISOString() ?? null,
         trialEndsAt: s.trialEndsAt?.toISOString() ?? null,
         cancelAtPeriodEnd: s.cancelAtPeriodEnd,
         interval: s.interval,
+        startsAt: s.startsAt && s.startsAt > new Date() ? s.startsAt.toISOString() : null,
       })),
     authorisations,
+    bankTransfer,
+    proformas: proformas.map((p) => ({ id: p.id, number: p.number, status: p.status, total: p.total, validUntil: p.validUntil.toISOString(), expired: p.expired, url: p.url })),
     invoices: invoices.map((i) => ({
       id: i.id,
       number: i.number,
@@ -142,9 +158,9 @@ export async function getBilling(): Promise<BillingView | null> {
   };
 }
 
-/** For the banner above every page: the owner's reminder while a trial or a grace period runs. */
+/** For the banner above every page: the reminder, to whoever manages billing, while a trial or a grace period runs. */
 export async function billingNotice(): Promise<{ tone: "info" | "warning"; text: string } | null> {
-  const a = await owner().catch(() => null);
+  const a = await manager().catch(() => null);
   if (!a?.ok) return null;
   const standing = await billingStanding((await currentTenant()).id);
   const days = (d: string | Date) => Math.max(0, Math.ceil((new Date(d).getTime() - Date.now()) / 86_400_000));
@@ -166,11 +182,11 @@ export async function billingNotice(): Promise<{ tone: "info" | "warning"; text:
 }
 
 export async function checkoutPlan(selection: Selection): Promise<ActionResult<CheckoutStart>> {
-  const a = await owner();
+  const a = await manager();
   if (!a.ok) return a;
   const tenant = await currentTenant();
   try {
-    const started = await startCheckout(tenant.id, selection, `${await tenantOrigin()}/settings/billing`);
+    const started = await startCheckout(tenant.id, selection, `${await tenantOrigin()}/settings/billing`, { seatsInUse: await seatsInUse() });
     await recordAudit({ userId: a.me.id, action: "CREATE", entityType: "Subscription", entityId: tenant.id, entityLabel: `Checkout started: ${(selection.items ?? []).map((i) => i.planKey).join(", ")}` });
     return { ok: true, data: started };
   } catch (err) {
@@ -181,7 +197,7 @@ export async function checkoutPlan(selection: Selection): Promise<ActionResult<C
 }
 
 export async function openBillingPortal(): Promise<ActionResult<{ url: string }>> {
-  const a = await owner();
+  const a = await manager();
   if (!a.ok) return a;
   try {
     return { ok: true, data: { url: await billingPortal((await currentTenant()).id, `${await tenantOrigin()}/settings/billing`) } };
@@ -192,8 +208,55 @@ export async function openBillingPortal(): Promise<ActionResult<{ url: string }>
   }
 }
 
+/**
+ * Paying through Razorpay: the plans or people from the next renewal (src/lib/billing/checkout.ts
+ * `scheduleRazorpayChange`) — authorised now on Razorpay's pages, charged and switched on from then.
+ */
+export async function changePlanAtRenewal(selection: Selection): Promise<ActionResult<{ startsAt: string; authorisations: { plan: string; url: string }[] }>> {
+  const a = await manager();
+  if (!a.ok) return a;
+  const tenant = await currentTenant();
+  try {
+    const change = await scheduleRazorpayChange(tenant.id, selection, { seatsInUse: await seatsInUse() });
+    await recordAudit({ userId: a.me.id, action: "UPDATE", entityType: "Subscription", entityId: tenant.id, entityLabel: `Plan change from ${change.startsAt.toISOString().slice(0, 10)}: ${(selection.items ?? []).map((i) => `${i.planKey}×${i.quantity}`).join(", ")}` });
+    revalidatePath("/settings/billing");
+    return { ok: true, data: { startsAt: change.startsAt.toISOString(), authorisations: change.authorisations } };
+  } catch (err) {
+    const r = refusal(err);
+    if (r) return r;
+    throw err;
+  }
+}
+
+/**
+ * Paying by bank transfer, in India: a proforma for the plans, people and months chosen, mailed to the
+ * billing address and whoever asked (src/lib/billing/proforma.ts). Staff record the transfer against it.
+ */
+export async function askForProforma(input: Selection & { periods: number }): Promise<ActionResult<{ number: string; url: string; total: number; validUntil: string }>> {
+  const a = await manager();
+  if (!a.ok) return a;
+  const tenant = await currentTenant();
+  try {
+    const made = await requestProforma({
+      tenantId: tenant.id,
+      items: (input?.items ?? []).slice(0, 20).map((i) => ({ planKey: String(i.planKey), quantity: Number(i.quantity) })),
+      interval: input?.interval === "YEAR" ? "YEAR" : "MONTH",
+      periods: Number(input?.periods),
+      requestedBy: { name: a.me.name, email: a.me.email },
+      seatsInUse: await seatsInUse(),
+    });
+    await recordAudit({ userId: a.me.id, action: "CREATE", entityType: "Proforma", entityId: made.id, entityLabel: `Proforma ${made.number}` });
+    revalidatePath("/settings/billing");
+    return { ok: true, data: { number: made.number, url: made.url, total: made.total, validUntil: made.validUntil.toISOString() } };
+  } catch (err) {
+    const r = refusal(err);
+    if (r) return r;
+    throw err;
+  }
+}
+
 export async function cancelSubscription(subscriptionId: string): Promise<ActionResult<null>> {
-  const a = await owner();
+  const a = await manager();
   if (!a.ok) return a;
   const tenant = await currentTenant();
   try {
@@ -210,7 +273,7 @@ export async function cancelSubscription(subscriptionId: string): Promise<Action
 }
 
 export async function saveBillingDetails(input: { billingEmail: string; taxId: string; billingName?: string; billingAddress?: string; billingState?: string }): Promise<ActionResult<null>> {
-  const a = await owner();
+  const a = await manager();
   if (!a.ok) return a;
   const email = String(input?.billingEmail ?? "").trim().toLowerCase();
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: "That doesn't look like an email address." };

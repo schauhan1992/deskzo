@@ -1,10 +1,16 @@
 import type { TaxDocument } from "@/lib/billing/tax-invoice";
 
 /**
- * One of Deskzo's own GST documents — a tax invoice or a credit note — as issued (src/lib/billing/
- * tax-invoice.ts keeps it frozen), laid out for A4: on screen at /invoice/<token>, and saved as a PDF
- * by the browser's print. Everything shown is the document's own; nothing is looked up again.
+ * One of Deskzo's own GST documents — a tax invoice, a credit note, or a proforma asked for to pay by
+ * bank transfer (src/lib/billing/proforma.ts) — as issued (src/lib/billing/tax-invoice.ts keeps it
+ * frozen), laid out for A4: on screen at /invoice/<token>, and saved as a PDF by the browser's print.
+ * Everything shown is the document's own; nothing is looked up again.
  */
+
+/** What a document is called, at its head and in the page's own line. */
+export function documentTitle(kind: TaxDocument["kind"]): string {
+  return kind === "credit-note" ? "Credit note" : kind === "proforma" ? "Proforma invoice" : "Tax invoice";
+}
 
 const money = (paise: number) => (paise / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -31,7 +37,8 @@ function Party({ title, party, extra }: { title: string; party: TaxDocument["buy
 
 export function TaxDocumentView({ doc }: { doc: TaxDocument }) {
   const credit = doc.kind === "credit-note";
-  const title = credit ? "Credit note" : "Tax invoice";
+  const proforma = doc.kind === "proforma";
+  const title = documentTitle(doc.kind);
   return (
     <article className="mx-auto w-full max-w-[210mm] bg-white p-6 text-[13px] leading-5 text-neutral-900 shadow-sm ring-1 ring-neutral-200 print:p-0 print:shadow-none print:ring-0 sm:p-10">
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-neutral-300 pb-4">
@@ -40,6 +47,7 @@ export function TaxDocumentView({ doc }: { doc: TaxDocument }) {
           <p className="mt-1 text-neutral-700">
             No. <span className="font-semibold tabular-nums">{doc.number}</span> · {dayText(doc.issuedAt)}
           </p>
+          {proforma && doc.validUntil && <p className="text-neutral-700">Valid until {dayText(doc.validUntil)}</p>}
           {doc.against && (
             <p className="text-neutral-700">
               Against tax invoice <span className="font-semibold tabular-nums">{doc.against.number}</span> of {dayText(doc.against.issuedAt)}
@@ -61,7 +69,7 @@ export function TaxDocumentView({ doc }: { doc: TaxDocument }) {
 
       <div className="grid gap-6 border-b border-neutral-300 py-4 sm:grid-cols-2">
         <Party title="From" party={{ ...doc.seller, email: null }} />
-        <Party title={credit ? "To" : "Billed to"} party={doc.buyer} extra={doc.endUser ? `For: ${doc.endUser.name} (${doc.endUser.host})` : null} />
+        <Party title={credit ? "To" : proforma ? "Bill to" : "Billed to"} party={doc.buyer} extra={doc.endUser ? `For: ${doc.endUser.name} (${doc.endUser.host})` : null} />
       </div>
 
       <table className="mt-4 w-full border-collapse text-left">
@@ -117,13 +125,29 @@ export function TaxDocumentView({ doc }: { doc: TaxDocument }) {
           </div>
         )}
         <div className="flex justify-between gap-4 border-t border-neutral-300 pt-1 text-base font-semibold">
-          <dt>{credit ? "Credited" : "Total"}</dt>
+          <dt>{credit ? "Credited" : proforma ? "Total to pay" : "Total"}</dt>
           <dd>₹{money(doc.total)}</dd>
         </div>
       </dl>
       <p className="mt-2 text-right text-neutral-700">{doc.amountInWords}</p>
 
+      {proforma && doc.bank && (
+        <div className="mt-6 rounded border border-neutral-300 p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">Pay by bank transfer</p>
+          <p className="mt-1 font-semibold text-neutral-900">{doc.bank.accountName}</p>
+          <p className="text-neutral-700">{doc.bank.bankName}</p>
+          <p className="text-neutral-700 tabular-nums">
+            Account {doc.bank.account} · IFSC {doc.bank.ifsc}
+          </p>
+          {doc.bank.upi && <p className="text-neutral-700">UPI {doc.bank.upi}</p>}
+          <p className="mt-2 text-neutral-900">
+            Quote <span className="font-semibold tabular-nums">{doc.number}</span> as the payment&apos;s reference.
+          </p>
+        </div>
+      )}
+
       <div className="mt-6 space-y-1 border-t border-neutral-300 pt-4 text-neutral-700">
+        {proforma && <p className="font-medium text-neutral-900">This is not a tax invoice. The GST tax invoice is issued and emailed once the payment is received.</p>}
         {doc.reason && <p>Reason: {doc.reason}</p>}
         {doc.paid && <p>{doc.paid}.</p>}
         <p>Tax is not payable on reverse charge.</p>

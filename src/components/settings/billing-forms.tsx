@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { GST_STATE_OPTIONS } from "@/lib/gst-engine";
 import { OutboundLink } from "@/components/ui/outbound-link";
-import { cancelSubscription, checkoutPlan, openBillingPortal, saveBillingDetails } from "@/actions/billing";
+import { askForProforma, cancelSubscription, changePlanAtRenewal, checkoutPlan, openBillingPortal, saveBillingDetails } from "@/actions/billing";
 import type { OfferPlan } from "@/lib/billing/checkout";
 import { formatMoney } from "@/lib/billing/money";
 import { SUITE_NAME, choiceRefusal, includedRefusal, needsRefusal } from "@/lib/billing/plan-choice";
@@ -34,28 +34,68 @@ function editionGroups(editions: OfferPlan[]): EditionGroup[] {
   return groups.filter((g) => g.plans.length > 0);
 }
 
+/** What the picker is for: buying, a change from the next renewal (Razorpay), or the next period by bank transfer. */
+export type PickerMode = "buy" | "change" | "transfer";
+
+/** Months or years a proforma can be for — what staff can record (src/lib/billing/offline.ts MAX_PERIODS). */
+const PERIOD_CHOICES: Record<Interval, number[]> = { MONTH: [1, 3, 6, 12], YEAR: [1, 2, 3] };
+
+/** "17 November 2026", from an ISO moment, on India's calendar — where proformas and Razorpay are. */
+const dayText = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata" });
+
 /**
  * Deskzo One, or any number of products — one plan each — or an edition of its own; then extras.
  * Ticking a plan unticks what cannot come with it (another plan of its product; everything, for
  * Deskzo One or an edition of its own), so the ticks always make a choice that can be bought. The
  * rules and their words are src/lib/billing/plan-choice.ts's — checkout says the same.
+ *
+ * Paid online (Stripe, or Razorpay's pages); in India, also by bank transfer against a proforma
+ * (`bankTransfer`). A workspace paying through Razorpay changes its plans from the next renewal
+ * (`mode: "change"`); one paying by transfer asks for the next period's proforma (`mode: "transfer"`).
  */
-export function PlanPicker({ plans, currency, gateway }: { plans: OfferPlan[]; currency: string; gateway: "STRIPE" | "RAZORPAY" }) {
+export function PlanPicker({
+  plans,
+  currency,
+  gateway,
+  mode = "buy",
+  bankTransfer = false,
+  renewsOn = null,
+  initial = null,
+}: {
+  plans: OfferPlan[];
+  currency: string;
+  gateway: "STRIPE" | "RAZORPAY";
+  mode?: PickerMode;
+  /** In India, with the bank account set up in the console: a proforma may be asked for instead. */
+  bankTransfer?: boolean;
+  /** For a change: the day the current plans renew, when the change would start. */
+  renewsOn?: string | null;
+  /** What it is on now — ticked to start with, so a change or a renewal starts from it. */
+  initial?: { interval: Interval; items: { planKey: string; quantity: number }[] } | null;
+}) {
+  const router = useRouter();
   const intervals = [...new Set(plans.flatMap((p) => p.prices.map((x) => x.interval)))];
-  const [interval, setBilled] = useState<Interval>(intervals.includes("MONTH") ? "MONTH" : "YEAR");
+  const [interval, setBilled] = useState<Interval>(initial && intervals.includes(initial.interval) ? initial.interval : intervals.includes("MONTH") ? "MONTH" : "YEAR");
   const priceOf = (plan: OfferPlan) => plan.prices.find((x) => x.interval === interval);
   const editions = plans.filter((p) => p.kind === "EDITION" && !!priceOf(p));
   const extras = plans.filter((p) => p.kind !== "EDITION" && !!priceOf(p));
   const groups = editionGroups(editions);
   const [picked, setPicked] = useState<string[]>(() => {
+    const now = (initial?.items ?? []).map((i) => i.planKey).filter((k) => plans.some((p) => p.key === k && p.kind === "EDITION"));
+    if (now.length) return now;
     const first = editionGroups(plans.filter((p) => p.kind === "EDITION" && p.prices.some((x) => x.interval === interval)))[0]?.plans[0];
     return first ? [first.key] : [];
   });
-  const [quantities, setQuantities] = useState<Record<string, string>>({});
+  const [quantities, setQuantities] = useState<Record<string, string>>(() => Object.fromEntries((initial?.items ?? []).map((i) => [i.planKey, String(i.quantity)])));
+  const [how, setHow] = useState<"online" | "transfer">(mode === "transfer" ? "transfer" : "online");
+  const [periods, setPeriods] = useState("1");
   const [pages, setPages] = useState<{ plan: string; url: string }[] | null>(null);
+  const [proforma, setProforma] = useState<{ number: string; url: string; total: number; validUntil: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const per = interval === "YEAR" ? "a year" : "a month";
+  const byTransfer = how === "transfer";
+  const periodCount = PERIOD_CHOICES[interval].includes(Number(periods)) ? Number(periods) : 1;
 
   // What is chosen at this interval: the ticked editions on sale in it, and every extra with a number.
   const chosenEditions = editions.filter((p) => picked.includes(p.key));
@@ -84,13 +124,30 @@ export function PlanPicker({ plans, currency, gateway }: { plans: OfferPlan[]; c
     });
   }
 
+  if (proforma) {
+    return (
+      <div className="space-y-2 text-sm">
+        <p className="text-text">
+          Proforma <span className="font-medium">{proforma.number}</span> for {formatMoney(proforma.total, "INR")}, GST included, is on its way to the billing email. It holds until {dayText(proforma.validUntil)}.
+        </p>
+        <p className="text-muted">Pay it by bank transfer, quoting its number as the reference. The plan switches on, and the GST tax invoice is emailed, once the payment reaches us.</p>
+        <OutboundLink href={proforma.url} className="inline-block font-medium text-brand hover:underline">
+          View the proforma
+        </OutboundLink>
+      </div>
+    );
+  }
   if (pages) {
     return (
       <div className="space-y-2 text-sm">
-        <p className="text-text">Authorise each payment on Razorpay&apos;s page. The workspace updates by itself once each is done.</p>
+        <p className="text-text">
+          {mode === "change" && renewsOn
+            ? `Authorise each on Razorpay's page. Nothing is charged until ${dayText(renewsOn)}, when the new plans take over from the current ones.`
+            : "Authorise each payment on Razorpay's page. The workspace updates by itself once each is done."}
+        </p>
         {pages.map((p) => (
           <OutboundLink key={p.url} href={p.url} className="block font-medium text-brand hover:underline">
-            Pay for {p.plan}
+            {mode === "change" ? `Authorise ${p.plan}` : `Pay for ${p.plan}`}
           </OutboundLink>
         ))}
       </div>
@@ -107,6 +164,20 @@ export function PlanPicker({ plans, currency, gateway }: { plans: OfferPlan[]; c
         if (refusal) return setError(refusal);
         const items = lines.map((l) => ({ planKey: l.plan.key, quantity: l.quantity }));
         startTransition(async () => {
+          if (byTransfer) {
+            const r = await askForProforma({ interval, items, periods: periodCount });
+            if (!r.ok) return setError(r.error);
+            setProforma(r.data);
+            router.refresh();
+            return;
+          }
+          if (mode === "change") {
+            const r = await changePlanAtRenewal({ interval, items });
+            if (!r.ok) return setError(r.error);
+            setPages(r.data.authorisations);
+            router.refresh();
+            return;
+          }
           const r = await checkoutPlan({ interval, items });
           if (!r.ok) return setError(r.error);
           if (r.data.gateway === "STRIPE") go(r.data.url);
@@ -114,10 +185,29 @@ export function PlanPicker({ plans, currency, gateway }: { plans: OfferPlan[]; c
         });
       }}
     >
+      {mode === "buy" && bankTransfer && (
+        <div className="inline-flex rounded-base border border-line p-0.5 text-sm" role="radiogroup" aria-label="How to pay">
+          {(["online", "transfer"] as const).map((h) => (
+            <button key={h} type="button" role="radio" aria-checked={how === h} onClick={() => setHow(h)} className={how === h ? "rounded-base bg-brand-subtle px-3 py-1 font-medium text-brand" : "px-3 py-1 text-muted"}>
+              {h === "online" ? "Pay online" : "Pay by bank transfer"}
+            </button>
+          ))}
+        </div>
+      )}
       {intervals.length > 1 && (
         <div className="inline-flex rounded-base border border-line p-0.5 text-sm" role="radiogroup" aria-label="Billed">
           {(["MONTH", "YEAR"] as const).map((i) => (
-            <button key={i} type="button" role="radio" aria-checked={interval === i} onClick={() => setBilled(i)} className={interval === i ? "rounded-base bg-brand-subtle px-3 py-1 font-medium text-brand" : "px-3 py-1 text-muted"}>
+            <button
+              key={i}
+              type="button"
+              role="radio"
+              aria-checked={interval === i}
+              onClick={() => {
+                setBilled(i);
+                setPeriods("1");
+              }}
+              className={interval === i ? "rounded-base bg-brand-subtle px-3 py-1 font-medium text-brand" : "px-3 py-1 text-muted"}
+            >
               {i === "YEAR" ? "Yearly" : "Monthly"}
             </button>
           ))}
@@ -177,24 +267,67 @@ export function PlanPicker({ plans, currency, gateway }: { plans: OfferPlan[]; c
           })}
         </fieldset>
       )}
+      {byTransfer && (
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <Label htmlFor="proforma-periods">Pay for</Label>
+          <Select id="proforma-periods" className="h-8 w-40" value={String(periodCount)} onChange={(e) => setPeriods(e.target.value)}>
+            {PERIOD_CHOICES[interval].map((n) => (
+              <option key={n} value={n}>
+                {n} {interval === "YEAR" ? (n === 1 ? "year" : "years") : n === 1 ? "month" : "months"}
+              </option>
+            ))}
+          </Select>
+        </div>
+      )}
       <p className="text-sm text-text" aria-live="polite">
         {lines.length ? (
-          <>
-            Total <span className="font-semibold tabular-nums">{formatMoney(total, currency)}</span> {per}, before tax — {lines.map((l) => (l.quantity > 1 ? `${l.plan.name} ×${l.quantity}` : l.plan.name)).join(", ")}.
-          </>
+          byTransfer ? (
+            <>
+              Total <span className="font-semibold tabular-nums">{formatMoney(total * periodCount, currency)}</span> for {periodCount} {interval === "YEAR" ? (periodCount === 1 ? "year" : "years") : periodCount === 1 ? "month" : "months"}, before GST —{" "}
+              {lines.map((l) => (l.quantity > 1 ? `${l.plan.name} ×${l.quantity}` : l.plan.name)).join(", ")}.
+            </>
+          ) : (
+            <>
+              Total <span className="font-semibold tabular-nums">{formatMoney(total, currency)}</span> {per}, before tax — {lines.map((l) => (l.quantity > 1 ? `${l.plan.name} ×${l.quantity}` : l.plan.name)).join(", ")}.
+            </>
+          )
         ) : (
           <span className="text-muted">Nothing chosen yet.</span>
         )}
       </p>
       <p className="text-xs text-muted">
-        {gateway === "STRIPE" ? "Paid by card through Stripe; tax is added as your country requires, and your tax number goes on every invoice." : "Paid through Razorpay, in rupees, by card, UPI or netbanking mandate."}
+        {byTransfer
+          ? "A proforma with our bank details is emailed to the billing email. The plan switches on once the transfer reaches us — your GST tax invoice follows."
+          : mode === "change" && renewsOn
+            ? `Starts on ${dayText(renewsOn)}, when the current plans renew: you authorise it on Razorpay now, and nothing is charged or changed until then.`
+            : gateway === "STRIPE"
+              ? "Paid by card through Stripe; tax is added as your country requires, and your tax number goes on every invoice."
+              : "Paid through Razorpay, in rupees, by card, UPI or netbanking mandate."}
       </p>
       {error && <p className="text-sm text-danger">{error}</p>}
       <Button type="submit" disabled={pending || chosenEditions.length === 0}>
-        {pending ? "Opening…" : "Continue to payment"}
+        {pending ? "Working…" : byTransfer ? "Email me a proforma" : mode === "change" ? "Continue to authorise" : "Continue to payment"}
       </Button>
     </form>
   );
+}
+
+/**
+ * Waiting for a gateway's word — back from Stripe's checkout, or a Razorpay page to authorise: the page
+ * asks again every few seconds, for three minutes at most, so the plan shows as soon as it is on.
+ */
+export function WaitForPayment() {
+  const router = useRouter();
+  useEffect(() => {
+    let asked = 0;
+    const timer = setInterval(() => {
+      asked += 1;
+      if (asked > 22) clearInterval(timer);
+      else router.refresh();
+    }, 8000);
+    return () => clearInterval(timer);
+  }, [router]);
+  return null;
 }
 
 export function ManageAtStripe() {

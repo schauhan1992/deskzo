@@ -2539,13 +2539,15 @@ async function main() {
       await attribute(tTerm.id, f.term.id, IST("2025-06-01T00:00:00"));
       ok("partnerShownToCustomer: the display name while ACTIVE, ONBOARDING or SUSPENDED", (await shown(f.tD1a.id))?.displayName === "Zzp Distribution" && (await shown(tOnb.id))?.displayName === "Zzp Onboarding Co" && (await shown(tSusp.id))?.displayName === "Zzp Suspended Co");
       ok("  nobody for a TERMINATED partner, a direct workspace, an unknown or empty id", (await shown(tTerm.id)) === null && (await shown(f.tDirect.id)) === null && (await shown("zzp-no-such-tenant")) === null && (await shown("")) === null);
-      const BillingPage = (require("../src/app/(dashboard)/settings/billing/page") as { default: () => Promise<unknown> }).default;
+      const BillingPage = (require("../src/app/(dashboard)/settings/billing/page") as { default: (props: { searchParams: Promise<Record<string, string>> }) => Promise<unknown> }).default;
       billingView = {
         standing: { kind: "paid" },
         held: false,
         canManageAtStripe: false,
-        subscriptions: [{ id: "s1", gateway: "RAZORPAY", status: "ACTIVE", interval: "MONTH", currentPeriodEnd: IST("2026-10-28T00:00:00"), cancelAtPeriodEnd: false, plans: [{ name: "Zzp Pro", quantity: 3 }] }],
+        subscriptions: [{ id: "s1", gateway: "RAZORPAY", status: "ACTIVE", interval: "MONTH", currentPeriodEnd: IST("2026-10-28T00:00:00"), cancelAtPeriodEnd: false, startsAt: null, plans: [{ key: "zzp-pro", name: "Zzp Pro", quantity: 3 }] }],
         authorisations: [],
+        bankTransfer: false,
+        proformas: [],
         usage: { seatsUsed: 3, seatsLimit: 5, copilotUsed: 1200, copilotLimit: 100000 },
         offer: [],
         currency: "INR",
@@ -2556,13 +2558,13 @@ async function main() {
       };
       const billingHtml = async (tenantId: string) => {
         billingTenantId = tenantId;
-        return outcome(async () => renderHtml(BillingPage()));
+        return outcome(async () => renderHtml(BillingPage({ searchParams: Promise.resolve({}) })));
       };
       const withPartner = await billingHtml(f.tD1a.id);
       ok("the workspace's Billing page: 'Sold and supported by Zzp Distribution.' as plain text", withPartner.includes('<p class="text-muted">Sold and supported by Zzp Distribution.</p>'), withPartner.slice(0, 200));
       ok("  shown for a SUSPENDED partner too; not for a TERMINATED one, nor a direct workspace", (await billingHtml(tSusp.id)).includes("Sold and supported by Zzp Suspended Co.") && !(await billingHtml(tTerm.id)).includes("Sold and supported") && !(await billingHtml(f.tDirect.id)).includes("Sold and supported"));
       billingView = null;
-      ok("  not the owner: the owner-only notice, and no line", !(await billingHtml(f.tD1a.id)).includes("Sold and supported"));
+      ok("  somebody who doesn't manage billing: not found, and no line", !(await billingHtml(f.tD1a.id)).includes("Sold and supported"));
     });
 
     // ═══ What was kept ════════════════════════════════════════════════════════════════════════════

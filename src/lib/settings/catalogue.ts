@@ -175,10 +175,10 @@ export const SETTINGS: SettingsSection[] = [
           {
             key: "billing",
             label: "Plan & billing",
-            description: "Your plan, paying for it, invoices, and how much of it is in use. The workspace owner's alone.",
+            description: "Your plan, paying for it, invoices, and how much of it is in use. The workspace owner's, and whoever they let manage billing.",
             href: "/settings/billing",
             icon: CreditCard,
-            permission: "settings.manage",
+            permission: "billing.manage",
           },
           {
             key: "domain",

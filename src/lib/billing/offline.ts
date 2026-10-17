@@ -112,6 +112,8 @@ export type OfflineInput = {
   /** A distributor or reseller paying for the workspace; empty: the workspace itself. */
   partnerId?: string | null;
   note?: string | null;
+  /** The workspace's proforma it pays (src/lib/billing/proforma.ts) — closed as paid with it. */
+  proformaId?: string | null;
 };
 
 export type RecordedPayment = { paymentId: string; invoiceId: string; subscriptionId: string; periodEnd: Date; taxNumber: string | null };
@@ -147,6 +149,11 @@ export async function recordOfflinePayment(input: OfflineInput, staffId: string,
   const endsAt = periodEndOf(startsAt, input.interval, Number(input.periods));
   const plans = await control.plan.findMany({ where: { key: { in: quote.lines.map((l) => l.planKey) } }, select: { id: true, key: true, prices: { where: { active: true, currency: "INR", interval: input.interval }, select: { id: true } } } });
   const tax = platformGstIn(amount);
+  if (input.proformaId) {
+    const proforma = await control.platformProforma.findUnique({ where: { id: input.proformaId }, select: { tenantId: true, status: true } });
+    if (!proforma || proforma.tenantId !== input.tenantId) throw new OfflineRefused("That proforma isn't this workspace's.");
+    if (proforma.status !== "OPEN") throw new OfflineRefused("That proforma is closed already — record the payment without it.");
+  }
 
   const made = await control.$transaction(async (tx) => {
     const sub = existing
@@ -202,6 +209,11 @@ export async function recordOfflinePayment(input: OfflineInput, staffId: string,
       },
       select: { id: true },
     });
+    // The proforma it pays, paid — only if nobody closed it in the meantime.
+    if (input.proformaId) {
+      const closed = await tx.platformProforma.updateMany({ where: { id: input.proformaId, tenantId: input.tenantId, status: "OPEN" }, data: { status: "PAID", paymentId: payment.id, closedAt: now } });
+      if (closed.count !== 1) throw new OfflineRefused("That proforma was closed a moment ago — record the payment without it.");
+    }
     // A free trial is over once it is paid for.
     await tx.subscription.updateMany({ where: { tenantId: input.tenantId, gateway: "MANUAL", status: "TRIALING" }, data: { status: "CANCELLED", cancelledAt: now } });
     await tx.platformAuditLog.create({
@@ -210,7 +222,7 @@ export async function recordOfflinePayment(input: OfflineInput, staffId: string,
         actor: staffId,
         action: "billing.offline.record",
         tenantId: input.tenantId,
-        detail: { payment: payment.id, method: input.method, amount, periods: Number(input.periods), interval: input.interval, until: endsAt.toISOString(), partnerId: input.partnerId || null },
+        detail: { payment: payment.id, method: input.method, amount, periods: Number(input.periods), interval: input.interval, until: endsAt.toISOString(), partnerId: input.partnerId || null, proformaId: input.proformaId || null },
       },
     });
     return { paymentId: payment.id, invoiceId: invoice.id, subscriptionId: sub.id, periodEnd: sub.currentPeriodEnd ?? endsAt };

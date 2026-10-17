@@ -22,7 +22,7 @@ import type { BillingPanel, SubView, WorkspaceHeader } from "@/lib/platform/work
 import type { Clock } from "@/lib/time/zone";
 import { cn } from "@/lib/utils";
 import { BillingProfileButton, EndManualPlanButton, ResyncButton, TrialCard } from "./billing-actions";
-import { RecordPaymentButton, VoidPaymentButton } from "./offline-payments";
+import { CancelProformaButton, RecordPaymentButton, VoidPaymentButton } from "./offline-payments";
 
 const OFFLINE_METHOD: Record<string, string> = { NEFT: "NEFT", RTGS: "RTGS", IMPS: "IMPS", UPI: "UPI", CHEQUE: "Cheque", CASH: "Cash", OTHER: "Other" };
 
@@ -195,6 +195,20 @@ export async function BillingTab({ header, billing, caps }: { header: WorkspaceH
         actions={caps.sell && !closed && tenant.country === "IN" ? <RecordPaymentButton tenantId={tenant.id} options={billing.offlineForm} /> : undefined}
         padded={false}
       >
+        {billing.offlineForm.proformas.length > 0 && (
+          <div className="space-y-1 border-b border-line px-4 py-3 text-sm">
+            <p className="text-xs font-medium text-muted">Proformas waiting for a transfer</p>
+            {billing.offlineForm.proformas.map((p) => (
+              <div key={p.id} className="flex flex-wrap items-center justify-between gap-2">
+                <span>
+                  <ExternalLink href={p.url}>{p.number}</ExternalLink>
+                  <span className="text-muted">{` — ${formatMoney(p.total, "INR")}, asked by ${p.requestedBy}, ${p.expired ? "expired" : `until ${clock.date(p.validUntil)}`}`}</span>
+                </span>
+                {caps.sell && !closed && <CancelProformaButton proformaId={p.id} number={p.number} />}
+              </div>
+            ))}
+          </div>
+        )}
         {billing.offlinePayments.length === 0 ? (
           <EmptyState
             icon={<Receipt className="h-5 w-5" />}

@@ -6,6 +6,7 @@ import { controlDb } from "@/lib/platform/control-db";
 import { refreshEntitlements } from "@/lib/platform/entitlements";
 import { platformGstIn } from "@/lib/billing/platform-gst";
 import { priceOfGatewayId } from "@/lib/billing/prices";
+import { finishScheduledChange } from "@/lib/billing/checkout";
 import { creditRefunds, issueTaxInvoice } from "@/lib/billing/tax-invoice";
 
 /**
@@ -171,8 +172,12 @@ export async function applyRazorpaySubscription(sub: RazorpaySubscription, now =
   if (!tenantId) return null;
   const price = await priceOfGatewayId("RAZORPAY", sub.plan_id);
   const status = razorpayStatus(sub.status);
+  // Authorised to start later — a change from the next renewal — counts for nothing until it starts.
+  const startAt = fromUnix(sub.start_at);
+  const startsAt = startAt && startAt > now ? startAt : null;
   const fields = {
     status,
+    startsAt,
     currentPeriodEnd: fromUnix(sub.current_end) ?? fromUnix(sub.charge_at),
     cancelledAt: status === "CANCELLED" ? (fromUnix(sub.ended_at) ?? now) : null,
     cancelAtPeriodEnd: status === "CANCELLED" ? false : (existing?.cancelAtPeriodEnd ?? false),
@@ -198,8 +203,11 @@ export async function applyRazorpaySubscription(sub: RazorpaySubscription, now =
       const holder = await tx.tenant.findUnique({ where: { razorpayCustomerId: sub.customer_id }, select: { id: true } });
       if (!holder) await tx.tenant.update({ where: { id: tenantId }, data: { razorpayCustomerId: sub.customer_id } });
     }
-    if (LIVE.has(status)) await endTrialFor(tx, tenantId, now);
+    // A change waiting for its start ends no trial: it is for a workspace paying already.
+    if (LIVE.has(status) && !startsAt) await endTrialFor(tx, tenantId, now);
   });
+  // The last part of a change authorised: what it replaces is cancelled at the end of its period.
+  if (status === "ACTIVE" && startsAt) await finishScheduledChange(tenantId, now);
   await refreshEntitlements(tenantId);
   return tenantId;
 }

@@ -7,6 +7,7 @@ import type { TerminalState } from "@/lib/console-shared/params";
 import { redactSecrets } from "@/lib/console-shared/redact";
 import type { CatalogueModuleView, GatewayKey, GatewayModes, InvoiceStatusKey, OfflineMethodKey, PlanKindKey, SubscriptionStatusKey, Tone } from "@/lib/console-shared/types";
 import { documentUrl } from "@/lib/billing/tax-invoice";
+import { proformasOf } from "@/lib/billing/proforma";
 import { usageDay } from "@/lib/copilot/settings";
 import { moduleEntitled, parseEntitlements, type Entitlements } from "@/lib/entitlements";
 import { getModuleDefinition } from "@/lib/modules";
@@ -397,6 +398,8 @@ export type OfflineFormOptions = {
   current: { planKey: string; quantity: number }[];
   /** Its offline subscription's paid-until date, when it has one. */
   paidUntil: Date | null;
+  /** Proformas it asked for and hasn't paid yet (src/lib/billing/proforma.ts) — a payment can be recorded against one. */
+  proformas: { id: string; number: string; total: number; validUntil: Date; expired: boolean; url: string; requestedBy: string; items: { planKey: string; quantity: number }[]; interval: "MONTH" | "YEAR"; periods: number }[];
 };
 
 export type BillingPanel = {
@@ -546,7 +549,7 @@ export async function workspaceBilling(tenantId: string, opts: { invoicePage?: n
 /** What the "Record a payment" form needs for this workspace: plans on sale with rupee prices, the partners, and what it has now. */
 async function offlineFormOptions(tenantId: string): Promise<OfflineFormOptions> {
   const control = controlDb();
-  const [plans, partners, live] = await Promise.all([
+  const [plans, partners, live, proformas] = await Promise.all([
     control.plan.findMany({
       where: { active: true, kind: { in: ["EDITION", "BUNDLE", "ADDON"] }, prices: { some: { active: true, currency: "INR" } } },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
@@ -558,6 +561,7 @@ async function offlineFormOptions(tenantId: string): Promise<OfflineFormOptions>
       orderBy: { createdAt: "desc" },
       select: { gateway: true, currentPeriodEnd: true, items: { select: { quantity: true, plan: { select: { key: true } } } } },
     }),
+    proformasOf(tenantId, { openOnly: true, take: 5 }),
   ]);
   const offline = live.find((s) => s.gateway === "OFFLINE");
   const from = offline ?? live[0];
@@ -574,6 +578,7 @@ async function offlineFormOptions(tenantId: string): Promise<OfflineFormOptions>
     partners: partners.map((p) => ({ id: p.id, name: p.displayName, kind: p.kind })),
     current: (from?.items ?? []).map((i) => ({ planKey: i.plan.key, quantity: i.quantity })),
     paidUntil: offline?.currentPeriodEnd ?? null,
+    proformas: proformas.map((p) => ({ id: p.id, number: p.number, total: p.total, validUntil: p.validUntil, expired: p.expired, url: p.url, requestedBy: p.requestedBy, items: p.items, interval: p.interval, periods: p.periods })),
   };
 }
 

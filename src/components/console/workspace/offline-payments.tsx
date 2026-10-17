@@ -2,7 +2,7 @@
 
 import { useId, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
-import { consoleRecordOfflinePayment, consoleVoidOfflinePayment } from "@/actions/platform/console-offline";
+import { consoleCancelProforma, consoleRecordOfflinePayment, consoleVoidOfflinePayment } from "@/actions/platform/console-offline";
 import { ConfirmDialog } from "@/components/console/kit/confirm-dialog";
 import { useConsoleAction } from "@/components/console/kit/use-console-action";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,8 @@ import type { OfflineFormOptions } from "@/lib/platform/workspace-data";
  * Recording a payment no gateway took (src/lib/billing/offline.ts) — a bank transfer, a cheque, a
  * distributor paying for its customer — and voiding one recorded by mistake. The form works out what
  * the price list says the period costs, GST included, beside the amount received, so a short payment
- * is seen before it is saved; the server checks everything again.
+ * is seen before it is saved; the server checks everything again. A transfer against a proforma the
+ * workspace asked for (src/lib/billing/proforma.ts) starts from that proforma, and closes it as paid.
  */
 
 const METHODS: { value: OfflineMethodKey; label: string }[] = [
@@ -48,6 +49,19 @@ export function RecordPaymentButton({ tenantId, options }: { tenantId: string; o
   const [receivedOn, setReceivedOn] = useState(todayInIndia);
   const [partnerId, setPartnerId] = useState("");
   const [note, setNote] = useState("");
+  const [proformaId, setProformaId] = useState("");
+
+  /** Against a proforma: its plans, people, period and total, as it asked. */
+  function fillFromProforma(id: string) {
+    setProformaId(id);
+    const p = options.proformas.find((x) => x.id === id);
+    if (!p) return;
+    setRows(p.items.map((i) => ({ planKey: i.planKey, quantity: String(i.quantity) })));
+    setBilledInterval(p.interval);
+    setPeriods(String(p.periods));
+    setAmount((p.total / 100).toFixed(2));
+    setReference((r) => r || p.number);
+  }
 
   // What the price list says, before and with GST — null while a plan has no price at this interval.
   const count = Math.max(0, Math.floor(Number(periods) || 0));
@@ -75,6 +89,7 @@ export function RecordPaymentButton({ tenantId, options }: { tenantId: string; o
     setReceivedOn(todayInIndia());
     setPartnerId("");
     setNote("");
+    setProformaId("");
     setOpen(true);
   }
 
@@ -91,6 +106,7 @@ export function RecordPaymentButton({ tenantId, options }: { tenantId: string; o
       receivedOn,
       partnerId,
       note,
+      proformaId,
     };
     action.run(() => consoleRecordOfflinePayment(form), {
       success: (d) => `Payment recorded — paid until ${new Date(d.periodEnd).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata" })}${d.taxNumber ? `, tax invoice ${d.taxNumber}` : " (its tax invoice waits for the seller's details in Settings › Invoicing)"}.`,
@@ -118,6 +134,20 @@ export function RecordPaymentButton({ tenantId, options }: { tenantId: string; o
         confirmDisabled={!rows.length || rows.some((r) => !r.planKey || !(Number(r.quantity) >= 1)) || !(count >= 1) || typedPaise === null || !receivedOn || (method !== "CASH" && !reference.trim())}
         onConfirm={save}
       >
+        {options.proformas.length > 0 && (
+          <div className="space-y-1.5">
+            <Label htmlFor={`${id}-proforma`}>Against a proforma</Label>
+            <Select id={`${id}-proforma`} value={proformaId} onChange={(e) => fillFromProforma(e.target.value)}>
+              <option value="">None</option>
+              {options.proformas.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {`${p.number} — ${rupees(p.total)}${p.expired ? " (expired)" : ""}`}
+                </option>
+              ))}
+            </Select>
+            <p className="text-[11px] text-muted">Fills in what it asked for; the proforma is closed as paid with this payment.</p>
+          </div>
+        )}
         <fieldset className="space-y-2">
           <legend className="text-sm font-medium text-text">What it pays for</legend>
           {rows.map((r, i) => {
@@ -224,6 +254,41 @@ export function RecordPaymentButton({ tenantId, options }: { tenantId: string; o
           </div>
         </div>
         <p className="text-sm text-muted">It is paid until the period ends; its paid invoice and GST tax invoice are made and mailed now, and a trial ends.</p>
+      </ConfirmDialog>
+    </>
+  );
+}
+
+/** A proforma closed unpaid — asked for by mistake, or settled another way. The workspace can ask for another. */
+export function CancelProformaButton({ proformaId, number }: { proformaId: string; number: string }) {
+  const action = useConsoleAction<null>();
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="h-7 px-2 text-xs"
+        onClick={() => {
+          action.reset();
+          setOpen(true);
+        }}
+      >
+        Cancel
+      </Button>
+      <ConfirmDialog
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Cancel this proforma"
+        confirmLabel="Cancel proforma"
+        pending={action.pending}
+        error={action.error}
+        onConfirm={() => action.run(() => consoleCancelProforma(proformaId), { success: `Proforma ${number} cancelled.`, onDone: () => setOpen(false) })}
+      >
+        <p>
+          <span className="font-medium">{number}</span> is closed unpaid. A payment can still be recorded without it.
+        </p>
       </ConfirmDialog>
     </>
   );

@@ -79,6 +79,9 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const id = `sub_zzprod${++seq}`;
     return answer(200, { id, entity: "subscription", status: "created", short_url: `https://rzp.test/${id}` });
   }
+  // Buying again cancels the pages the last attempt left waiting (src/lib/billing/checkout.ts).
+  const cancelled = url.pathname.match(/^\/v1\/subscriptions\/([^/]+)\/cancel$/);
+  if (url.host === "api.razorpay.com" && method === "POST" && cancelled) return answer(200, { id: cancelled[1], entity: "subscription", status: "cancelled" });
   throw new Error(`check:products makes no outside calls — ${method} ${url.href}`);
 }) as typeof fetch;
 
