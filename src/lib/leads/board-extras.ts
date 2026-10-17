@@ -1,9 +1,10 @@
 import { db } from "@/lib/db";
 import type { AvatarUser } from "@/components/ui/avatar";
+import { effectiveStatus } from "@/lib/tasks/rules";
 
 /**
  * What a lead's card on the board shows beyond the lead itself (owner, 16 Oct 2026): its tasks done out
- * of all, the products asked for, the calls and notes logged, and the people on it — the owner, then
+ * of all (a cancelled one is neither — it was never going to be done), the products asked for, the calls and notes logged, and the people on it — the owner, then
  * whoever has a task on it. Counts only, never what they say. One query a kind for the whole board.
  * Server only.
  */
@@ -22,7 +23,7 @@ export async function leadBoardExtras(leads: { id: string; ownerUserId: string |
   const out: Record<string, LeadBoardExtras> = {};
   if (ids.length === 0) return out;
   const [tasks, assignees, products, activities, calls] = await Promise.all([
-    db.task.groupBy({ by: ["leadId", "done"], where: { leadId: { in: ids } }, _count: { _all: true } }),
+    db.task.groupBy({ by: ["leadId", "done", "status"], where: { leadId: { in: ids } }, _count: { _all: true } }),
     db.task.findMany({
       where: { leadId: { in: ids }, assignedToUserId: { not: null } },
       select: { leadId: true, assignedToUserId: true },
@@ -49,8 +50,10 @@ export async function leadBoardExtras(leads: { id: string; ownerUserId: string |
   for (const id of ids) out[id] = { tasksDone: 0, tasksTotal: 0, products: 0, touches: 0, people: [] };
   for (const t of tasks) {
     if (!t.leadId || !out[t.leadId]) continue;
+    const status = effectiveStatus(t);
+    if (status === "CANCELLED") continue;
     out[t.leadId]!.tasksTotal += t._count._all;
-    if (t.done) out[t.leadId]!.tasksDone += t._count._all;
+    if (status === "DONE") out[t.leadId]!.tasksDone += t._count._all;
   }
   for (const p of products) if (out[p.leadId]) out[p.leadId]!.products = p._count._all;
   for (const a of activities) if (out[a.leadId]) out[a.leadId]!.touches += a._count._all;

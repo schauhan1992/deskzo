@@ -187,12 +187,13 @@ async function main() {
         { title: "Send the quote", createdByUserId: hr.id, leadId: lead.id, assignedToUserId: worker.id, done: true },
         { title: "Book the demo", createdByUserId: hr.id, leadId: lead.id, assignedToUserId: worker.id },
         { title: "Chase", createdByUserId: hr.id, leadId: lead.id },
+        { title: "The old approach", createdByUserId: hr.id, leadId: lead.id, done: true, status: "CANCELLED" },
       ],
     });
     await db.leadRequirement.create({ data: { leadId: lead.id, itemId: item.id } });
     await db.activity.create({ data: { leadId: lead.id, userId: hr.id, type: "NOTE", notes: "Spoke to the buyer" } });
     const extras = (await leadBoardExtras([{ id: lead.id, ownerUserId: hr.id }]))[lead.id];
-    ok("tasks done of all", extras?.tasksDone === 1 && extras.tasksTotal === 3, JSON.stringify(extras));
+    ok("tasks done of all — one closed before the status column counts as done, a cancelled one not at all", extras?.tasksDone === 1 && extras.tasksTotal === 3, JSON.stringify(extras));
     ok("  products asked for, calls and notes", extras?.products === 1 && extras.touches === 1);
     ok("  the owner first, then whoever has a task on it, once each", extras?.people.map((p) => p.id).join() === `${hr.id},${worker.id}`);
     ok("a lead with nothing has nothing", JSON.stringify((await leadBoardExtras([{ id: "zz-none", ownerUserId: null }]))["zz-none"]) === JSON.stringify({ tasksDone: 0, tasksTotal: 0, products: 0, touches: 0, people: [] }));

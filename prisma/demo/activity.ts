@@ -13,6 +13,7 @@ import {
   rnd,
   some,
   sometimeLastYear,
+  TODAY,
 } from "./shared";
 
 /**
@@ -435,7 +436,8 @@ export async function seedActivity(
           ]),
           dueDate: daysAhead(int(-90, 30)),
           done,
-          doneAt: done ? new Date(createdAt.getTime() + int(1, 30) * 86400000) : null,
+          // Done within a month of being set — but never after today.
+          doneAt: done ? new Date(Math.min(createdAt.getTime() + int(1, 30) * 86400000, TODAY.getTime() - int(1, 120) * 60_000)) : null,
           assignedToUserId: person.id,
           createdByUserId: chance(0.6) ? person.id : pick(people).id,
           companyId: company?.id ?? null,

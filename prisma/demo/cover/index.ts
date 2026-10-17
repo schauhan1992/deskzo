@@ -6,6 +6,7 @@ import seedFinanceCover from "./finance";
 import seedCrm, { resetCrm } from "./crm";
 import seedReach from "./reach";
 import seedTasks from "./tasks";
+import seedTaskDepth from "./task-depth";
 import seedPeopleYear from "./people";
 
 /**
@@ -22,7 +23,8 @@ import seedPeopleYear from "./people";
  *                 then leads, visits, meetings and custom fields;
  *   4. reach    — marketing decides who can be reached from the invoices and tickets as they stand;
  *   5. tasks    — the day-to-day work on the leads and tickets the others left, the owner's list and
- *                 the back office's, dated from the day it runs;
+ *                 the back office's, dated from the day it runs; then task-depth fills in their status,
+ *                 priority, challenges and XP, checklists, comments and time;
  *   6. people   — last: joining and leaving dates, awards and the activity trail are read from
  *                 everything the others did.
  */
@@ -35,6 +37,7 @@ export const COVER_AREAS: CoverArea[] = [
   { key: "crm", label: "Accounts, leads, calls, visits, meetings and custom fields", seed: seedCrm },
   { key: "reach", label: "Marketing, forms, feedback, the portal and projects", seed: seedReach },
   { key: "tasks", label: "Tasks on leads and tickets, the owner's list and the back office's", seed: seedTasks },
+  { key: "task-depth", label: "Task status, priority, challenges and XP, checklists, comments and time", seed: seedTaskDepth },
   { key: "people", label: "Each person's year: HR, payroll, targets, wins and their trail", seed: seedPeopleYear },
 ];
 
@@ -46,6 +49,8 @@ export const COVER_AREAS: CoverArea[] = [
  * they post into.
  */
 export async function resetCover(db: PrismaClient, companyIds: string[], userIds: string[]): Promise<void> {
+  // A challenge outlives whoever ran it (SetNull); the demo's go with the demo.
+  await db.taskChallenge.deleteMany({ where: { createdById: { in: userIds } } });
   // Revenue & Close and the prepaid/accrual schedules point at journal entries and documents.
   await db.revenueSchedule.deleteMany({ where: { companyId: { in: companyIds } } });
   await db.accountingSchedule.deleteMany({});
