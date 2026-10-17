@@ -12,7 +12,7 @@ import { recordAudit } from "@/lib/audit";
 import { PEOPLE_ONLY } from "@/lib/people";
 import { workspaceClock } from "@/lib/time/workspace";
 import { chatFileType } from "@/lib/chat/rules";
-import { ADVANCED, givenToWork, storedDay } from "@/lib/tasks/server";
+import { ADVANCED, givenToWork, storedDay, workableTask } from "@/lib/tasks/server";
 import { COMMENT_MAX, ONLY_WORKS, TASK_FILE_MAX_BYTES } from "@/lib/tasks/rules";
 import type { ActionResult } from "@/actions/company";
 
@@ -80,8 +80,8 @@ export async function getTaskPanel(id: string) {
     starred: stars.length > 0,
     loggedMinutes: task.timeLogs.reduce((sum, t) => sum + t.minutes, 0),
     viewerId: user.id,
-    /** Move it along, tick its steps, attach and log time. */
-    canEdit,
+    /** Move it along, tick its steps, attach and log time: whoever it's assigned to, or whose role may change it. */
+    canWork: canEdit || task.assignedToUserId === user.id,
     /** Change what it is — its details and its steps — and take others' files and comments off. */
     canChange: canEdit && !workOnly,
     canDelete: canDelete && !workOnly,
@@ -105,14 +105,16 @@ export async function addChecklistItem(taskId: string, title: string): Promise<A
   return { ok: true, data: item };
 }
 
-async function itemFor(userId: string, itemId: string) {
+/** A step, when this person may tick it (`work`: workableTask) or change it (`change`: the role's edit). */
+async function itemFor(userId: string, itemId: string, may: "work" | "change") {
   const item = await db.taskChecklistItem.findUnique({ where: { id: String(itemId ?? "") }, select: { id: true, taskId: true, done: true } });
-  return item && (await taskFor(userId, item.taskId, "edit")) ? item : null;
+  if (!item) return null;
+  return (may === "work" ? await workableTask(userId, item.taskId) : await taskFor(userId, item.taskId, "edit")) ? item : null;
 }
 
 export async function toggleChecklistItem(itemId: string): Promise<ActionResult<{ done: boolean }>> {
   const user = await requireModuleUser("tasks");
-  const item = await itemFor(user.id, itemId);
+  const item = await itemFor(user.id, itemId, "work");
   if (!item) return { ok: false, error: "That step no longer exists." };
   const done = !item.done;
   await db.taskChecklistItem.update({ where: { id: item.id }, data: { done, doneAt: done ? new Date() : null, doneById: done ? user.id : null } });
@@ -122,7 +124,7 @@ export async function toggleChecklistItem(itemId: string): Promise<ActionResult<
 
 export async function deleteChecklistItem(itemId: string): Promise<ActionResult<null>> {
   const user = await requireModuleUser("tasks");
-  const item = await itemFor(user.id, itemId);
+  const item = await itemFor(user.id, itemId, "change");
   if (!item) return { ok: false, error: "That step no longer exists." };
   const task = await db.task.findUniqueOrThrow({ where: { id: item.taskId }, select: { assignedToUserId: true, createdByUserId: true } });
   if (await givenToWork(user.id, task)) return { ok: false, error: ONLY_WORKS };
@@ -173,7 +175,7 @@ export async function uploadTaskFile(form: FormData): Promise<ActionResult<{ id:
   const user = await requireModuleUser("tasks");
   const refused = await refuseWhileViewingAs();
   if (refused) return { ok: false, error: refused };
-  const task = await taskFor(user.id, String(form.get("taskId") ?? ""), "edit");
+  const task = await workableTask(user.id, String(form.get("taskId") ?? ""));
   if (!task) return { ok: false, error: "Task not found." };
   const file = form.get("file");
   if (!file || typeof file !== "object" || !("arrayBuffer" in file) || (file as File).size === 0) return { ok: false, error: "Choose a file." };
@@ -209,7 +211,7 @@ export async function logTaskTime(input: { taskId: string; minutes: number; note
   const user = await requireModuleUser("tasks");
   const refused = await refuseWhileViewingAs();
   if (refused) return { ok: false, error: refused };
-  const task = await taskFor(user.id, String(input?.taskId ?? ""), "edit");
+  const task = await workableTask(user.id, String(input?.taskId ?? ""));
   if (!task) return { ok: false, error: "Task not found." };
   const minutes = Number(input?.minutes);
   if (!Number.isInteger(minutes) || minutes < 1 || minutes > 24 * 60) return { ok: false, error: "Log between 1 minute and 24 hours at a time." };

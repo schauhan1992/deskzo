@@ -119,7 +119,7 @@ export function TaskPanel({ taskId, onClose, options }: { taskId: string; onClos
           </button>
           <Badge tone={STATUS_TONES[shown]}>{STATUS_LABELS[shown]}</Badge>
           <Badge tone={PRIORITY_TONES[panel.priority]}>{PRIORITY_LABELS[panel.priority]} priority</Badge>
-          {panel.canEdit && (
+          {panel.canWork && (
             <Select
               aria-label="Move to"
               value={status}
@@ -238,7 +238,7 @@ export function TaskPanel({ taskId, onClose, options }: { taskId: string; onClos
                   type="checkbox"
                   className="h-4 w-4"
                   checked={item.done}
-                  disabled={!panel.canEdit || pending}
+                  disabled={!panel.canWork || pending}
                   onChange={() => run(() => toggleChecklistItem(item.id))}
                   aria-label={item.title}
                 />
@@ -272,7 +272,7 @@ export function TaskPanel({ taskId, onClose, options }: { taskId: string; onClos
             ))}
             {panel.attachments.length === 0 && <li className="text-sm text-subtle">No files yet.</li>}
           </ul>
-          {panel.canEdit && (
+          {panel.canWork && (
             <label className="mt-2 inline-flex cursor-pointer items-center gap-1.5 text-sm font-medium text-brand hover:underline">
               <Paperclip className="h-3.5 w-3.5" />
               Attach a file
@@ -295,7 +295,7 @@ export function TaskPanel({ taskId, onClose, options }: { taskId: string; onClos
         </Section>
 
         <Section title="Time logged">
-          {panel.canEdit && <LogTime onLog={(minutes, note, day) => run(() => logTaskTime({ taskId: panel.id, minutes, note, spentOn: day }))} pending={pending} today={today} />}
+          {panel.canWork && <LogTime onLog={(minutes, note, day) => run(() => logTaskTime({ taskId: panel.id, minutes, note, spentOn: day }))} pending={pending} today={today} />}
           <ul className="mt-2 space-y-1 text-sm">
             {panel.timeLogs.map((t) => (
               <li key={t.id} className="flex items-center gap-2">

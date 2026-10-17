@@ -37,6 +37,10 @@ export type TaskRow = {
   ticket: { id: string; ticketSeq: number; title: string } | null;
   /** Given to the viewer by somebody else: theirs to tick off, not to change or delete (src/lib/tasks/rules.ts). */
   workOnly?: boolean;
+  /** What the viewer may do with it (src/lib/tasks/server.ts, taskRights), where the list was given it. */
+  canWork?: boolean;
+  canChange?: boolean;
+  canDelete?: boolean;
 };
 
 type AddFormValues = z.input<typeof createTaskSchema>;
@@ -259,7 +263,8 @@ export function TaskList({
           </thead>
           <tbody>
             {tasks.map((task) => {
-              const canDelete = !task.workOnly && (canDeleteAny || task.createdBy.id === currentUserId || task.assignedTo?.id === currentUserId);
+              const canDelete = task.canDelete ?? (!task.workOnly && (canDeleteAny || task.createdBy.id === currentUserId || task.assignedTo?.id === currentUserId));
+              const canChange = task.canChange ?? !task.workOnly;
 
               if (editingId === task.id) {
                 return <EditTaskForm key={task.id} task={task} users={users} columnCount={columnCount} onClose={() => setEditingId(null)} />;
@@ -277,7 +282,7 @@ export function TaskList({
                         type="checkbox"
                         checked={task.done}
                         onChange={() => toggleDone(task)}
-                        disabled={isPending}
+                        disabled={isPending || task.canWork === false}
                         aria-label={`Done: ${task.title}`}
                         className="mt-1 h-4 w-4 rounded border-line-strong"
                       />
@@ -302,7 +307,7 @@ export function TaskList({
                   <td className="px-3 py-2.5 text-muted">{task.createdBy.name}</td>
                   <td className="px-3 py-2.5 text-right">
                     <RowActions>
-                      {!task.workOnly && <IconButton icon={Pencil} label="Edit task" onClick={() => setEditingId(task.id)} />}
+                      {canChange && <IconButton icon={Pencil} label="Edit task" onClick={() => setEditingId(task.id)} />}
                       {canDelete && (
                         <IconButton
                           icon={Trash2}

@@ -12,7 +12,7 @@ import { recordAudit } from "@/lib/audit";
 import { createTaskSchema, updateTaskSchema } from "@/lib/validation/task";
 import { workspaceClock } from "@/lib/time/workspace";
 import { calendarDayRange } from "@/lib/time/zone";
-import { ADVANCED, givenToWork, givenToWorkAll, moveTask } from "@/lib/tasks/server";
+import { ADVANCED, givenToWork, moveTask, taskRights, workableTask } from "@/lib/tasks/server";
 import { ONLY_WORKS, TASK_STATUSES, type TaskPriorityKey, type TaskRepeatKey, type TaskSort, type TaskStatusKey } from "@/lib/tasks/rules";
 import type { ActionResult } from "@/actions/company";
 
@@ -229,7 +229,8 @@ export async function updateTask(input: unknown): Promise<ActionResult<{ id: str
 /** The old tick: done, or open again — through the same move as the status menu (src/lib/tasks/server.ts). */
 export async function toggleTaskDone(id: string): Promise<ActionResult<null>> {
   const user = await requireModuleUser("tasks");
-  const task = await reachableTask(user.id, id, "edit");
+  // Whoever it's assigned to ticks it off, whatever their role may change (workableTask).
+  const task = await workableTask(user.id, id);
   if (!task) {
     return { ok: false, error: "Task not found." };
   }
@@ -246,7 +247,8 @@ export async function toggleTaskDone(id: string): Promise<ActionResult<null>> {
 export async function setTaskStatus(id: string, status: string): Promise<ActionResult<{ nextTaskId: string | null }>> {
   const user = await requireModuleUser("tasks");
   if (!(TASK_STATUSES as readonly string[]).includes(status)) return { ok: false, error: "That isn't a status a task can have." };
-  const task = await reachableTask(user.id, String(id ?? ""), "edit");
+  // Whoever it's assigned to moves it along, whatever their role may change (workableTask).
+  const task = await workableTask(user.id, String(id ?? ""));
   if (!task) return { ok: false, error: "Task not found." };
   const moved = await moveTask(task.id, status as TaskStatusKey);
   if (!moved) return { ok: false, error: "Task not found." };
@@ -440,13 +442,14 @@ export async function myOpenTasks(): Promise<RailTask[]> {
 
 /** A row of the list, with its checklist's progress and whether the viewer starred it. */
 async function withProgress<T extends { id: string; stars: { userId: string }[]; assignedToUserId: string | null; createdByUserId: string }>(userId: string, rows: T[]) {
-  const [done, workOnly] = await Promise.all([checklistDone(rows.map((r) => r.id)), givenToWorkAll(userId, rows)]);
+  const [done, rights] = await Promise.all([checklistDone(rows.map((r) => r.id)), taskRights(userId, rows)]);
   return rows.map(({ stars, ...row }) => ({
     ...row,
     starred: stars.length > 0,
     checklistDone: done.get(row.id) ?? 0,
-    /** Given to the viewer by somebody else: theirs to move along, not to change (onlyWorks). */
-    workOnly: workOnly(row),
+    // What the viewer may do with it — work it, change it, delete it, and whether it was given to them
+    // (src/lib/tasks/server.ts, taskRights) — so the list offers only what the server will do.
+    ...rights(row),
   }));
 }
 

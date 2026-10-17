@@ -3,6 +3,43 @@ import { db } from "@/lib/db";
 import { workspaceClock } from "@/lib/time/workspace";
 import { closes, dayKeyOf, earnsXp, nextOccurrence, onlyWorks, type TaskStatusKey } from "@/lib/tasks/rules";
 import { getDownlineUserIds } from "@/lib/org-chart";
+import { taskAccess } from "@/lib/authz/access";
+
+/**
+ * The task, when this person may work it — move it through its stages, tick its steps, attach files and
+ * log time: whoever it's assigned to, as long as they can see it, and anybody whose role may change it
+ * (owner, 17 Oct 2026: the assignee moves a task along even where their role can't change tasks —
+ * changing it still follows the role). Null when they can't.
+ */
+export async function workableTask(userId: string, id: string) {
+  if (typeof id !== "string" || !id) return null;
+  const task = await db.task.findFirst({ where: { AND: [{ id }, await taskAccess(userId, "view")] }, omit: ADVANCED });
+  if (!task) return null;
+  if (task.assignedToUserId === userId) return task;
+  return (await db.task.count({ where: { AND: [{ id }, await taskAccess(userId, "edit")] } })) > 0 ? task : null;
+}
+
+/**
+ * What this person may do with each of these tasks, as the list shows it: work it (`workableTask`), change
+ * it (the role's edit, unless it was given to them — `onlyWorks`), delete it (the role's delete, the same).
+ */
+export async function taskRights(userId: string, tasks: readonly { id: string; assignedToUserId: string | null; createdByUserId: string }[]) {
+  const ids = tasks.map((t) => t.id);
+  const [editable, deletable, given] = await Promise.all([
+    ids.length ? db.task.findMany({ where: { AND: [{ id: { in: ids } }, await taskAccess(userId, "edit")] }, select: { id: true } }).then((r) => new Set(r.map((t) => t.id))) : new Set<string>(),
+    ids.length ? db.task.findMany({ where: { AND: [{ id: { in: ids } }, await taskAccess(userId, "delete")] }, select: { id: true } }).then((r) => new Set(r.map((t) => t.id))) : new Set<string>(),
+    givenToWorkAll(userId, tasks),
+  ]);
+  return (task: { id: string; assignedToUserId: string | null; createdByUserId: string }) => {
+    const workOnly = given(task);
+    return {
+      workOnly,
+      canWork: editable.has(task.id) || task.assignedToUserId === userId,
+      canChange: editable.has(task.id) && !workOnly,
+      canDelete: deletable.has(task.id) && !workOnly,
+    };
+  };
+}
 
 /**
  * `onlyWorks` (src/lib/tasks/rules.ts) for many tasks at once: the viewer's downline, read once, and

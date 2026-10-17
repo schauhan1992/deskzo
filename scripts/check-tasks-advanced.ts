@@ -60,6 +60,8 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
 const db = directClient();
 const TAG = "ZZPROBE_TA";
 const MAIL = "@zzprobe-ta.invalid";
+/** A role that sees every task and may change none — as a workspace had set up its Support role. */
+const SEE_ONLY = "ZZPROBE_TA_SEE_ONLY";
 let failures = 0;
 const ok = (label: string, pass: boolean, detail: unknown = "") => {
   console.log(`${pass ? "  ok  " : " FAIL "} ${label}${detail !== "" ? ` — ${String(detail)}` : ""}`);
@@ -80,6 +82,7 @@ async function cleanup() {
     await db.user.deleteMany({ where: { id: { in: ids } } });
   }
   await db.department.deleteMany({ where: { name: { startsWith: TAG } } });
+  await db.role.deleteMany({ where: { key: SEE_ONLY } });
 }
 
 async function main() {
@@ -102,7 +105,7 @@ async function main() {
 
   await cleanup();
   try {
-    const make = async (key: string, role: "ADMIN" | "SALES", departmentId: string | null = null) => {
+    const make = async (key: string, role: "ADMIN" | "SALES" | typeof SEE_ONLY, departmentId: string | null = null) => {
       const u = await db.user.create({ data: { name: `${TAG} ${key}`, email: `${key}${MAIL}`, role, passwordHash: "x".repeat(60), departmentId } });
       roles.set(u.id, role);
       return u;
@@ -204,7 +207,7 @@ async function main() {
     ok("  not on a day still to come", !(await extras.logTaskTime({ taskId, minutes: 30, spentOn: nextWeek })).ok);
     ok("  nor nothing, or more than a day", !(await extras.logTaskTime({ taskId, minutes: 0 })).ok && !(await extras.logTaskTime({ taskId, minutes: 1500 })).ok);
     const panel = await extras.getTaskPanel(taskId);
-    ok("the panel has it all", panel?.checklist.length === 2 && panel.comments.length === 1 && panel.attachments.length === 1 && panel.loggedMinutes === 45 && panel.canEdit === true);
+    ok("the panel has it all", panel?.checklist.length === 2 && panel.comments.length === 1 && panel.attachments.length === 1 && panel.loggedMinutes === 45 && panel.canWork === true);
     actorId = manager.id;
     const timeId = panel?.timeLogs[0]?.id ?? "";
     ok("only whoever logged time takes it off", !(await extras.deleteTaskTime(timeId)).ok);
@@ -262,7 +265,7 @@ async function main() {
     ok("  nor add or remove its steps", !(await extras.addChecklistItem(taskId, "My own step")).ok && (!step2.ok || !(await extras.deleteChecklistItem(step2.data.id)).ok));
     ok("  but moves it along and ticks its steps", (await tasks.setTaskStatus(taskId, "IN_PROGRESS")).ok && (!step2.ok || (await extras.toggleChecklistItem(step2.data.id)).ok));
     const given = await extras.getTaskPanel(taskId);
-    ok("the panel says so: work it, don't change it", given?.workOnly === true && given.canEdit && !given.canChange && !given.canDelete);
+    ok("the panel says so: work it, don't change it", given?.workOnly === true && given.canWork && !given.canChange && !given.canDelete);
     ok("the list marks it for them", (await tasks.listTasks({ search: TAG })).find((t) => t.id === taskId)?.workOnly === true);
     actorId = manager.id;
     ok("  and not for whoever set it", (await tasks.listTasks({ search: TAG })).find((t) => t.id === taskId)?.workOnly === false);
@@ -284,6 +287,38 @@ async function main() {
     ok("a peer's task: work it, don't change it", fromPeer.ok && !(await tasks.updateTask({ id: fromPeer.data.id, title: `${TAG} Not covering`, assignedToUserId: worker.id })).ok);
     await db.user.update({ where: { id: peer.id }, data: { active: false } });
     ok("  but once they've left, it's theirs to change — nobody else would", fromPeer.ok && (await tasks.updateTask({ id: fromPeer.data.id, title: `${TAG} Covered`, assignedToUserId: worker.id })).ok);
+
+    section("A role that can't change tasks, given one");
+
+    await db.role.create({ data: { key: SEE_ONLY, name: `${TAG} see only` } });
+    await db.roleAccessLevel.createMany({
+      data: [
+        { role: SEE_ONLY, record: "tasks", action: "view", level: "ALL" },
+        { role: SEE_ONLY, record: "tasks", action: "edit", level: "NONE" },
+        { role: SEE_ONLY, record: "tasks", action: "delete", level: "NONE" },
+        { role: SEE_ONLY, record: "tasks", action: "assign", level: "NONE" },
+      ],
+    });
+    const support = await make("support", SEE_ONLY, team.id);
+    actorId = manager.id;
+    const forSupport = await tasks.createTask({ title: `${TAG} Workspace two complete`, assignedToUserId: support.id });
+    const supportStep = forSupport.ok ? await extras.addChecklistItem(forSupport.data.id, "Check the logins") : null;
+    const notTheirs = await tasks.createTask({ title: `${TAG} Somebody else's`, assignedToUserId: manager.id });
+    actorId = support.id;
+    const theirs = forSupport.ok ? forSupport.data.id : "";
+    ok("whoever it's assigned to moves it along though their role can't change tasks", (await tasks.setTaskStatus(theirs, "IN_PROGRESS")).ok);
+    ok("  ticks its steps, logs time and attaches", !!supportStep?.ok && (await extras.toggleChecklistItem(supportStep.data.id)).ok && (await extras.logTaskTime({ taskId: theirs, minutes: 30 })).ok);
+    ok("  but doesn't change or delete it", !(await tasks.updateTask({ id: theirs, title: `${TAG} Renamed`, assignedToUserId: support.id })).ok && !(await tasks.deleteTask(theirs)).ok);
+    ok("  and can't move somebody else's", notTheirs.ok && !(await tasks.setTaskStatus(notTheirs.data.id, "DONE")).ok);
+    const supportRows = await tasks.listTasks({ search: TAG });
+    const theirRow = supportRows.find((t) => t.id === theirs);
+    const other = supportRows.find((t) => notTheirs.ok && t.id === notTheirs.data.id);
+    ok("the list offers them only what they can do: work theirs, nothing else", theirRow?.canWork === true && !theirRow.canChange && !theirRow.canDelete && other?.canWork === false && !other.canChange && !other.canDelete, JSON.stringify({ theirs: theirRow && { w: theirRow.canWork, c: theirRow.canChange, d: theirRow.canDelete }, other: other && { w: other.canWork } }));
+    const supportPanel = await extras.getTaskPanel(theirs);
+    ok("  and so does the panel", supportPanel?.canWork === true && !supportPanel.canChange && !supportPanel.canDelete);
+    actorId = manager.id;
+    const managerRow = (await tasks.listTasks({ search: TAG })).find((t) => t.id === theirs);
+    ok("whoever set it can still change and delete it", managerRow?.canChange === true && managerRow.canDelete === true);
 
     section("Challenges and the leaderboard");
 
