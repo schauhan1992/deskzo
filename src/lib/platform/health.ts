@@ -13,6 +13,8 @@ import { refDb, referenceConfigured } from "@/lib/platform/reference-db";
 import { readPinDirectory, readWorldPlaces } from "@/lib/platform/reference-sync";
 import { gatewayModes, secretsSet, staffTwoFactorPolicy, type GatewayMode, type SecretKey } from "@/lib/platform/settings";
 import type { Clock } from "@/lib/time/zone";
+import { overdueWakes } from "@/lib/automate/wake";
+import { platformPause } from "@/lib/automate/switches";
 
 /**
  * The platform's own health, read for the console's System health page (/health): whether the
@@ -627,6 +629,22 @@ async function workerVerdict(pool: LeaseRow | undefined, now: Date): Promise<Ver
   return { status: "ok", detail: `Last finished work ${ago(last, now)}.`, since: last };
 }
 
+/**
+ * Deskzo Automate: workspaces whose workflow work has waited more than five minutes past due on the
+ * wake list — the worker isn't running, or isn't keeping up. Off while the platform's switch pauses it.
+ */
+async function automateVerdict(now: Date): Promise<Verdict> {
+  if ((await platformPause()).paused) return { status: "off", detail: "Paused for every workspace in Settings › Automate." };
+  const late = await overdueWakes(5 * MINUTE, now);
+  if (!late.length) return { status: "ok", detail: "Nothing waiting past its time." };
+  const oldest = late[0]!.nextDueAt;
+  return {
+    status: now.getTime() - oldest.getTime() > HOUR ? "fail" : "warn",
+    detail: `${plural(late.length, "workspace")} with workflow work waiting since ${ago(oldest, now)}. The platform worker runs it (npm run platform:worker).`,
+    since: oldest,
+  };
+}
+
 async function controlSchemaVerdict(): Promise<Verdict> {
   let expected: string | null;
   try {
@@ -795,6 +813,7 @@ export async function systemHealth(now = new Date()): Promise<{ asOf: Date; chec
     check("provisioning.waiting", "provisioning", "Setups waiting to start", "/provisioning", () => setupsWaitingVerdict(now)),
     check("warm.pool", "provisioning", "Warm pool", "/provisioning#warm-pool", async () => warmVerdict(await warmPool())),
     check("worker", "provisioning", "Platform worker", "/provisioning", async () => workerVerdict(await lease("warm-pool"), now)),
+    check("automate", "background", "Workflows (Automate)", "/settings#automate", () => automateVerdict(now)),
 
     check("control.migrations", "schemas", "Control plane schema", null, () => controlSchemaVerdict()),
     check("workspace.schemas", "schemas", "Workspace schemas", "/migrations", async () => workspaceSchemasVerdict(await drift)),

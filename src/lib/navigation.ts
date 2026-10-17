@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
   BarChart3,
+  Workflow,
   BookOpen,
   BookUser,
   Briefcase,
@@ -265,6 +266,7 @@ const GROUP_ICONS: Record<(typeof NAV_GROUP_ORDER)[number] | "Reports" | "Admini
   People: Users,
   "My work": Briefcase,
   Performance: TrendingUp,
+  Automate: Workflow,
   Reports: BarChart3,
   Administration: SettingsIcon,
 };
@@ -301,6 +303,7 @@ const GROUP_HEADINGS: Record<(typeof NAV_GROUP_ORDER)[number] | "Reports" | "Adm
   Marketing: "Growth",
   Performance: "Growth",
   Reports: "Growth",
+  Automate: "Admin",
   Administration: "Admin",
 };
 

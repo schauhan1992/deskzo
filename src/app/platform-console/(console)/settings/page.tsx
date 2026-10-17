@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight, Check, Clock, CreditCard, Globe, LifeBuoy, Link2, Mail, Network, ReceiptText, Server, ShieldCheck, UserPlus, Waypoints, type LucideIcon } from "lucide-react";
+import { ArrowRight, Check, Clock, CreditCard, Globe, LifeBuoy, Link2, Mail, Network, ReceiptText, Server, ShieldCheck, UserPlus, Waypoints, Workflow, type LucideIcon } from "lucide-react";
 import { InvoicingSettingsForm } from "@/components/console/settings/invoicing-settings";
 import { readSeller, sellerProblem } from "@/lib/billing/tax-invoice";
 import { GST_STATE_CODES } from "@/lib/gst-engine";
@@ -17,6 +17,8 @@ import { ConsoleTimeZoneSetting } from "@/components/console/settings/time-zone-
 import { consoleZone } from "@/lib/platform/console-clock";
 import { zoneOptions } from "@/lib/time/zones";
 import { LinkedSignInSwitch } from "@/components/console/settings/linked-sign-in-setting";
+import { AutomateSwitch } from "@/components/console/settings/automate-setting";
+import { platformPause } from "@/lib/automate/switches";
 import { TwoFactorPolicyEditor } from "@/components/console/settings/security-settings";
 import { ChangedBy, SignupSettingsForm } from "@/components/console/settings/signup-settings";
 import type { SettingChange } from "@/components/console/settings/signup-settings";
@@ -44,6 +46,7 @@ const SECTIONS: { id: string; label: string; icon: LucideIcon }[] = [
   { id: "invoicing", label: "Invoicing", icon: ReceiptText },
   { id: "security", label: "Staff security", icon: ShieldCheck },
   { id: "linked-sign-in", label: "Linked sign-in", icon: Link2 },
+  { id: "automate", label: "Automate", icon: Workflow },
   { id: "custom-domains", label: "Custom domains", icon: Globe },
   { id: "time-zone", label: "Time zone", icon: Clock },
   { id: "support", label: "Support", icon: LifeBuoy },
@@ -70,7 +73,7 @@ export default async function ConsoleSettingsPage() {
   const caps = capsFor(staff.role);
   const [seller, waitingInvoices] = await Promise.all([readSeller(), controlDb().invoice.count({ where: { taxNumber: null, currency: "INR", status: "PAID" } })]);
   const sellerIssue = sellerProblem(seller);
-  const [rows, modes, policy, open, days, people, autoClose, presence, tick, facts, support, linked, domainsOffered, timeZone, mail] = await Promise.all([
+  const [rows, modes, policy, open, days, people, autoClose, presence, tick, facts, support, linked, domainsOffered, timeZone, mail, automate] = await Promise.all([
     settingsOverview(),
     gatewayModes(),
     staffTwoFactorPolicy(),
@@ -87,6 +90,7 @@ export default async function ConsoleSettingsPage() {
     consoleZone(),
     // Null until the release's migration has made the mail tables.
     mailSetup().catch(() => null),
+    automateState(),
   ]);
   const env = platformEnv();
   const production = env.key === "production";
@@ -267,6 +271,10 @@ export default async function ConsoleSettingsPage() {
             description="Switching between linked workspaces from the header, without signing in again — one switch for every workspace."
           >
             <LinkedSignInSwitch enabled={linked.enabled} change={linked.change} readOnly={!caps.owner} />
+          </Panel>
+
+          <Panel id="automate" title="Automate" description="Deskzo Automate's workflows in every workspace — one switch to pause them all at once, as a kill switch.">
+            <AutomateSwitch running={automate.running} change={automate.change} readOnly={!caps.owner} />
           </Panel>
 
           <Panel
@@ -500,6 +508,14 @@ function changeOf(r: SettingRow | null): SettingChange | null {
  * (`script:linked-sign-in`) as its command. It is not one of settingsOverview's keys, so the name is
  * looked up here.
  */
+async function automateState(): Promise<{ running: boolean; change: SettingChange | null }> {
+  // Unreadable (the console still works without it): shown as running, as the worker reads it fresh anyway.
+  const setting = await platformPause().catch(() => ({ paused: false, updatedBy: null, updatedAt: null }));
+  if (!setting.updatedAt) return { running: !setting.paused, change: null };
+  const name = setting.updatedBy ? ((await controlDb().platformUser.findUnique({ where: { id: setting.updatedBy }, select: { name: true } }))?.name ?? "a former staff member") : null;
+  return { running: !setting.paused, change: { by: name, at: setting.updatedAt } };
+}
+
 async function linkedSignInState(): Promise<{ enabled: boolean; change: SettingChange | null }> {
   const setting = await linkedSignInSetting();
   if (!setting.updatedAt) return { enabled: setting.enabled, change: null };

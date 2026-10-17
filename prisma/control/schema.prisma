@@ -2462,3 +2462,18 @@ model DocumentSeries {
 
   @@map("document_series")
 }
+
+/**
+ * Which workspaces have Deskzo Automate work due, and from when (src/lib/automate/wake.ts). The
+ * platform worker opens only these instead of every workspace on every pass. `version` goes up with
+ * each request to wake, so a worker that read an older row never pushes a newer request back.
+ */
+model AutomationWake {
+  tenantId  String   @id
+  nextDueAt DateTime
+  version   Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@index([nextDueAt])
+  @@map("automation_wake")
+}

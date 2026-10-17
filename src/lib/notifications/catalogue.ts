@@ -58,6 +58,8 @@ export const NOTIFICATION_CATALOGUE: NotificationDefinition[] = [
   { type: "MEETING_SOON", label: "A meeting is about to start", when: "A meeting in your connected calendar starts within ten minutes.", group: "work" },
   { type: "SURVEY_ASSIGNED", label: "A form to fill in", when: "HR aims a form or poll at you.", group: "work" },
   { type: "VISITOR_ARRIVED", label: "A visitor is at reception", when: "Somebody signs in at the front desk asking for you.", group: "work" },
+  { type: "WORKFLOW_MESSAGE", label: "A workflow tells me something", when: "A step in one of the workspace's workflows sends you a message.", group: "work" },
+  { type: "WORKFLOW_PAUSED", label: "My workflow paused itself", when: "A workflow you own stops on its own: it failed twenty times in a row, or its owner left.", group: "work" },
   { type: "VISITOR_EXPECTED", label: "A visitor is expected", when: "A visitor you invited is due shortly, or somebody adds one in your name.", group: "work" },
 
   // ─── Sales ──────────────────────────────────────────────────────────────────────────────────

@@ -476,6 +476,10 @@ enum NotificationType {
    * in the chat (src/lib/chat).
    */
   CHAT_MENTION
+  /// A workflow step told you something (Deskzo Automate, src/lib/automate/actions/notify-person.ts).
+  WORKFLOW_MESSAGE
+  /// One of your workflows paused itself: you left, or it failed twenty times in a row.
+  WORKFLOW_PAUSED
 }
 
 model User {
@@ -14010,4 +14014,271 @@ model WordFilter {
   updatedAt   DateTime @updatedAt
 
   @@map("word_filters")
+}
+
+// ─── Deskzo Automate ─────────────────────────────────────────────────────────────────────────────
+//
+// One workflow engine for the workspace (plan approved 17 Oct 2026; src/lib/automate). A workflow is
+// a draft people edit plus immutable published versions; a run always uses the version it started
+// on. Business writes record events in their own transaction (the outbox); the platform worker turns
+// matching events and schedules into runs and carries each run out a step at a time, saving after
+// every step. Users are referred to by id, as pipeline automations do: people are switched off,
+// not deleted, and the engine pauses a workflow whose owner has gone.
+
+enum AutomationWorkflowStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum AutomationSource {
+  BUILDER
+  TEMPLATE
+  AI
+  MIGRATED
+}
+
+enum AutomationRunStatus {
+  /// Waiting for the worker: new, or due again after a retry.
+  QUEUED
+  /// A worker holds it now (`lockedUntil`); one whose lease ran out is taken over.
+  RUNNING
+  /// In a delay, until `runAfter`.
+  WAITING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  /// An outside call whose outcome is unknown: a person decides, it is never retried blindly.
+  NEEDS_ATTENTION
+}
+
+enum AutomationStepStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+  SKIPPED
+  UNKNOWN
+}
+
+enum AutomationErrorKind {
+  /// Worth trying again: the network, a 5xx, a 429.
+  TRANSIENT
+  /// Will fail the same way again: bad input, a missing permission.
+  PERMANENT
+  /// It may or may not have happened.
+  UNKNOWN
+}
+
+/** A workflow: what people edit (`draft`) and which published version runs (`activeVersionId`). */
+model AutomationWorkflow {
+  id              String                   @id @default(cuid())
+  name            String
+  description     String?
+  /// Whose permissions every step runs with, checked when it runs.
+  ownerUserId     String
+  status          AutomationWorkflowStatus @default(DRAFT)
+  /// The definition being edited, not yet published (src/lib/automate/definition.ts).
+  draft           Json
+  activeVersionId String?
+  source          AutomationSource         @default(BUILDER)
+  templateKey     String?
+  /// Why it stopped on its own — its owner left, or it failed too often — in words.
+  pausedReason    String?
+  /// Failed runs in a row; twenty pause it. A run that succeeds sets it back to nought.
+  failureStreak   Int                      @default(0)
+  createdById     String
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+
+  versions AutomationVersion[]
+  triggers AutomationTrigger[]
+  runs     AutomationRun[]
+  webhooks AutomationWebhook[]
+
+  @@index([status])
+  @@map("automation_workflows")
+}
+
+/** A published version. Never changed once written: the database refuses an UPDATE. */
+model AutomationVersion {
+  id             String             @id @default(cuid())
+  workflowId     String
+  workflow       AutomationWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  number         Int
+  definition     Json
+  definitionHash String
+  triggerType    String
+  note           String?
+  publishedById  String
+  publishedAt    DateTime           @default(now())
+
+  runs AutomationRun[]
+
+  @@unique([workflowId, number])
+  @@map("automation_versions")
+}
+
+/** What the matcher looks up: one row per active workflow, rewritten on publish. */
+model AutomationTrigger {
+  id         String             @id @default(cuid())
+  workflowId String             @unique
+  workflow   AutomationWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  versionId  String
+  /// An event type ("task.created"), "schedule" or "manual".
+  type       String
+  /// A schedule's next time, in UTC, worked out on the workspace's clock.
+  nextFireAt DateTime?
+
+  @@index([type])
+  @@index([nextFireAt])
+  @@map("automation_triggers")
+}
+
+/**
+ * Something that happened, written in the same transaction as the change itself — so it exists
+ * exactly when the change does. Kept 30 days. `causedByRunId` and `depth` stop workflows feeding
+ * each other for ever.
+ */
+model AutomationEvent {
+  id            String    @id @default(cuid())
+  type          String
+  recordType    String?
+  recordId      String?
+  /// Ids and the fields that changed — never a whole record.
+  payload       Json
+  actorUserId   String?
+  causedByRunId String?
+  depth         Int       @default(0)
+  occurredAt    DateTime  @default(now())
+  /// When the matcher dealt with it; null while it waits.
+  matchedAt     DateTime?
+
+  @@index([matchedAt, occurredAt])
+  @@index([occurredAt])
+  @@map("automation_events")
+}
+
+/** One run of one version. Saved after every step, so a worker that dies leaves it resumable. */
+model AutomationRun {
+  id              String              @id @default(cuid())
+  /// Shown as RUN-000123.
+  runSeq          Int                 @unique @default(autoincrement())
+  workflowId      String
+  workflow        AutomationWorkflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  versionId       String
+  version         AutomationVersion   @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  eventId         String?
+  /// workflow + event, or workflow + schedule slot: the same cause never makes two runs.
+  idempotencyKey  String              @unique
+  /// "task:<id>" — the record it is about, for the once-a-minute rule.
+  recordKey       String?
+  status          AutomationRunStatus @default(QUEUED)
+  /// Where it has got to in the definition (src/lib/automate/cursor.ts).
+  cursor          Json
+  /// The trigger and every step's output, encrypted with the workspace's own key.
+  contextCipher   String
+  runAfter        DateTime            @default(now())
+  lockedBy        String?
+  lockedUntil     DateTime?
+  /// Tries of the step it is on.
+  attempts        Int                 @default(0)
+  depth           Int                 @default(0)
+  /// Actions that ran and succeeded — what the plan's monthly steps count.
+  stepsUsed       Int                 @default(0)
+  isTest          Boolean             @default(false)
+  cancelRequested Boolean             @default(false)
+  startedById     String?
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  error           String?
+  createdAt       DateTime            @default(now())
+
+  steps   AutomationRunStep[]
+  effects AutomationEffect[]
+
+  @@index([status, runAfter])
+  @@index([workflowId, createdAt])
+  @@index([workflowId, recordKey, createdAt])
+  @@map("automation_runs")
+}
+
+/** One try of one step: what went in and came out, redacted for showing, and how it ended. */
+model AutomationRunStep {
+  id            String               @id @default(cuid())
+  runId         String
+  run           AutomationRun        @relation(fields: [runId], references: [id], onDelete: Cascade)
+  stepId        String
+  type          String
+  attempt       Int                  @default(1)
+  status        AutomationStepStatus
+  startedAt     DateTime             @default(now())
+  finishedAt    DateTime?
+  durationMs    Int?
+  inputSummary  Json?
+  outputSummary Json?
+  errorKind     AutomationErrorKind?
+  error         String?
+  retryAt       DateTime?
+
+  @@index([runId, startedAt])
+  @@map("automation_run_steps")
+}
+
+/**
+ * Proof an action already happened, written in the action's own transaction under `runId:stepId`.
+ * A retried step finds it and hands back what it made instead of making a second one.
+ */
+model AutomationEffect {
+  key        String        @id
+  runId      String
+  run        AutomationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  recordType String?
+  recordId   String?
+  output     Json
+  createdAt  DateTime      @default(now())
+
+  @@index([runId])
+  @@map("automation_effects")
+}
+
+/** An outside app connected for workflows (Phase 4). The secret is encrypted; screens see only that one is set. */
+model AutomationConnection {
+  id                  String    @id @default(cuid())
+  provider            String
+  name                String
+  ownerUserId         String
+  sharedWithWorkspace Boolean   @default(false)
+  credentialsCipher   String?
+  scopes              String[]  @default([])
+  status              String    @default("ACTIVE")
+  lastUsedAt          DateTime?
+  lastError           String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@map("automation_connections")
+}
+
+/** An inbound webhook address for one workflow (Phase 4). Only the token's digest is kept. */
+model AutomationWebhook {
+  id                  String             @id @default(cuid())
+  workflowId          String
+  workflow            AutomationWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  tokenHash           String             @unique
+  signingSecretCipher String?
+  lastReceivedAt      DateTime?
+  createdAt           DateTime           @default(now())
+
+  @@map("automation_webhooks")
+}
+
+/** The workspace's own switch: paused, no run starts or moves on until it is lifted. */
+model AutomationSettings {
+  id          String    @id @default("global")
+  pausedAt    DateTime?
+  pausedById  String?
+  updatedAt   DateTime  @updatedAt
+
+  @@map("automation_settings")
 }

@@ -83,6 +83,7 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "pipeline.ts": ["leads", "orders"],
   // A pipeline's automations (src/lib/pipeline/automations.ts).
   "pipeline-automations.ts": ["leads"],
+  "automate.ts": ["automate"],
   "wording.ts": "core",
   "workplace.ts": "core",
   "sign-in-rules.ts": "core",
@@ -238,6 +239,7 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "wishes.ts": ["hr"],
   "workspace.ts": ["workspace"],
   "platform/console-admin.ts": "platform",
+  "platform/console-automate.ts": "platform",
   "platform/console-alerts.ts": "platform",
   "platform/console-announcements.ts": "platform",
   "platform/console-billing.ts": "platform",

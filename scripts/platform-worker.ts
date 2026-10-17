@@ -11,12 +11,18 @@
  *
  * The signup form also starts one with --once as it queues a job, so a signup completes even where
  * nobody has set a worker up yet — the long-running one simply finds nothing left to do.
+ *
+ * It also carries out Deskzo Automate's workflows (src/lib/automate/worker.ts): every pass, the
+ * workspaces on the wake list that are due; every ten minutes, and with --once, every active one —
+ * which catches a wake that was lost. A delay of minutes needs this to run as a long-lived process;
+ * as a five-minute --once it still runs everything, just up to five minutes late.
  */
 import "dotenv/config";
 import { closeControlDb } from "../src/lib/platform/control-db";
 import { withPlatformLease } from "../src/lib/platform/fanout";
 import { fillWarmPool, runNextJob } from "../src/lib/platform/provisioning";
 import { installLogLabels } from "../src/lib/tenancy/log-labels";
+import { runAutomate } from "../src/lib/automate/worker";
 
 // Each line it writes names the workspace it was working on.
 installLogLabels();
@@ -24,6 +30,7 @@ installLogLabels();
 const once = process.argv.includes("--once");
 const POLL_MS = 2_000;
 const POOL_EVERY_MS = 60_000;
+const AUTOMATE_SWEEP_EVERY_MS = 10 * 60_000;
 
 async function drainJobs(): Promise<number> {
   let done = 0;
@@ -45,20 +52,38 @@ async function topUpPool(): Promise<void> {
   }
 }
 
+async function automate(sweepAll: boolean): Promise<void> {
+  const turn = await runAutomate({ sweepAll }).catch((err) => {
+    console.error("[worker] Automate's turn failed", err);
+    return null;
+  });
+  if (!turn || turn.paused) return;
+  for (const outcome of turn.outcomes) {
+    if ("skipped" in outcome) continue;
+    if (!outcome.ok) console.error(`[worker] automate ${outcome.slug}: ${outcome.error}`);
+    else if (outcome.value.runs || outcome.value.turns) console.log(`[worker] automate ${outcome.slug}: ${outcome.value.runs} new run(s), ${outcome.value.turns} turn(s)`);
+  }
+}
+
 async function main() {
   if (once) {
     await drainJobs();
     await topUpPool();
+    await automate(true);
     return;
   }
-  console.log("[worker] running — provisioning jobs and the warm pool");
+  console.log("[worker] running — provisioning jobs, the warm pool and workflows");
   let lastPool = 0;
+  let lastSweep = 0;
   for (;;) {
     await drainJobs().catch((err) => console.error("[worker] taking jobs failed", err));
     if (Date.now() - lastPool > POOL_EVERY_MS) {
       await topUpPool();
       lastPool = Date.now();
     }
+    const sweep = Date.now() - lastSweep > AUTOMATE_SWEEP_EVERY_MS;
+    await automate(sweep);
+    if (sweep) lastSweep = Date.now();
     await new Promise((r) => setTimeout(r, POLL_MS));
   }
 }

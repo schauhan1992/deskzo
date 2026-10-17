@@ -73,7 +73,7 @@ export const PRODUCT_FAMILY = "Deskzo";
  * Modules every product comes with: the notification centre, tasks, sticky notes, team chat and saved
  * lists — the workspace's own furniture rather than anything a product is bought for.
  */
-export const BASE_MODULES: readonly string[] = ["notifications", "tasks", "notes", "chat", "workspace"];
+export const BASE_MODULES: readonly string[] = ["notifications", "tasks", "notes", "chat", "workspace", "automate"];
 
 export const PRODUCTS: readonly Product[] = [
   {
