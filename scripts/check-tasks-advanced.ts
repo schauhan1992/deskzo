@@ -302,7 +302,7 @@ async function main() {
     const rows = await tasks.listTasks({ search: TAG });
     const challenges = await extras.listTaskChallenges();
     const list = renderToStaticMarkup(createElement(TasksWorkspace, { tasks: rows, options, challenges, viewerId: manager.id, view: "list" }));
-    ok("the table has its columns and the tasks", ["Task", "Team", "Challenge", "Assigned to", "Start", "Due", "Priority", "XP", "Status", "Actions", "Optimise image processing"].every((l) => list.includes(l)));
+    ok("the table has its columns and the tasks", ["Task", "Team", "Challenge", "Assigned to", "Set by", "Start", "Due", "Priority", "XP", "Status", "Actions", "Optimise image processing"].every((l) => list.includes(l)));
     const board = renderToStaticMarkup(createElement(TasksWorkspace, { tasks: rows, options, challenges, viewerId: manager.id, view: "board" }));
     ok("the board has a column a status", ["To do", "In progress", "Done", "Cancelled"].every((l) => board.includes(`>${l}<`)));
   } finally {

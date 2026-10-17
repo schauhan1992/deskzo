@@ -1,7 +1,7 @@
 import { listTasks, listTasksPaged, countTasks } from "@/actions/task";
 import { listTaskChallenges, taskFormOptions } from "@/actions/task-extras";
 import { isModuleEnabled } from "@/actions/module";
-import { auth } from "@/lib/auth";
+import { requireUser } from "@/lib/session";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { SearchParamInput } from "@/components/ui/search-param-input";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
@@ -40,8 +40,9 @@ export default async function TasksPage({
     return <ModuleDisabledNotice moduleKey="tasks" />;
   }
 
-  const [params, session] = await Promise.all([searchParams, auth()]);
-  const userId = session!.user.id;
+  // Whoever the page is for — in "view as", the person being viewed, as the task actions read it.
+  const [params, user] = await Promise.all([searchParams, requireUser()]);
+  const userId = user.id;
   const view = params.view === "board" ? "board" : "list";
   const sort = (TASK_SORTS as readonly string[]).includes(params.sort ?? "") ? (params.sort as TaskSort) : undefined;
   const dir = params.dir === "desc" ? ("desc" as const) : ("asc" as const);

@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ArrowUpDown, CalendarDays, CheckSquare, LayoutGrid, List, MessageSquare, Paperclip, Pencil, Plus, Star, Trash2, Trophy } from "lucide-react";
+import { ArrowUpDown, CalendarDays, CheckSquare, LayoutGrid, List, Lock, MessageSquare, Paperclip, Pencil, Plus, Star, Trash2, Trophy } from "lucide-react";
 import { deleteTask, setTaskStatus, toggleTaskStar } from "@/actions/task";
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -146,6 +146,7 @@ export function TasksWorkspace({
                 <th className="px-3 py-2.5">Team</th>
                 <th className="px-3 py-2.5">Challenge</th>
                 <th className="px-3 py-2.5">Assigned to</th>
+                <th className="px-3 py-2.5">Set by</th>
                 <SortHeader label="Start" sortKey="start" sort={sort} dir={dir} href={href} />
                 <SortHeader label="Due" sortKey="due" sort={sort} dir={dir} href={href} />
                 <SortHeader label="Priority" sortKey="priority" sort={sort} dir={dir} href={href} />
@@ -184,6 +185,8 @@ export function TasksWorkspace({
                         <span className="text-subtle">—</span>
                       )}
                     </td>
+                    {/* Who set it — "Self" where they set it for themselves; a task somebody else gave is theirs to work only. */}
+                    <td className="whitespace-nowrap px-3 py-3 text-muted">{t.assignedTo && t.createdBy.id === t.assignedTo.id ? <span className="text-subtle">Self</span> : t.createdBy.name}</td>
                     <td className="whitespace-nowrap px-3 py-3 text-muted">{t.startDate ? formatCalendarDay(t.startDate) : "—"}</td>
                     <td className={`whitespace-nowrap px-3 py-3 ${overdue ? "font-medium text-danger" : "text-muted"}`}>{due?.label ?? "—"}</td>
                     <td className="px-3 py-3">
@@ -195,8 +198,8 @@ export function TasksWorkspace({
                     </td>
                     <td className="whitespace-nowrap px-3 py-3 text-right">
                       {t.workOnly ? (
-                        <span className="text-xs text-subtle" title={`${t.createdBy.name} gave you this task — open it to move it along`}>
-                          Given by {t.createdBy.name.split(" ")[0]}
+                        <span className="inline-flex p-1 text-subtle" title={`${t.createdBy.name} gave you this task — open it to move it along; changing it is theirs`} aria-label={`Given by ${t.createdBy.name}`}>
+                          <Lock className="h-4 w-4" />
                         </span>
                       ) : (
                         <>
@@ -219,7 +222,7 @@ export function TasksWorkspace({
               })}
               {tasks.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="px-4 py-10 text-center text-subtle">
+                  <td colSpan={12} className="px-4 py-10 text-center text-subtle">
                     No tasks match these filters.
                   </td>
                 </tr>
