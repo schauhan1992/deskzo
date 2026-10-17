@@ -1,8 +1,14 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { Crown, Target, Trophy, Building2 } from "lucide-react";
 import { isModuleEnabled } from "@/actions/module";
 import { getWinsWall } from "@/actions/wins";
 import { getPrizeShowcase } from "@/actions/prizes";
+import { auth } from "@/lib/auth";
+import { moduleAvailableForTenant } from "@/lib/modules-access";
+import { screenForThisTv } from "@/lib/tv/screens";
+import { buildWinsWall } from "@/lib/wins/wall";
+import { prizeShowcase } from "@/lib/wins/prize-showcase";
 import { PrizeShowcase } from "@/components/wins/prize-showcase";
 import { getOrganisation } from "@/lib/organisation";
 import { Leaderboard, WinFeed } from "@/components/wins/leaderboard";
@@ -10,7 +16,7 @@ import { TvRefresh } from "@/components/wins/tv-refresh";
 import { Confetti } from "@/components/layout/celebration-splash";
 import { inrSpoken } from "@/lib/wins/copy";
 
-export const metadata: Metadata = { title: "Wins" };
+export const metadata: Metadata = { title: "Wins", robots: { index: false, follow: false }, referrer: "no-referrer" };
 
 const ICON: Record<string, typeof Trophy> = { DEAL_WON: Trophy, TARGET_HIT: Target, FIRST_ORDER: Building2, TOP_PERFORMER: Crown };
 
@@ -18,13 +24,27 @@ const ICON: Record<string, typeof Trophy> = { DEAL_WON: Trophy, TARGET_HIT: Targ
  * The sales floor's screen: the prizes up for grabs, the leaderboard, the latest win large, and the
  * month so far. Refreshes itself every minute. A win from the last two hours takes the top of the
  * right-hand side, with confetti — keyed on the win, so a new one sets it off again.
+ *
+ * Shown to a paired TV (owner, 17 Oct 2026 — src/lib/tv/screens.ts) for its branch, or everybody's, masked
+ * as whoever paired it would see it; to somebody signed in, everybody's, as their Wins page. Any other TV
+ * goes back to its pairing code — which is where a TV taken off lands within the minute.
  */
 export default async function WinsTvPage() {
-  if (!(await isModuleEnabled("wins"))) {
-    return <p className="grid min-h-screen place-items-center text-2xl text-white/60">The wins board is switched off.</p>;
+  const off = <p className="grid min-h-screen place-items-center text-2xl text-white/60">The wins board is switched off.</p>;
+  const screen = await screenForThisTv();
+  let wall: Awaited<ReturnType<typeof buildWinsWall>> | null;
+  let showcase: Awaited<ReturnType<typeof prizeShowcase>>;
+  if (screen) {
+    if (!(await moduleAvailableForTenant("wins"))) return off;
+    [wall, showcase] = await Promise.all([buildWinsWall({ viewerId: null, maskAs: screen.pairedById, branchId: screen.branchId }), prizeShowcase()]);
+  } else {
+    const session = await auth();
+    if (!session?.user) redirect("/tv");
+    if (!(await isModuleEnabled("wins"))) return off;
+    [wall, showcase] = await Promise.all([getWinsWall(), getPrizeShowcase()]);
   }
-  const [wall, org, showcase] = await Promise.all([getWinsWall(), getOrganisation(), getPrizeShowcase()]);
-  if (!wall) return <p className="grid min-h-screen place-items-center text-2xl text-white/60">The wins board is switched off.</p>;
+  const org = await getOrganisation();
+  if (!wall) return off;
   const latest = wall.wins.find((w) => w.fresh) ?? null;
   const LatestIcon = latest ? (ICON[latest.source] ?? Trophy) : Trophy;
   const c = wall.counts;
@@ -35,7 +55,10 @@ export default async function WinsTvPage() {
 
       <header className="flex items-baseline justify-between gap-6">
         <div>
-          <div className="text-lg uppercase tracking-widest text-white/50">{org.tradeName || org.legalName || "Sales"}</div>
+          <div className="text-lg uppercase tracking-widest text-white/50">
+            {org.tradeName || org.legalName || "Sales"}
+            {screen?.branchName ? ` · ${screen.branchName}` : ""}
+          </div>
           <h1 className="text-5xl font-bold">Wins — {wall.monthLabel}</h1>
         </div>
         <div className="text-5xl font-light text-white/80">

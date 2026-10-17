@@ -501,6 +501,14 @@ export const PERMISSION_REGISTRY = [
     defaultRoles: ["MANAGEMENT"],
   },
   {
+    // Owner, 17 Oct 2026: Management and Admin (an admin holds every key).
+    key: "wins.tv",
+    label: "Put Deskzo on a TV",
+    description:
+      "Pair a TV with its code so it shows the wins board for a branch or the whole company, rename it, and take it off. A TV shows the board and nothing else — no sign-in, no seat.",
+    defaultRoles: ["MANAGEMENT"],
+  },
+  {
     key: "forms.create",
     label: "Build forms",
     description:

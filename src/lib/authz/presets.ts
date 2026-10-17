@@ -448,6 +448,8 @@ export const ROLE_PRESETS: RolePreset[] = [
       "booking.manage",
       "cards.manage",
       "signatures.manage",
+      // Putting the wins board on the office TVs (owner, 17 Oct 2026: Management and Admin).
+      "wins.tv",
     ],
   },
   {

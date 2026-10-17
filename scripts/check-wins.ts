@@ -48,6 +48,10 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
     };
   }
   if (request === "@/lib/email") return { sendEmailNotification: async () => {} };
+  // The TV page asks first whether it is a paired TV (its cookie), then whether somebody is signed in.
+  // Here it is never a TV, and the actor is signed in.
+  if (request === "next/headers") return { cookies: async () => ({ get: () => undefined, set: () => {} }), headers: async () => new Headers() };
+  if (request === "@/lib/auth") return { auth: async () => (actor.id ? { user: { id: actor.id } } : null) };
   return originalLoad.call(this, request, parent, isMain);
 } as typeof originalLoad;
 

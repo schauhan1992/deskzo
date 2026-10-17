@@ -409,6 +409,14 @@ const PUBLIC_ACTIONS = new Set([
    * `check:team-pipelines` holds it.
    */
   "src/actions/booking-public.ts",
+  /**
+   * A TV on the wall (/tv), which nobody signs in on. All it can do is get a pairing code for itself
+   * and ask whether it has been paired; the pairing is done by somebody signed in with "wins.tv"
+   * (src/actions/tv.ts). Open only while the plan has the wins board and it is on; a code is good for
+   * ten minutes, the codes waiting at once are capped per workspace by count, and the secret a paired
+   * TV collects goes only to the browser holding that code's own key. `check:tv-screens` holds it.
+   */
+  "src/actions/tv-public.ts",
 ]);
 
 /**

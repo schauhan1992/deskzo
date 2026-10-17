@@ -111,6 +111,16 @@ function isPublicPath(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
+/**
+ * The wall screens (owner, 17 Oct 2026). A TV signs nobody in: it shows a pairing code at /tv, and once
+ * paired, its board, by a secret of its own in a cookie scoped to /tv (src/lib/tv/screens.ts) — so these
+ * pages decide who is looking themselves, and send a TV that isn't paired back to its code. Somebody
+ * signed in who opens one is still gated below like on any page.
+ */
+function isTvPath(pathname: string): boolean {
+  return pathname === "/tv" || pathname.startsWith("/tv/");
+}
+
 /** The caller's address as our own proxy saw it, or null — src/lib/client-ip.ts. */
 function clientIp(req: NextRequest): string | null {
   return clientIpFrom(req.headers);
@@ -465,7 +475,7 @@ async function handle(req: NextRequest & { auth: unknown }, pathname: string, te
   const isLoggedIn = !!req.auth;
   const isLoginPage = pathname.startsWith("/login");
 
-  if (!isLoggedIn && !isPublicPath(pathname)) {
+  if (!isLoggedIn && !isPublicPath(pathname) && !isTvPath(pathname)) {
     const loginUrl = new URL("/login", req.nextUrl.origin);
     loginUrl.searchParams.set("callbackUrl", pathname);
     return harden(NextResponse.redirect(loginUrl), pathname);

@@ -84,7 +84,7 @@ export const ACCESS_MODULES: readonly AccessModule[] = [
     description: "Orders, Quotes & Invoices, Renewals, Wins",
     icon: "sales",
     records: ["orders", "documents"],
-    keys: ["orders.view", "orders.approve", "orders.process", "orders.approveLoss", "documents.view", "documents.issue", "documents.send", "documents.void", "forecast.manage", "wins.manage"],
+    keys: ["orders.view", "orders.approve", "orders.process", "orders.approveLoss", "documents.view", "documents.issue", "documents.send", "documents.void", "forecast.manage", "wins.manage", "wins.tv"],
     groups: [],
     sections: ["section.orders", "section.renewals", "section.salesDocuments", "section.wins", "section.forecast"],
   },

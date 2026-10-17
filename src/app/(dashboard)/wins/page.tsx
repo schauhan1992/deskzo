@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { MonitorPlay } from "lucide-react";
+import { MonitorPlay, Tv } from "lucide-react";
+import { currentUser } from "@/lib/session";
+import { can } from "@/lib/authz/resolve";
 import { isModuleEnabled } from "@/actions/module";
 import { getWinsWall } from "@/actions/wins";
 import { getPrizeShowcase } from "@/actions/prizes";
@@ -16,7 +18,8 @@ import { inrSpoken } from "@/lib/wins/copy";
  */
 export default async function WinsPage() {
   if (!(await isModuleEnabled("wins"))) return <ModuleDisabledNotice moduleKey="wins" />;
-  const [wall, showcase] = await Promise.all([getWinsWall(), getPrizeShowcase()]);
+  const user = await currentUser();
+  const [wall, showcase, mayPairTv] = await Promise.all([getWinsWall(), getPrizeShowcase(), user ? can(user.id, "wins.tv") : false]);
   if (!wall) return <ModuleDisabledNotice moduleKey="wins" />;
   const c = wall.counts;
 
@@ -30,12 +33,22 @@ export default async function WinsPage() {
             performer is announced on the 1st. This is the board everybody sees.
           </p>
         </div>
-        <Link href="/tv/wins" target="_blank">
-          <Button variant="secondary" size="sm">
-            <MonitorPlay className="h-3.5 w-3.5" />
-            Open the TV screen
-          </Button>
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          {mayPairTv && (
+            <Link href="/settings/tv-screens">
+              <Button variant="secondary" size="sm">
+                <Tv className="h-3.5 w-3.5" />
+                Put on a TV
+              </Button>
+            </Link>
+          )}
+          <Link href="/tv/wins" target="_blank">
+            <Button variant="secondary" size="sm">
+              <MonitorPlay className="h-3.5 w-3.5" />
+              Open the TV screen
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {showcase.length > 0 && (

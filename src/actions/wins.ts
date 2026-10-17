@@ -8,12 +8,9 @@ import { can } from "@/lib/authz/resolve";
 import { recordAudit } from "@/lib/audit";
 import { isModuleEnabled } from "@/actions/module";
 import { toPlain } from "@/lib/serialize";
-import { periodContaining } from "@/lib/forecast/periods";
-import { workspaceClock } from "@/lib/time/workspace";
-import { bookingsByPerson, detectSalesWins, winsSettings, withoutOrphanedWins } from "@/lib/wins/detect";
+import { detectSalesWins, winsSettings } from "@/lib/wins/detect";
+import { buildWinsWall } from "@/lib/wins/wall";
 import type { ActionResult } from "@/actions/company";
-import { salesLeadRelation } from "@/lib/pipeline/server";
-import { maskDealWins } from "@/lib/leads/masking";
 
 /**
  * The wins wall and the office TV: this month's leaderboard, the wins as they happened, and the
@@ -26,104 +23,13 @@ import { maskDealWins } from "@/lib/leads/masking";
 
 const SCOPES: SplashScope[] = ["EVERYONE", "SUBJECT"];
 
-/** "just now", "25 min ago", "3 h ago", "2 days ago" — worked out here, because a page may not read the clock while it renders. */
-function agoText(ms: number): string {
-  const min = Math.floor(ms / 60_000);
-  if (min < 1) return "just now";
-  if (min < 60) return `${min} min ago`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return `${h} h ago`;
-  const d = Math.floor(h / 24);
-  return `${d} day${d === 1 ? "" : "s"} ago`;
-}
-
 export async function getWinsWall() {
   const user = await requireModuleUser("wins");
   if (!(await isModuleEnabled("wins"))) return null;
-  const now = new Date();
-  // This month on the workspace's calendar.
-  const clock = await workspaceClock();
-  const month = periodContaining(now, "month", clock);
-  const settings = await winsSettings();
-
-  // Deals won: stage changes to won in pipelines that count as sales.
-  const salesOnly = await salesLeadRelation();
-  const [bookings, targets, allWins, wonThisMonth, canManage] = await Promise.all([
-    bookingsByPerson(month.from, month.to),
-    db.target.findMany({
-      where: {
-        active: true,
-        metric: "ORDER_VALUE",
-        scope: "USER",
-        period: "MONTH",
-        // Date-only columns are compared by calendar day — the month's days, as the columns hold them —
-        // and the month is matched exactly below. A strict `lt` at the month's midnight instant drops a
-        // target that ends on its last day.
-        fromDate: { gte: clock.calendarDate(month.from) },
-        toDate: { lt: clock.calendarDate(month.to) },
-      },
-      select: { userId: true, value: true, fromDate: true, toDate: true, user: { select: { name: true, active: true } } },
-    }),
-    db.celebration.findMany({
-      where: { source: { notIn: ["MANUAL", "MOST_ACTIVE", "PRIZES"] }, active: true, createdAt: { gte: new Date(now.getTime() - 30 * 86_400_000) } },
-      orderBy: { createdAt: "desc" },
-      take: 30,
-      select: { id: true, source: true, title: true, message: true, amount: true, createdAt: true, details: true, subject: { select: { id: true, name: true } } },
-    }),
-    db.activity.findMany({
-      where: { type: "STAGE_CHANGE", notes: { contains: " to WON" }, occurredAt: { gte: month.from, lt: month.to }, ...salesOnly },
-      distinct: ["leadId"],
-      select: { leadId: true },
-    }),
-    can(user.id, "wins.manage"),
-  ]);
-  // A win for a customer or deal deleted since is not on the wall — see withoutOrphanedWins.
-  // A won deal's own words are masked for this viewer as their field access says (src/lib/leads/masking.ts).
-  const wins = (await maskDealWins(user.id, await withoutOrphanedWins(allWins))).map(({ details, ...w }) => {
-    void details; // only needed to find the orphans; the wall has no use for it
-    return w;
-  });
-
-  // Everybody booking this month, and everybody with a target for it even if they have not booked
-  // yet — a target at 0% is part of the picture.
-  const people = new Map<string, { userId: string; name: string; booked: number; target: number | null }>();
-  for (const b of bookings) people.set(b.userId, { userId: b.userId, name: b.name, booked: b.value, target: null });
-  for (const t of targets) {
-    if (!t.userId || !t.user?.active) continue;
-    // A date column holds the calendar day: it is this month's when its yyyy-mm is this month's.
-    if (t.fromDate.toISOString().slice(0, 7) !== month.key || t.toDate.toISOString().slice(0, 7) !== month.key) continue;
-    const row = people.get(t.userId) ?? { userId: t.userId, name: t.user.name, booked: 0, target: null };
-    row.target = (row.target ?? 0) + Number(t.value);
-    people.set(t.userId, row);
-  }
-  const leaderboard = [...people.values()]
-    .sort((a, b) => b.booked - a.booked || (b.target ?? 0) - (a.target ?? 0))
-    .map((p, i) => ({
-      rank: i + 1,
-      userId: p.userId,
-      name: p.name,
-      booked: settings.showAmounts ? p.booked : null,
-      target: settings.showAmounts ? p.target : null,
-      percent: p.target ? Math.round((p.booked / p.target) * 100) : null,
-      isYou: p.userId === user.id,
-    }));
-
-  const counts = {
-    booked: settings.showAmounts ? leaderboard.reduce((t, r) => t + (r.booked ?? 0), 0) : null,
-    target: settings.showAmounts ? [...people.values()].reduce((t, p) => t + (p.target ?? 0), 0) || null : null,
-    dealsWon: wonThisMonth.length,
-    newCustomers: wins.filter((w) => w.source === "FIRST_ORDER" && w.createdAt >= month.from).length,
-    targetsHit: wins.filter((w) => w.source === "TARGET_HIT" && w.createdAt >= month.from).length,
-  };
-
-  return toPlain({
-    monthLabel: month.label,
-    showAmounts: settings.showAmounts,
-    canManage,
-    leaderboard,
-    counts,
-    wins: wins.map((w) => ({ ...w, amount: settings.showAmounts && w.amount !== null ? Number(w.amount) : null, ago: agoText(now.getTime() - w.createdAt.getTime()), fresh: now.getTime() - w.createdAt.getTime() < 2 * 3_600_000 })),
-  });
+  // The figures are built where the office TV builds them too (src/lib/wins/wall.ts): everybody's, masked
+  // as this person's field access says, with them marked on the leaderboard.
+  const [wall, canManage] = await Promise.all([buildWinsWall({ viewerId: user.id, maskAs: user.id, branchId: null }), can(user.id, "wins.manage")]);
+  return { ...wall, canManage };
 }
 
 export async function getWinsSettings() {

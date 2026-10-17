@@ -12,36 +12,23 @@ import { awardSettings } from "@/lib/performance/award-settings";
 import { winsSettings } from "@/lib/wins/detect";
 import { prizesForPeriod } from "@/lib/wins/prize-store";
 import { prizeSplashFor, raceIsPublic, raceIsPublicNow, RACES, tellEverybody } from "@/lib/wins/prize-announce";
-import { checkPrizeImage, currentPeriod, isSlot, periodByKey, RACE_LABEL, SLOTS, slotLabel, upcomingPeriods } from "@/lib/wins/prizes";
+import { checkPrizeImage, currentPeriod, isSlot, periodByKey, RACE_LABEL, slotLabel, upcomingPeriods } from "@/lib/wins/prizes";
 import { workspaceClock } from "@/lib/time/workspace";
 import type { ActionResult } from "@/actions/company";
+import { prizeShowcase, type ShowcaseRace } from "@/lib/wins/prize-showcase";
 
 /**
  * Prizes: what is up for grabs (everybody), setting them and announcing them (wins.manage), and the
  * hall of fame of who won what.
  */
 
-export type ShowcaseItem = { slot: string; slotLabel: string; name: string; note: string | null; imageDataUrl: string | null };
-export type ShowcaseRace = { race: PrizeRace; label: string; periodLabel: string; items: ShowcaseItem[] };
+export type { ShowcaseItem, ShowcaseRace } from "@/lib/wins/prize-showcase";
 
-/** The prizes up for grabs right now, for every race run where everybody can see it. */
+/** The prizes up for grabs right now, for every race run where everybody can see it (src/lib/wins/prize-showcase.ts). */
 export async function getPrizeShowcase(): Promise<ShowcaseRace[]> {
   await requireModuleUser("wins");
   if (!(await isModuleEnabled("wins"))) return [];
-  const [awards, wins, clock] = await Promise.all([awardSettings(), winsSettings(), workspaceClock()]);
-  const now = new Date();
-  const out: ShowcaseRace[] = [];
-  for (const race of RACES) {
-    if (!raceIsPublic(race, awards, wins)) continue;
-    const period = currentPeriod(race, now, clock);
-    const prizes = await prizesForPeriod(race, period.key);
-    const items = SLOTS[race].flatMap(({ slot, label }) => {
-      const p = prizes.get(slot);
-      return p ? [{ slot, slotLabel: label, name: p.name, note: p.note, imageDataUrl: p.imageDataUrl }] : [];
-    });
-    if (items.length) out.push({ race, label: RACE_LABEL[race], periodLabel: period.label, items });
-  }
-  return toPlain(out);
+  return prizeShowcase();
 }
 
 export type PrizeRow = { race: PrizeRace; period: string; slot: string; name: string; note: string | null; imageDataUrl: string | null };

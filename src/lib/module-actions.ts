@@ -186,6 +186,10 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "portal-public.ts": "public",
   "portal.ts": ["customer_portal"],
   "prizes.ts": ["wins"],
+  // TV screens: pairing a TV, renaming it, taking it off (owner, 17 Oct 2026).
+  "tv.ts": ["wins"],
+  // What a TV itself calls while it shows its code — no sign-in (src/lib/tv/screens.ts).
+  "tv-public.ts": "public",
   "profile.ts": "core",
   "project-credential.ts": ["projects"],
   "project-document.ts": ["projects"],
