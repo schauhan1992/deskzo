@@ -13,7 +13,9 @@ import { PRIORITY_LABELS, TASK_PRIORITIES, TASK_SORTS, type TaskSort } from "@/l
 
 /**
  * Tasks (owner, 16 Oct 2026): every task the viewer may see, as a table or a board by status, filtered
- * by status, priority, team, person, challenge, the viewer's stars and the due date.
+ * by status, priority, team, person, challenge, the viewer's stars and the due date. It opens on the
+ * viewer's own (owner, 17 Oct 2026: a task given to somebody sat pages down among everybody's) —
+ * Everyone, Set by me, Unassigned and each person are a choice away.
  */
 export default async function TasksPage({
   searchParams,
@@ -49,8 +51,11 @@ export default async function TasksPage({
 
   const page = resolvePage(params.page);
   const pageSize = resolvePageSize(params.pageSize);
+  // Whose: the viewer's own unless chosen — "all" is everybody's, "byme" the tasks they set.
+  const who = params.assignedTo ?? "me";
   const filters = {
-    assignedToUserId: params.assignedTo,
+    assignedToUserId: who === "me" ? userId : who === "all" || who === "byme" ? undefined : who,
+    createdByUserId: who === "byme" ? userId : undefined,
     status: params.status,
     priority: (TASK_PRIORITIES as readonly string[]).includes(params.priority ?? "") ? params.priority : undefined,
     departmentId: params.team || undefined,
@@ -72,12 +77,23 @@ export default async function TasksPage({
     countTasks(filters),
   ]);
 
+  const whose =
+    who === "me"
+      ? "Assigned to you"
+      : who === "all"
+        ? "Everyone's"
+        : who === "byme"
+          ? "Set by you"
+          : who === "unassigned"
+            ? "Nobody's yet"
+            : `${options.people.find((p) => p.id === who)?.name ?? "Somebody"}'s`;
+
   return (
     <div>
       <div>
         <h1 className="text-xl font-semibold text-text">Tasks</h1>
         <p className="mt-1 text-sm text-muted">
-          {result.total} total · {counts.open} open{counts.overdue > 0 && ` · ${counts.overdue} overdue`}
+          {whose} — {result.total} total · {counts.open} open{counts.overdue > 0 && ` · ${counts.overdue} overdue`}
         </p>
       </div>
 
@@ -98,11 +114,17 @@ export default async function TasksPage({
         />
         <SelectParamFilter paramName="priority" label="Priority" allLabel="Any" options={TASK_PRIORITIES.map((p) => ({ value: p, label: PRIORITY_LABELS[p] }))} />
         <SelectParamFilter paramName="team" label="Team" allLabel="Every team" options={options.departments.map((d) => ({ value: d.id, label: d.name }))} />
+        {/* No value is "Me" — the page's own default; Everyone is a choice like any other. */}
         <SelectParamFilter
           paramName="assignedTo"
           label="Assigned to"
-          allLabel="Everyone"
-          options={[{ value: "unassigned", label: "Unassigned" }, ...options.people.map((u) => ({ value: u.id, label: u.name }))]}
+          allLabel="Me"
+          options={[
+            { value: "all", label: "Everyone" },
+            { value: "byme", label: "Set by me" },
+            { value: "unassigned", label: "Unassigned" },
+            ...options.people.filter((u) => u.id !== userId).map((u) => ({ value: u.id, label: u.name })),
+          ]}
         />
         {challenges.length > 0 && (
           <SelectParamFilter

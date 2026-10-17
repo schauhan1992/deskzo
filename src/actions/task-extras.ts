@@ -146,7 +146,9 @@ export async function addTaskComment(taskId: string, body: string): Promise<Acti
   const comment = await db.taskComment.create({ data: { taskId: task.id, userId: user.id, body: text }, select: { id: true } });
   const name = (await db.user.findUnique({ where: { id: user.id }, select: { name: true } }))?.name ?? "Somebody";
   for (const to of new Set([task.assignedToUserId, task.createdByUserId].filter((v): v is string => !!v && v !== user.id))) {
-    await notifyUser({ userId: to, type: "TASK_COMMENT", title: `${name} commented on "${task.title}"`, message: text.slice(0, 200), link: "/tasks" });
+    // Whoever set it finds it under "Set by me"; whoever it's for, on their own list.
+    const link = to === task.assignedToUserId ? "/tasks" : "/tasks?assignedTo=byme";
+    await notifyUser({ userId: to, type: "TASK_COMMENT", title: `${name} commented on "${task.title}"`, message: text.slice(0, 200), link });
   }
   touched();
   return { ok: true, data: comment };

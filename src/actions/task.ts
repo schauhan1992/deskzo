@@ -289,6 +289,8 @@ export async function deleteTask(id: string): Promise<ActionResult<null>> {
 
 type TaskListParams = {
   assignedToUserId?: string;
+  /** The tasks somebody set — "Set by me" on the Tasks page. */
+  createdByUserId?: string;
   done?: boolean;
   search?: string;
   dueFrom?: string;
@@ -338,6 +340,7 @@ async function taskListWhere(userId: string, params?: TaskListParams): Promise<P
         ? { assignedToUserId: null }
         : { assignedToUserId: params.assignedToUserId }
       : {}),
+    ...(params?.createdByUserId ? { createdByUserId: params.createdByUserId } : {}),
     ...(params?.done !== undefined ? { done: params.done } : {}),
     ...(params?.search ? { title: { contains: params.search, mode: "insensitive" as const } } : {}),
     ...(dueDate ? { dueDate } : {}),

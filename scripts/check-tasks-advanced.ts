@@ -167,6 +167,8 @@ async function main() {
     ok("  To do leaves them out", (await listed({ status: "todo" })).includes(taskId) && !(await listed({ status: "todo" })).includes(futureId));
     ok("by priority, team and challenge", (await listed({ priority: "URGENT" })).join() === futureId && (await listed({ departmentId: team.id })).join() === taskId && (await listed({ challengeId })).join() === taskId);
     ok("sorted by priority, urgent first", (await listed({ sort: "priority" }))[0] === futureId);
+    ok("assigned to somebody: theirs only", (await listed({ assignedToUserId: worker.id })).length === 2 && (await listed({ assignedToUserId: manager.id })).length === 0);
+    ok("set by somebody: the tasks they set, whoever has them", (await listed({ createdByUserId: manager.id })).length === 2 && (await listed({ createdByUserId: worker.id })).length === 0);
     const star = await tasks.toggleTaskStar(taskId);
     ok("a star is the viewer's", star.ok && star.data.starred && (await listed({ starred: true })).join() === taskId);
     actorId = worker.id;
