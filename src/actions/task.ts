@@ -12,8 +12,8 @@ import { recordAudit } from "@/lib/audit";
 import { createTaskSchema, updateTaskSchema } from "@/lib/validation/task";
 import { workspaceClock } from "@/lib/time/workspace";
 import { calendarDayRange } from "@/lib/time/zone";
-import { ADVANCED, moveTask } from "@/lib/tasks/server";
-import { TASK_STATUSES, type TaskPriorityKey, type TaskRepeatKey, type TaskSort, type TaskStatusKey } from "@/lib/tasks/rules";
+import { ADVANCED, givenToWork, givenToWorkAll, moveTask } from "@/lib/tasks/server";
+import { ONLY_WORKS, TASK_STATUSES, type TaskPriorityKey, type TaskRepeatKey, type TaskSort, type TaskStatusKey } from "@/lib/tasks/rules";
 import type { ActionResult } from "@/actions/company";
 
 function revalidateTaskPaths(task: { companyId: string | null; leadId: string | null; ticketId: string | null }) {
@@ -173,6 +173,8 @@ export async function updateTask(input: unknown): Promise<ActionResult<{ id: str
   if (!existing) {
     return { ok: false, error: "Task not found." };
   }
+  // Given to them by somebody else: they move it along (setTaskStatus), they don't rewrite it.
+  if (await givenToWork(user.id, existing)) return { ok: false, error: ONLY_WORKS };
   // Handing it to somebody else is assigning, and asks for that.
   if ((data.assignedToUserId || null) !== existing.assignedToUserId && !(await reachableTask(user.id, data.id, "assign"))) {
     return { ok: false, error: "You can't hand this task to somebody else." };
@@ -269,7 +271,8 @@ export async function toggleTaskStar(id: string): Promise<ActionResult<{ starred
 
 export async function deleteTask(id: string): Promise<ActionResult<null>> {
   const user = await requireModuleUser("tasks");
-  // Your own (made by you or given to you), or anybody's with "Delete any task" — the task rule's delete.
+  // Your own (made by you, or given to you by somebody whose tasks you reach), or anybody's with "Delete
+  // any task" — the task rule's delete. One given to you by a manager or a peer is theirs to delete.
   if (!(await db.task.findUnique({ where: { id }, select: { id: true } }))) {
     return { ok: false, error: "Task not found." };
   }
@@ -277,6 +280,7 @@ export async function deleteTask(id: string): Promise<ActionResult<null>> {
   if (!task) {
     return { ok: false, error: "You don't have permission to delete this task." };
   }
+  if (await givenToWork(user.id, task)) return { ok: false, error: ONLY_WORKS };
 
   await db.task.delete({ where: { id } });
   revalidateTaskPaths(task);
@@ -432,9 +436,15 @@ export async function myOpenTasks(): Promise<RailTask[]> {
 }
 
 /** A row of the list, with its checklist's progress and whether the viewer starred it. */
-async function withProgress<T extends { id: string; stars: { userId: string }[] }>(rows: T[]) {
-  const done = await checklistDone(rows.map((r) => r.id));
-  return rows.map(({ stars, ...row }) => ({ ...row, starred: stars.length > 0, checklistDone: done.get(row.id) ?? 0 }));
+async function withProgress<T extends { id: string; stars: { userId: string }[]; assignedToUserId: string | null; createdByUserId: string }>(userId: string, rows: T[]) {
+  const [done, workOnly] = await Promise.all([checklistDone(rows.map((r) => r.id)), givenToWorkAll(userId, rows)]);
+  return rows.map(({ stars, ...row }) => ({
+    ...row,
+    starred: stars.length > 0,
+    checklistDone: done.get(row.id) ?? 0,
+    /** Given to the viewer by somebody else: theirs to move along, not to change (onlyWorks). */
+    workOnly: workOnly(row),
+  }));
 }
 
 export async function listTasks(params?: TaskListParams) {
@@ -445,7 +455,7 @@ export async function listTasks(params?: TaskListParams) {
     omit: ADVANCED,
     include: taskListInclude(user.id),
   });
-  return withProgress(await leadsSeenBy(user.id, rows));
+  return withProgress(user.id, await leadsSeenBy(user.id, rows));
 }
 
 export async function listTasksPaged(params: TaskListParams & { page: number; pageSize: number }) {
@@ -461,7 +471,7 @@ export async function listTasksPaged(params: TaskListParams & { page: number; pa
     }),
     db.task.count({ where }),
   ]);
-  return { rows: await withProgress(await leadsSeenBy(user.id, rows)), total };
+  return { rows: await withProgress(user.id, await leadsSeenBy(user.id, rows)), total };
 }
 
 /** Open and overdue counts across the whole filtered set, so the header holds steady while paging. */

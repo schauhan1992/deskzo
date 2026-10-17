@@ -1,7 +1,28 @@
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { workspaceClock } from "@/lib/time/workspace";
-import { closes, dayKeyOf, earnsXp, nextOccurrence, type TaskStatusKey } from "@/lib/tasks/rules";
+import { closes, dayKeyOf, earnsXp, nextOccurrence, onlyWorks, type TaskStatusKey } from "@/lib/tasks/rules";
+import { getDownlineUserIds } from "@/lib/org-chart";
+
+/**
+ * `onlyWorks` (src/lib/tasks/rules.ts) for many tasks at once: the viewer's downline, read once, and
+ * which of the tasks' givers are still here.
+ */
+type GivenShape = { assignedToUserId: string | null; createdByUserId: string };
+export async function givenToWorkAll(userId: string, tasks: readonly GivenShape[]): Promise<(task: GivenShape) => boolean> {
+  const givers = [...new Set(tasks.filter((t) => t.assignedToUserId === userId && t.createdByUserId !== userId).map((t) => t.createdByUserId))];
+  if (givers.length === 0) return () => false;
+  const [downline, active] = await Promise.all([
+    getDownlineUserIds(userId),
+    db.user.findMany({ where: { id: { in: givers }, active: true }, select: { id: true } }).then((rows) => new Set(rows.map((r) => r.id))),
+  ]);
+  return (task) => onlyWorks(task, userId, downline, active.has(task.createdByUserId));
+}
+
+/** Whether this person only works this task: given to them by somebody who doesn't report to them. */
+export async function givenToWork(userId: string, task: { assignedToUserId: string | null; createdByUserId: string }): Promise<boolean> {
+  return (await givenToWorkAll(userId, [task]))(task);
+}
 
 /**
  * Advanced tasks on the server (owner, 16 Oct 2026). Server only.

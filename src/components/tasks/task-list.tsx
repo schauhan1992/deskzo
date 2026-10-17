@@ -35,6 +35,8 @@ export type TaskRow = {
   company: { id: string; name: string; companySeq: number } | null;
   lead: { id: string; title: string; leadSeq: number } | null;
   ticket: { id: string; ticketSeq: number; title: string } | null;
+  /** Given to the viewer by somebody else: theirs to tick off, not to change or delete (src/lib/tasks/rules.ts). */
+  workOnly?: boolean;
 };
 
 type AddFormValues = z.input<typeof createTaskSchema>;
@@ -257,7 +259,7 @@ export function TaskList({
           </thead>
           <tbody>
             {tasks.map((task) => {
-              const canDelete = canDeleteAny || task.createdBy.id === currentUserId || task.assignedTo?.id === currentUserId;
+              const canDelete = !task.workOnly && (canDeleteAny || task.createdBy.id === currentUserId || task.assignedTo?.id === currentUserId);
 
               if (editingId === task.id) {
                 return <EditTaskForm key={task.id} task={task} users={users} columnCount={columnCount} onClose={() => setEditingId(null)} />;
@@ -300,7 +302,7 @@ export function TaskList({
                   <td className="px-3 py-2.5 text-muted">{task.createdBy.name}</td>
                   <td className="px-3 py-2.5 text-right">
                     <RowActions>
-                      <IconButton icon={Pencil} label="Edit task" onClick={() => setEditingId(task.id)} />
+                      {!task.workOnly && <IconButton icon={Pencil} label="Edit task" onClick={() => setEditingId(task.id)} />}
                       {canDelete && (
                         <IconButton
                           icon={Trash2}

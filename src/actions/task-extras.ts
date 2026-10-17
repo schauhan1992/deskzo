@@ -12,8 +12,8 @@ import { recordAudit } from "@/lib/audit";
 import { PEOPLE_ONLY } from "@/lib/people";
 import { workspaceClock } from "@/lib/time/workspace";
 import { chatFileType } from "@/lib/chat/rules";
-import { ADVANCED, storedDay } from "@/lib/tasks/server";
-import { COMMENT_MAX, TASK_FILE_MAX_BYTES } from "@/lib/tasks/rules";
+import { ADVANCED, givenToWork, storedDay } from "@/lib/tasks/server";
+import { COMMENT_MAX, ONLY_WORKS, TASK_FILE_MAX_BYTES } from "@/lib/tasks/rules";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -71,6 +71,8 @@ export async function getTaskPanel(id: string) {
     taskFor(user.id, id, "delete").then(Boolean),
   ]);
   if (!task) return null;
+  // Given to them by somebody else: they work it, they don't change it (src/lib/tasks/rules.ts).
+  const workOnly = await givenToWork(user.id, task);
   const [shown] = await leadsSeenBy(user.id, [task]);
   const { stars, ...rest } = shown!;
   return {
@@ -78,8 +80,12 @@ export async function getTaskPanel(id: string) {
     starred: stars.length > 0,
     loggedMinutes: task.timeLogs.reduce((sum, t) => sum + t.minutes, 0),
     viewerId: user.id,
+    /** Move it along, tick its steps, attach and log time. */
     canEdit,
-    canDelete,
+    /** Change what it is — its details and its steps — and take others' files and comments off. */
+    canChange: canEdit && !workOnly,
+    canDelete: canDelete && !workOnly,
+    workOnly,
   };
 }
 
@@ -89,6 +95,7 @@ export async function addChecklistItem(taskId: string, title: string): Promise<A
   const user = await requireModuleUser("tasks");
   const task = await taskFor(user.id, taskId, "edit");
   if (!task) return { ok: false, error: "Task not found." };
+  if (await givenToWork(user.id, task)) return { ok: false, error: ONLY_WORKS };
   const text = String(title ?? "").trim();
   if (!text) return { ok: false, error: "Write the step first." };
   if (text.length > 200) return { ok: false, error: "A step is at most 200 characters." };
@@ -117,6 +124,8 @@ export async function deleteChecklistItem(itemId: string): Promise<ActionResult<
   const user = await requireModuleUser("tasks");
   const item = await itemFor(user.id, itemId);
   if (!item) return { ok: false, error: "That step no longer exists." };
+  const task = await db.task.findUniqueOrThrow({ where: { id: item.taskId }, select: { assignedToUserId: true, createdByUserId: true } });
+  if (await givenToWork(user.id, task)) return { ok: false, error: ONLY_WORKS };
   await db.taskChecklistItem.delete({ where: { id: item.id } });
   touched();
   return { ok: true, data: null };
@@ -148,7 +157,8 @@ export async function deleteTaskComment(commentId: string): Promise<ActionResult
   const user = await requireModuleUser("tasks");
   const comment = await db.taskComment.findUnique({ where: { id: String(commentId ?? "") }, select: { id: true, taskId: true, userId: true } });
   if (!comment || !(await taskFor(user.id, comment.taskId, "view"))) return { ok: false, error: "That comment no longer exists." };
-  if (comment.userId !== user.id && !(await taskFor(user.id, comment.taskId, "edit"))) return { ok: false, error: "Only its writer can take a comment back." };
+  const onTask = comment.userId === user.id ? null : await taskFor(user.id, comment.taskId, "edit");
+  if (comment.userId !== user.id && (!onTask || (await givenToWork(user.id, onTask)))) return { ok: false, error: "Only its writer can take a comment back." };
   await db.taskComment.delete({ where: { id: comment.id } });
   touched();
   return { ok: true, data: null };
@@ -182,7 +192,8 @@ export async function deleteTaskFile(fileId: string): Promise<ActionResult<null>
   const user = await requireModuleUser("tasks");
   const file = await db.taskAttachment.findUnique({ where: { id: String(fileId ?? "") }, select: { id: true, taskId: true, uploadedById: true, fileName: true } });
   if (!file || !(await taskFor(user.id, file.taskId, "view"))) return { ok: false, error: "That file no longer exists." };
-  if (file.uploadedById !== user.id && !(await taskFor(user.id, file.taskId, "edit"))) return { ok: false, error: "Only whoever attached it can remove a file." };
+  const onTask = file.uploadedById === user.id ? null : await taskFor(user.id, file.taskId, "edit");
+  if (file.uploadedById !== user.id && (!onTask || (await givenToWork(user.id, onTask)))) return { ok: false, error: "Only whoever attached it can remove a file." };
   await db.taskAttachment.delete({ where: { id: file.id } });
   await recordAudit({ userId: user.id, action: "DELETE", entityType: "TaskAttachment", entityId: file.id, entityLabel: file.fileName.slice(0, 80) });
   touched();

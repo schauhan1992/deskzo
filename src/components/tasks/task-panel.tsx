@@ -135,7 +135,7 @@ export function TaskPanel({ taskId, onClose, options }: { taskId: string; onClos
             </Select>
           )}
           <span className="ml-auto flex gap-2">
-            {panel.canEdit && (
+            {panel.canChange && (
               <Button type="button" size="sm" variant="secondary" onClick={() => setEditing(true)}>
                 <Pencil className="mr-1.5 h-3.5 w-3.5" />
                 Edit
@@ -156,6 +156,11 @@ export function TaskPanel({ taskId, onClose, options }: { taskId: string; onClos
           </span>
         </div>
         {error && <p className="text-sm text-danger">{error}</p>}
+        {panel.workOnly && (
+          <p className="rounded-base bg-surface-sunken px-3 py-2 text-xs text-muted">
+            {panel.createdBy.name} gave you this task — move it along, tick its steps, comment, attach files and log your time. Changing it is theirs.
+          </p>
+        )}
 
         <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
           <Meta label="Assigned to">
@@ -238,7 +243,7 @@ export function TaskPanel({ taskId, onClose, options }: { taskId: string; onClos
                   aria-label={item.title}
                 />
                 <span className={item.done ? "text-subtle line-through" : "text-text"}>{item.title}</span>
-                {panel.canEdit && (
+                {panel.canChange && (
                   <button type="button" aria-label="Remove step" onClick={() => run(() => deleteChecklistItem(item.id))} className="ml-auto opacity-0 group-hover:opacity-100">
                     <X className="h-3.5 w-3.5 text-subtle hover:text-danger" />
                   </button>
@@ -246,7 +251,7 @@ export function TaskPanel({ taskId, onClose, options }: { taskId: string; onClos
               </li>
             ))}
           </ul>
-          {panel.canEdit && <AddLine placeholder="Add a step" onAdd={(text) => run(() => addChecklistItem(panel.id, text))} pending={pending} />}
+          {panel.canChange && <AddLine placeholder="Add a step" onAdd={(text) => run(() => addChecklistItem(panel.id, text))} pending={pending} />}
         </Section>
 
         <Section title={`Files${panel.attachments.length ? ` · ${panel.attachments.length}` : ""}`}>
@@ -258,7 +263,7 @@ export function TaskPanel({ taskId, onClose, options }: { taskId: string; onClos
                   {f.fileName}
                 </a>
                 <span className="text-subtle">({fileSize(f.size)})</span>
-                {(f.uploadedBy.id === panel.viewerId || panel.canEdit) && (
+                {(f.uploadedBy.id === panel.viewerId || panel.canChange) && (
                   <button type="button" aria-label={`Remove ${f.fileName}`} onClick={() => run(() => deleteTaskFile(f.id))}>
                     <X className="h-3 w-3 text-subtle hover:text-danger" />
                   </button>
@@ -317,7 +322,7 @@ export function TaskPanel({ taskId, onClose, options }: { taskId: string; onClos
                 <div className="min-w-0 flex-1">
                   <p className="text-xs text-muted">
                     <span className="font-medium text-text">{c.user.name}</span> · {clock.dateTime(c.createdAt)}
-                    {(c.user.id === panel.viewerId || panel.canEdit) && (
+                    {(c.user.id === panel.viewerId || panel.canChange) && (
                       <button type="button" onClick={() => run(() => deleteTaskComment(c.id))} className="ml-2 text-subtle hover:text-danger">
                         Remove
                       </button>

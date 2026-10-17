@@ -123,7 +123,7 @@ export const PERMISSION_REGISTRY = [
     key: "tasks.delete",
     label: "Delete any task",
     description:
-      "Delete a task that isn't yours — anyone can already delete a task they created or are assigned to.",
+      "Delete a task that isn't yours — anyone can already delete a task they created. One somebody else gave them is the giver's to delete.",
     defaultRoles: ["MANAGEMENT"],
   },
   {

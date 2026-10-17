@@ -39,6 +39,8 @@ export type WorkspaceTask = TaskFormTask & {
   lead: { id: string; title: string; leadSeq: number } | null;
   ticket: { id: string; ticketSeq: number; title: string } | null;
   _count: { checklist: number; comments: number; attachments: number };
+  /** Given to the viewer by somebody else: theirs to move along, not to change or delete (src/lib/tasks/rules.ts). */
+  workOnly: boolean;
 };
 
 const BOARD: { status: TaskStatusKey; label: string; panel: string; title: string }[] = [
@@ -192,17 +194,25 @@ export function TasksWorkspace({
                       <Badge tone={STATUS_TONES[shown]}>{STATUS_LABELS[shown]}</Badge>
                     </td>
                     <td className="whitespace-nowrap px-3 py-3 text-right">
-                      <button type="button" aria-label="Edit" onClick={() => setEditing(t)} className="rounded-base p-1 text-info hover:bg-info-bg">
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        aria-label="Delete"
-                        onClick={() => window.confirm(`Delete "${t.title}"?`) && run(() => deleteTask(t.id))}
-                        className="rounded-base p-1 text-danger hover:bg-danger-bg"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      {t.workOnly ? (
+                        <span className="text-xs text-subtle" title={`${t.createdBy.name} gave you this task — open it to move it along`}>
+                          Given by {t.createdBy.name.split(" ")[0]}
+                        </span>
+                      ) : (
+                        <>
+                          <button type="button" aria-label="Edit" onClick={() => setEditing(t)} className="rounded-base p-1 text-info hover:bg-info-bg">
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="Delete"
+                            onClick={() => window.confirm(`Delete "${t.title}"?`) && run(() => deleteTask(t.id))}
+                            className="rounded-base p-1 text-danger hover:bg-danger-bg"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </>
+                      )}
                     </td>
                   </tr>
                 );

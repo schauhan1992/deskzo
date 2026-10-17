@@ -85,3 +85,17 @@ export function minutesWords(minutes: number): string {
 /** The list's sort orders. */
 export const TASK_SORTS = ["due", "start", "priority", "title", "created", "xp", "status"] as const;
 export type TaskSort = (typeof TASK_SORTS)[number];
+
+/**
+ * A task given, not set (owner, 17 Oct 2026: "x should just change the stage … instead of completely
+ * edit that task"): somebody else set it for this person — their manager, a peer, anyone who doesn't
+ * report to them. They work it: move it through its stages, tick its steps, comment, attach files and
+ * log time. Its details, its steps and deleting it are whoever set it's. A task given by somebody in
+ * their own downline (`downline`, src/lib/org-chart.ts) they still change, and one whose giver has left
+ * (`giverActive` false) — nobody else would.
+ */
+export function onlyWorks(task: { assignedToUserId: string | null; createdByUserId: string }, userId: string, downline: readonly string[], giverActive = true): boolean {
+  return task.assignedToUserId === userId && task.createdByUserId !== userId && giverActive && !downline.includes(task.createdByUserId);
+}
+
+export const ONLY_WORKS = "This task was given to you — you can move it along, tick its steps, comment and log time, but changing or deleting it is for whoever set it.";

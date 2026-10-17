@@ -177,10 +177,12 @@ async function main() {
 
     section("Checklist, comments, files, time");
 
-    actorId = worker.id;
+    // Steps are set by whoever set the task; the worker it was given to ticks them.
+    actorId = manager.id;
     const step1 = await extras.addChecklistItem(taskId, "Profile the resizer");
     const step2 = await extras.addChecklistItem(taskId, "Cache the thumbnails");
     ok("steps are added", step1.ok && step2.ok);
+    actorId = worker.id;
     if (step1.ok) await extras.toggleChecklistItem(step1.data.id);
     const progress = (await tasks.listTasks({ search: TAG })).find((t) => t.id === taskId);
     ok("  and ticked, the list counting them", progress?.checklistDone === 1 && progress?._count.checklist === 2, `${progress?.checklistDone}/${progress?._count.checklist}`);
@@ -247,6 +249,39 @@ async function main() {
     ok("  and opens it again as To do", ticked.ok && (await db.task.findUniqueOrThrow({ where: { id: ticked.data.id } })).status === "TODO");
     ok("Cancelled closes it without XP", future.ok && (await tasks.setTaskStatus(futureId, "CANCELLED")).ok && (await db.task.findUniqueOrThrow({ where: { id: futureId } })).done === true);
     ok("a status that isn't one is refused", !(await tasks.setTaskStatus(taskId, "MAYBE")).ok);
+
+    section("A task given, not set");
+
+    // The worker reports to nobody here, and the manager set the task: the worker works it.
+    actorId = worker.id;
+    const rewrite = await tasks.updateTask({ id: taskId, title: `${TAG} Something else`, assignedToUserId: worker.id });
+    ok("whoever a task was given to can't change it", !rewrite.ok && /given to you/.test(rewrite.error), said(rewrite));
+    ok("  nor delete it", !(await tasks.deleteTask(taskId)).ok && (await db.task.count({ where: { id: taskId } })) === 1);
+    ok("  nor add or remove its steps", !(await extras.addChecklistItem(taskId, "My own step")).ok && (!step2.ok || !(await extras.deleteChecklistItem(step2.data.id)).ok));
+    ok("  but moves it along and ticks its steps", (await tasks.setTaskStatus(taskId, "IN_PROGRESS")).ok && (!step2.ok || (await extras.toggleChecklistItem(step2.data.id)).ok));
+    const given = await extras.getTaskPanel(taskId);
+    ok("the panel says so: work it, don't change it", given?.workOnly === true && given.canEdit && !given.canChange && !given.canDelete);
+    ok("the list marks it for them", (await tasks.listTasks({ search: TAG })).find((t) => t.id === taskId)?.workOnly === true);
+    actorId = manager.id;
+    ok("  and not for whoever set it", (await tasks.listTasks({ search: TAG })).find((t) => t.id === taskId)?.workOnly === false);
+    ok("  who still changes it", (await tasks.updateTask({ id: taskId, title: `${TAG} Optimise image processing`, assignedToUserId: worker.id, dueDate: nextWeek, xp: 50 })).ok);
+    await tasks.setTaskStatus(taskId, "DONE");
+
+    actorId = worker.id;
+    const mine = await tasks.createTask({ title: `${TAG} My own list`, assignedToUserId: worker.id });
+    ok("a task somebody set for themselves is theirs to change", mine.ok && (await tasks.updateTask({ id: mine.data.id, title: `${TAG} My own list, renamed`, assignedToUserId: worker.id })).ok);
+    // The worker reports to the manager now; the worker sets the manager a task.
+    await db.user.update({ where: { id: worker.id }, data: { managerId: manager.id } });
+    const upward = await tasks.createTask({ title: `${TAG} Sign this off`, assignedToUserId: manager.id });
+    actorId = manager.id;
+    ok("a manager given a task by somebody who reports to them still changes it", upward.ok && (await tasks.updateTask({ id: upward.data.id, title: `${TAG} Sign this off today`, assignedToUserId: manager.id })).ok);
+    const peer = await make("peer", "SALES", team.id);
+    actorId = peer.id;
+    const fromPeer = await tasks.createTask({ title: `${TAG} Cover my call`, assignedToUserId: worker.id });
+    actorId = worker.id;
+    ok("a peer's task: work it, don't change it", fromPeer.ok && !(await tasks.updateTask({ id: fromPeer.data.id, title: `${TAG} Not covering`, assignedToUserId: worker.id })).ok);
+    await db.user.update({ where: { id: peer.id }, data: { active: false } });
+    ok("  but once they've left, it's theirs to change — nobody else would", fromPeer.ok && (await tasks.updateTask({ id: fromPeer.data.id, title: `${TAG} Covered`, assignedToUserId: worker.id })).ok);
 
     section("Challenges and the leaderboard");
 
