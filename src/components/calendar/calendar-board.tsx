@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight, RefreshCw, Video } from "lucide-react";
-import { syncMyCalendar, type CalendarSummary, type MyEvent } from "@/actions/calendar";
+import { ChevronLeft, ChevronRight, Printer, RefreshCw, Video } from "lucide-react";
+import { syncMyCalendar, type CalendarFeedView, type CalendarSummary, type MyEvent } from "@/actions/calendar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
@@ -13,7 +13,9 @@ import { useClock } from "@/components/time/clock-provider";
 import { CalendarNotice } from "@/components/calendar/calendar-notice";
 import { ScheduleMeetingButton } from "@/components/calendar/schedule-meeting-button";
 import { MeetingActions } from "@/components/calendar/meeting-actions";
+import { CalendarFeedButton } from "@/components/calendar/calendar-feed";
 import { addDays, dayLabel, spanLabel } from "@/lib/calendar/days";
+import { ITEM_KIND_LABELS } from "@/lib/calendar/items";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { cn } from "@/lib/utils";
 
@@ -36,11 +38,14 @@ function ago(iso: string | null, now: number): string {
 
 /**
  * A person's own calendar, a week at a time (a day at a time down the page on a phone) or as the next
- * fortnight's list. Opened after a while away, it asks for a sync and shows what came back.
+ * fortnight's list — their connected calendar's meetings or Deskzo's own, and their tasks, visits, leave,
+ * holidays and bookings beside them, read-only. Opened after a while away, a connected calendar asks for
+ * a sync and shows what came back.
  */
 export function CalendarBoard({
   summary,
   events,
+  feed,
   firstDay,
   days,
   view,
@@ -49,6 +54,8 @@ export function CalendarBoard({
 }: {
   summary: CalendarSummary;
   events: MyEvent[];
+  /** The person's subscribe link, when the page is theirs to see. */
+  feed: CalendarFeedView | null;
   firstDay: string;
   days: number;
   view: "week" | "agenda";
@@ -64,6 +71,8 @@ export function CalendarBoard({
   const [now, setNow] = useState(() => Date.now());
 
   const ready = summary.state === "ready";
+  // Deskzo's own calendar stands in for a missing or broken connection: only "off" and viewing-as stop the page.
+  const usable = summary.state !== "off" && summary.state !== "viewing-as";
   const lastSynced = summary.state === "ready" ? summary.lastSyncedAt : null;
 
   function sync() {
@@ -104,32 +113,46 @@ export function CalendarBoard({
               <>
                 Your {CALENDAR_OF[summary.provider]} · {summary.mailbox} · {syncing ? "syncing…" : ago(summary.lastSyncedAt, now)}
               </>
+            ) : usable ? (
+              "Your meetings in Deskzo, with your tasks, visits, leave and holidays."
             ) : (
               "Your own calendar, kept in step with Outlook, Google Calendar or Zoho Calendar."
             )}
           </p>
           {(syncError || (summary.state === "ready" && summary.lastError)) && <p className="mt-1 text-xs text-warning">{syncError ?? (summary.state === "ready" ? summary.lastError : null)}</p>}
         </div>
-        {ready && (
+        {usable && (
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={sync} disabled={syncing} aria-label="Sync now">
-              <RefreshCw className={cn("h-3.5 w-3.5", syncing && "animate-spin")} />
-              Sync
-            </Button>
+            {ready && (
+              <Button variant="ghost" size="sm" onClick={sync} disabled={syncing} aria-label="Sync now">
+                <RefreshCw className={cn("h-3.5 w-3.5", syncing && "animate-spin")} />
+                Sync
+              </Button>
+            )}
+            {feed && <CalendarFeedButton feed={feed} />}
+            <a
+              href={`/calendar/print?week=${firstDay}${view === "agenda" ? "&view=agenda" : ""}`}
+              target="_blank"
+              rel="noopener"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium text-text hover:bg-surface-sunken"
+            >
+              <Printer className="h-3.5 w-3.5" aria-hidden />
+              Print
+            </a>
             {canSchedule && <ScheduleMeetingButton record={null} variant="primary" />}
           </div>
         )}
       </div>
 
-      {!ready && summary.state !== "broken" ? (
+      {!usable ? (
         <div className="mt-6">
           <CalendarNotice summary={summary} />
         </div>
       ) : (
         <>
-          {summary.state === "broken" && (
+          {!ready && summary.state !== "app-missing" && (
             <div className="mt-4">
-              <CalendarNotice summary={summary} compact />
+              <CalendarNotice summary={summary} compact deskzo />
             </div>
           )}
           <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
@@ -182,7 +205,13 @@ function EventChip({ e, onOpen, className, style }: { e: MyEvent; onOpen: (e: My
       style={style}
       className={cn(
         "overflow-hidden rounded-md border px-1.5 py-0.5 text-left text-[11px] leading-tight",
-        e.status === "CANCELLED" ? "border-line bg-surface-sunken text-subtle line-through" : e.record ? "border-brand/40 bg-brand-subtle text-brand" : "border-line-strong bg-surface text-text",
+        e.status === "CANCELLED"
+          ? "border-line bg-surface-sunken text-subtle line-through"
+          : e.kind !== "meeting"
+            ? "border-dashed border-line-strong bg-surface-sunken text-muted"
+            : e.record || e.native
+              ? "border-brand/40 bg-brand-subtle text-brand"
+              : "border-line-strong bg-surface text-text",
         className,
       )}
       title={e.title}
@@ -276,7 +305,7 @@ function WeekGrid({ keys, today, onDay, onOpen }: DayProps) {
 function Agenda({ keys, today, onDay, onOpen }: DayProps) {
   const clock = useClock();
   const withEvents = keys.map((k) => ({ k, list: onDay(k) })).filter((d) => d.list.length > 0);
-  if (!withEvents.length) return <p className="rounded-xl border border-line bg-surface py-10 text-center text-sm text-muted">Nothing in your calendar these days.</p>;
+  if (!withEvents.length) return <p className="rounded-xl border border-line bg-surface py-10 text-center text-sm text-muted">Nothing on these days.</p>;
   return (
     <div className="space-y-4">
       {withEvents.map(({ k, list }) => (
@@ -292,7 +321,11 @@ function Agenda({ keys, today, onDay, onOpen }: DayProps) {
                   <span className="w-28 shrink-0 text-xs text-muted">{e.allDay ? "All day" : `${clock.time(e.startsAt)} – ${clock.time(e.endsAt)}`}</span>
                   <span className="min-w-0 flex-1">
                     <span className={cn("block truncate text-sm text-text", e.status === "CANCELLED" && "text-subtle line-through")}>{e.title}</span>
-                    {e.record && <span className="block truncate text-xs text-brand">{e.record.label}</span>}
+                    {e.kind !== "meeting" ? (
+                      <span className="block truncate text-xs text-subtle">{ITEM_KIND_LABELS[e.kind]}</span>
+                    ) : (
+                      e.record && <span className="block truncate text-xs text-brand">{e.record.label}</span>
+                    )}
                   </span>
                   {e.joinUrl && e.status !== "CANCELLED" && <Video className="mt-0.5 h-4 w-4 shrink-0 text-muted" aria-label="Has a meeting link" />}
                 </button>
@@ -318,6 +351,8 @@ function EventDetails({ event: e, now, canReschedule, onClose }: { event: MyEven
       <div className="space-y-3 text-sm">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-text">{when}</span>
+          {e.kind !== "meeting" && <Badge>{ITEM_KIND_LABELS[e.kind]}</Badge>}
+          {e.kind === "meeting" && e.native && <Badge tone="brand">In Deskzo</Badge>}
           {e.status === "CANCELLED" && <Badge tone="red">Cancelled</Badge>}
           {e.status === "TENTATIVE" && <Badge tone="amber">Tentative</Badge>}
         </div>
@@ -329,7 +364,7 @@ function EventDetails({ event: e, now, canReschedule, onClose }: { event: MyEven
         )}
         {e.record && (
           <p>
-            For{" "}
+            {e.kind === "meeting" ? "For " : ""}
             <Link href={e.record.href} className="text-brand hover:underline" onClick={onClose}>
               {e.record.label}
             </Link>
@@ -348,7 +383,8 @@ function EventDetails({ event: e, now, canReschedule, onClose }: { event: MyEven
           </ul>
         )}
         {e.description && <p className="whitespace-pre-line text-xs text-muted">{e.description}</p>}
-        {e.isOrganizer && upcoming && e.status !== "CANCELLED" && !e.allDay && (
+        {e.kind === "meeting" && e.native && e.attendees.length > 0 && <p className="text-[11px] text-subtle">Deskzo emailed the invitations; replies go to {e.isOrganizer ? "you" : "the organiser"}.</p>}
+        {e.kind === "meeting" && e.isOrganizer && upcoming && e.status !== "CANCELLED" && !e.allDay && (
           <div className="border-t border-line pt-3">
             <MeetingActions eventId={e.id} title={e.title} canReschedule={canReschedule} />
           </div>

@@ -304,6 +304,9 @@ const NOT_YET_EVERYWHERE = {
     repeatUntil: true,
     repeatedFromId: true,
   },
+  // 20261113100000_native_calendar. Read by name in src/lib/calendar/native.ts, mirror.ts and sync.ts, which
+  // treat a workspace without them as having none of Deskzo's own meetings (scheduling asks for a calendar).
+  calendarEvent: { sequence: true, mirrorProvider: true, mirrorId: true, mirrorEtag: true, mirroredAt: true },
 } satisfies Prisma.GlobalOmitConfig;
 
 /** The one client, made on first use. */

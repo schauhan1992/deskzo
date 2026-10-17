@@ -10,10 +10,15 @@ const CALENDAR_OF = { MICROSOFT: "Outlook calendar", GOOGLE: "Google Calendar", 
 /**
  * What stands between the person and their calendar, and the one thing to do about it — connect,
  * reconnect allowing the calendar, or ask an admin. Null when the calendar is ready.
+ *
+ * `deskzo`: said where Deskzo's own calendar stands in meanwhile (src/lib/calendar/native.ts) — the person
+ * isn't stopped, only told what connecting would add. Nothing to say then when there's nothing to connect.
  */
-export function CalendarNotice({ summary, compact = false }: { summary: CalendarSummary; compact?: boolean }) {
+export function CalendarNotice({ summary, compact = false, deskzo = false }: { summary: CalendarSummary; compact?: boolean; deskzo?: boolean }) {
   const pathname = usePathname() || "/calendar";
   if (summary.state === "ready") return null;
+  if (deskzo && summary.state === "app-missing") return null;
+  const meanwhile = deskzo ? " Until then, the meetings you schedule are kept in Deskzo's own calendar, and Deskzo emails the invitations." : "";
 
   let title: string;
   let body: string;
@@ -32,18 +37,20 @@ export function CalendarNotice({ summary, compact = false }: { summary: Calendar
       body = "An admin sets up Microsoft 365, Google Workspace or Zoho under Settings → Security; then each person connects their own.";
       break;
     case "not-connected":
-      title = "Connect your calendar";
-      body = "Your mailbox and calendar connect together, once — meetings you schedule here go into your own calendar, with the invitations sent from it.";
+      title = deskzo ? "Your meetings are in Deskzo's calendar" : "Connect your calendar";
+      body = deskzo
+        ? "Connect your Outlook, Google or Zoho calendar to have them there instead — meetings you schedule then get a meeting link, and everything else in your calendar shows here too."
+        : "Your mailbox and calendar connect together, once — meetings you schedule here go into your own calendar, with the invitations sent from it.";
       links = summary.providers.map((p) => ({ href: mailConnectPath(p, pathname), label: `Connect ${PROVIDER_NAMES[p]}` }));
       break;
     case "no-calendar":
       title = `Allow your ${CALENDAR_OF[summary.provider]}`;
-      body = `${MAIL_NAMES[summary.provider]} (${summary.mailbox}) is connected for mail, but not your calendar. Connect again and allow the calendar when ${PROVIDER_NAMES[summary.provider]} asks.`;
+      body = `${MAIL_NAMES[summary.provider]} (${summary.mailbox}) is connected for mail, but not your calendar. Connect again and allow the calendar when ${PROVIDER_NAMES[summary.provider]} asks.${meanwhile}`;
       links = [{ href: mailConnectPath(summary.provider, pathname), label: `Reconnect ${PROVIDER_NAMES[summary.provider]}` }];
       break;
     case "broken":
       title = `Your ${CALENDAR_OF[summary.provider]} needs connecting again`;
-      body = summary.error ? `${PROVIDER_NAMES[summary.provider]} said: ${summary.error}` : `${PROVIDER_NAMES[summary.provider]} stopped letting Deskzo in — a changed password, or the permission withdrawn.`;
+      body = `${summary.error ? `${PROVIDER_NAMES[summary.provider]} said: ${summary.error}` : `${PROVIDER_NAMES[summary.provider]} stopped letting Deskzo in — a changed password, or the permission withdrawn.`}${meanwhile}`;
       links = [{ href: mailConnectPath(summary.provider, pathname), label: `Reconnect ${PROVIDER_NAMES[summary.provider]}` }];
       break;
   }

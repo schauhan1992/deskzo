@@ -26,7 +26,7 @@ export default async function Page() {
       <div>
         <h1 className="text-xl font-semibold text-text">Booking pages</h1>
         <p className="mt-1 text-sm text-muted">
-          Pages where customers book a meeting in the time your team has free. A booking goes into the host&apos;s calendar with the invitation and a meeting link, and{" "}
+          Pages where customers book a meeting in the time your team has free. A booking goes into the host&apos;s calendar with the invitation — with a meeting link when their Outlook, Google or Zoho calendar is connected — and{" "}
           {leads ? "opens a lead" : "adds the company and contact"}.
         </p>
       </div>

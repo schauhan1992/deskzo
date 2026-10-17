@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
+import { notMigratedYet } from "@/lib/not-migrated";
 import type { WorkplaceProvider } from "@/lib/workplace/providers";
 
 /**
@@ -24,6 +25,13 @@ export async function saveCalendarAccount(userId: string, provider: WorkplacePro
   const before = await db.calendarAccount.findUnique({ where: { userId }, select: { provider: true, calendarId: true } });
   const fresh = !before || before.provider !== provider || before.calendarId !== calendarId;
   if (fresh) await db.calendarEvent.deleteMany({ where: { userId, NOT: LINKED } });
+  // Copies of their Deskzo meetings in another provider's calendar are no copies in this one: copied again
+  // after the first sync (src/lib/calendar/mirror.ts). By name — a workspace without the columns has none.
+  await db.calendarEvent
+    .updateMany({ where: { userId, provider: null, mirrorProvider: { not: provider } }, data: { mirrorProvider: null, mirrorId: null, mirrorEtag: null, mirroredAt: null } })
+    .catch((err: unknown) => {
+      if (!notMigratedYet(err)) throw err;
+    });
   const data = {
     provider,
     calendarId,

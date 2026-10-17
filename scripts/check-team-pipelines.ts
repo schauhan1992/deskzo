@@ -22,7 +22,7 @@
  *     value; a lead done in a pipeline that isn't sales makes nobody a customer and counts as no sale;
  *   · automations: on arriving and on entering a stage — a task, an assignment, a notification, and an
  *     email that can't be sent noted on the automation, never undoing the move;
- *   · booking pages: only hosts with a calendar; times from their hours less what is busy; a booking
+ *   · booking pages: only hosts active here; times from their hours less what is busy; a booking
  *     opening a lead in the page's pipeline, owned by the host, and a meeting with the customer invited;
  *     the same time never taken twice; too many from one place refused;
  *   · and the real workspace untouched.
@@ -520,7 +520,9 @@ async function run(scratchUrl: string) {
     as(rep);
     ok("only somebody who may manage booking pages makes one", !(await booking.saveBookingPage(page)).ok);
     as(manager);
-    ok("  a host must have a calendar connected", !(await booking.saveBookingPage({ ...page, hostUserIds: [rep.id] })).ok);
+    // A host needs no calendar connected any more — without one it's Deskzo's own (check:native-calendar) —
+    // but must be somebody active here.
+    ok("  a host must be somebody active here", !(await booking.saveBookingPage({ ...page, hostUserIds: ["zz-nobody"] })).ok);
     const saved = await booking.saveBookingPage(page);
     ok("a page made", saved.ok, errorOf(saved));
     ok("  its address can't be taken twice", !(await booking.saveBookingPage({ ...page, title: "Another" })).ok);

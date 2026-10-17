@@ -29,6 +29,7 @@ export function MeetingActions({
   const [cancelling, setCancelling] = useState(false);
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   function cancel() {
@@ -39,8 +40,13 @@ export function MeetingActions({
         setError(done.error);
         return;
       }
-      setCancelling(false);
       router.refresh();
+      // Called off here, but the people invited couldn't all be told: said before the dialog goes.
+      if (done.data.warning) {
+        setWarning(done.data.warning);
+        return;
+      }
+      setCancelling(false);
     });
   }
 
@@ -58,23 +64,32 @@ export function MeetingActions({
       </div>
       {editing && <MeetingDialog mode={{ kind: "edit", eventId }} onClose={() => setEditing(false)} />}
       {cancelling && (
-        <Dialog open onClose={() => setCancelling(false)} title={`Cancel “${title}”?`}>
-          <div className="space-y-3">
-            <p className="text-sm text-muted">Everybody invited is told it&apos;s off, from your calendar.</p>
-            <div>
-              <Label htmlFor={`cancel-note-${eventId}`}>A line for them (optional)</Label>
-              <Textarea id={`cancel-note-${eventId}`} value={note} onChange={(e) => setNote(e.target.value)} rows={2} maxLength={1000} />
+        <Dialog open onClose={() => setCancelling(false)} title={warning ? `“${title}” is cancelled` : `Cancel “${title}”?`}>
+          {warning ? (
+            <div className="space-y-3">
+              <p className="text-sm text-warning">{warning}</p>
+              <div className="flex justify-end">
+                <Button onClick={() => setCancelling(false)}>Close</Button>
+              </div>
             </div>
-            {error && <p className="text-sm text-danger">{error}</p>}
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setCancelling(false)}>
-                Keep it
-              </Button>
-              <Button variant="danger" onClick={cancel} disabled={pending}>
-                {pending ? "Cancelling…" : "Cancel meeting"}
-              </Button>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-sm text-muted">Everybody invited is told it&apos;s off.</p>
+              <div>
+                <Label htmlFor={`cancel-note-${eventId}`}>A line for them (optional)</Label>
+                <Textarea id={`cancel-note-${eventId}`} value={note} onChange={(e) => setNote(e.target.value)} rows={2} maxLength={1000} />
+              </div>
+              {error && <p className="text-sm text-danger">{error}</p>}
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" onClick={() => setCancelling(false)}>
+                  Keep it
+                </Button>
+                <Button variant="danger" onClick={cancel} disabled={pending}>
+                  {pending ? "Cancelling…" : "Cancel meeting"}
+                </Button>
+              </div>
             </div>
-          </div>
+          )}
         </Dialog>
       )}
     </>

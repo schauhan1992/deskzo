@@ -33,9 +33,12 @@ export type MeetingDialogMode = { kind: "new"; record: MeetingRecordRef | null }
 
 type Loaded = {
   calendar: CalendarSummary;
+  /** A new meeting goes into Deskzo's own calendar. */
+  native: boolean;
+  invites: MeetingForm["invites"];
   record: MeetingForm["record"];
   colleagues: Colleague[];
-  edit: { hasLink: boolean; noDirectContact: boolean } | null;
+  edit: { hasLink: boolean; noDirectContact: boolean; native: boolean } | null;
 };
 
 const lengthLabel = (m: number) => (m < 60 ? `${m} minutes` : m % 60 === 0 ? `${m / 60} hour${m === 60 ? "" : "s"}` : `${Math.floor(m / 60)} h ${m % 60} min`);
@@ -44,6 +47,9 @@ const lengthLabel = (m: number) => (m < 60 ? `${m} minutes` : m % 60 === 0 ? `${
  * Scheduling a meeting — or changing one — in the person's own calendar. Who is invited: people at the
  * customer the record is about, colleagues, anybody by address; when, with the day's busy times laid out
  * for them and every colleague invited, so a slot can be picked without asking around.
+ *
+ * With no calendar connected (or one that stopped working) the meeting is Deskzo's own: the dialog says
+ * so, and how its invitations will be emailed, instead of stopping them (src/lib/calendar/native.ts).
  */
 export function MeetingDialog({ mode, onClose }: { mode: MeetingDialogMode; onClose: () => void }) {
   const router = useRouter();
@@ -86,7 +92,7 @@ export function MeetingDialog({ mode, onClose }: { mode: MeetingDialogMode; onCl
         const byEmail = new Map(colleagues.map((c) => [c.email.toLowerCase(), c.id]));
         setColleagueIds(e.emails.map((x) => byEmail.get(x.toLowerCase())).filter((x): x is string => !!x));
         setEmails(e.emails.filter((x) => !byEmail.has(x.toLowerCase())));
-        setLoaded({ calendar: form.data.calendar, record: null, colleagues, edit: { hasLink: e.hasLink, noDirectContact: e.noDirectContact } });
+        setLoaded({ calendar: form.data.calendar, native: form.data.native, invites: form.data.invites, record: null, colleagues, edit: { hasLink: e.hasLink, noDirectContact: e.noDirectContact, native: e.native } });
         return;
       }
       const form = await meetingFormFor({ record: mode.record });
@@ -103,7 +109,7 @@ export function MeetingDialog({ mode, onClose }: { mode: MeetingDialogMode; onCl
       setLocation(d?.location ?? "");
       setAgenda(d?.agenda ?? "");
       setContactIds(form.data.record?.preferredContactIds ?? []);
-      setLoaded({ calendar: form.data.calendar, record: form.data.record, colleagues, edit: null });
+      setLoaded({ calendar: form.data.calendar, native: form.data.native, invites: form.data.invites, record: form.data.record, colleagues, edit: null });
     })().catch(() => !gone && setError("The meeting form couldn't be loaded. Try again."));
     return () => {
       gone = true;
@@ -119,7 +125,8 @@ export function MeetingDialog({ mode, onClose }: { mode: MeetingDialogMode; onCl
   // The day's busy times: the person's own, and each colleague invited.
   const [mine, setMine] = useState<MyEvent[]>([]);
   const [theirs, setTheirs] = useState<BusyPerson[]>([]);
-  const ready = loaded?.calendar.state === "ready";
+  // Off, or viewing as somebody else, stops the dialog; anything else is a calendar — connected, or Deskzo's.
+  const ready = !!loaded && loaded.calendar.state !== "off" && loaded.calendar.state !== "viewing-as";
   const colleagueKey = colleagueIds.join(",");
   useEffect(() => {
     if (!ready || !dayKey) return;
@@ -140,7 +147,9 @@ export function MeetingDialog({ mode, onClose }: { mode: MeetingDialogMode; onCl
   }, [ready, dayKey, colleagueKey, clock]);
 
   const calendar = loaded?.calendar;
-  const provider = calendar && "provider" in calendar ? calendar.provider : null;
+  // Deskzo's own meeting: new without a working calendar, or one of Deskzo's being changed. No meeting link.
+  const native = loaded ? (loaded.edit ? loaded.edit.native : loaded.native) : false;
+  const provider = calendar && "provider" in calendar && !native ? calendar.provider : null;
   const record = loaded?.record ?? null;
   const noDirectContact = record?.noDirectContact || loaded?.edit?.noDirectContact || false;
   const colleagues = loaded?.colleagues ?? [];
@@ -155,9 +164,11 @@ export function MeetingDialog({ mode, onClose }: { mode: MeetingDialogMode; onCl
     },
     ...chosen.map((c) => {
       const busy = theirs.find((t) => t.userId === c.id);
-      return { key: c.id, label: c.name, blocks: busy?.busy ?? [], note: c.hasCalendar ? null : "Calendar not connected" };
+      return { key: c.id, label: c.name, blocks: busy?.busy ?? [] };
     }),
   ];
+  const deskzoOnly = chosen.filter((c) => !c.hasCalendar).map((c) => c.name);
+  const [warning, setWarning] = useState<string | null>(null);
 
   function addTyped() {
     const parts = typing.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean);
@@ -179,6 +190,12 @@ export function MeetingDialog({ mode, onClose }: { mode: MeetingDialogMode; onCl
         return;
       }
       router.refresh();
+      // Changed, but not everybody heard: said, before the dialog goes.
+      const warned = "warning" in done.data ? (done.data as { warning: string | null }).warning : null;
+      if (warned) {
+        setWarning(warned);
+        return;
+      }
       onClose();
     });
   }
@@ -191,6 +208,15 @@ export function MeetingDialog({ mode, onClose }: { mode: MeetingDialogMode; onCl
         error ? <p className="text-sm text-danger">{error}</p> : <p className="py-6 text-center text-sm text-muted">Opening your calendar…</p>
       ) : !ready ? (
         <CalendarNotice summary={loaded.calendar} compact />
+      ) : warning ? (
+        <div className="space-y-3">
+          <p className="text-sm text-warning">{warning}</p>
+          <div className="flex justify-end">
+            <Button type="button" onClick={onClose}>
+              Close
+            </Button>
+          </div>
+        </div>
       ) : (
         <form
           className="space-y-4"
@@ -199,6 +225,16 @@ export function MeetingDialog({ mode, onClose }: { mode: MeetingDialogMode; onCl
             submit();
           }}
         >
+          {native && (
+            <div className="space-y-2">
+              {!loaded.edit && <CalendarNotice summary={loaded.calendar} compact deskzo />}
+              <p className="text-xs text-muted">
+                <span className="font-medium text-text">{loaded.edit ? "This meeting is in Deskzo's own calendar." : "This goes into your Deskzo calendar."}</span> The invitations are emailed from {loaded.invites.from}, with the meeting attached so it goes into
+                their calendars; replies come to you.
+                {loaded.invites.left !== null && ` Through Deskzo's mail, ${loaded.invites.left === 0 ? "nobody more can be invited today" : `${loaded.invites.left} more ${loaded.invites.left === 1 ? "person" : "people"} can be invited today`}.`}
+              </p>
+            </div>
+          )}
           <div>
             <Label htmlFor="meeting-title">Title</Label>
             <Input id="meeting-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} required />
@@ -279,7 +315,6 @@ export function MeetingDialog({ mode, onClose }: { mode: MeetingDialogMode; onCl
                   .map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
-                      {c.hasCalendar ? "" : " (no calendar)"}
                     </option>
                   ))}
               </Select>
@@ -305,14 +340,17 @@ export function MeetingDialog({ mode, onClose }: { mode: MeetingDialogMode; onCl
             <div>
               <p className="mb-1.5 text-sm font-medium text-text">Busy that day</p>
               <BusyStrip dayKey={dayKey} rows={rows} proposal={proposal} />
-              <p className="mt-1 text-[11px] text-subtle">Colleagues&apos; calendars show only when they&apos;re busy — never what with.</p>
+              <p className="mt-1 text-[11px] text-subtle">
+                Colleagues&apos; calendars show only when they&apos;re busy — never what with.
+                {deskzoOnly.length > 0 && ` ${deskzoOnly.join(", ")} ${deskzoOnly.length === 1 ? "hasn't" : "haven't"} a calendar connected: only their meetings in Deskzo show.`}
+              </p>
             </div>
           )}
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <Label htmlFor="meeting-location">Where</Label>
-              <Input id="meeting-location" value={location} onChange={(e) => setLocation(e.target.value)} maxLength={300} placeholder={online ? "Online" : "Address or room"} />
+              <Input id="meeting-location" value={location} onChange={(e) => setLocation(e.target.value)} maxLength={300} placeholder={native ? "Address, room or a meeting link" : online ? "Online" : "Address or room"} />
             </div>
             <div>
               <Label htmlFor="meeting-agenda">Agenda</Label>

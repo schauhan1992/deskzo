@@ -5,6 +5,7 @@ import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
 import { notMigratedYet } from "@/lib/custom-fields/server";
 import { scheduleMeeting } from "@/lib/calendar/meetings";
+import { busyFor } from "@/lib/calendar/busy";
 import { intakeLead, leadPayloadSchema } from "@/lib/lead-capture/intake";
 import { companyPath, leadPath } from "@/lib/record-links";
 import { workspaceClock } from "@/lib/time/workspace";
@@ -13,35 +14,37 @@ import type { Clock } from "@/lib/time/zone";
 import { BOOKING_LIMITS, openSlots, pageSlots, parseHours, pickHost, type Busy, type SlotRules } from "@/lib/booking/rules";
 
 /**
- * Booking pages, against the database (src/lib/booking/rules.ts has the rules). A page's hosts are people
- * with a connected calendar — the meeting is made in it, the provider sends the invitation, and their
- * busy times come from it (as synced, so up to a few minutes old) and from bookings already taken. A
+ * Booking pages, against the database (src/lib/booking/rules.ts has the rules). A page's hosts are the
+ * company's people. With a calendar connected, the meeting is made in it and the provider sends the
+ * invitation; without one, it is a meeting in Deskzo's own calendar and Deskzo emails the invitation
+ * (src/lib/calendar/native.ts, owner 17 Oct 2026). Their busy times come from both (a connected calendar as
+ * synced, so up to a few minutes old) and from bookings already taken. A
  * booking opens a lead, its company and contact as a website enquiry would (`intakeLead`), in the page's
  * pipeline, owned by the host it went to — or, where the plan has no leads, only the company and contact.
  */
 
 const DAY = 86_400_000;
 
-/** People who can host: active, with a calendar connected and working. */
+/**
+ * People who can host: active, with an address for the invitation's replies — a meeting goes into their
+ * connected calendar, or into Deskzo's own when they have none.
+ */
 export async function possibleHosts(): Promise<{ id: string; name: string }[]> {
-  const accounts = await db.calendarAccount.findMany({ where: { brokenAt: null, user: { active: true } }, select: { user: { select: { id: true, name: true } } } });
-  return accounts.map((a) => a.user).sort((a, b) => a.name.localeCompare(b.name));
+  const people = await db.user.findMany({ where: { active: true }, orderBy: { name: "asc" }, take: 1000, select: { id: true, name: true, email: true } });
+  return people.filter((p) => !!p.email?.trim()).map((p) => ({ id: p.id, name: p.name }));
 }
 
-/** What each host is busy with between two moments: their calendar's busy events, and bookings taken. */
+/** What each host is busy with between two moments: their calendar's busy events, Deskzo's meetings, and bookings taken. */
 async function busyOf(userIds: string[], from: Date, to: Date): Promise<Map<string, Busy[]>> {
-  const [events, bookings] = await Promise.all([
-    db.calendarEvent.findMany({
-      where: { userId: { in: userIds }, busy: true, status: { not: "CANCELLED" }, startsAt: { lt: to }, endsAt: { gt: from } },
-      select: { userId: true, startsAt: true, endsAt: true },
-    }),
+  const [people, bookings] = await Promise.all([
+    db.user.findMany({ where: { id: { in: userIds } }, select: { id: true, email: true } }),
     db.booking.findMany({
       where: { hostUserId: { in: userIds }, status: "CONFIRMED", startsAt: { lt: to }, endsAt: { gt: from } },
       select: { hostUserId: true, startsAt: true, endsAt: true },
     }),
   ]);
-  const out = new Map<string, Busy[]>(userIds.map((id) => [id, []]));
-  for (const e of events) out.get(e.userId)?.push({ start: e.startsAt, end: e.endsAt });
+  const busy = await busyFor(people, from, to);
+  const out = new Map<string, Busy[]>(userIds.map((id) => [id, [...(busy.get(id) ?? [])]]));
   for (const b of bookings) out.get(b.hostUserId)?.push({ start: b.startsAt, end: b.endsAt });
   return out;
 }
@@ -143,7 +146,7 @@ const clean = (v: unknown, max: number) => String(v ?? "").replace(/[\u0000-\u00
 /**
  * Books a time on a page: checked again now (the time must still be open), given to the host free then
  * with fewest bookings coming up, held for them under a lock so two people can't take one slot, then
- * opened as a lead and made a meeting in the host's calendar. `source` is where the request came from —
+ * opened as a lead and made a meeting in the host's calendar — their connected one, or Deskzo's own. `source` is where the request came from —
  * only its hash is kept, to count how many one place makes.
  */
 export async function bookSlot(
@@ -243,7 +246,7 @@ export async function bookSlot(
     userId: hostId,
     type: links.leadId ? "LEAD_ASSIGNED" : "FORM_RESPONSE",
     title: `${name} booked ${page.title}`,
-    message: `${clock.dateTime(start)}${meeting.ok ? "" : ` — the meeting couldn't be added to your calendar (${meeting.error}); send them an invitation yourself.`}`,
+    message: `${clock.dateTime(start)}${meeting.ok ? (meeting.warning ? ` — ${meeting.warning}` : "") : ` — the meeting couldn't be added to your calendar (${meeting.error}); send them an invitation yourself.`}`,
     link: leadSeq ? leadPath(leadSeq) : companySeq ? companyPath(companySeq) : "/calendar",
   });
   await recordAudit({ userId: page.createdById, action: "CREATE", entityType: "Booking", entityId: booking.id, entityLabel: `${page.title}: ${name} with ${host.name}, ${clock.dateTime(start)}` });

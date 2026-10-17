@@ -3,17 +3,23 @@ import { recordAudit } from "@/lib/audit";
 import { cancelEvent, createEvent, updateEvent, withCalendar, type EventRef } from "@/lib/calendar/provider";
 import { eventFields } from "@/lib/calendar/sync";
 import type { MeetingLinks } from "@/lib/calendar/records";
-import type { MeetingDraft } from "@/lib/calendar/types";
+import type { MeetingDraft, MeetingOutcome } from "@/lib/calendar/types";
 import { calendarsWanted } from "@/lib/calendar/account";
+import { hasWorkingCalendar } from "@/lib/calendar/connected";
+import { cancelNative, rescheduleNative, scheduleNative } from "@/lib/calendar/native";
 
 /**
  * Meetings scheduled, moved and cancelled from here — always in the calendar of the person doing it, as
  * its organiser, so that Outlook, Google or Zoho sends the invitations and the replies come back to them.
  * What the provider made of it is kept at once (CalendarEvent), linked to the record it was for; the
  * next sync keeps it current.
+ *
+ * Somebody with no working calendar connection has Deskzo's own (owner, 17 Oct 2026 — native.ts): the
+ * meeting is kept here alone and Deskzo emails the invitations. A meeting stays where it was made: one of
+ * Deskzo's own is moved and cancelled by Deskzo even after its organiser connects a calendar.
  */
 
-export type MeetingOutcome = { ok: true; eventId: string } | { ok: false; error: string; reconnect?: boolean };
+export type { MeetingOutcome };
 
 const MINUTE = 60_000;
 
@@ -24,6 +30,7 @@ export async function scheduleMeeting(userId: string, draft: MeetingDraft, links
     // A visit's cancelled meeting gives way to the new one.
     if (already) await db.calendarEvent.update({ where: { id: already.id }, data: { visitId: null } });
   }
+  if (!(await hasWorkingCalendar(userId))) return scheduleNative(userId, draft, links, label);
   const made = await withCalendar(userId, (token, ctx) => createEvent(ctx, token, draft));
   if (!made.ok) return { ok: false, error: made.error, reconnect: made.reconnect };
   const now = new Date();
@@ -42,7 +49,7 @@ export async function scheduleMeeting(userId: string, draft: MeetingDraft, links
 async function ownMeeting(userId: string, eventId: string) {
   const row = await db.calendarEvent.findFirst({
     where: { id: eventId, userId },
-    select: { id: true, externalId: true, etag: true, joinUrl: true, title: true, isOrganizer: true, status: true, allDay: true, attendees: true, visitId: true, startsAt: true, endsAt: true },
+    select: { id: true, provider: true, externalId: true, etag: true, joinUrl: true, title: true, isOrganizer: true, status: true, allDay: true, attendees: true, visitId: true, startsAt: true, endsAt: true },
   });
   if (!row) return { ok: false as const, error: "That meeting isn't in your calendar." };
   if (row.status === "CANCELLED") return { ok: false as const, error: "That meeting has been cancelled." };
@@ -50,8 +57,8 @@ async function ownMeeting(userId: string, eventId: string) {
   return { ok: true as const, row };
 }
 
-const refOf = (row: { externalId: string; etag: string | null; joinUrl: string | null; attendees: unknown }): EventRef => ({
-  externalId: row.externalId,
+const refOf = (row: { externalId: string | null; etag: string | null; joinUrl: string | null; attendees: unknown }): EventRef => ({
+  externalId: row.externalId ?? "",
   etag: row.etag,
   joinUrl: row.joinUrl,
   invited: Array.isArray(row.attendees) && row.attendees.length > 0,
@@ -60,6 +67,11 @@ const refOf = (row: { externalId: string; etag: string | null; joinUrl: string |
 export async function rescheduleMeeting(userId: string, eventId: string, draft: MeetingDraft): Promise<MeetingOutcome> {
   const own = await ownMeeting(userId, eventId);
   if (!own.ok) return { ok: false, error: own.error };
+  if (!own.row.provider) {
+    const native = await rescheduleNative(userId, eventId, draft);
+    if (native.ok && own.row.visitId) await db.visit.updateMany({ where: { id: own.row.visitId, userId, status: "PLANNED" }, data: { scheduledFor: draft.startsAt } });
+    return native;
+  }
   const moved = await withCalendar(userId, (token, ctx) => updateEvent(ctx, token, refOf(own.row), draft));
   if (!moved.ok && (moved.status === 404 || moved.status === 410)) {
     // Cancelled or deleted in the calendar itself (in Teams, say) before the sync caught up: it is off.
@@ -77,6 +89,7 @@ export async function rescheduleMeeting(userId: string, eventId: string, draft: 
 export async function cancelMeeting(userId: string, eventId: string, note: string | null): Promise<MeetingOutcome> {
   const own = await ownMeeting(userId, eventId);
   if (!own.ok) return { ok: false, error: own.error };
+  if (!own.row.provider) return cancelNative(userId, eventId, note);
   const done = await withCalendar(userId, (token, ctx) => cancelEvent(ctx, token, refOf(own.row), note));
   if (!done.ok) return { ok: false, error: done.error, reconnect: done.reconnect };
   await db.calendarEvent.update({ where: { id: own.row.id }, data: { status: "CANCELLED", syncedAt: new Date() } });

@@ -2,6 +2,7 @@ import nodemailer from "nodemailer";
 import {
   allRecipients,
   asError,
+  attachmentsOf,
   fromHeader,
   replyToFor,
   networkFailure,
@@ -53,8 +54,8 @@ export const resendProvider: MessageProvider = {
           html: message.html,
           text: textFallback(message),
           headers: standardHeaders(message),
-          ...(message.attachments?.length
-            ? { attachments: message.attachments.map((a) => ({ filename: a.filename, content: a.content.toString("base64"), content_type: a.contentType })) }
+          ...(attachmentsOf(message).length
+            ? { attachments: attachmentsOf(message).map((a) => ({ filename: a.filename, content: a.content.toString("base64"), content_type: a.contentType })) }
             : {}),
         }),
       });
@@ -109,8 +110,8 @@ export const elasticProvider: MessageProvider = {
           Content: {
             From: fromHeader(config, message),
             ReplyTo: replyToFor(message, config),
-            ...(message.attachments?.length
-              ? { Attachments: message.attachments.map((a) => ({ BinaryContent: a.content.toString("base64"), Name: a.filename, ContentType: a.contentType })) }
+            ...(attachmentsOf(message).length
+              ? { Attachments: attachmentsOf(message).map((a) => ({ BinaryContent: a.content.toString("base64"), Name: a.filename, ContentType: a.contentType })) }
               : {}),
             Subject: message.subject,
             Body: [
@@ -243,6 +244,8 @@ async function smtpSend(
       ...(message.attachments?.length
         ? { attachments: message.attachments.map((a) => ({ filename: a.filename, content: a.content, contentType: a.contentType })) }
         : {}),
+      // A meeting as mail programs expect one: the text/calendar part and invite.ics, from nodemailer.
+      ...(message.calendar ? { icalEvent: { method: message.calendar.method, content: message.calendar.content, filename: message.calendar.method === "CANCEL" ? "cancel.ics" : "invite.ics" } } : {}),
     });
     return { ok: true, providerMessageId: info.messageId ?? null };
   } catch (err) {
@@ -335,7 +338,7 @@ export const mockProvider: MessageProvider = {
   kind: "EMAIL",
   needs: [],
   async send(message) {
-    const files = message.attachments?.length ? ` with ${message.attachments.map((a) => a.filename).join(", ")}` : "";
+    const files = attachmentsOf(message).length ? ` with ${attachmentsOf(message).map((a) => a.filename).join(", ")}` : "";
     console.log(`[mock] would send "${message.subject}" to ${allRecipients(message).map((r) => r.email).join(", ")}${files}`);
     return { ok: true, providerMessageId: `mock_${Date.now()}_${Math.random().toString(36).slice(2, 10)}` };
   },

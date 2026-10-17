@@ -136,7 +136,7 @@ export async function saveBookingPage(input: unknown): Promise<ActionResult<{ id
   const hours = parseHours(data.hours);
   if (!hours.ok) return { ok: false, error: hours.error };
   const able = new Set((await possibleHosts()).map((h) => h.id));
-  if (data.hostUserIds.some((id) => !able.has(id))) return { ok: false, error: "Every host needs a calendar connected (My profile → Calendar)." };
+  if (data.hostUserIds.some((id) => !able.has(id))) return { ok: false, error: "Each host must be somebody here who is active and has an email address." };
   const pipeline = await leadStages();
   if (data.pipelineId && !pipeline.pipelines.some((p) => p.id === data.pipelineId && !p.archived)) return { ok: false, error: "That pipeline is no longer in use." };
 

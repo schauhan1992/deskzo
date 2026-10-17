@@ -11,7 +11,8 @@ import { byWorkflow, notReached, recordIdField } from "@/lib/automate/actions/sh
  * Schedule a meeting from a lead, customer, contact or ticket (Deskzo Automate, Phase 2) — in the
  * workflow owner's own calendar, as its organiser, the way the Schedule meeting dialog does it
  * (src/lib/calendar/meetings.ts): Outlook, Google or Zoho sends the invitations and the replies come back
- * to them. The record's contact is invited unless the step says not to, and never a reseller's customer;
+ * to them — or, with none connected, Deskzo's own calendar, which emails them (src/lib/calendar/native.ts).
+ * The record's contact is invited unless the step says not to, and never a reseller's customer;
  * colleagues may be added by id. Linked to the record, so it shows on its page.
  *
  * When it starts: `startsAt` (from the trigger, say a booking's time), or `inDays` days from today at
@@ -60,9 +61,7 @@ export const meetingSchedule = defineAction({
 
     const record = await meetingRecordFor(ctx.actorId, { kind: i.record, id: i.recordId });
     if (!record) throw notReached(i.record);
-    // Booked in their own calendar: without one connected there is nothing to book it in.
-    const owner = await db.user.findUnique({ where: { id: ctx.actorId }, select: { email: true, calendarAccount: { select: { brokenAt: true } } } });
-    if (!owner?.calendarAccount || owner.calendarAccount.brokenAt) throw new ActionError("The workflow's owner hasn't a working calendar connected (My profile), so no meeting was booked.", "PERMANENT");
+    const owner = await db.user.findUnique({ where: { id: ctx.actorId }, select: { email: true } });
 
     let startsAt: Date;
     if (i.startsAt) {
@@ -87,7 +86,7 @@ export const meetingSchedule = defineAction({
       if (colleagues.length !== new Set(i.colleagueIds).size) throw new ActionError("One of the colleagues to invite isn't an active user.", "PERMANENT");
       for (const c of colleagues) if (c.email) attendees.push({ email: c.email, name: c.name });
     }
-    const me = addressOf(owner.email ?? "");
+    const me = addressOf(owner?.email ?? "");
     const seen = new Set<string>();
     const invited = attendees.filter((a) => {
       const key = addressOf(a.email);
@@ -108,7 +107,7 @@ export const meetingSchedule = defineAction({
     };
     const { output } = await withOutsideEffect<Output>(ctx, async () => {
       const made = await scheduleMeeting(ctx.actorId, draft, record.links, `${record.label} — ${byWorkflow(ctx)}`);
-      if (!made.ok) return { ok: false, error: `The meeting wasn't booked: ${made.error}`, kind: made.reconnect ? "PERMANENT" : "TRANSIENT" };
+      if (!made.ok) return { ok: false, error: `The meeting wasn't booked: ${made.error}`, kind: made.reconnect || made.lasting ? "PERMANENT" : "TRANSIENT" };
       return { ok: true, output: { eventId: made.eventId, startsAt: startsAt.toISOString(), invited: invited.length }, recordType: "calendarEvent", recordId: made.eventId };
     });
     return output;

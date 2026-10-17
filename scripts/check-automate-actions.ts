@@ -18,7 +18,8 @@
  *     through the company's mail server and logged; at most once, and a send cut off part way waits
  *     for a person;
  *   · a document emailed with its PDF and logged; a draft refused;
- *   · a meeting refused without a calendar — booking one in a real calendar isn't exercised here;
+ *   · a meeting without a calendar connected: in Deskzo's own calendar, the contact invited through the
+ *     company's mail server with the meeting attached — booking one in a real calendar isn't exercised here;
  *   · a report emailed to colleagues, each seeing only their own reach;
  *   · the date checks: overdue invoices, renewals, quiet leads — once a day, and only when listened for.
  *
@@ -346,8 +347,13 @@ async function main() {
 
     // ─── Meetings ───────────────────────────────────────────────────────────────────────────────
     section("Meetings");
+    const invitesBefore = sent.length;
     const meeting = await runOnce("ZZ meeting", [{ id: "book", type: "action", action: "meeting.schedule", input: { record: "lead", recordId: deal, inDays: 1, at: "11:00" } }]);
-    ok("with no calendar connected: refused at once, nothing tried", meeting.status === "FAILED" && meeting.error.includes("calendar"), meeting.error);
+    const invite = sent.slice(invitesBefore).find((m) => m.calendar?.method === "REQUEST");
+    const booked = await inA(() => db.calendarEvent.findFirst({ where: { leadId: deal, fromDeskzo: true }, select: { id: true, provider: true, userId: true, startsAt: true } }));
+    ok("with no calendar connected: booked in Deskzo's own calendar, in the owner's name, on the lead", meeting.status === "SUCCEEDED" && !!booked && booked.provider === null && booked.userId === owner, meeting.error);
+    ok("  the lead's contact invited through the company's mail server, the meeting attached", invite?.to === "asha@zzact.invalid" && invite.calendar!.content.includes(`UID:${booked?.id}@deskzo.com`) && invite.replyTo === "zzowner@zzact.invalid");
+    ok("  at 11:00 tomorrow on the workspace's clock", !!booked && india.dateKey(booked.startsAt) === india.dateKey(new Date(Date.now() + 86_400_000)) && india.time(booked.startsAt) === "11:00 am", booked && india.dateTime(booked.startsAt));
     console.log("  (booking in a real calendar isn't exercised here: it needs Outlook, Google or Zoho)");
 
     // ─── Reports ────────────────────────────────────────────────────────────────────────────────

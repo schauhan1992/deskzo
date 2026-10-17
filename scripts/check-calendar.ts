@@ -804,7 +804,7 @@ async function run(scratchUrl: string, base: string) {
         const made = await calendar.scheduleMeetingAction({ record: { kind: "ticket", id: ticket.id }, title, startsAt: `${d(3)}T11:00`, durationMinutes: 30, online: true, contactIds: [contact.id] });
         if (!made.ok) return null;
         const row = await db.calendarEvent.findUniqueOrThrow({ where: { id: made.data.eventId }, select: { externalId: true } });
-        stand.ms.events.delete(row.externalId);
+        stand.ms.events.delete(row.externalId!);
         return made.data.eventId;
       };
       const cancelledInTeams = await goneFromOutlook("Cancelled in Teams");
@@ -843,10 +843,10 @@ async function run(scratchUrl: string, base: string) {
       ok("  where it got to kept, and the next due in five minutes", !!acc1.syncCursor?.includes("$deltatoken=") && !!acc1.lastSyncedAt && acc1.nextSyncAt.getTime() - acc1.lastSyncedAt.getTime() === 5 * 60_000);
 
       // Moved in Outlook, the visit's event moved too, and one deleted.
-      const demoId = row!.externalId;
+      const demoId = row!.externalId!;
       const demo = stand.ms.events.get(demoId)!;
       stand.ms.events.set(demoId, { ...demo, start: { dateTime: graphTime(at(0, "15:00")), timeZone: "UTC" }, end: { dateTime: graphTime(at(0, "16:00")), timeZone: "UTC" }, changeKey: "moved" });
-      const visitExt = visitEvent!.externalId;
+      const visitExt = visitEvent!.externalId!;
       const ve = stand.ms.events.get(visitExt)!;
       stand.ms.events.set(visitExt, { ...ve, start: { dateTime: graphTime(at(2, "11:00")), timeZone: "UTC" }, end: { dateTime: graphTime(at(2, "12:00")), timeZone: "UTC" } });
       stand.ms.events.delete("ms-ext-2");
@@ -941,7 +941,7 @@ async function run(scratchUrl: string, base: string) {
       await syncCalendarFor(zohoUser.id);
       ok("  what's no longer in it has gone", (await db.calendarEvent.count({ where: { externalId: "z-own" } })) === 0);
       const zCancel = zMeet.ok ? await calendar.cancelMeetingAction({ eventId: zMeet.data.eventId }) : null;
-      ok("  cancelled, naming its etag", !!zCancel?.ok && !stand.zoho.events.has(zRow!.externalId), zCancel && errorOf(zCancel));
+      ok("  cancelled, naming its etag", !!zCancel?.ok && !stand.zoho.events.has(zRow!.externalId!), zCancel && errorOf(zCancel));
 
       section("A calendar that refuses");
       stand.zoho.fault = "403";
@@ -967,8 +967,8 @@ async function run(scratchUrl: string, base: string) {
       const heldEnd = new Date(Date.now() - 3600_000);
       if (heldMeeting.ok) {
         const held = await db.calendarEvent.update({ where: { id: heldMeeting.data.eventId }, data: { startsAt: heldStart, endsAt: heldEnd } });
-        stand.ms.events.set(held.externalId, { ...stand.ms.events.get(held.externalId)!, start: { dateTime: graphTime(heldStart), timeZone: "UTC" }, end: { dateTime: graphTime(heldEnd), timeZone: "UTC" } });
-        stand.ms.log.push({ v: ++stand.ms.v, id: held.externalId, removed: false });
+        stand.ms.events.set(held.externalId!, { ...stand.ms.events.get(held.externalId!)!, start: { dateTime: graphTime(heldStart), timeZone: "UTC" }, end: { dateTime: graphTime(heldEnd), timeZone: "UTC" } });
+        stand.ms.log.push({ v: ++stand.ms.v, id: held.externalId!, removed: false });
       }
       ok("once it has ended", (await logHeldMeetings()) === 1 && (await db.activity.count({ where: { leadId: lead.id, type: "MEETING" } })) === 1);
       ok("  and only once", (await logHeldMeetings()) === 0 && (await db.activity.count({ where: { leadId: lead.id, type: "MEETING" } })) === 1);
@@ -1027,7 +1027,7 @@ async function run(scratchUrl: string, base: string) {
       as(rep);
       const cancelledVisit = await visits.setVisitStatus({ id: visit.id, status: "CANCELLED", note: "Customer postponed" });
       const visitRow = await db.calendarEvent.findUnique({ where: { visitId: visit.id } });
-      ok("cancels its event, and everybody invited is told", cancelledVisit.ok && visitRow?.status === "CANCELLED" && !stand.ms.events.has(visitRow.externalId), errorOf(cancelledVisit));
+      ok("cancels its event, and everybody invited is told", cancelledVisit.ok && visitRow?.status === "CANCELLED" && !stand.ms.events.has(visitRow.externalId!), errorOf(cancelledVisit));
 
       // ── Disconnecting ────────────────────────────────────────────────────────────────────────
       section("Disconnecting");

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { MailType } from "@/lib/console-shared/mail-catalogue";
+import type { CalendarPart } from "@/lib/marketing/providers/types";
 import { recordDelivery } from "@/lib/platform/mail/log";
 import { connectionSendError, forgetMailToken, resolveMail, sendError, serverFrom, serverTransport, transportFor, type MailFrom } from "@/lib/platform/mail/store";
 
@@ -51,6 +52,8 @@ export type PlatformMail = {
   bcc?: string[];
   html?: string;
   attachments?: { filename: string; contentType: string; content: Buffer }[];
+  /** An invitation to a workspace's own meeting (type DOCUMENTS, src/lib/calendar/invite-mail.ts): its iCalendar text. */
+  calendar?: CalendarPart;
   messageId?: string;
   inReplyTo?: string;
   references?: string[];
@@ -120,6 +123,7 @@ export async function deliverMail(mail: PlatformMail, options: { connectionId?: 
       ...(mail.cc?.length ? { cc: mail.cc } : {}),
       ...(mail.bcc?.length ? { bcc: mail.bcc } : {}),
       ...(mail.attachments?.length ? { attachments: mail.attachments.map((a) => ({ filename: a.filename, content: a.content, contentType: a.contentType })) } : {}),
+      ...(mail.calendar ? { icalEvent: { method: mail.calendar.method, content: mail.calendar.content, filename: mail.calendar.method === "CANCEL" ? "cancel.ics" : "invite.ics" } } : {}),
       ...(mail.messageId ? { messageId: mail.messageId } : {}),
       ...(mail.inReplyTo ? { inReplyTo: mail.inReplyTo } : {}),
       ...(mail.references?.length ? { references: mail.references } : {}),
@@ -146,6 +150,7 @@ async function writeOutbox(mail: PlatformMail, from: string, replyTo: string | u
     mail.bcc?.length ? `Bcc: ${mail.bcc.join(", ")}` : "",
     // The outbox is for reading what would have gone; the files are named, not written.
     mail.attachments?.length ? `X-Attachments: ${mail.attachments.map((a) => `${a.filename} (${a.content.length} bytes)`).join(", ")}` : "",
+    mail.calendar ? `X-Calendar: ${mail.calendar.method === "CANCEL" ? "cancel.ics" : "invite.ics"} (METHOD:${mail.calendar.method})` : "",
     mail.messageId ? `Message-ID: ${mail.messageId}` : "",
     mail.inReplyTo ? `In-Reply-To: ${mail.inReplyTo}` : "",
     mail.references?.length ? `References: ${mail.references.join(" ")}` : "",

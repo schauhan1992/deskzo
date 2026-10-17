@@ -484,7 +484,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     inEveryPlan: true,
     label: "Calendar",
     description:
-      "Each person's own Outlook, Google Calendar or Zoho Calendar, kept in step — meetings scheduled from a lead, a customer, a ticket or a planned visit with a Teams, Meet or Zoho Meeting link, and colleagues' busy times when picking a slot.",
+      "Each person's own Outlook, Google Calendar or Zoho Calendar, kept in step — or Deskzo's own calendar, which emails the invitations, for anybody without one. Meetings scheduled from a lead, a customer, a ticket or a planned visit (with a Teams, Meet or Zoho Meeting link when connected), colleagues' busy times when picking a slot, tasks, visits, leave and holidays alongside, and a private subscribe link for the phone.",
     navGroup: "My work",
     navItems: [{ href: "/calendar", label: "Calendar", icon: CalendarDays }],
   },
@@ -547,7 +547,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     key: "booking",
     label: "Booking pages",
     description:
-      "Pages where customers book a meeting with your team, in the time they have free. Each page has its own address, hours, meeting length and people to meet; a booking lands in the host's calendar with a meeting link and invitation, and opens a lead in the pipeline you choose.",
+      "Pages where customers book a meeting with your team, in the time they have free. Each page has its own address, hours, meeting length and people to meet; a booking lands in the host's calendar with an invitation (and a meeting link when their calendar is connected), and opens a lead in the pipeline you choose.",
     navGroup: "Sales",
     navItems: [{ href: "/booking-pages", label: "Booking pages", icon: CalendarCheck, permission: "booking.manage" }],
   },

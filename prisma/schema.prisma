@@ -889,6 +889,7 @@ model User {
   orderStepChanges              OrderStepChange[]
   calendarAccount               CalendarAccount?         @relation("UserCalendarAccount")
   calendarEvents                CalendarEvent[]          @relation("UserCalendarEvents")
+  calendarFeed                  CalendarFeed?            @relation("UserCalendarFeed")
   bookingsHosted                Booking[]                @relation("BookingHost")
   recurringBillingsSet RecurringBilling[] @relation("RecurringBillingSetBy")
   chatsCreated         Chat[]             @relation("ChatCreatedBy")
@@ -12499,8 +12500,8 @@ model CalendarAccount {
 
 /**
  * A public page where a customer books a meeting (src/lib/booking): `/book/<slug>` on the workspace's
- * address. It offers the hosts' free times — their working hours here, less what their connected
- * calendars and earlier bookings show busy — and a booking is made as a meeting in the host's own
+ * address. It offers the hosts' free times — their working hours here, less what their calendars (connected,
+ * or Deskzo's own) and earlier bookings show busy — and a booking is made as a meeting in the host's own
  * calendar, whose invitation the customer receives.
  */
 model BookingPage {
@@ -12510,7 +12511,7 @@ model BookingPage {
   title           String
   description     String?
   durationMinutes Int           @default(30)
-  /// Who the customer can meet: people with a connected calendar. A booking goes to whoever is free, the least booked first.
+  /// Who the customer can meet: active people with an email address — a meeting in their connected calendar, or Deskzo's own. A booking goes to whoever is free, the least booked first.
   hostUserIds     String[]
   /// Weekly hours in the workspace's zone, Monday "1" to Sunday "7": { "1": [["09:00", "17:00"]], … }.
   hours           Json
@@ -12587,14 +12588,20 @@ enum CalendarEventStatus {
  *
  * Times are instants; an all-day event runs from midnight UTC of its first day to midnight UTC of the
  * day after its last, as a typed day is kept (src/lib/time/zone.ts formatCalendarDay).
+ *
+ * Deskzo's own calendar (owner, 17 Oct 2026 — src/lib/calendar/native.ts): a meeting scheduled by somebody
+ * with no working calendar connection is kept here alone, with no provider and no external id. Deskzo
+ * sends its invitations as iCalendar emails (UID from the row's id, `sequence` counting each change), and
+ * once its organiser connects Outlook, Google or Zoho a copy goes into that calendar once (`mirror…`).
  */
 model CalendarEvent {
-  id             String                 @id @default(cuid())
+  id             String                  @id @default(cuid())
   userId         String
-  user           User                   @relation("UserCalendarEvents", fields: [userId], references: [id], onDelete: Cascade)
-  provider       MailConnectionProvider
-  /** The provider's id for the event — for a repeating one, for this occurrence. */
-  externalId     String
+  user           User                    @relation("UserCalendarEvents", fields: [userId], references: [id], onDelete: Cascade)
+  /** Null: Deskzo's own meeting, in no provider's calendar. */
+  provider       MailConnectionProvider?
+  /** The provider's id for the event — for a repeating one, for this occurrence. Null for Deskzo's own. */
+  externalId     String?
   /** Outlook's changeKey, Google's etag, Zoho's etag: what an update has to name. */
   etag           String?
   title          String
@@ -12602,34 +12609,45 @@ model CalendarEvent {
   location       String?
   startsAt       DateTime
   endsAt         DateTime
-  allDay         Boolean                @default(false)
+  allDay         Boolean                 @default(false)
   /** The Teams, Meet or Zoho Meeting link. */
   joinUrl        String?
-  status         CalendarEventStatus    @default(CONFIRMED)
+  status         CalendarEventStatus     @default(CONFIRMED)
   /** False when the calendar shows the time as free. */
-  busy           Boolean                @default(true)
+  busy           Boolean                 @default(true)
   /** Only the organiser may move or cancel it from here. */
-  isOrganizer    Boolean                @default(false)
+  isOrganizer    Boolean                 @default(false)
   organizerEmail String?
-  /** [{ email, name, response }] */
-  attendees      Json                   @default("[]")
+  /** [{ email, name, response }] — for Deskzo's own meetings, each address in lower case. */
+  attendees      Json                    @default("[]")
   /** Scheduled from a record here, rather than found in the calendar. */
-  fromDeskzo     Boolean                @default(false)
+  fromDeskzo     Boolean                 @default(false)
   companyId      String?
-  company        Company?               @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  company        Company?                @relation(fields: [companyId], references: [id], onDelete: SetNull)
   contactId      String?
-  contact        Contact?               @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  contact        Contact?                @relation(fields: [contactId], references: [id], onDelete: SetNull)
   leadId         String?
-  lead           Lead?                  @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  lead           Lead?                   @relation(fields: [leadId], references: [id], onDelete: SetNull)
   ticketId       String?
-  ticket         Ticket?                @relation(fields: [ticketId], references: [id], onDelete: SetNull)
-  visitId        String?                @unique
-  visit          Visit?                 @relation(fields: [visitId], references: [id], onDelete: SetNull)
+  ticket         Ticket?                 @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  visitId        String?                 @unique
+  visit          Visit?                  @relation(fields: [visitId], references: [id], onDelete: SetNull)
   /** When the lead's timeline was told the meeting took place (src/lib/calendar/held.ts). */
   heldLoggedAt   DateTime?
-  syncedAt       DateTime               @default(now())
-  createdAt      DateTime               @default(now())
-  updatedAt      DateTime               @updatedAt
+  /** Deskzo's own meeting: how many times its invitation has changed — iCalendar's SEQUENCE. */
+  sequence       Int                     @default(0)
+  /**
+   * Deskzo's own meeting copied into its organiser's calendar once they connected one: whose, the copy's
+   * id and etag there, and when it was claimed for copying. The copy invites nobody — Deskzo's invitation
+   * already went — and a sync never takes it for an event of its own.
+   */
+  mirrorProvider MailConnectionProvider?
+  mirrorId       String?
+  mirrorEtag     String?
+  mirroredAt     DateTime?
+  syncedAt       DateTime                @default(now())
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
 
   @@unique([userId, externalId])
   @@index([userId, startsAt])
@@ -12638,6 +12656,27 @@ model CalendarEvent {
   @@index([leadId])
   @@index([ticketId])
   @@map("calendar_events")
+}
+
+/**
+ * A person's subscribe link (src/lib/calendar/feed.ts): a secret address serving their Deskzo meetings as an
+ * iCalendar feed, for the calendar on their phone. Only the secret's hash is kept, so the address is shown
+ * once, when it is made; a new one ends the old. Busy times alone unless they choose titles. Read at most
+ * so many times an hour (`reads` since `windowStartedAt`).
+ */
+model CalendarFeed {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  user            User      @relation("UserCalendarFeed", fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash       String    @unique
+  showTitles      Boolean   @default(false)
+  windowStartedAt DateTime  @default(now())
+  reads           Int       @default(0)
+  lastReadAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("calendar_feeds")
 }
 
 /**

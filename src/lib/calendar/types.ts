@@ -39,6 +39,13 @@ export type MeetingDraft = {
 };
 
 /**
+ * What scheduling, moving or cancelling a meeting came to. `warning`: done, but something around it
+ * wasn't — the people invited weren't all told, say. `reconnect`: the person's calendar needs connecting
+ * again. `lasting`: trying again as it is won't help (an address that can't be invited).
+ */
+export type MeetingOutcome = { ok: true; eventId: string; warning?: string } | { ok: false; error: string; reconnect?: boolean; lasting?: boolean };
+
+/**
  * One call to a provider. `status` 0 is no answer at all; 401 is a token refused early (one fresh token,
  * one more try); 410 is a sync cursor the provider has forgotten (read the window afresh).
  */

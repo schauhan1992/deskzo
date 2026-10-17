@@ -37,7 +37,25 @@ export type OutboundMessage = {
   fromEmail?: string | null;
   cc?: string[];
   attachments?: { filename: string; contentType: string; content: Buffer }[];
+  /**
+   * An invitation to one of Deskzo's own meetings (src/lib/calendar/invite-mail.ts): the iCalendar text,
+   * sent as a mail program expects a meeting — a text/calendar part with its method, and the same as
+   * invite.ics — so Outlook and Gmail offer to accept it.
+   */
+  calendar?: CalendarPart | null;
 };
+
+export type CalendarPart = { method: "REQUEST" | "CANCEL"; content: string };
+
+/** The invitation as an attachment, for a backend that takes attachments but no calendar part of its own. */
+export function calendarAttachment(part: CalendarPart): { filename: string; contentType: string; content: Buffer } {
+  return { filename: part.method === "CANCEL" ? "cancel.ics" : "invite.ics", contentType: `text/calendar; charset=utf-8; method=${part.method}`, content: Buffer.from(part.content, "utf8") };
+}
+
+/** Every attachment a message carries, its invitation among them. */
+export function attachmentsOf(message: Pick<OutboundMessage, "attachments" | "calendar">): { filename: string; contentType: string; content: Buffer }[] {
+  return [...(message.attachments ?? []), ...(message.calendar ? [calendarAttachment(message.calendar)] : [])];
+}
 
 export type SendResult =
   | { ok: true; providerMessageId: string | null }

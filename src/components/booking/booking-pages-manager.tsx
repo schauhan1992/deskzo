@@ -43,7 +43,7 @@ export function BookingPagesManager({
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [slugTouched, setSlugTouched] = useState(false);
-  const nameOf = (id: string) => hosts.find((h) => h.id === id)?.name ?? "someone without a calendar now";
+  const nameOf = (id: string) => hosts.find((h) => h.id === id)?.name ?? "someone who can't host now";
   const when = (iso: string) => new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: zone }).format(new Date(iso));
 
   function run(fn: () => Promise<{ ok: true } | { ok: false; error: string }>, after?: () => void) {
@@ -71,7 +71,7 @@ export function BookingPagesManager({
       )}
       {hosts.length === 0 && (
         <p className="rounded-md bg-warning-bg px-3 py-2 text-sm text-warning">
-          Nobody has a calendar connected yet. A host needs one — My profile → Calendar — so their free times can be offered and the meeting made in it.
+          Nobody can host yet: a host is somebody active here with an email address, for the invitation&apos;s replies.
         </p>
       )}
       <div className="flex justify-end">
@@ -281,7 +281,7 @@ export function BookingPagesManager({
                   );
                 })}
               </div>
-              <p className="text-xs text-subtle">People with a calendar connected. A booking goes to whoever is free then, the least booked first.</p>
+              <p className="text-xs text-subtle">A booking goes to whoever is free then, the least booked first — into their connected calendar, or Deskzo&apos;s own when they have none.</p>
             </fieldset>
             <fieldset className="space-y-2">
               <legend className="text-xs font-medium text-text">Hours ({zone.replace(/_/g, " ")})</legend>

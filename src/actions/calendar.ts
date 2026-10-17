@@ -11,9 +11,16 @@ import { NO_DIRECT_CONTACT_NOTICE } from "@/lib/reseller";
 import { meetingRecordFor, readMeetingRecordRef, type MeetingRecordRef } from "@/lib/calendar/records";
 import { cancelMeeting, rescheduleMeeting, scheduleMeeting } from "@/lib/calendar/meetings";
 import { syncCalendarFor } from "@/lib/calendar/sync";
+import { hasWorkingCalendar } from "@/lib/calendar/connected";
+import { busyFor } from "@/lib/calendar/busy";
+import { overlaysFor } from "@/lib/calendar/overlays";
+import { inviteRoute, invitesLeft } from "@/lib/calendar/invite-mail";
+import { endFeed, feedStateFor, makeFeed, setFeedTitles } from "@/lib/calendar/feed";
+import { tenantOrigin } from "@/lib/tenancy/resolve";
 import { toPlain } from "@/lib/serialize";
 import { companyPath, leadPath, ticketPath, visitPath } from "@/lib/record-links";
 import type { MeetingDraft } from "@/lib/calendar/types";
+import type { CalendarItem } from "@/lib/calendar/items";
 import type { WorkplaceProvider } from "@/lib/workplace/providers";
 import type { ActionResult } from "@/actions/company";
 import { listLeadMasker, maskLeadTitle } from "@/lib/leads/masking";
@@ -24,6 +31,11 @@ import { listLeadMasker, maskLeadTitle } from "@/lib/leads/masking";
  * a contact, a ticket or a planned visit — or from the Calendar page — always into the calendar of the
  * person scheduling, who organises them. Colleagues' calendars are only ever busy times: no titles, no
  * people, for anybody.
+ *
+ * Deskzo's own calendar (owner, 17 Oct 2026): somebody with no working connection still schedules — the
+ * meeting is kept by Deskzo and its invitations emailed (src/lib/calendar/native.ts) — and the Calendar
+ * page shows their meetings either way, with their tasks, visits, leave, holidays and bookings beside them.
+ * Each person may also have a subscribe link for their phone's calendar (src/lib/calendar/feed.ts).
  */
 
 const OFF = "Calendar is switched off for this workspace (Settings → Modules).";
@@ -72,21 +84,7 @@ export async function getMyCalendar(): Promise<CalendarSummary> {
   return { state: "ready", provider: mailbox.provider, mailbox: mailbox.mailbox, lastSyncedAt: account.lastSyncedAt?.toISOString() ?? null, lastError: account.lastError };
 }
 
-export type MyEvent = {
-  id: string;
-  title: string;
-  startsAt: string;
-  endsAt: string;
-  allDay: boolean;
-  status: "CONFIRMED" | "TENTATIVE" | "CANCELLED";
-  location: string | null;
-  joinUrl: string | null;
-  isOrganizer: boolean;
-  organizerEmail: string | null;
-  description: string | null;
-  attendees: { email: string; name: string | null; response: string | null }[];
-  record: { label: string; href: string } | null;
-};
+export type MyEvent = CalendarItem;
 
 const RECORD_SELECT = {
   company: { select: { id: true, companySeq: true, name: true } },
@@ -103,20 +101,33 @@ function recordOf(e: { company: { companySeq: number; name: string } | null; lea
   return null;
 }
 
-/** The person's own events that touch these days — at most two months of them. */
-export async function listMyEvents(input: { from: string; to: string }): Promise<MyEvent[]> {
-  const user = await calendarUser();
-  if (!user || (await viewAsContext())) return [];
+/** The days asked for, on the workspace's clock — at most two months of them — or null. */
+async function readDays(input: { from: string; to: string }) {
   const clock = await workspaceClock();
-  const from = clock.startOfDay(String(input?.from ?? ""));
-  const to = clock.endOfDay(String(input?.to ?? ""));
-  if (!from || !to || to <= from || to.getTime() - from.getTime() > 62 * 86_400_000) return [];
+  const first = String(input?.from ?? "");
+  const last = String(input?.to ?? "");
+  const from = clock.startOfDay(first);
+  const to = clock.endOfDay(last);
+  if (!from || !to || to <= from || to.getTime() - from.getTime() > 62 * 86_400_000) return null;
+  return { clock, first, last, from, to };
+}
+
+/**
+ * The person's meetings touching these instants: everything in their own calendar, connected or Deskzo's —
+ * and, while they have no calendar connected for an invitation to land in, Deskzo's meetings colleagues
+ * have invited them to. Those are somebody else's: theirs to see, not to change, and not their record.
+ */
+async function meetingsOf(user: { id: string; email?: string | null }, from: Date, to: Date): Promise<{ items: MyEvent[]; visitIds: Set<string> }> {
+  const email = user.email?.trim().toLowerCase();
+  const invited = !!email && !(await hasWorkingCalendar(user.id));
   const rows = await db.calendarEvent.findMany({
-    where: { userId: user.id, startsAt: { lt: to }, endsAt: { gt: from } },
+    where: { startsAt: { lt: to }, endsAt: { gt: from }, OR: [{ userId: user.id }, ...(invited ? [{ provider: null, userId: { not: user.id }, attendees: { array_contains: [{ email }] } }] : [])] },
     orderBy: [{ startsAt: "asc" }, { endsAt: "asc" }],
     take: 1000,
     select: {
       id: true,
+      userId: true,
+      provider: true,
       title: true,
       startsAt: true,
       endsAt: true,
@@ -128,25 +139,53 @@ export async function listMyEvents(input: { from: string; to: string }): Promise
       organizerEmail: true,
       description: true,
       attendees: true,
+      visitId: true,
       ...RECORD_SELECT,
     },
   });
   const masker = await listLeadMasker(user.id);
-  return rows.map((r) => ({
-    id: r.id,
-    title: r.title,
-    startsAt: r.startsAt.toISOString(),
-    endsAt: r.endsAt.toISOString(),
-    allDay: r.allDay,
-    status: r.status,
-    location: r.location,
-    joinUrl: r.joinUrl,
-    isOrganizer: r.isOrganizer,
-    organizerEmail: r.organizerEmail,
-    description: r.description,
-    attendees: (Array.isArray(r.attendees) ? r.attendees : []) as MyEvent["attendees"],
-    record: recordOf(masker.active && r.lead ? { ...r, lead: { ...r.lead, title: maskLeadTitle(masker, r.lead.title) } } : r),
-  }));
+  const items = rows.map((r): MyEvent => {
+    const mine = r.userId === user.id;
+    return {
+      id: r.id,
+      kind: "meeting",
+      native: !r.provider,
+      title: r.title,
+      startsAt: r.startsAt.toISOString(),
+      endsAt: r.endsAt.toISOString(),
+      allDay: r.allDay,
+      status: r.status,
+      location: r.location,
+      joinUrl: r.joinUrl,
+      isOrganizer: mine && r.isOrganizer,
+      organizerEmail: r.organizerEmail,
+      description: r.description,
+      attendees: (Array.isArray(r.attendees) ? r.attendees : []) as MyEvent["attendees"],
+      record: mine ? recordOf(masker.active && r.lead ? { ...r, lead: { ...r.lead, title: maskLeadTitle(masker, r.lead.title) } } : r) : null,
+    };
+  });
+  const visitIds = new Set(rows.filter((r) => r.userId === user.id && r.visitId && r.status !== "CANCELLED").map((r) => r.visitId!));
+  return { items, visitIds };
+}
+
+/** The person's own meetings that touch these days — at most two months of them. */
+export async function listMyEvents(input: { from: string; to: string }): Promise<MyEvent[]> {
+  const user = await calendarUser();
+  if (!user || (await viewAsContext())) return [];
+  const days = await readDays(input);
+  return days ? (await meetingsOf(user, days.from, days.to)).items : [];
+}
+
+/** The Calendar page's days: the person's meetings, and beside them their tasks, visits, leave, holidays and bookings. */
+export async function listMyDays(input: { from: string; to: string }): Promise<MyEvent[]> {
+  const user = await calendarUser();
+  if (!user || (await viewAsContext())) return [];
+  const days = await readDays(input);
+  if (!days) return [];
+  const meetings = await meetingsOf(user, days.from, days.to);
+  const shown = { eventIds: new Set(meetings.items.filter((e) => e.status !== "CANCELLED").map((e) => e.id)), visitIds: meetings.visitIds };
+  const overlays = await overlaysFor(user.id, days.clock, days.first, days.last, shown);
+  return [...meetings.items, ...overlays].sort((a, b) => a.startsAt.localeCompare(b.startsAt) || a.endsAt.localeCompare(b.endsAt));
 }
 
 export async function syncMyCalendar(): Promise<ActionResult<{ changed: number; removed: number }>> {
@@ -190,20 +229,14 @@ export async function colleaguesBusy(input: { userIds: string[]; from: string; t
   const from = new Date(String(input?.from ?? ""));
   const to = new Date(String(input?.to ?? ""));
   if (!ids.length || Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from || to.getTime() - from.getTime() > 14 * 86_400_000) return [];
-  const [people, busy] = await Promise.all([
-    db.user.findMany({ where: { id: { in: ids }, active: true }, select: { id: true, name: true, calendarAccount: { select: { brokenAt: true } } } }),
-    db.calendarEvent.findMany({
-      where: { userId: { in: ids }, busy: true, status: { not: "CANCELLED" }, startsAt: { lt: to }, endsAt: { gt: from } },
-      orderBy: { startsAt: "asc" },
-      take: 2000,
-      select: { userId: true, startsAt: true, endsAt: true },
-    }),
-  ]);
+  const people = await db.user.findMany({ where: { id: { in: ids }, active: true }, select: { id: true, name: true, email: true, calendarAccount: { select: { brokenAt: true } } } });
+  // Their connected calendar as synced, and Deskzo's own meetings they organise or are invited to.
+  const busy = await busyFor(people, from, to);
   return people.map((p) => ({
     userId: p.id,
     name: p.name,
     hasCalendar: !!p.calendarAccount && !p.calendarAccount.brokenAt,
-    busy: busy.filter((b) => b.userId === p.id).map((b) => ({ startsAt: b.startsAt.toISOString(), endsAt: b.endsAt.toISOString() })),
+    busy: (busy.get(p.id) ?? []).map((b) => ({ startsAt: b.start.toISOString(), endsAt: b.end.toISOString() })),
   }));
 }
 
@@ -211,6 +244,13 @@ export async function colleaguesBusy(input: { userIds: string[]; from: string; t
 
 export type MeetingForm = {
   calendar: CalendarSummary;
+  /** A new meeting goes into Deskzo's own calendar: no Outlook, Google or Zoho calendar working for them. */
+  native: boolean;
+  /**
+   * How Deskzo's invitations go out for them — for a new meeting when `native`, and for changing one of
+   * Deskzo's meetings — and, through Deskzo's mail, how many more people it may invite today.
+   */
+  invites: { from: string; left: number | null };
   record: {
     label: string;
     href: string;
@@ -228,7 +268,10 @@ export async function meetingFormFor(input: { record: MeetingRecordRef | null })
   if (!user) return { ok: false, error: OFF };
   if (!(await maySchedule(user.id))) return { ok: false, error: NO_SCHEDULING };
   const calendar = await getMyCalendar();
-  if (!input?.record) return { ok: true, data: { calendar, record: null } };
+  const native = !(await hasWorkingCalendar(user.id));
+  const route = await inviteRoute(user.id);
+  const invites = { from: route.from, left: await invitesLeft(user.id, route) };
+  if (!input?.record) return { ok: true, data: { calendar, native, invites, record: null } };
   const ref = readMeetingRecordRef(input.record);
   const record = ref ? await meetingRecordFor(user.id, ref) : null;
   if (!record) return { ok: false, error: "That record isn't there, or isn't yours to schedule from." };
@@ -237,6 +280,8 @@ export async function meetingFormFor(input: { record: MeetingRecordRef | null })
     ok: true,
     data: toPlain({
       calendar,
+      native,
+      invites,
       record: {
         label: record.label,
         href: record.href,
@@ -335,13 +380,13 @@ export async function scheduleMeetingAction(input: unknown): Promise<ActionResul
 }
 
 /** One of the person's own meetings, as the dialog opens it to be changed. */
-export async function meetingToEdit(input: { eventId: string }): Promise<ActionResult<{ title: string; startsAt: string; durationMinutes: number; online: boolean; hasLink: boolean; location: string | null; agenda: string | null; emails: string[]; noDirectContact: boolean }>> {
+export async function meetingToEdit(input: { eventId: string }): Promise<ActionResult<{ title: string; startsAt: string; durationMinutes: number; online: boolean; hasLink: boolean; native: boolean; location: string | null; agenda: string | null; emails: string[]; noDirectContact: boolean }>> {
   const user = await calendarUser();
   if (!user) return { ok: false, error: OFF };
   if (!(await maySchedule(user.id))) return { ok: false, error: NO_SCHEDULING };
   const row = await db.calendarEvent.findFirst({
     where: { id: String(input?.eventId ?? ""), userId: user.id },
-    select: { title: true, startsAt: true, endsAt: true, joinUrl: true, location: true, description: true, attendees: true, isOrganizer: true, status: true, allDay: true, company: { select: { managedByResellerId: true } } },
+    select: { provider: true, title: true, startsAt: true, endsAt: true, joinUrl: true, location: true, description: true, attendees: true, isOrganizer: true, status: true, allDay: true, company: { select: { managedByResellerId: true } } },
   });
   if (!row || !row.isOrganizer || row.status === "CANCELLED" || row.allDay) return { ok: false, error: "That meeting can't be changed from here." };
   const clock = await workspaceClock();
@@ -354,6 +399,7 @@ export async function meetingToEdit(input: { eventId: string }): Promise<ActionR
       durationMinutes: Math.max(5, Math.round((row.endsAt.getTime() - row.startsAt.getTime()) / 60_000)),
       online: !!row.joinUrl,
       hasLink: !!row.joinUrl,
+      native: !row.provider,
       location: row.location,
       agenda: row.description,
       emails: attendees.map((a) => a.email).filter((e): e is string => typeof e === "string"),
@@ -362,7 +408,7 @@ export async function meetingToEdit(input: { eventId: string }): Promise<ActionR
   };
 }
 
-export async function rescheduleMeetingAction(input: unknown): Promise<ActionResult<{ eventId: string }>> {
+export async function rescheduleMeetingAction(input: unknown): Promise<ActionResult<{ eventId: string; warning: string | null }>> {
   const user = await calendarUser();
   if (!user) return { ok: false, error: OFF };
   if (!(await maySchedule(user.id))) return { ok: false, error: NO_SCHEDULING };
@@ -401,10 +447,10 @@ export async function rescheduleMeetingAction(input: unknown): Promise<ActionRes
   for (const [path, id] of [["/leads", row.leadId], ["/companies", row.companyId], ["/tickets", row.ticketId], ["/visits", row.visitId]] as const) {
     if (id) revalidatePath(`${path}/${id}`);
   }
-  return { ok: true, data: { eventId: done.eventId } };
+  return { ok: true, data: { eventId: done.eventId, warning: done.warning ?? null } };
 }
 
-export async function cancelMeetingAction(input: { eventId: string; note?: string | null }): Promise<ActionResult<null>> {
+export async function cancelMeetingAction(input: { eventId: string; note?: string | null }): Promise<ActionResult<{ warning: string | null }>> {
   const user = await calendarUser();
   if (!user) return { ok: false, error: OFF };
   const blocked = await refuseWhileViewingAs();
@@ -418,5 +464,51 @@ export async function cancelMeetingAction(input: { eventId: string; note?: strin
   for (const [path, id] of [["/leads", row?.leadId], ["/companies", row?.companyId], ["/tickets", row?.ticketId], ["/visits", row?.visitId]] as const) {
     if (id) revalidatePath(`${path}/${id}`);
   }
+  return { ok: true, data: { warning: done.warning ?? null } };
+}
+
+// ─── The subscribe link ──────────────────────────────────────────────────────────────────────────
+
+export type CalendarFeedView = { ready: boolean; on: boolean; showTitles: boolean; createdAt: string | null; lastReadAt: string | null };
+
+/** Whether the person has a subscribe link, and what it shows — never the link itself, which is shown once. */
+export async function myCalendarFeed(): Promise<CalendarFeedView | null> {
+  const user = await calendarUser();
+  if (!user || (await viewAsContext())) return null;
+  const state = await feedStateFor(user.id);
+  if (!state) return { ready: false, on: false, showTitles: false, createdAt: null, lastReadAt: null };
+  return state.on ? { ready: true, on: true, showTitles: state.showTitles, createdAt: state.createdAt.toISOString(), lastReadAt: state.lastReadAt?.toISOString() ?? null } : { ready: true, on: false, showTitles: false, createdAt: null, lastReadAt: null };
+}
+
+/** A new subscribe link — the old one, if any, stops working. Its address is returned this once. */
+export async function makeCalendarFeedLink(): Promise<ActionResult<{ url: string; webcal: string }>> {
+  const user = await calendarUser();
+  if (!user) return { ok: false, error: OFF };
+  const blocked = await refuseWhileViewingAs();
+  if (blocked) return { ok: false, error: blocked };
+  if (!(await feedStateFor(user.id))) return { ok: false, error: "This workspace is still being updated. Try again in a few minutes." };
+  const token = await makeFeed(user.id);
+  const url = `${await tenantOrigin()}/api/calendar/feed/${token}.ics`;
+  revalidatePath("/calendar");
+  return { ok: true, data: { url, webcal: url.replace(/^https?:/, "webcal:") } };
+}
+
+export async function setCalendarFeedTitles(input: { showTitles: boolean }): Promise<ActionResult<null>> {
+  const user = await calendarUser();
+  if (!user) return { ok: false, error: OFF };
+  const blocked = await refuseWhileViewingAs();
+  if (blocked) return { ok: false, error: blocked };
+  if (!(await setFeedTitles(user.id, input?.showTitles === true))) return { ok: false, error: "Make a subscribe link first." };
+  revalidatePath("/calendar");
+  return { ok: true, data: null };
+}
+
+export async function turnOffCalendarFeed(): Promise<ActionResult<null>> {
+  const user = await calendarUser();
+  if (!user) return { ok: false, error: OFF };
+  const blocked = await refuseWhileViewingAs();
+  if (blocked) return { ok: false, error: blocked };
+  await endFeed(user.id);
+  revalidatePath("/calendar");
   return { ok: true, data: null };
 }

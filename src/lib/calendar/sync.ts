@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { LINKED } from "@/lib/calendar/account";
 import { syncEvents, syncWindowFor, windowStale, withCalendar } from "@/lib/calendar/provider";
+import { mirrorIdsOf, pushMirrors } from "@/lib/calendar/mirror";
 import type { RemoteEvent, SyncPage, SyncWindow } from "@/lib/calendar/types";
 import type { WorkplaceProvider } from "@/lib/workplace/providers";
 
@@ -13,6 +14,9 @@ import type { WorkplaceProvider } from "@/lib/workplace/providers";
  * Run every few minutes for whoever is due (chores.ts, from the workspace's heartbeat), at once after
  * scheduling, and when somebody presses Sync on their Calendar page. One person's sync never runs
  * twice at once: each claims the person's CalendarAccount for a few minutes first.
+ *
+ * After a good round, the person's own Deskzo meetings without a copy in this calendar get one (mirror.ts)
+ * — and the copies, when the next round finds them, are left alone: the meeting is Deskzo's.
  */
 
 const MINUTE = 60_000;
@@ -53,6 +57,7 @@ export async function syncCalendarFor(userId: string, now = new Date()): Promise
       where: { userId },
       data: { syncCursor: got.value.cursor, windowFrom: window.from, windowTo: window.to, lastSyncedAt: now, lastError: null, nextSyncAt: new Date(now.getTime() + NEXT_MS) },
     });
+    await pushMirrors(userId, now).catch((err: unknown) => console.error("[calendar] copying Deskzo meetings into a calendar failed", err instanceof Error ? err.message : err));
     return { ok: true, ...applied, full: got.value.full };
   } finally {
     await db.calendarAccount.updateMany({ where: { userId }, data: { claimedUntil: null } });
@@ -110,7 +115,10 @@ async function letGo(rows: Linkable[], now: Date): Promise<number> {
 export async function applySync(userId: string, provider: WorkplaceProvider, page: SyncPage, window: SyncWindow, now: Date): Promise<{ changed: number; removed: number }> {
   const gone = new Set(page.removed);
   const kept: string[] = [];
+  const copies = await mirrorIdsOf(userId);
   for (const e of page.changed) {
+    // A copy of one of the person's Deskzo meetings: the meeting is Deskzo's, and already here.
+    if (copies.has(e.externalId)) continue;
     if (e.status === "CANCELLED") {
       gone.add(e.externalId);
       continue;
@@ -136,7 +144,7 @@ export async function applySync(userId: string, provider: WorkplaceProvider, pag
       },
       select: { ...LINKS, externalId: true },
     });
-    removed += await letGo(inWindow.filter((r) => !seen.has(r.externalId) && !gone.has(r.externalId)), now);
+    removed += await letGo(inWindow.filter((r) => !!r.externalId && !seen.has(r.externalId) && !gone.has(r.externalId)), now);
   }
 
   await followVisits(userId, kept);
