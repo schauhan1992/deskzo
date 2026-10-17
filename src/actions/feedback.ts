@@ -273,8 +273,20 @@ export async function listFeedback(filters?: FeedbackFilters) {
   const { user, viewAll } = await access();
 
   const view = filters?.view;
+  // Who may see what, and the search, are each an OR: spread side by side the search's replaced the
+  // visibility rule's, so typing a company's name showed every score on it. Each is its own AND term.
+  const search: Prisma.FeedbackRequestWhereInput | null = filters?.search
+    ? {
+        OR: [
+          { reference: { contains: filters.search, mode: "insensitive" as const } },
+          { company: { name: { contains: filters.search, mode: "insensitive" as const } } },
+          { response: { comment: { contains: filters.search, mode: "insensitive" as const } } },
+        ],
+      }
+    : null;
+  const terms = [...(viewAll ? [] : [visibleTo(user.id)]), ...(search ? [search] : [])];
   const where: Prisma.FeedbackRequestWhereInput = {
-    ...(viewAll ? {} : visibleTo(user.id)),
+    ...(terms.length ? { AND: terms } : {}),
     ...(filters?.companyId ? { companyId: filters.companyId } : {}),
     ...(filters?.aboutUserId ? { aboutUserId: filters.aboutUserId } : {}),
     ...(view === "answered" ? { status: "ANSWERED" as const } : {}),
@@ -283,15 +295,6 @@ export async function listFeedback(filters?: FeedbackFilters) {
     // filing that under satisfied is how a business stops hearing anything at all.
     ...(view === "unhappy" ? { response: { rating: { lte: 3 } } } : {}),
     ...(view === "unanswered" ? { response: { rating: { lte: 3 }, acknowledgedAt: null } } : {}),
-    ...(filters?.search
-      ? {
-          OR: [
-            { reference: { contains: filters.search, mode: "insensitive" as const } },
-            { company: { name: { contains: filters.search, mode: "insensitive" as const } } },
-            { response: { comment: { contains: filters.search, mode: "insensitive" as const } } },
-          ],
-        }
-      : {}),
   };
 
   const rows = await db.feedbackRequest.findMany({

@@ -6,8 +6,13 @@
  * one the chance to leave a good word. And the invariant underneath the whole module: the response
  * is kept whatever the score. The gate decides where a person goes next, never whether we listen.
  *
+ * Then, against the workspace database, who sees which feedback through the real list — a search
+ * narrows what somebody may see and never widens it.
+ *
  *   npm run check:feedback
  */
+import "dotenv/config";
+import Module from "node:module";
 import {
   averageOf,
   clampRating,
@@ -169,5 +174,89 @@ eq("Then the person", subjectOf({ aboutUser: { name: "Priya" } }), "Working with
 eq("And otherwise, the general question", subjectOf({}), "How we're doing");
 eq("A blank label doesn't win", subjectOf({ serviceLabel: "   ", ticket: { title: "Printer offline" } }), "Printer offline");
 
-console.log(failures === 0 ? "\nAll feedback checks passed.\n" : `\n${failures} check(s) FAILED.\n`);
-process.exit(failures === 0 ? 0 : 1);
+// ─── Who sees which feedback, through the real list ──────────────────────────────────────────────
+//
+// Against the workspace database, on a fixture made here and removed in a finally: somebody without
+// "See all customer feedback" sees only feedback about them, asked for by them, or on accounts they
+// own or look after — and typing a search narrows that, never widens it (a search used to replace the
+// visibility rule, so searching a company's name showed every score about everybody on it).
+
+const MAIL = "@zzprobe-feedback.invalid";
+const TAG = "Zzprobe Fb";
+const ROLE = "ZZPROBE_FB";
+
+async function whoSeesWhat() {
+  console.log("\n— Who sees which feedback —\n");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- loaded after the stand-ins below are in place
+  const { directClient } = require("../src/lib/tenancy/direct-client") as typeof import("../src/lib/tenancy/direct-client");
+  const db = directClient();
+  // The list is a server action: whoever calls it is the fixture's viewer, or their manager.
+  let actorId = "";
+  const internals = Module as unknown as { _load(r: string, p: unknown, m: boolean): unknown };
+  const originalLoad = internals._load;
+  internals._load = function (this: unknown, request: string, parent: unknown, isMain: boolean) {
+    if (request === "next/cache") return { revalidatePath() {}, revalidateTag() {}, unstable_cache: (fn: unknown) => fn };
+    if (request === "@/lib/session" || request.endsWith("lib/session")) {
+      const user = async () => ({ id: actorId, role: ROLE, name: "Zzprobe Viewer", email: `viewer${MAIL}` });
+      return { requireUser: user, currentUser: user, viewAsContext: async () => null, refuseWhileViewingAs: async () => null };
+    }
+    return originalLoad.call(this, request, parent, isMain);
+  } as typeof originalLoad;
+
+  const cleanup = async () => {
+    await db.company.deleteMany({ where: { name: { startsWith: TAG } } });
+    await db.userPermission.deleteMany({ where: { user: { email: { endsWith: MAIL } } } });
+    await db.auditLog.deleteMany({ where: { user: { email: { endsWith: MAIL } } } });
+    await db.user.deleteMany({ where: { email: { endsWith: MAIL } } });
+    await db.role.deleteMany({ where: { key: ROLE } });
+  };
+  await cleanup();
+  try {
+    await db.role.create({ data: { key: ROLE, name: "Zzprobe feedback" } });
+    const person = (key: string) => db.user.create({ data: { name: `Zzprobe ${key}`, email: `${key.toLowerCase()}${MAIL}`, role: ROLE, passwordHash: "x".repeat(60) } });
+    const viewer = await person("Viewer");
+    const colleague = await person("Colleague");
+    const boss = await person("Boss");
+    await db.userPermission.create({ data: { userId: boss.id, permission: "feedback.viewAll", allowed: true, reason: TAG } });
+    // One account, looked after by the colleague; one score about the viewer on it, and one about the colleague.
+    const company = await db.company.create({
+      data: { name: `${TAG} Traders`, normalizedName: `${TAG} traders`.toLowerCase(), createdById: colleague.id, ownerUserId: colleague.id, relationshipType: "CLIENT", stage: "CUSTOMER" } as never,
+    });
+    const ask = (ref: string, aboutUserId: string, requestedById: string) =>
+      db.feedbackRequest.create({ data: { token: `zzprobe-${ref}-${Math.random().toString(36).slice(2)}`, reference: `ZZPFB-${ref}`, companyId: company.id, aboutUserId, requestedById } });
+    const aboutViewer = await ask("V1", viewer.id, colleague.id);
+    const aboutColleague = await ask("C1", colleague.id, colleague.id);
+
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- after the session stand-in, so it reaches the action
+    const { listFeedback } = require("../src/actions/feedback") as typeof import("../src/actions/feedback");
+    const ids = (result: Awaited<ReturnType<typeof listFeedback>>) => new Set((result.rows as { id: string }[]).map((r) => r.id));
+
+    actorId = viewer.id;
+    const plain = ids(await listFeedback({}));
+    ok("without the permission: the feedback about them, not a colleague's on the same account", plain.has(aboutViewer.id) && !plain.has(aboutColleague.id));
+    const searched = ids(await listFeedback({ search: TAG }));
+    ok("  and searching the account's name still shows only theirs", searched.has(aboutViewer.id) && !searched.has(aboutColleague.id), `${searched.size} shown`);
+    const byReference = ids(await listFeedback({ search: "ZZPFB-C1" }));
+    ok("  nor does searching the colleague's reference find it", !byReference.has(aboutColleague.id), `${byReference.size} shown`);
+
+    actorId = boss.id;
+    const all = ids(await listFeedback({ search: TAG }));
+    ok("with \"See all customer feedback\", the same search finds both", all.has(aboutViewer.id) && all.has(aboutColleague.id), `${all.size} shown`);
+    const narrowed = ids(await listFeedback({ search: "ZZPFB-V1" }));
+    ok("  and a search still narrows", narrowed.has(aboutViewer.id) && !narrowed.has(aboutColleague.id), `${narrowed.size} shown`);
+  } finally {
+    await cleanup();
+    const left = await db.user.count({ where: { email: { endsWith: MAIL } } });
+    ok("nothing of the fixture is left behind", left === 0, left);
+    await db.$disconnect();
+  }
+}
+
+whoSeesWhat()
+  .catch((err) => {
+    ok("the database checks ran to their end", false, err instanceof Error ? err.message : String(err));
+  })
+  .finally(() => {
+    console.log(failures === 0 ? "\nAll feedback checks passed.\n" : `\n${failures} check(s) FAILED.\n`);
+    process.exit(failures === 0 ? 0 : 1);
+  });
