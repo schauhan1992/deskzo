@@ -1,4 +1,4 @@
-import type { Filter, Rule } from "@/lib/automate/definition";
+import type { Filter, Rule, RuleOp } from "@/lib/automate/definition";
 import { readPath, resolveValue, type RunContext } from "@/lib/automate/references";
 
 /**
@@ -60,9 +60,12 @@ function contains(haystack: unknown, needle: unknown): boolean {
 }
 
 export function ruleHolds(rule: Rule, context: RunContext): boolean {
-  const left = readPath(context, rule.ref);
-  const right = resolveValue(rule.value, context);
-  switch (rule.op) {
+  return compare(rule.op, readPath(context, rule.ref), resolveValue(rule.value, context));
+}
+
+/** One comparison, the way a rule makes it — also how a waiting run's rules meet an event (src/lib/automate/waits.ts). */
+export function compare(op: RuleOp, left: unknown, right: unknown): boolean {
+  switch (op) {
     case "eq":
       return same(left, right);
     case "ne":

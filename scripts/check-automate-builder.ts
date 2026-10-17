@@ -186,7 +186,7 @@ async function main() {
 
     // ─── Templates ──────────────────────────────────────────────────────────────────────────────
     section("Every template: made, published");
-    const blanks: Record<string, Record<string, unknown>> = { "ticket-escalation": { tell: colleague, hours: 4 }, "lead-quiet": { days: 5 }, "daily-sales-report": { to: ["owner"], at: "09:00" } };
+    const blanks: Record<string, Record<string, unknown>> = { "ticket-escalation": { tell: colleague, hours: 4 }, "lead-quiet": { days: 5 }, "daily-sales-report": { to: ["owner"], at: "09:00" }, "customer-onboarding": { approver: colleague }, "employee-onboarding": { hr: "owner", it: colleague } };
     const made: Record<string, string[]> = {};
     for (const t of TEMPLATES) {
       const result = await inA(() => store.createFromTemplate(t.key, blanks[t.key] ?? {}, owner));

@@ -267,8 +267,11 @@ const OP_LABELS: Record<RuleOp, string> = {
   isNotEmpty: "is not empty",
 };
 
-/** Rules: all of them, or any one — on the data the step may read. */
-export function FilterEditor({ filter, onChange, data, emptyText }: { filter: Filter | undefined; onChange: (f: Filter | undefined) => void; data: DataRef[]; emptyText: string }) {
+/**
+ * Rules: all of them, or any one — on the data the step may read. `valueData`: what a rule's value
+ * may be taken from, when that differs — a wait's rules read the event, but compare it with this run's data.
+ */
+export function FilterEditor({ filter, onChange, data, emptyText, valueData }: { filter: Filter | undefined; onChange: (f: Filter | undefined) => void; data: DataRef[]; emptyText: string; valueData?: DataRef[] }) {
   const any = !!filter && "any" in filter;
   const rules: Rule[] = filter ? ("any" in filter ? filter.any : filter.all) : [];
   const set = (next: Rule[], mode = any) => onChange(next.length ? (mode ? { any: next } : { all: next }) : undefined);
@@ -319,6 +322,7 @@ export function FilterEditor({ filter, onChange, data, emptyText }: { filter: Fi
                     }}
                   />
                 )}
+                {valueData && rule.op !== "isEmpty" && rule.op !== "isNotEmpty" && <DataPicker data={valueData} onPick={(r) => change(i, { ...rule, value: `{{${r}}}` })} label="From the data" />}
               </div>
             </div>
           ))}

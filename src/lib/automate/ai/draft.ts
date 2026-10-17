@@ -49,6 +49,8 @@ function tidy(steps: unknown): unknown {
     if (typeof step.message === "string") step.message = step.message.slice(0, 300);
     if (Array.isArray(step.paths)) step.paths = step.paths.map((p) => (p && typeof p === "object" ? { ...(p as Record<string, unknown>), name: text((p as { name?: unknown }).name, 80) || "Path", steps: tidy((p as { steps?: unknown }).steps) } : p));
     if (Array.isArray(step.else)) step.else = tidy(step.else);
+    for (const list of ["approved", "rejected", "steps"] as const) if (Array.isArray(step[list])) step[list] = tidy(step[list]);
+    if (typeof step.title === "string" && step.type === "approval") step.title = step.title.slice(0, 200);
     return step;
   });
 }

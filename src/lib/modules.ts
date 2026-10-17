@@ -471,7 +471,11 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     description:
       "Everything the app has told you, past the twenty the bell holds — searchable, archivable, and with a switch per kind so people can turn down what they do not need rather than learning to ignore the bell entirely.",
     navGroup: "My work",
-    navItems: [{ href: "/notifications", label: "Notifications", icon: BellRing }],
+    navItems: [
+      { href: "/notifications", label: "Notifications", icon: BellRing },
+      // Deskzo Automate's approvals inbox (Phase 6): anybody may be named on an approval.
+      { href: "/approvals", label: "Approvals", icon: BadgeCheck },
+    ],
   },
   {
     key: "tasks",

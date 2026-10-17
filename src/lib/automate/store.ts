@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { currentTenant } from "@/lib/tenancy/resolve";
 import { clockOfTenant } from "@/lib/time/workspace";
 import { blankDefinition, eachStep, type Definition } from "@/lib/automate/definition";
-import { advanceRun, createRun, ENGINE_LIMITS } from "@/lib/automate/engine";
+import { advanceRun, createRun, ENGINE_LIMITS, settleEndedRun } from "@/lib/automate/engine";
 import { actionByKey, actorRefusal } from "@/lib/automate/registry";
 import { nextFire } from "@/lib/automate/schedule";
 import { validateDefinition, type DefinitionProblem } from "@/lib/automate/validate";
@@ -162,7 +162,11 @@ export async function cancelRun(runId: string): Promise<StoreResult<null>> {
     where: { id: runId, status: { in: ["QUEUED", "WAITING", "NEEDS_ATTENTION"] } },
     data: { status: "CANCELLED", finishedAt: now, error: "Cancelled by a person.", lockedBy: null, lockedUntil: null },
   });
-  if (waiting.count) return { ok: true, data: null };
+  if (waiting.count) {
+    // Its approvals, waits and parallel paths go with it; a path cancelled tells the run it belongs to.
+    await settleEndedRun(runId, "CANCELLED");
+    return { ok: true, data: null };
+  }
   const running = await db.automationRun.updateMany({ where: { id: runId, status: "RUNNING" }, data: { cancelRequested: true } });
   if (running.count) return { ok: true, data: null };
   return { ok: false, error: "That run has already finished." };

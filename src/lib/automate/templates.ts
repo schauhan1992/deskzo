@@ -293,6 +293,124 @@ export const TEMPLATES: readonly Template[] = [
       },
     ],
   },
+  {
+    key: "customer-onboarding",
+    name: "Customer onboarding after a won deal",
+    description: "A won deal gets a kick-off call and a welcome email; once the call is done — or the time runs out — the person you choose decides whether support takes the customer on.",
+    steps: [
+      "A lead is won",
+      "Give its owner a kick-off call to make",
+      "Email the contact a welcome",
+      "Wait for the kick-off call to be done",
+      "Ask for approval to hand the customer to support",
+      "Approved: open an onboarding ticket. Not: a task to keep it going",
+    ],
+    blanks: [
+      { key: "approver", label: "Who decides the hand-over", kind: "person", required: true },
+      { key: "days", label: "Wait for the call (days)", kind: "number", default: 7, min: 1, max: 30 },
+      MAIL_FROM,
+    ],
+    build: (v) => [
+      {
+        name: "Customer onboarding after a won deal",
+        description: "A kick-off call and a welcome for a won deal, then a decision on handing the customer to support.",
+        definition: {
+          schema: 1,
+          trigger: { type: "lead.won" },
+          steps: [
+            { id: "kickoff", name: "Kick-off call", note: "Its owner calls the new customer within two days.", type: "action", action: "task.create", input: { title: "Kick-off call with {{trigger.contact.name}} — {{trigger.company.name}}", assignTo: "lead_owner", dueInDays: 2, leadId: LEAD } },
+            {
+              id: "welcome",
+              name: "Welcome them",
+              note: "A welcome from the deal's owner, so replies come back to them.",
+              type: "action",
+              action: "email.send",
+              input: { to: "lead_contact", leadId: LEAD, from: s(v.from, "lead_owner"), subject: "Welcome aboard", body: "Hello {{trigger.contact.name}},\n\nThank you for choosing us. We will call you in the next two days to plan the start together.\n\nRegards" },
+            },
+            {
+              id: "called",
+              name: "Wait for the kick-off call",
+              note: "Until the kick-off task is marked done.",
+              type: "waitForEvent",
+              event: "task.completed",
+              filter: { all: [{ ref: "event.task.id", op: "eq", value: "{{steps.kickoff.output.taskId}}" }] },
+              timeout: { days: n(v.days, 7) },
+              onTimeout: "continue",
+            },
+            {
+              id: "handover",
+              name: "Hand over to support?",
+              note: "Whoever you chose decides, in their Approvals.",
+              type: "approval",
+              title: "Hand {{trigger.company.name}} over to support?",
+              message: "The deal \"{{trigger.lead.title}}\" is won and its kick-off is due or done. Approve to open an onboarding ticket for support.",
+              approvers: [s(v.approver, "owner")],
+              timeout: { days: 5 },
+              onTimeout: "rejected",
+              approved: [{ id: "ticket", name: "Onboarding ticket", type: "action", action: "ticket.create", input: { companyId: "{{trigger.company.id}}", title: "Onboarding: {{trigger.company.name}}", priority: "MEDIUM" } }],
+              rejected: [{ id: "keep_going", name: "Keep it going", type: "action", action: "task.create", input: { title: "Keep onboarding {{trigger.company.name}} going", assignTo: "lead_owner", dueInDays: 3, leadId: LEAD } }],
+            },
+          ],
+        },
+      },
+    ],
+  },
+  {
+    key: "employee-onboarding",
+    name: "Employee onboarding checklist",
+    description: "When somebody joins: a task for each item on the checklist, a welcome for them and a heads-up for IT at the same time, and HR asked to confirm when it is all done.",
+    steps: ["Somebody joins the company", "A task for each item on the checklist", "At the same time: welcome them, and tell IT", "Ask HR to confirm the onboarding is done", "Approved: tell their manager. Not: a task to finish it"],
+    blanks: [
+      { key: "hr", label: "Who looks after onboarding (HR)", kind: "person", required: true },
+      { key: "it", label: "Who sets up laptops and accounts (IT)", kind: "person", required: true },
+    ],
+    build: (v) => {
+      const hr = s(v.hr, "owner");
+      const it = s(v.it, "owner");
+      return [
+        {
+          name: "Employee onboarding checklist",
+          description: "A checklist of tasks for each new joiner, IT told, and HR's confirmation at the end.",
+          definition: {
+            schema: 1,
+            trigger: { type: "person.joined" },
+            steps: [
+              { id: "who", name: "Their manager, or HR", type: "transform", set: { person: { fn: "value.default", args: ["{{trigger.person.managerId}}", hr] } } },
+              {
+                id: "checklist",
+                name: "The checklist",
+                note: "Change the items to your own.",
+                type: "forEach",
+                items: ["Laptop and email account", "ID card and building access", "Welcome kit", "Bank and payroll details", "Introduce them to the team"],
+                steps: [{ id: "item", name: "A task for the item", type: "action", action: "task.create", input: { title: "{{steps.checklist.output.item}} — {{trigger.person.name}}", assignTo: hr, dueInDays: 3 } }],
+              },
+              {
+                id: "together",
+                name: "Welcome and IT",
+                type: "parallel",
+                paths: [
+                  { name: "Welcome them", steps: [{ id: "welcome", type: "action", action: "notify.person", input: { to: "{{trigger.person.id}}", title: "Welcome to the team, {{trigger.person.name}}", message: "We're glad you're here. Your checklist is under way." } }] },
+                  { name: "Tell IT", steps: [{ id: "tell_it", type: "action", action: "notify.person", input: { to: it, title: "Set up a laptop and accounts for {{trigger.person.name}}", message: "{{trigger.person.name}} joins as {{trigger.person.designation}}." } }] },
+                ],
+              },
+              {
+                id: "done",
+                name: "Onboarding done?",
+                note: "HR confirms once every item is done.",
+                type: "approval",
+                title: "Is {{trigger.person.name}}'s onboarding done?",
+                approvers: [hr],
+                timeout: { days: 14 },
+                onTimeout: "rejected",
+                approved: [{ id: "tell_manager", type: "action", action: "notify.person", input: { to: "{{steps.who.output.person}}", title: "{{trigger.person.name}} is fully onboarded" } }],
+                rejected: [{ id: "finish", type: "action", action: "task.create", input: { title: "Finish onboarding {{trigger.person.name}}", assignTo: hr, dueInDays: 2 } }],
+              },
+            ],
+          },
+        },
+      ];
+    },
+  },
 ];
 
 export function templateByKey(key: string): Template | null {

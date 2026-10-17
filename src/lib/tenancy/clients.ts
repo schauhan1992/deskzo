@@ -249,6 +249,8 @@ const NOT_YET_EVERYWHERE = {
   automationWorkflow: { workflowSeq: true, migratedFrom: true },
   // 20261114100000_automate_webhooks. Read by name in src/lib/automate/webhooks.ts.
   automationWebhook: { requireSignature: true },
+  // 20261116100000_automate_advanced_steps. Read by name in src/lib/automate/engine.ts.
+  automationRun: { parentRunId: true, parentStepKey: true },
   // 20261013100000_deskzo_updates_seen. Read by name in src/actions/help.ts only.
   user: { deskzoUpdatesSeenAt: true, reminderSounds: true },
   // 20261014100000_custom_fields. Read by name (`select` or `omit: { customFields: false }`) through

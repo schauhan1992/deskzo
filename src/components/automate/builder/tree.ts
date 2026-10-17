@@ -1,4 +1,4 @@
-import type { Definition, Step } from "@/lib/automate/definition";
+import { childLists, mapChildLists, type Definition, type Step } from "@/lib/automate/definition";
 import type { Catalog } from "@/lib/automate/catalog";
 
 /**
@@ -6,11 +6,13 @@ import type { Catalog } from "@/lib/automate/catalog";
  * draft and undo is just the old one. Steps are found by id: ids are unique across a workflow, and a
  * step keeps its id for life, because later steps refer to its output by it.
  *
- * A place in the tree — where a new step goes — is a slot: the top-level list, or one path of a
- * branch (its index, or "else").
+ * A place in the tree — where a new step goes — is a slot: the top-level list, or one of a step's
+ * lists by the key src/lib/automate/definition.ts `childLists` gives it: a branch's paths (0, 1…) and
+ * else (-1), an approval's approved (0) and rejected (1), a for-each's steps (0), a parallel step's
+ * paths (0, 1, 2).
  */
 
-export type Slot = { branchId: string | null; path: number | "else" | null };
+export type Slot = { branchId: string | null; path: number | null };
 export const ROOT: Slot = { branchId: null, path: null };
 
 /** The draft as the builder holds it: a definition that may be unfinished. */
@@ -27,17 +29,13 @@ export function readDraft(raw: unknown): Draft {
   return { schema: 1, trigger: d.trigger, steps: d.steps, ...(d.settings ? { settings: d.settings } : {}) } as Draft;
 }
 
+/** An approval's lists exist once the builder shows them, so a step can be added to either. */
+function withLists(step: Step): Step {
+  return step.type === "approval" ? { ...step, approved: step.approved ?? [], rejected: step.rejected ?? [] } : step;
+}
+
 function mapSteps(steps: Step[], fn: (list: Step[], slot: Slot) => Step[], slot: Slot = ROOT): Step[] {
-  const mine = fn(steps, slot);
-  return mine.map((step) =>
-    step.type === "branch"
-      ? {
-          ...step,
-          paths: step.paths.map((p, i) => ({ ...p, steps: mapSteps(p.steps, fn, { branchId: step.id, path: i }) })),
-          ...(step.else ? { else: mapSteps(step.else, fn, { branchId: step.id, path: "else" }) } : {}),
-        }
-      : step,
-  );
+  return fn(steps, slot).map((step) => mapChildLists(withLists(step), (list, path) => mapSteps(list, fn, { branchId: step.id, path })));
 }
 
 const sameSlot = (a: Slot, b: Slot) => a.branchId === b.branchId && a.path === b.path;
@@ -45,10 +43,7 @@ const sameSlot = (a: Slot, b: Slot) => a.branchId === b.branchId && a.path === b
 export function allSteps(steps: Step[], out: Step[] = []): Step[] {
   for (const step of steps) {
     out.push(step);
-    if (step.type === "branch") {
-      for (const p of step.paths) allSteps(p.steps, out);
-      if (step.else) allSteps(step.else, out);
-    }
+    for (const list of childLists(step)) allSteps(list.steps, out);
   }
   return out;
 }
@@ -106,18 +101,40 @@ export function cloneStep(draft: Draft, step: Step): Step {
       }
     }
   };
-  const copy = (s: Step): Step =>
-    s.type === "branch"
-      ? { ...s, id: fresh(s.id), paths: s.paths.map((p) => ({ ...p, steps: p.steps.map(copy) })), ...(s.else ? { else: s.else.map(copy) } : {}) }
-      : ({ ...JSON.parse(JSON.stringify(s)), id: fresh(s.id) } as Step);
+  const copy = (s: Step): Step => mapChildLists({ ...(JSON.parse(JSON.stringify(s)) as Step), id: fresh(s.id) }, (list) => list.map(copy));
   return copy(step);
 }
 
 export type DataRef = { ref: string; label: string; group: string };
 
+/** What a step's outputs offer the steps after it. */
+function outputsOf(step: Step, catalog: Catalog): DataRef[] {
+  const name = (fallback: string) => step.name || fallback;
+  switch (step.type) {
+    case "action": {
+      const action = catalog.actions.find((a) => a.key === step.action);
+      return (action?.outputs ?? []).map((field) => ({ ref: `steps.${step.id}.output.${field}`, label: `${name(action?.label || step.id)} › ${field}`, group: "Earlier steps" }));
+    }
+    case "transform":
+      return Object.keys(step.set).map((field) => ({ ref: `steps.${step.id}.output.${field}`, label: `${name(step.id)} › ${field}`, group: "Earlier steps" }));
+    case "approval":
+      return ["decision", "decidedBy", "comment", "timedOut"].map((field) => ({ ref: `steps.${step.id}.output.${field}`, label: `${name("Approval")} › ${field}`, group: "Earlier steps" }));
+    case "waitForEvent":
+      return [
+        { ref: `steps.${step.id}.output.timedOut`, label: `${name("Wait")} › timed out`, group: "Earlier steps" },
+        ...(catalog.triggers.find((t) => t.type === step.event)?.paths ?? []).map((p) => ({ ref: `steps.${step.id}.output.event.${p.ref.slice("trigger.".length)}`, label: `${name("Wait")} › event › ${p.label}`, group: "Earlier steps" })),
+      ];
+    case "forEach":
+      return [{ ref: `steps.${step.id}.output.count`, label: `${name("For each")} › count`, group: "Earlier steps" }];
+    default:
+      return [];
+  }
+}
+
 /**
  * What a step may read: the trigger's fields, and the outputs of the steps that have run by then — the
- * ones before it on its own path, and before the branches it sits in. As the publish check sees it
+ * ones before it on its own path, and before the lists it sits in; inside a for-each, the item this
+ * time round; after a parallel step, its paths' steps. As the publish check sees it
  * (src/lib/automate/validate.ts), so the picker never offers what publishing would refuse.
  */
 export function dataBefore(draft: Draft, stepId: string | null, catalog: Catalog): DataRef[] {
@@ -125,29 +142,29 @@ export function dataBefore(draft: Draft, stepId: string | null, catalog: Catalog
   const out: DataRef[] = (trigger?.paths ?? []).map((p) => ({ ...p, group: "What started it" }));
   if (stepId === null) return out;
   const before: Step[] = [];
-  const walk = (steps: Step[], seen: Step[]): boolean => {
+  const loops: Step[] = [];
+  const walk = (steps: Step[], seen: Step[], around: Step[]): boolean => {
     const here = [...seen];
     for (const step of steps) {
       if (step.id === stepId) {
         before.push(...here);
+        loops.push(...around.filter((s) => s.type === "forEach"));
         return true;
       }
-      if (step.type === "branch") {
-        for (const p of step.paths) if (walk(p.steps, here)) return true;
-        if (step.else && walk(step.else, here)) return true;
+      for (const list of childLists(step)) {
+        // An approval's own output is there inside its lists; a for-each's item, inside its steps.
+        if (walk(list.steps, step.type === "approval" ? [...here, step] : here, [...around, step])) return true;
       }
       here.push(step);
+      if (step.type === "parallel") for (const inner of allSteps(step.paths.flatMap((p) => p.steps))) here.push(inner);
     }
     return false;
   };
-  walk(draft.steps, []);
-  for (const step of before) {
-    if (step.type === "action") {
-      const action = catalog.actions.find((a) => a.key === step.action);
-      for (const field of action?.outputs ?? []) out.push({ ref: `steps.${step.id}.output.${field}`, label: `${step.name || action?.label || step.id} › ${field}`, group: "Earlier steps" });
-    } else if (step.type === "transform") {
-      for (const field of Object.keys(step.set)) out.push({ ref: `steps.${step.id}.output.${field}`, label: `${step.name || step.id} › ${field}`, group: "Earlier steps" });
-    }
+  walk(draft.steps, [], []);
+  for (const loop of loops) {
+    out.push({ ref: `steps.${loop.id}.output.item`, label: `${loop.name || "For each"} › the item`, group: "This time round" });
+    out.push({ ref: `steps.${loop.id}.output.index`, label: `${loop.name || "For each"} › which item (from 0)`, group: "This time round" });
   }
+  for (const step of before) out.push(...outputsOf(step, catalog));
   return out;
 }

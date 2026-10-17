@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUp, Copy, GitBranch, Hourglass, MoreHorizontal, Octagon, Plus, Trash2, Filter as FilterIcon, Zap, Play } from "lucide-react";
+import { ArrowDown, ArrowUp, BadgeCheck, Columns3, Copy, GitBranch, Hourglass, MoreHorizontal, Octagon, Plus, Radio, Repeat, Trash2, Filter as FilterIcon, Zap, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label } from "@/components/ui/input";
@@ -21,7 +21,7 @@ import {
   type BuilderWorkflow,
   type RunDetail,
 } from "@/actions/automate";
-import type { Step } from "@/lib/automate/definition";
+import { childLists, mapChildLists, type Step } from "@/lib/automate/definition";
 import type { ActionSpec, Catalog } from "@/lib/automate/catalog";
 import type { DefinitionProblem } from "@/lib/automate/validate";
 import { runPath, runRef, workflowRef } from "@/lib/automate/refs";
@@ -78,10 +78,20 @@ function describe(step: Step, catalog: Catalog): { title: string; detail: string
       return { title: "End the run", detail: step.outcome === "succeeded" ? "as a success" : "as a failure" };
     case "transform":
       return { title: "Set values", detail: "" };
+    case "approval": {
+      const who = step.approvers.length + (step.role ? 1 : 0);
+      return { title: "Ask for approval", detail: step.title ? `“${step.title.slice(0, 60)}”` : who ? "" : "nobody chosen yet" };
+    }
+    case "waitForEvent":
+      return { title: "Wait for something to happen", detail: catalog.triggers.find((t) => t.type === step.event)?.label ?? step.event };
+    case "forEach":
+      return { title: "For each item", detail: Array.isArray(step.items) ? `${step.items.length} item${step.items.length === 1 ? "" : "s"} typed in` : step.items ? "of a list from the data" : "no list yet" };
+    case "parallel":
+      return { title: "At the same time", detail: `${step.paths.length} path${step.paths.length === 1 ? "" : "s"}` };
   }
 }
 
-const ICONS = { action: Zap, condition: FilterIcon, branch: GitBranch, delay: Hourglass, stop: Octagon, transform: Zap } as const;
+const ICONS = { action: Zap, condition: FilterIcon, branch: GitBranch, delay: Hourglass, stop: Octagon, transform: Zap, approval: BadgeCheck, waitForEvent: Radio, forEach: Repeat, parallel: Columns3 } as const;
 
 /** Hands the browser a file to save. */
 function download(fileName: string, text: string) {
@@ -266,6 +276,12 @@ export function WorkflowBuilder({ workflow, demo = false }: { workflow: BuilderW
               <MenuItem onClick={() => (add(slot, index, () => ({ id: newStepId(draft, "branch"), type: "branch", paths: [{ name: "Path 1", if: { all: [] }, steps: [] }], else: [] })), close())}>Branch into paths</MenuItem>
               <MenuItem onClick={() => (add(slot, index, () => ({ id: newStepId(draft, "wait"), type: "delay", for: { hours: 1 } })), close())}>Wait</MenuItem>
               <MenuItem onClick={() => (add(slot, index, () => ({ id: newStepId(draft, "stop"), type: "stop", outcome: "succeeded" })), close())}>End the run</MenuItem>
+              <MenuSeparator />
+              <MenuLabel>Waiting and repeating</MenuLabel>
+              <MenuItem onClick={() => (add(slot, index, () => ({ id: newStepId(draft, "approve"), type: "approval", title: "", approvers: ["owner"], timeout: { days: 3 }, onTimeout: "rejected", approved: [], rejected: [] })), close())}>Ask for approval</MenuItem>
+              <MenuItem onClick={() => (add(slot, index, () => ({ id: newStepId(draft, "wait_for"), type: "waitForEvent", event: "task.completed", timeout: { days: 7 }, onTimeout: "continue" })), close())}>Wait for something to happen</MenuItem>
+              <MenuItem onClick={() => (add(slot, index, () => ({ id: newStepId(draft, "each"), type: "forEach", items: [], steps: [] })), close())}>For each item in a list</MenuItem>
+              <MenuItem onClick={() => (add(slot, index, () => ({ id: newStepId(draft, "together"), type: "parallel", paths: [{ name: "Path 1", steps: [] }, { name: "Path 2", steps: [] }] })), close())}>Paths at the same time</MenuItem>
             </div>
           )}
         </Menu>
@@ -337,12 +353,12 @@ export function WorkflowBuilder({ workflow, demo = false }: { workflow: BuilderW
           </div>
         </div>
         {isSelected && form && <div className="mt-2 rounded-lg border border-line bg-surface-sunken p-3 lg:hidden">{form}</div>}
-        {s.type === "branch" && (
-          <div className="mt-2 grid gap-3 border-l-2 border-line pl-3 md:grid-cols-2">
-            {[...s.paths.map((p, i) => ({ label: p.name, steps: p.steps, slot: { branchId: s.id, path: i } as Slot })), ...(s.else ? [{ label: "Otherwise", steps: s.else, slot: { branchId: s.id, path: "else" } as Slot }] : [])].map((path) => (
-              <div key={String(path.slot.path)} className="min-w-0 rounded-lg bg-surface-sunken p-2">
-                <p className="mb-1 text-xs font-medium text-muted">{path.label}</p>
-                {renderList(path.steps, path.slot)}
+        {childLists(s).length > 0 && (
+          <div className={`mt-2 grid gap-3 border-l-2 pl-3 md:grid-cols-2 ${s.type === "parallel" ? "border-brand" : "border-line"}`}>
+            {childLists(s).map((list) => (
+              <div key={list.path} className={`min-w-0 rounded-lg bg-surface-sunken p-2 ${s.type === "forEach" ? "md:col-span-2" : ""}`}>
+                <p className="mb-1 text-xs font-medium text-muted">{list.label}</p>
+                {renderList(list.steps, { branchId: s.id, path: list.path })}
               </div>
             ))}
           </div>
@@ -559,29 +575,10 @@ export function WorkflowBuilder({ workflow, demo = false }: { workflow: BuilderW
 
 /** A step placed straight after another, in the same list. */
 function insertAfter(draft: Draft, afterId: string, step: Step): Draft {
-  const place = (list: Step[]): Step[] | null => {
+  const place = (list: Step[]): Step[] => {
     const at = list.findIndex((s) => s.id === afterId);
     if (at >= 0) return [...list.slice(0, at + 1), step, ...list.slice(at + 1)];
-    for (const s of list) {
-      if (s.type !== "branch") continue;
-      for (const p of s.paths) {
-        const placed = place(p.steps);
-        if (placed) {
-          p.steps = placed;
-          return list;
-        }
-      }
-      if (s.else) {
-        const placed = place(s.else);
-        if (placed) {
-          s.else = placed;
-          return list;
-        }
-      }
-    }
-    return null;
+    return list.map((s) => mapChildLists(s, place));
   };
-  const copy = JSON.parse(JSON.stringify(draft)) as Draft;
-  const placed = place(copy.steps);
-  return placed ? { ...copy, steps: placed as Draft["steps"] } : draft;
+  return { ...draft, steps: place(draft.steps) as Draft["steps"] };
 }

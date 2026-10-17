@@ -101,6 +101,23 @@ function clearStep(step: Step, cleared: Cleared[]): Step {
         paths: step.paths.map((p) => ({ ...p, if: clearFilter(p.if, step.id, "paths", cleared, `${title}, ${p.name}`), steps: p.steps.map((s) => clearStep(s, cleared)) })),
         ...(step.else ? { else: step.else.map((s) => clearStep(s, cleared)) } : {}),
       };
+    case "approval": {
+      // People named by id don't carry over; "owner" and a reference do. A role is kept by its key.
+      const approvers = step.approvers.filter((a) => isTemplate(a) || a === "owner");
+      if (approvers.length !== step.approvers.length) cleared.push({ stepId: step.id, field: "approvers", label: `${title} › Who approves` });
+      return {
+        ...step,
+        approvers,
+        ...(step.approved ? { approved: step.approved.map((s) => clearStep(s, cleared)) } : {}),
+        ...(step.rejected ? { rejected: step.rejected.map((s) => clearStep(s, cleared)) } : {}),
+      };
+    }
+    case "waitForEvent":
+      return step.filter ? { ...step, filter: clearFilter(step.filter, step.id, "filter", cleared, title) } : step;
+    case "forEach":
+      return { ...step, steps: step.steps.map((s) => clearStep(s, cleared)) };
+    case "parallel":
+      return { ...step, paths: step.paths.map((p) => ({ ...p, steps: p.steps.map((s) => clearStep(s, cleared)) })) };
     default:
       return step;
   }
@@ -125,7 +142,10 @@ export function splitProblems(definition: Definition, problems: DefinitionProble
   for (const p of problems) {
     const step = p.stepId ? steps.get(p.stepId) : null;
     const top = p.field?.split(".")[0] ?? "";
-    const isBlank = p.message === NOTHING_CHOSEN || (step?.type === "action" && !!top && isWorkspaceField(step.action, top) && (step.input[top] === undefined || step.input[top] === "" || (Array.isArray(step.input[top]) && (step.input[top] as unknown[]).length === 0)));
+    const isBlank =
+      p.message === NOTHING_CHOSEN ||
+      (step?.type === "approval" && top === "approvers") ||
+      (step?.type === "action" && !!top && isWorkspaceField(step.action, top) && (step.input[top] === undefined || step.input[top] === "" || (Array.isArray(step.input[top]) && (step.input[top] as unknown[]).length === 0)));
     (isBlank ? blanks : others).push(p);
   }
   return { blanks, others };

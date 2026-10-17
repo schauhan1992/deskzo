@@ -39,9 +39,11 @@ export type Catalog = {
   pipelines: { id: string; name: string; stages: { id: string; label: string }[] }[];
   /** Outside apps the owner may use: their own, and those shared with the workspace. */
   connections: { id: string; name: string; provider: string }[];
+  /** The workspace's roles, for an approval anybody with a role may decide. */
+  roles: { key: string; name: string }[];
 };
 
-const GROUPS: Record<string, string> = { schedule: "Time", manual: "Time", webhook: "Outside apps", lead: "Leads", ticket: "Tickets", document: "Money", invoice: "Money", payment: "Money", order: "Orders", renewal: "Orders", form: "Forms and bookings", booking: "Forms and bookings", task: "Tasks" };
+const GROUPS: Record<string, string> = { schedule: "Time", manual: "Time", webhook: "Outside apps", lead: "Leads", ticket: "Tickets", document: "Money", invoice: "Money", payment: "Money", order: "Orders", renewal: "Orders", form: "Forms and bookings", booking: "Forms and bookings", task: "Tasks", person: "People" };
 
 type JsonProp = { type?: string; enum?: string[]; default?: unknown; minimum?: number; maximum?: number; maxLength?: number; format?: string; items?: JsonProp };
 
@@ -88,10 +90,11 @@ export function fieldsOf(key: string, input: z.ZodType): FieldSpec[] {
 
 /** The builder's catalogue, for a workflow owned by `ownerId` (whose access decides what is available). */
 export async function builderCatalog(ownerId: string): Promise<Catalog> {
-  const [people, pipeline, connections] = await Promise.all([
+  const [people, pipeline, connections, roles] = await Promise.all([
     db.user.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
     leadStages().catch(() => null),
     db.automationConnection.findMany({ where: { OR: [{ ownerUserId: ownerId }, { sharedWithWorkspace: true }] }, orderBy: { name: "asc" }, select: { id: true, name: true, provider: true } }).catch(() => []),
+    db.role.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }], select: { key: true, name: true } }),
   ]);
   const actions: ActionSpec[] = [];
   for (const action of ACTIONS) {
@@ -114,6 +117,7 @@ export async function builderCatalog(ownerId: string): Promise<Catalog> {
     actions,
     people,
     connections,
+    roles,
     pipelines: pipeline
       ? pipeline.pipelines.filter((p) => !p.archived).map((p) => ({ id: p.id, name: p.name, stages: pipeline.stages.filter((s) => s.pipelineId === p.id && !s.archived).map((s) => ({ id: s.id, label: s.label })) }))
       : [],

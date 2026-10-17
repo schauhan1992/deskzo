@@ -1,8 +1,8 @@
 "use client";
 
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import type { Definition, DelayStep, Schedule, Step } from "@/lib/automate/definition";
-import type { Catalog } from "@/lib/automate/catalog";
+import type { ApprovalStep, Definition, DelayStep, Duration, ForEachStep, ParallelStep, Schedule, Step, WaitStep } from "@/lib/automate/definition";
+import type { Catalog, FieldSpec } from "@/lib/automate/catalog";
 import type { DefinitionProblem } from "@/lib/automate/validate";
 import { DataPicker, FieldInput, FilterEditor } from "@/components/automate/builder/fields";
 import type { DataRef } from "@/components/automate/builder/tree";
@@ -16,7 +16,170 @@ import type { WebhookView } from "@/lib/automate/webhooks";
  */
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const KIND_NAMES: Record<Step["type"], string> = { action: "Step", condition: "Only carry on if", branch: "Branch", delay: "Wait", stop: "End the run", transform: "Set values" };
+const KIND_NAMES: Record<Step["type"], string> = {
+  action: "Step",
+  condition: "Only carry on if",
+  branch: "Branch",
+  delay: "Wait",
+  stop: "End the run",
+  transform: "Set values",
+  approval: "Ask for approval",
+  waitForEvent: "Wait for something to happen",
+  forEach: "For each item",
+  parallel: "At the same time",
+};
+
+/** A length of time in days and hours — an approval's or a wait's limit. */
+function DurationFields({ value, onChange, label, hint }: { value: Duration; onChange: (d: Duration) => void; label: string; hint: string }) {
+  const set = (key: "days" | "hours", raw: string) => {
+    const next: Duration = { ...value };
+    if (raw === "" || Number(raw) <= 0) delete next[key];
+    else next[key] = Math.floor(Number(raw));
+    onChange(next);
+  };
+  return (
+    <div className="space-y-1">
+      <Label>{label}</Label>
+      <div className="flex items-center gap-2 text-sm">
+        <Input type="number" min={0} max={30} value={value.days ?? ""} onChange={(e) => set("days", e.target.value)} className="w-20" aria-label="Days" /> days
+        <Input type="number" min={0} max={23} value={value.hours ?? ""} onChange={(e) => set("hours", e.target.value)} className="w-20" aria-label="Hours" /> hours
+      </div>
+      <p className="text-xs text-subtle">{hint}</p>
+    </div>
+  );
+}
+
+const OWNER_OPTION = [{ value: "owner", label: "The workflow's owner" }];
+
+function ApprovalFields({ step, onChange, catalog, data }: { step: ApprovalStep; onChange: (s: Step) => void; catalog: Catalog; data: DataRef[] }) {
+  const people = step.approvers.filter((a) => !/\{\{/.test(a));
+  const fromData = step.approvers.filter((a) => /\{\{/.test(a));
+  const field = (name: string, label: string, kind: FieldSpec["kind"], extra: Partial<FieldSpec> = {}): FieldSpec => ({ name, label, kind, required: false, ...extra });
+  return (
+    <div className="space-y-3">
+      <FieldInput field={field("title", "What to approve", "text", { required: true, hint: "The line approvers see: “Discount of {{trigger.lead.value}} for {{trigger.company.name}}”." })} value={step.title} catalog={catalog} data={data} onChange={(v) => onChange({ ...step, title: String(v ?? "") })} />
+      <FieldInput field={field("message", "More for them to read", "longText")} value={step.message} catalog={catalog} data={data} onChange={(v) => onChange({ ...step, ...(v ? { message: String(v) } : { message: undefined }) })} />
+      <div className="space-y-1">
+        <Label>Who approves</Label>
+        <FieldInput field={field("approvers", "People", "people", { special: OWNER_OPTION })} value={people} catalog={catalog} data={data} onChange={(v) => onChange({ ...step, approvers: [...(Array.isArray(v) ? v.map(String) : []), ...fromData] })} />
+        {fromData.map((ref) => (
+          <p key={ref} className="flex items-center justify-between gap-2 text-xs text-muted">
+            <span>Whoever the data names: {data.find((d) => `{{${d.ref}}}` === ref)?.label ?? ref}</span>
+            <button type="button" className="text-danger hover:underline" onClick={() => onChange({ ...step, approvers: step.approvers.filter((a) => a !== ref) })}>
+              Remove
+            </button>
+          </p>
+        ))}
+        <DataPicker data={data} onPick={(r) => onChange({ ...step, approvers: [...step.approvers, `{{${r}}}`] })} label="A person from the data" />
+        <Select value={step.role ?? ""} onChange={(e) => onChange({ ...step, ...(e.target.value ? { role: e.target.value } : { role: undefined }) })}>
+          <option value="">And no role</option>
+          {catalog.roles.map((r) => (
+            <option key={r.key} value={r.key}>
+              Or anybody who is a {r.name}
+            </option>
+          ))}
+        </Select>
+        <p className="text-xs text-subtle">The first of them to decide does, in their Approvals. Nobody else may.</p>
+      </div>
+      <DurationFields value={step.timeout} onChange={(timeout) => onChange({ ...step, timeout })} label="Wait for a decision" hint="At most 30 days." />
+      <div className="space-y-1">
+        <Label>If nobody decides by then</Label>
+        <Select value={step.onTimeout} onChange={(e) => onChange({ ...step, onTimeout: e.target.value as ApprovalStep["onTimeout"] })}>
+          <option value="rejected">Take it as rejected</option>
+          <option value="approved">Take it as approved</option>
+        </Select>
+      </div>
+      <p className="text-xs text-subtle">Its decision is there for the steps after: approved or rejected, who, and their comment.</p>
+    </div>
+  );
+}
+
+function WaitFields({ step, onChange, catalog, data }: { step: WaitStep; onChange: (s: Step) => void; catalog: Catalog; data: DataRef[] }) {
+  const events = catalog.triggers.filter((t) => t.event && t.type !== "webhook");
+  const fields = (catalog.triggers.find((t) => t.type === step.event)?.paths ?? []).map((p) => ({ ref: `event.${p.ref.slice("trigger.".length)}`, label: p.label, group: "The event" }));
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1">
+        <Label>Wait until</Label>
+        <Select value={step.event} onChange={(e) => onChange({ ...step, event: e.target.value, filter: undefined })}>
+          {events.map((t) => (
+            <option key={t.type} value={t.type}>
+              {t.label}
+            </option>
+          ))}
+        </Select>
+      </div>
+      <div className="space-y-1">
+        <Label>And only when</Label>
+        <FilterEditor filter={step.filter} onChange={(f) => onChange({ ...step, ...(f ? { filter: f } : { filter: undefined }) })} data={fields} valueData={data} emptyText="No rules: the first one of these to happen will do." />
+        <p className="text-xs text-subtle">Say which one: “the event&apos;s task id is the task made earlier”, from the data.</p>
+      </div>
+      <DurationFields value={step.timeout} onChange={(timeout) => onChange({ ...step, timeout })} label="Wait at most" hint="At most 30 days." />
+      <div className="space-y-1">
+        <Label>If it doesn&apos;t happen by then</Label>
+        <Select value={step.onTimeout} onChange={(e) => onChange({ ...step, onTimeout: e.target.value as WaitStep["onTimeout"] })}>
+          <option value="continue">Carry on anyway</option>
+          <option value="stop">End the run here</option>
+        </Select>
+      </div>
+    </div>
+  );
+}
+
+function ForEachFields({ step, onChange, data }: { step: ForEachStep; onChange: (s: Step) => void; data: DataRef[] }) {
+  const typed = Array.isArray(step.items);
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1">
+        <Label>The list</Label>
+        <Select value={typed ? "typed" : "data"} onChange={(e) => onChange({ ...step, items: e.target.value === "typed" ? [] : "" })}>
+          <option value="typed">Items I type in</option>
+          <option value="data">A list from the data</option>
+        </Select>
+      </div>
+      {typed ? (
+        <div className="space-y-1">
+          <Textarea
+            rows={5}
+            value={(step.items as unknown[]).map(String).join("\n")}
+            placeholder={"Laptop and email account\nID card\nWelcome kit"}
+            onChange={(e) => onChange({ ...step, items: e.target.value.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 100) })}
+          />
+          <p className="text-xs text-subtle">One a line, up to 100.</p>
+        </div>
+      ) : (
+        <div className="space-y-1">
+          <Input value={typeof step.items === "string" ? step.items : ""} readOnly placeholder="Choose a list from the data" />
+          <DataPicker data={data} onPick={(r) => onChange({ ...step, items: `{{${r}}}` })} label="Choose the list" />
+        </div>
+      )}
+      <p className="text-xs text-subtle">The steps inside run once per item, in turn; they read the item as “This time round › the item”.</p>
+    </div>
+  );
+}
+
+function ParallelFields({ step, onChange }: { step: ParallelStep; onChange: (s: Step) => void }) {
+  return (
+    <div className="space-y-2">
+      {step.paths.map((path, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <Input value={path.name} maxLength={80} onChange={(e) => onChange({ ...step, paths: step.paths.map((p, j) => (j === i ? { ...p, name: e.target.value } : p)) })} />
+          {step.paths.length > 2 && (
+            <button type="button" className="text-xs text-danger hover:underline" onClick={() => onChange({ ...step, paths: step.paths.filter((_, j) => j !== i) })}>
+              Remove
+            </button>
+          )}
+        </div>
+      ))}
+      {step.paths.length < 3 && (
+        <button type="button" className="text-xs font-medium text-brand hover:underline" onClick={() => onChange({ ...step, paths: [...step.paths, { name: `Path ${step.paths.length + 1}`, steps: [] }] })}>
+          Add a path
+        </button>
+      )}
+      <p className="text-xs text-subtle">The paths run at the same time — one waiting for an approval doesn&apos;t hold up the others — and the run carries on when every one is done.</p>
+    </div>
+  );
+}
 
 function Problems({ problems }: { problems: DefinitionProblem[] }) {
   if (!problems.length) return null;
@@ -332,6 +495,10 @@ export function StepForm({ step, onChange, catalog, data, problems }: { step: St
       )}
 
       {step.type === "delay" && <DelayFields step={step} onChange={onChange} data={data} />}
+      {step.type === "approval" && <ApprovalFields step={step} onChange={onChange} catalog={catalog} data={data} />}
+      {step.type === "waitForEvent" && <WaitFields step={step} onChange={onChange} catalog={catalog} data={data} />}
+      {step.type === "forEach" && <ForEachFields step={step} onChange={onChange} data={data} />}
+      {step.type === "parallel" && <ParallelFields step={step} onChange={onChange} />}
 
       {step.type === "stop" && (
         <div className="space-y-2">

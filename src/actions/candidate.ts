@@ -24,6 +24,7 @@ import { noPasswordYet } from "@/lib/no-password";
 import { isSystemAddress } from "@/lib/people";
 import { workspaceClock } from "@/lib/time/workspace";
 import { personPath } from "@/lib/record-links";
+import { emitPersonJoined } from "@/lib/automate/emit-people";
 
 /**
  * Hiring, up to the point somebody becomes an employee.
@@ -404,6 +405,8 @@ export async function convertCandidate(
         intakeExpiresAt: null,
       },
     });
+    // For Deskzo Automate: somebody has joined (an onboarding workflow starts from it).
+    await emitPersonJoined(tx, newUser.id, user.id);
 
     return newUser;
   });

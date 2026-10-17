@@ -12,9 +12,11 @@ import { z } from "zod";
  *       { "id": "wait", "type": "delay", "for": { "hours": 2 } },
  *       { "id": "tell", "type": "action", "action": "notify.person", "input": { "to": "owner", "title": "Still open" } } ] }
  *
- * Phase 1 steps: action, condition, branch, delay, transform, stop. There is no code anywhere in a
- * workflow: data comes in only through `{{trigger.…}}` and `{{steps.<id>.output.…}}` references and
- * the fixed function list in transforms (src/lib/automate/transform.ts).
+ * Phase 1 steps: action, condition, branch, delay, transform, stop. Phase 6 adds approval (waits for
+ * named people or a role), waitForEvent (waits for something to happen), forEach (its steps once per
+ * item of a list) and parallel (up to three paths at once). There is no code anywhere in a workflow:
+ * data comes in only through `{{trigger.…}}` and `{{steps.<id>.output.…}}` references and the fixed
+ * function list in transforms (src/lib/automate/transform.ts).
  */
 
 export const LIMITS = {
@@ -28,6 +30,14 @@ export const LIMITS = {
   rules: 20,
   /** The longest delay. */
   delayDays: 90,
+  /** The longest an approval or a wait for an event waits. */
+  waitDays: 30,
+  /** People named on one approval. */
+  approvers: 10,
+  /** Items a for-each goes through. */
+  forEachItems: 100,
+  /** Paths of one parallel step. */
+  parallelPaths: 3,
 } as const;
 
 const STEP_ID = /^[a-z][a-z0-9_-]{0,39}$/i;
@@ -120,7 +130,34 @@ export type BranchStep = StepBase & { type: "branch"; paths: BranchPath[]; else?
 export type DelayStep = StepBase & { type: "delay"; for?: Duration; until?: { at: string; days?: number[] }; on?: { value: string; before?: Duration; after?: Duration } };
 export type TransformStep = StepBase & { type: "transform"; set: Record<string, TransformExpr> };
 export type StopStep = StepBase & { type: "stop"; outcome: "succeeded" | "failed"; message?: string };
-export type Step = ActionStep | ConditionStep | BranchStep | DelayStep | TransformStep | StopStep;
+/**
+ * Waits until one of the people named — a person's id, "owner", a reference to a person — or anybody
+ * with `role` approves or rejects in the approvals inbox; nobody deciding within `timeout` goes the
+ * `onTimeout` way. Then the `approved` or `rejected` steps, and on after the step.
+ */
+export type ApprovalStep = StepBase & {
+  type: "approval";
+  title: string;
+  message?: string;
+  approvers: string[];
+  role?: string;
+  timeout: Duration;
+  onTimeout: "approved" | "rejected";
+  approved?: Step[];
+  rejected?: Step[];
+};
+/**
+ * Waits for an event — a task done, a ticket answered — whose fields meet `filter` (rules on
+ * "event.…", their values worked out when the wait begins). Nothing within `timeout`: "continue"
+ * goes on, "stop" ends the run quietly.
+ */
+export type WaitStep = StepBase & { type: "waitForEvent"; event: string; filter?: Filter; timeout: Duration; onTimeout: "continue" | "stop" };
+/** Its steps once per item: of a list the data names ("{{steps.x.output.items}}"), or a list typed in. */
+export type ForEachStep = StepBase & { type: "forEach"; items: string | unknown[]; steps: Step[] };
+/** Up to three paths at once; the run goes on when every one is done. */
+export type ParallelPath = { name: string; steps: Step[] };
+export type ParallelStep = StepBase & { type: "parallel"; paths: ParallelPath[] };
+export type Step = ActionStep | ConditionStep | BranchStep | DelayStep | TransformStep | StopStep | ApprovalStep | WaitStep | ForEachStep | ParallelStep;
 
 const base = { id: z.string().regex(STEP_ID, "A step id is a letter, then letters, digits, - or _ (40 at most)."), name: z.string().max(80).optional(), note: z.string().max(300).optional() };
 
@@ -148,6 +185,48 @@ export const stepSchema: z.ZodType<Step> = z.lazy(() =>
       .refine((d) => [d.for, d.until, d.on].filter(Boolean).length === 1, "A delay waits for a while, until a time of day, or until a time the data names — one of them."),
     z.object({ ...base, type: z.literal("transform"), set: z.record(z.string().regex(/^[a-z][a-zA-Z0-9_]{0,39}$/), transformExprSchema) }).strict(),
     z.object({ ...base, type: z.literal("stop"), outcome: z.enum(["succeeded", "failed"]), message: z.string().max(300).optional() }).strict(),
+    z
+      .object({
+        ...base,
+        type: z.literal("approval"),
+        title: z.string().trim().min(1, "Say what is to be approved.").max(200),
+        message: z.string().max(2000).optional(),
+        approvers: z.array(z.string().max(200)).max(LIMITS.approvers, `At most ${LIMITS.approvers} people.`),
+        role: z.string().trim().max(60).optional(),
+        timeout: durationSchema,
+        onTimeout: z.enum(["approved", "rejected"]),
+        approved: z.array(stepSchema).optional(),
+        rejected: z.array(stepSchema).optional(),
+      })
+      .strict(),
+    z
+      .object({
+        ...base,
+        type: z.literal("waitForEvent"),
+        event: z.string().min(1).max(80),
+        filter: filterSchema.optional(),
+        timeout: durationSchema,
+        onTimeout: z.enum(["continue", "stop"]),
+      })
+      .strict(),
+    z
+      .object({
+        ...base,
+        type: z.literal("forEach"),
+        items: z.union([z.string().max(200), z.array(z.unknown()).max(LIMITS.forEachItems, `A for-each goes through at most ${LIMITS.forEachItems} items.`)]),
+        steps: z.array(stepSchema),
+      })
+      .strict(),
+    z
+      .object({
+        ...base,
+        type: z.literal("parallel"),
+        paths: z
+          .array(z.object({ name: z.string().min(1).max(80), steps: z.array(stepSchema) }).strict())
+          .min(1)
+          .max(LIMITS.parallelPaths, `At most ${LIMITS.parallelPaths} paths at once.`),
+      })
+      .strict(),
   ]),
 ) as z.ZodType<Step>;
 
@@ -166,16 +245,62 @@ export const definitionSchema = z
   .strict();
 export type Definition = z.infer<typeof definitionSchema>;
 
-/** Every step, depth-first in the order they would run, with how deep in branches each sits. */
+/**
+ * The lists of steps a step holds, each with the key the cursor and the builder know it by: a branch's
+ * paths (0, 1…) and else (-1); an approval's approved (0) and rejected (1); a for-each's steps (0); a
+ * parallel step's paths (0, 1, 2).
+ */
+export function childLists(step: Step): { path: number; label: string; steps: Step[] }[] {
+  switch (step.type) {
+    case "branch":
+      return [...step.paths.map((p, i) => ({ path: i, label: p.name, steps: p.steps })), ...(step.else ? [{ path: -1, label: "Otherwise", steps: step.else }] : [])];
+    case "approval":
+      return [
+        { path: 0, label: "If approved", steps: step.approved ?? [] },
+        { path: 1, label: "If rejected", steps: step.rejected ?? [] },
+      ];
+    case "forEach":
+      return [{ path: 0, label: "For each item", steps: step.steps }];
+    case "parallel":
+      return step.paths.map((p, i) => ({ path: i, label: p.name, steps: p.steps }));
+    default:
+      return [];
+  }
+}
+
+/** One of a step's lists by its key, or null. */
+export function childList(step: Step, path: number): Step[] | null {
+  return childLists(step).find((l) => l.path === path)?.steps ?? null;
+}
+
+/** The step with each of its lists replaced by `fn`'s. */
+export function mapChildLists(step: Step, fn: (steps: Step[], path: number) => Step[]): Step {
+  switch (step.type) {
+    case "branch":
+      return { ...step, paths: step.paths.map((p, i) => ({ ...p, steps: fn(p.steps, i) })), ...(step.else ? { else: fn(step.else, -1) } : {}) };
+    case "approval":
+      return { ...step, ...(step.approved ? { approved: fn(step.approved, 0) } : {}), ...(step.rejected ? { rejected: fn(step.rejected, 1) } : {}) };
+    case "forEach":
+      return { ...step, steps: fn(step.steps, 0) };
+    case "parallel":
+      return { ...step, paths: step.paths.map((p, i) => ({ ...p, steps: fn(p.steps, i) })) };
+    default:
+      return step;
+  }
+}
+
+/** Every step, depth-first in the order they would run, with how deep in branches and the like each sits. */
 export function eachStep(steps: Step[], depth = 0, out: { step: Step; depth: number }[] = []): { step: Step; depth: number }[] {
   for (const step of steps) {
     out.push({ step, depth });
-    if (step.type === "branch") {
-      for (const path of step.paths) eachStep(path.steps, depth + 1, out);
-      if (step.else) eachStep(step.else, depth + 1, out);
-    }
+    for (const list of childLists(step)) eachStep(list.steps, depth + 1, out);
   }
   return out;
+}
+
+/** Every step inside a step's lists, at any depth — not the step itself. */
+export function allStepsIn(step: Step): Step[] {
+  return childLists(step).flatMap((list) => eachStep(list.steps).map((e) => e.step));
 }
 
 export function delayMs(duration: Duration): number {

@@ -11,8 +11,8 @@ import { clockOfTenant } from "@/lib/time/workspace";
 import type { Clock } from "@/lib/time/zone";
 import { ActionError, type FailureKind } from "@/lib/automate/action-types";
 import { filterHolds } from "@/lib/automate/conditions";
-import { advance, currentStep, enterBranch, isCursor, startCursor, type Cursor } from "@/lib/automate/cursor";
-import { LIMITS, definitionSchema, delayMs, type Definition, type Step } from "@/lib/automate/definition";
+import { advance, currentStep, enterBranch, enterList, isCursor, startCursor, stepKey, type Cursor } from "@/lib/automate/cursor";
+import { LIMITS, childList, definitionSchema, delayMs, eachStep, type Definition, type Step } from "@/lib/automate/definition";
 import { resolveValue, type RunContext } from "@/lib/automate/references";
 import { summarize } from "@/lib/automate/redact";
 import { actionByKey, actorRefusal } from "@/lib/automate/registry";
@@ -21,7 +21,9 @@ import { workspacePause } from "@/lib/automate/switches";
 import { applyTransform } from "@/lib/automate/transform";
 import { emitDateEvents, listensForDates } from "@/lib/automate/dates";
 import { requestWakeHere } from "@/lib/automate/wake";
-import { workflowPath } from "@/lib/automate/refs";
+import { runRef, workflowPath } from "@/lib/automate/refs";
+import { approversToTell, resolveApprovers, tellApprovers } from "@/lib/automate/approvals";
+import { eventMeets, fixRules, type WaitRule } from "@/lib/automate/waits";
 
 /**
  * Deskzo Automate's engine: events and schedules become runs, and runs are carried out a step at a
@@ -39,6 +41,10 @@ import { workflowPath } from "@/lib/automate/refs";
  *     fails the run at once; an outcome nobody can know waits for a person.
  *   · Limits: 1,000 runs per workflow an hour, one run per workflow per record a minute, workflows
  *     three deep and never themselves, 120 days a run, and twenty failures in a row pause a workflow.
+ *   · Phase 6: an approval waits for its request in the approvals inbox (src/lib/automate/approvals.ts),
+ *     a wait for an event for the matcher to find one (src/lib/automate/waits.ts), a for-each goes
+ *     round its steps once per item, and a parallel step's paths run as runs of their own — the run
+ *     goes on when the last of them is done. A step's key carries the for-each round it is in.
  */
 
 export const ENGINE_LIMITS = {
@@ -90,6 +96,11 @@ export type NewRun = {
   test?: { definition?: Definition; live: boolean };
   /** Held by this process from the start — a test run carried out in the request that asked for it. */
   claimed?: boolean;
+  /** A parallel step's path (Phase 6): where it starts, the outputs it starts with, and whose path it is. */
+  cursor?: Cursor;
+  steps?: RunContext["steps"];
+  parentRunId?: string;
+  parentStepKey?: string;
 };
 
 /**
@@ -100,7 +111,7 @@ export const LIVE_IN_TEST: ReadonlySet<string> = new Set(["task.create", "lead.n
 
 /** A new run, or null when one with the same key exists — the same cause never makes two. */
 export async function createRun(input: NewRun): Promise<string | null> {
-  const contextCipher = await sealContext({ trigger: input.trigger, steps: {}, ...(input.test ? { test: input.test } : {}) });
+  const contextCipher = await sealContext({ trigger: input.trigger, steps: input.steps ?? {}, ...(input.test ? { test: input.test } : {}) });
   const now = new Date();
   try {
     const run = await db.automationRun.create({
@@ -111,8 +122,9 @@ export async function createRun(input: NewRun): Promise<string | null> {
         idempotencyKey: input.idempotencyKey,
         eventId: input.eventId ?? null,
         recordKey: input.recordKey ?? null,
-        cursor: startCursor() as unknown as Prisma.InputJsonValue,
+        cursor: (input.cursor ?? startCursor()) as unknown as Prisma.InputJsonValue,
         contextCipher,
+        ...(input.parentRunId ? { parentRunId: input.parentRunId, parentStepKey: input.parentStepKey ?? null } : {}),
         depth: input.depth ?? 0,
         isTest: input.isTest ?? false,
         startedById: input.startedById ?? null,
@@ -149,7 +161,9 @@ export async function matchEvents(now: Date = new Date(), limit = 200): Promise<
 
   let runs = 0;
   let skipped = 0;
+  let woke = false;
   for (const event of events) {
+    if (await wakeWaiting(event, now)) woke = true;
     for (const trigger of triggers) {
       if (trigger.type !== event.type || trigger.versionId !== trigger.workflow.activeVersionId) continue;
       // A webhook call is for the one workflow whose address it came to.
@@ -191,7 +205,28 @@ export async function matchEvents(now: Date = new Date(), limit = 200): Promise<
     }
     await db.automationEvent.update({ where: { id: event.id }, data: { matchedAt: now } });
   }
+  if (woke) await requestWakeHere(now);
   return { events: events.length, runs, skipped };
+}
+
+/**
+ * Runs waiting for this kind of event (Phase 6): each whose rules the event meets — and that began
+ * waiting before it happened — takes it and wakes. True when one did.
+ */
+async function wakeWaiting(event: { id: string; type: string; payload: Prisma.JsonValue; occurredAt: Date }, now: Date): Promise<boolean> {
+  const waits = await db.automationEventWait.findMany({
+    where: { eventType: event.type, matchedEventId: null, expiresAt: { gt: now }, createdAt: { lte: event.occurredAt } },
+    select: { id: true, runId: true, rules: true, matchAny: true },
+  });
+  let woke = false;
+  for (const wait of waits) {
+    if (!eventMeets(event.payload, (wait.rules ?? []) as WaitRule[], wait.matchAny)) continue;
+    const taken = await db.automationEventWait.updateMany({ where: { id: wait.id, matchedEventId: null }, data: { matchedEventId: event.id, matchedPayload: (event.payload ?? {}) as Prisma.InputJsonValue } });
+    if (!taken.count) continue;
+    await db.automationRun.updateMany({ where: { id: wait.runId, status: "WAITING" }, data: { runAfter: now } });
+    woke = true;
+  }
+  return woke;
 }
 
 /** Schedules whose time has come: one run each, for the slot that came due — never one per slot missed. */
@@ -246,6 +281,9 @@ export async function claimRuns(now: Date = new Date()): Promise<string[]> {
 type Held = {
   id: string;
   workflowId: string;
+  versionId: string | null;
+  parentRunId: string | null;
+  parentStepKey: string | null;
   workflowName: string;
   ownerUserId: string;
   depth: number;
@@ -293,7 +331,10 @@ async function finish(run: Held, status: AutomationRunStatus, error: string | nu
     where: { id: run.id, lockedBy: HOLDER },
     data: { status, error: error ? error.slice(0, 1000) : null, lockedBy: null, lockedUntil: null, ...(terminal ? { finishedAt: new Date() } : {}), ...extra },
   });
-  if (!saved.count || run.isTest) return;
+  if (!saved.count) return;
+  if (terminal) await afterEnd(run, status);
+  // A test counts for nothing; a parallel path's run is counted by the run it belongs to.
+  if (run.isTest || run.parentRunId) return;
   if (status === "SUCCEEDED") {
     await db.automationWorkflow.updateMany({ where: { id: run.workflowId, failureStreak: { gt: 0 } }, data: { failureStreak: 0 } });
   } else if (status === "FAILED") {
@@ -302,6 +343,44 @@ async function finish(run: Held, status: AutomationRunStatus, error: string | nu
       await pauseWorkflow(run.workflowId, `It failed ${workflow.failureStreak} times in a row. The latest: ${error ?? "no reason given"}`.slice(0, 500), workflow.ownerUserId);
     }
   }
+}
+
+const OPEN: AutomationRunStatus[] = ["QUEUED", "RUNNING", "WAITING", "NEEDS_ATTENTION"];
+
+/** A run that has ended: its approvals and waits go, its own paths stop, and the run it is a path of hears. */
+async function afterEnd(run: Pick<Held, "id" | "parentRunId" | "parentStepKey">, status: AutomationRunStatus) {
+  await db.approvalRequest.updateMany({ where: { runId: run.id, status: "PENDING" }, data: { status: "CANCELLED" } });
+  await db.automationEventWait.deleteMany({ where: { runId: run.id } });
+  if (status !== "SUCCEEDED") await stopPaths(run.id);
+  if (run.parentRunId) await wakeParentIfDone(run.parentRunId, run.parentStepKey);
+}
+
+/** A run ended outside the engine — cancelled while it waited — settled as one the engine ended. */
+export async function settleEndedRun(runId: string, status: AutomationRunStatus) {
+  const run = await db.automationRun.findUnique({ where: { id: runId }, select: { id: true, parentRunId: true, parentStepKey: true } });
+  if (run) await afterEnd(run, status);
+}
+
+/** The parallel paths of a run that has stopped, stopped too. */
+export async function stopPaths(runId: string) {
+  const now = new Date();
+  const children = await db.automationRun.findMany({ where: { parentRunId: runId, status: { in: OPEN } }, select: { id: true, status: true } });
+  for (const child of children) {
+    if (child.status === "RUNNING") {
+      await db.automationRun.updateMany({ where: { id: child.id, status: "RUNNING" }, data: { cancelRequested: true } });
+    } else {
+      const done = await db.automationRun.updateMany({ where: { id: child.id, status: { in: ["QUEUED", "WAITING", "NEEDS_ATTENTION"] } }, data: { status: "CANCELLED", finishedAt: now, error: "The run it is a path of stopped.", lockedBy: null, lockedUntil: null } });
+      if (done.count) await afterEnd({ id: child.id, parentRunId: null, parentStepKey: null }, "CANCELLED");
+    }
+  }
+}
+
+/** Wakes a run waiting on its parallel paths once none of them is still going. */
+export async function wakeParentIfDone(parentRunId: string, parentStepKey: string | null) {
+  const open = await db.automationRun.count({ where: { parentRunId, ...(parentStepKey ? { parentStepKey } : {}), status: { in: OPEN } } });
+  if (open) return;
+  const woken = await db.automationRun.updateMany({ where: { id: parentRunId, status: "WAITING" }, data: { runAfter: new Date() } });
+  if (woken.count) await requestWakeHere();
 }
 
 function failureKindOf(err: unknown): FailureKind {
@@ -345,6 +424,9 @@ async function load(runId: string): Promise<Held | null> {
       status: true,
       lockedBy: true,
       workflowId: true,
+      versionId: true,
+      parentRunId: true,
+      parentStepKey: true,
       depth: true,
       isTest: true,
       attempts: true,
@@ -361,6 +443,9 @@ async function load(runId: string): Promise<Held | null> {
   return {
     id: row.id,
     workflowId: row.workflowId,
+    versionId: row.versionId,
+    parentRunId: row.parentRunId,
+    parentStepKey: row.parentStepKey,
     workflowName: row.workflow.name,
     ownerUserId: row.workflow.ownerUserId,
     depth: row.depth,
@@ -408,6 +493,7 @@ export async function advanceRun(runId: string, clock: Clock): Promise<Automatio
 
     const here = currentStep(run.definition, run.cursor);
     run.cursor = here.cursor;
+    keepItems(run);
     const step = here.step;
     if (!step) {
       // A workflow that carries on past failures still says which steps failed.
@@ -425,6 +511,50 @@ export async function advanceRun(runId: string, clock: Clock): Promise<Automatio
     const outcome = await runStep(run, step, clock);
     if (outcome !== "NEXT") return outcome;
   }
+}
+
+/** Each for-each the cursor is in: its output names the item this time round. */
+function keepItems(run: Held) {
+  for (const frame of run.cursor.frames) {
+    if (frame.of === undefined || !frame.branch) continue;
+    const output = run.context.steps[frame.branch]?.output as { items?: unknown[] } | undefined;
+    if (!output?.items) continue;
+    const index = frame.iteration ?? 0;
+    run.context.steps[frame.branch] = { output: { ...output, item: output.items[index] ?? null, index } };
+  }
+}
+
+/** Parks a run until `until`, on the step it is on — an approval, a wait, a parallel step — to look again then, or when woken. */
+async function park(run: Held, until: Date): Promise<"WAITING" | "LOST"> {
+  const saved = await checkpoint(run, { status: "WAITING", runAfter: until, lockedBy: null, lockedUntil: null, attempts: 0, cursor: run.cursor as unknown as Prisma.InputJsonValue, contextCipher: await sealContext(run.context) });
+  if (!saved) return "LOST";
+  await requestWakeHere(until);
+  return "WAITING";
+}
+
+/**
+ * Parks the run, then looks once more: an answer that came while it was being parked — a decision, an
+ * event, the last parallel path — found nobody waiting to wake, so the run wakes itself.
+ */
+async function parkUnless(run: Held, until: Date, ready: () => Promise<boolean>): Promise<"WAITING" | "LOST"> {
+  const parked = await park(run, until);
+  if (parked === "WAITING" && (await ready())) {
+    const woken = await db.automationRun.updateMany({ where: { id: run.id, status: "WAITING" }, data: { runAfter: new Date() } });
+    if (woken.count) await requestWakeHere();
+  }
+  return parked;
+}
+
+/** A step that can't go on, ever: recorded, and the run failed. */
+async function failHere(run: Held, row: StepRow, message: string): Promise<"FAILED"> {
+  await db.automationRunStep.update(stepDone(row, "FAILED", undefined, message, "PERMANENT"));
+  await finish(run, "FAILED", message);
+  return "FAILED";
+}
+
+/** Into one of a step's lists, or past the step when that list has nothing in it. */
+function into(run: Held, step: Step, path: number, extra: Parameters<typeof enterList>[3] = {}): Cursor {
+  return (childList(step, path) ?? []).length ? enterList(run.cursor, step.id, path, extra) : advance(run.cursor);
 }
 
 /** One step: saved, then the run moved on — or ended, put to wait, or put back for a retry. */
@@ -514,7 +644,181 @@ async function runStep(run: Held, step: Step, clock: Clock): Promise<"NEXT" | Au
     }
     case "action":
       return runAction(run, step, clock);
+    case "approval":
+      return runApproval(run, step, now);
+    case "waitForEvent":
+      return runWait(run, step, now);
+    case "forEach": {
+      const row = await startStep(run, step, null);
+      const items = resolveValue(step.items, run.context);
+      if (!Array.isArray(items)) return failHere(run, row, `${typeof step.items === "string" ? step.items : "The items"} isn't a list.`);
+      if (items.length > LIMITS.forEachItems) return failHere(run, row, `The list has ${items.length} items; a for-each goes through at most ${LIMITS.forEachItems}.`);
+      await db.automationRunStep.update(stepDone(row, "SUCCEEDED", { count: items.length }));
+      run.context.steps[step.id] = { output: { items, count: items.length, item: items[0] ?? null, index: 0 } };
+      const next = items.length ? into(run, step, 0, { iteration: 0, of: items.length }) : advance(run.cursor);
+      return (await save(run, next)) ? "NEXT" : "LOST";
+    }
+    case "parallel":
+      return runParallel(run, step);
   }
+}
+
+const decided = async (requestId: string) => (await db.approvalRequest.findUnique({ where: { id: requestId }, select: { status: true } }))?.status !== "PENDING";
+const taken = async (waitId: string) => !!(await db.automationEventWait.findUnique({ where: { id: waitId }, select: { matchedEventId: true } }))?.matchedEventId;
+const pathsDone = async (runId: string, key: string) => (await db.automationRun.count({ where: { parentRunId: runId, parentStepKey: key, status: { in: OPEN } } })) === 0;
+
+/**
+ * An approval: the first time here, a request in the approvals inbox and the run parked until it
+ * times out; woken by a decision — or the time running out — the approved or rejected steps.
+ */
+async function runApproval(run: Held, step: Extract<Step, { type: "approval" }>, now: Date): Promise<"NEXT" | AutomationRunStatus | "LOST"> {
+  const key = stepKey(run.cursor, step.id);
+  const title = String(resolveValue(step.title, run.context) ?? "").slice(0, 200) || "Approve this";
+  if (run.isTest) {
+    // A test says who it would ask, and goes on as approved.
+    const row = await startStep(run, step, null);
+    const asked = await resolveApprovers(step.approvers, run.context, run.ownerUserId);
+    await db.automationRunStep.update(stepDone(row, "SUCCEEDED", { wouldAsk: asked.length, role: step.role ?? null, decision: "approved", test: true }));
+    run.context.steps[step.id] = { output: { decision: "approved", decidedById: null, comment: null, timedOut: false } };
+    return (await save(run, into(run, step, 0))) ? "NEXT" : "LOST";
+  }
+  let request = await db.approvalRequest.findUnique({ where: { runId_stepKey: { runId: run.id, stepKey: key } } });
+  if (!request) {
+    const row = await startStep(run, step, null);
+    const approverIds = await resolveApprovers(step.approvers, run.context, run.ownerUserId);
+    const tell = await approversToTell(approverIds, step.role ?? null);
+    if (!tell.length) return failHere(run, row, "Nobody is left to approve this: the people named have left, and nobody holds the role.");
+    const expiresAt = new Date(now.getTime() + delayMs(step.timeout));
+    const message = step.message ? String(resolveValue(step.message, run.context) ?? "").slice(0, 2000) : null;
+    const made = await db.approvalRequest.create({
+      data: { kind: "WORKFLOW_STEP", workflowId: run.workflowId, runId: run.id, stepKey: key, title, summary: message, approverIds, approverRole: step.role ?? null, expiresAt, onTimeout: step.onTimeout },
+      select: { id: true },
+    });
+    await db.automationRunStep.update(stepDone(row, "SUCCEEDED", { asked: tell.length, until: expiresAt.toISOString() }));
+    const parked = await parkUnless(run, expiresAt, () => decided(made.id));
+    if (parked === "WAITING") await tellApprovers(tell, title, run.workflowName);
+    return parked;
+  }
+  if (request.status === "PENDING") {
+    const id = request.id;
+    if (request.expiresAt > now) return parkUnless(run, request.expiresAt, () => decided(id));
+    // Nobody decided in time: it goes the way it was set to — unless a decision landed just now.
+    const timed = await db.approvalRequest.updateMany({ where: { id: request.id, status: "PENDING" }, data: { status: "TIMED_OUT", decidedAt: now } });
+    request = (await db.approvalRequest.findUnique({ where: { id: request.id } }))!;
+    if (!timed.count && request.status === "PENDING") return parkUnless(run, request.expiresAt, () => decided(id));
+  }
+  if (request.status === "CANCELLED") {
+    await finish(run, "CANCELLED", "The approval was cancelled.");
+    return "CANCELLED";
+  }
+  const timedOut = request.status === "TIMED_OUT";
+  const decision = timedOut ? (request.onTimeout === "approved" ? "approved" : "rejected") : request.status === "APPROVED" ? "approved" : "rejected";
+  const row = await startStep(run, step, null);
+  const by = request.decidedById ? (await db.user.findUnique({ where: { id: request.decidedById }, select: { name: true } }))?.name ?? null : null;
+  await db.automationRunStep.update(stepDone(row, "SUCCEEDED", { decision, by, timedOut, comment: request.comment }));
+  run.context.steps[step.id] = { output: { decision, decidedById: request.decidedById, decidedBy: by, comment: request.comment, timedOut } };
+  return (await save(run, into(run, step, decision === "approved" ? 0 : 1))) ? "NEXT" : "LOST";
+}
+
+/** A wait for an event: the first time here, a wait the matcher looks at; woken by an event, or the time running out. */
+async function runWait(run: Held, step: Extract<Step, { type: "waitForEvent" }>, now: Date): Promise<"NEXT" | AutomationRunStatus | "LOST"> {
+  const key = stepKey(run.cursor, step.id);
+  if (run.isTest) {
+    const row = await startStep(run, step, null);
+    await db.automationRunStep.update(stepDone(row, "SUCCEEDED", { wouldWaitFor: step.event, test: true }));
+    run.context.steps[step.id] = { output: { timedOut: false, event: null } };
+    return (await save(run, advance(run.cursor))) ? "NEXT" : "LOST";
+  }
+  const wait = await db.automationEventWait.findUnique({ where: { runId_stepKey: { runId: run.id, stepKey: key } }, select: { id: true, expiresAt: true, matchedEventId: true, matchedPayload: true } });
+  if (!wait) {
+    const row = await startStep(run, step, null);
+    const { rules, any } = fixRules(step.filter, run.context);
+    const expiresAt = new Date(now.getTime() + delayMs(step.timeout));
+    const made = await db.automationEventWait.create({ data: { runId: run.id, stepKey: key, eventType: step.event, rules: rules as unknown as Prisma.InputJsonValue, matchAny: any, expiresAt }, select: { id: true } });
+    await db.automationRunStep.update(stepDone(row, "SUCCEEDED", { waitingFor: step.event, until: expiresAt.toISOString() }));
+    return parkUnless(run, expiresAt, () => taken(made.id));
+  }
+  let came = wait.matchedEventId ? wait.matchedPayload : null;
+  if (!wait.matchedEventId) {
+    if (wait.expiresAt > now) return parkUnless(run, wait.expiresAt, () => taken(wait.id));
+    // Out of time — unless the event was taken just now.
+    const gone = await db.automationEventWait.deleteMany({ where: { id: wait.id, matchedEventId: null } });
+    if (!gone.count) came = (await db.automationEventWait.findUnique({ where: { id: wait.id }, select: { matchedPayload: true } }))?.matchedPayload ?? null;
+  }
+  await db.automationEventWait.deleteMany({ where: { id: wait.id } });
+  const row = await startStep(run, step, null);
+  const timedOut = came === null;
+  await db.automationRunStep.update(stepDone(row, "SUCCEEDED", { timedOut, event: came }));
+  run.context.steps[step.id] = { output: { timedOut, event: came } };
+  if (timedOut && step.onTimeout === "stop") {
+    await finish(run, "SUCCEEDED", null, { cursor: run.cursor as unknown as Prisma.InputJsonValue, contextCipher: await sealContext(run.context) });
+    return "SUCCEEDED";
+  }
+  return (await save(run, advance(run.cursor))) ? "NEXT" : "LOST";
+}
+
+/**
+ * A parallel step: its paths start as runs of their own, with this run's data, and this run waits.
+ * Woken when the last is done, it takes in the outputs of every path's steps and goes on — or fails,
+ * when a path failed or was cancelled. A test runs the paths one after another, in itself.
+ */
+async function runParallel(run: Held, step: Extract<Step, { type: "parallel" }>): Promise<"NEXT" | AutomationRunStatus | "LOST"> {
+  if (run.isTest) {
+    const row = await startStep(run, step, null);
+    await db.automationRunStep.update(stepDone(row, "SUCCEEDED", { paths: step.paths.length, test: true }));
+    run.context.steps[step.id] = { output: { paths: step.paths.length } };
+    return (await save(run, enterList(run.cursor, step.id, 0, { paths: step.paths.length }))) ? "NEXT" : "LOST";
+  }
+  const key = stepKey(run.cursor, step.id);
+  const children = await db.automationRun.findMany({ where: { parentRunId: run.id, parentStepKey: key }, orderBy: { runSeq: "asc" }, select: { id: true, runSeq: true, status: true, error: true, contextCipher: true, cursor: true } });
+  const lastly = new Date(run.createdAt.getTime() + ENGINE_LIMITS.runLifeMs);
+  // Every path started — or, after a worker died part way, the ones not started yet (each path's key
+  // makes a second try at one that exists a no-op).
+  if (children.length < step.paths.length) {
+    const row = await startStep(run, step, null);
+    for (const [i] of step.paths.entries()) {
+      await createRun({
+        workflowId: run.workflowId,
+        versionId: run.versionId,
+        idempotencyKey: `${run.id}:${key}:path${i}`,
+        trigger: run.context.trigger,
+        steps: run.context.steps,
+        cursor: enterList(run.cursor, step.id, i, { scope: true }),
+        depth: run.depth,
+        parentRunId: run.id,
+        parentStepKey: key,
+      });
+    }
+    await db.automationRunStep.update(stepDone(row, "SUCCEEDED", { paths: step.paths.length, started: true }));
+    await requestWakeHere();
+    return parkUnless(run, lastly, () => pathsDone(run.id, key));
+  }
+  if (children.some((c) => OPEN.includes(c.status))) return parkUnless(run, lastly, () => pathsDone(run.id, key));
+
+  const row = await startStep(run, step, null);
+  const pathOf = (c: { cursor: Prisma.JsonValue }) => (isCursor(c.cursor) ? (c.cursor.frames.find((f) => f.branch === step.id)?.path ?? 0) : 0);
+  const bad = children.find((c) => c.status !== "SUCCEEDED");
+  if (bad) {
+    const name = step.paths[pathOf(bad)]?.name ?? "A path";
+    const message = `${name} ${bad.status === "CANCELLED" ? "was cancelled" : `failed: ${bad.error ?? "no reason given"}`} (${runRef(bad.runSeq)}).`;
+    if (run.definition.settings?.onError === "continue") {
+      await db.automationRunStep.update(stepDone(row, "FAILED", undefined, message, "PERMANENT"));
+      run.context.steps[step.id] = { output: null, failed: message.slice(0, 300) };
+      return (await save(run, advance(run.cursor))) ? "NEXT" : "LOST";
+    }
+    return failHere(run, row, message);
+  }
+  // Every path's steps' outputs, as each path's run left them.
+  for (const child of children) {
+    const context = await openContext(child.contextCipher);
+    for (const { step: inner } of eachStep(step.paths[pathOf(child)]?.steps ?? [])) {
+      const output = context.steps[inner.id];
+      if (output) run.context.steps[inner.id] = output;
+    }
+  }
+  await db.automationRunStep.update(stepDone(row, "SUCCEEDED", { paths: step.paths.length, runs: children.map((c) => runRef(c.runSeq)) }));
+  run.context.steps[step.id] = { output: { paths: step.paths.length } };
+  return (await save(run, advance(run.cursor))) ? "NEXT" : "LOST";
 }
 
 async function save(run: Held, cursor: Cursor): Promise<boolean> {
@@ -575,7 +879,7 @@ async function runAction(run: Held, step: Extract<Step, { type: "action" }>, clo
   } else {
     try {
       output = await action.run(
-        { actorId: run.ownerUserId, workflowId: run.workflowId, workflowName: run.workflowName, runId: run.id, stepId: step.id, key: `${run.id}:${step.id}`, depth: run.depth, clock },
+        { actorId: run.ownerUserId, workflowId: run.workflowId, workflowName: run.workflowName, runId: run.id, stepId: step.id, key: `${run.id}:${stepKey(run.cursor, step.id)}`, depth: run.depth, clock },
         input.data as never,
       );
     } catch (err) {

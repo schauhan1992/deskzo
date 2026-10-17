@@ -26,6 +26,7 @@ import { draftWithAI, stepCount } from "@/lib/automate/ai/draft";
 import { DraftingRefusal, draftingProvider, draftingUnavailable } from "@/lib/automate/ai/model";
 import { copilotConfig } from "@/lib/copilot/settings";
 import { notMigratedYet } from "@/lib/not-migrated";
+import { decide, inboxFor } from "@/lib/automate/approvals";
 import { randomUUID } from "node:crypto";
 import type { ActionResult } from "@/actions/company";
 
@@ -817,6 +818,91 @@ export async function deleteAutomationCompanyTemplate(id: string): Promise<Actio
     if (!(await deleteCompanyTemplate(id))) return { ok: false, error: "That template no longer exists." };
     await recordAudit({ userId: user.id, action: "DELETE", entityType: "AutomationTemplate", entityId: id, entityLabel: "A company workflow template" });
     revalidatePath("/automate/templates");
+    return { ok: true, data: null };
+  } catch (err) {
+    return refused(err);
+  }
+}
+
+// ─── The approvals inbox (Phase 6) ─────────────────────────────────────────────────────────────────
+
+export type InboxItem = {
+  id: string;
+  /** A workflow's approval step, or something the AI copilot drafted for this person to confirm. */
+  source: "workflow" | "copilot";
+  title: string;
+  summary: string | null;
+  from: string;
+  askedAt: Date;
+  expiresAt: Date | null;
+  status: string;
+  decidedBy: string | null;
+  decidedAt: Date | null;
+  comment: string | null;
+};
+
+/**
+ * What waits on this person to approve or reject — named on a workflow's approval step, or holding
+ * its role — with the copilot's drafts waiting on them, and what they decided lately. For anybody
+ * signed in: approvers needn't be admins.
+ */
+export async function getApprovalsInbox(): Promise<{ waiting: InboxItem[]; decided: InboxItem[] }> {
+  const user = await requireModuleUser("automate");
+  let requests: Awaited<ReturnType<typeof inboxFor>>;
+  try {
+    requests = await inboxFor(user.id);
+  } catch (err) {
+    if (!notMigratedYet(err)) throw err;
+    requests = { waiting: [], decided: [] };
+  }
+  const all = [...requests.waiting, ...requests.decided];
+  const [workflows, people, proposals] = await Promise.all([
+    db.automationWorkflow.findMany({ where: { id: { in: [...new Set(all.map((r) => r.workflowId).filter((x): x is string => !!x))] } }, select: { id: true, name: true } }),
+    db.user.findMany({ where: { id: { in: [...new Set(all.map((r) => r.decidedById).filter((x): x is string => !!x))] } }, select: { id: true, name: true } }),
+    db.copilotProposal.findMany({ where: { userId: user.id, status: "PENDING" }, orderBy: { createdAt: "desc" }, take: 50, select: { id: true, kind: true, summary: true, createdAt: true } }),
+  ]);
+  const workflowName = new Map(workflows.map((w) => [w.id, w.name]));
+  const personName = new Map(people.map((p) => [p.id, p.name]));
+  const item = (r: (typeof all)[number]): InboxItem => ({
+    id: r.id,
+    source: "workflow",
+    title: r.title,
+    summary: r.summary,
+    from: r.workflowId ? `The workflow "${workflowName.get(r.workflowId) ?? "that has since gone"}"` : "Deskzo",
+    askedAt: r.createdAt,
+    expiresAt: r.expiresAt,
+    status: r.status,
+    decidedBy: r.decidedById ? (personName.get(r.decidedById) ?? "Someone who has left") : null,
+    decidedAt: r.decidedAt,
+    comment: r.comment,
+  });
+  const drafts: InboxItem[] = proposals.map((p) => ({
+    id: p.id,
+    source: "copilot",
+    title: `${p.kind === "TASK" ? "A task" : "A note"}: ${p.summary}`,
+    summary: null,
+    from: "The AI copilot, in your chat",
+    askedAt: p.createdAt,
+    expiresAt: null,
+    status: "PENDING",
+    decidedBy: null,
+    decidedAt: null,
+    comment: null,
+  }));
+  return { waiting: [...requests.waiting.map(item), ...drafts], decided: requests.decided.map(item) };
+}
+
+/** Approves or rejects a workflow's request — only somebody it names, or who holds its role. */
+export async function decideApproval(id: string, decision: "approved" | "rejected", comment: string | null): Promise<ActionResult<null>> {
+  try {
+    const user = await requireModuleUser("automate");
+    const viewing = await refuseWhileViewingAs();
+    if (viewing) return { ok: false, error: viewing };
+    if (decision !== "approved" && decision !== "rejected") return { ok: false, error: "Approve it or reject it." };
+    const done = await decide(String(id), user.id, decision, typeof comment === "string" ? comment : null);
+    if (!done.ok) return done;
+    await recordAudit({ userId: user.id, action: "UPDATE", entityType: "ApprovalRequest", entityId: String(id), entityLabel: `${decision === "approved" ? "Approved" : "Rejected"} in the approvals inbox` });
+    revalidatePath("/approvals");
     return { ok: true, data: null };
   } catch (err) {
     return refused(err);

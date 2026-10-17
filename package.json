@@ -176,6 +176,7 @@
     "check:automate": "tsx scripts/check-automate.ts",
     "check:automate-actions": "tsx scripts/check-automate-actions.ts",
     "check:automate-builder": "tsx scripts/check-automate-builder.ts",
+    "check:automate-advanced": "tsx scripts/check-automate-advanced.ts",
     "check:automate-connectors": "tsx scripts/check-automate-connectors.ts",
     "check:automate-drafting": "tsx scripts/check-automate-drafting.ts",
     "eval:automate-drafting": "tsx scripts/eval-automate-drafting.ts",

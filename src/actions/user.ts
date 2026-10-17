@@ -24,6 +24,7 @@ import { logActivity } from "@/lib/activity";
 import { signInPolicyFor } from "@/lib/workplace/sign-in-rules-server";
 import { lockedOut, waysIn } from "@/lib/workplace/sign-in-rules";
 import { ADMIN_RESET_LINK_TTL_MS, adminResetMail, temporaryPassword, temporaryResetNotice } from "@/lib/admin-password";
+import { emitPersonJoined } from "@/lib/automate/emit-people";
 
 function refuse(err: unknown): ActionResult<never> {
   if (err instanceof AuthzError) return { ok: false, error: err.message };
@@ -284,6 +285,8 @@ export async function createUser(
       if (jobTitle?.trim()) {
         await tx.employeeProfile.create({ data: { userId: made.id, designation: jobTitle.trim() } });
       }
+      // For Deskzo Automate: somebody has joined (an onboarding workflow starts from it).
+      await emitPersonJoined(tx, made.id, admin.id);
       return made;
     });
   } catch (err) {

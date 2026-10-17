@@ -14282,14 +14282,91 @@ model AutomationRun {
   finishedAt      DateTime?
   error           String?
   createdAt       DateTime            @default(now())
+  /// A path of a parallel step runs as a run of its own (Phase 6): the run it belongs to, and that
+  /// step (its id, and which time round a for-each it is). The parent waits until every path is done.
+  parentRunId     String?
+  parentStepKey   String?
 
   steps   AutomationRunStep[]
   effects AutomationEffect[]
+  waits   AutomationEventWait[]
 
   @@index([status, runAfter])
   @@index([workflowId, createdAt])
   @@index([workflowId, recordKey, createdAt])
+  @@index([parentRunId])
   @@map("automation_runs")
+}
+
+/**
+ * A run waiting for something to happen (Deskzo Automate, Phase 6 — wait-for-event): the event it
+ * waits for, and the rules an event must meet, their values fixed when the wait began. The matcher
+ * fills in the event that came; the run, woken, reads it. Gone with its run.
+ */
+model AutomationEventWait {
+  id             String        @id @default(cuid())
+  runId          String
+  run            AutomationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  /// The step's id, and which time round a for-each it is.
+  stepKey        String
+  eventType      String
+  /// The rules, each { ref: "event.…", op, value } with the value already worked out.
+  rules          Json
+  matchAny       Boolean       @default(false)
+  expiresAt      DateTime
+  matchedEventId String?
+  matchedPayload Json?
+  createdAt      DateTime      @default(now())
+
+  @@unique([runId, stepKey])
+  @@index([eventType, matchedEventId])
+  @@map("automation_event_waits")
+}
+
+enum ApprovalKind {
+  /// An approval step in a workflow.
+  WORKFLOW_STEP
+  /// Something an AI agent proposes to do (the agent plan); the copilot's own proposals are read from copilot_proposals.
+  AGENT_PROPOSAL
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  /// Nobody decided in time: the step went the way it was set to go.
+  TIMED_OUT
+  CANCELLED
+}
+
+/**
+ * The approvals inbox (Deskzo Automate, Phase 6; shared with the agent plan): something waiting for a
+ * named person, or anybody with a role, to approve or reject. Only they may decide; nobody deciding by
+ * `expiresAt` sends the step down its `onTimeout` path.
+ */
+model ApprovalRequest {
+  id           String         @id @default(cuid())
+  kind         ApprovalKind   @default(WORKFLOW_STEP)
+  workflowId   String?
+  runId        String?
+  stepKey      String?
+  title        String
+  summary      String?
+  approverIds  String[]
+  /// Anybody with this role may decide too.
+  approverRole String?
+  status       ApprovalStatus @default(PENDING)
+  decidedById  String?
+  decidedAt    DateTime?
+  comment      String?
+  expiresAt    DateTime
+  /// "approved" or "rejected": the way the step goes when nobody decides in time.
+  onTimeout    String
+  createdAt    DateTime       @default(now())
+
+  @@unique([runId, stepKey])
+  @@index([status, expiresAt])
+  @@map("approval_requests")
 }
 
 /** One try of one step: what went in and came out, redacted for showing, and how it ended. */

@@ -40,6 +40,7 @@ export const TRIGGERS: readonly TriggerDefinition[] = [
   { type: "booking.made", label: "Somebody books a slot", fields: ["booking", "companyId", "contactId", "leadId"], event: true },
   { type: "task.created", label: "A task is created", fields: ["task"], event: true },
   { type: "task.completed", label: "A task is done", fields: ["task"], event: true },
+  { type: "person.joined", label: "Somebody joins the company", fields: ["person"], event: true },
 ];
 
 export function triggerByType(type: string): TriggerDefinition | null {
@@ -62,6 +63,7 @@ const PARTS: Record<string, readonly Field[]> = {
   payment: [f("id", "id"), f("ref", "number"), f("amount", "amount"), f("currency", "currency"), f("method", "method"), f("reference", "reference"), f("companyId", "customer id"), f("invoiceId", "invoice id")],
   order: [f("id", "id"), f("ref", "number"), f("status", "status"), f("companyId", "customer id"), f("itemId", "product id"), f("itemName", "product"), f("quantity", "quantity"), f("unitPrice", "unit price"), f("endDate", "ends on"), f("addedByUserId", "added by")],
   booking: [f("id", "id"), f("pageId", "booking page id"), f("page", "booking page"), f("hostUserId", "host"), f("startsAt", "starts at"), f("endsAt", "ends at")],
+  person: [f("id", "id"), f("name", "name"), f("role", "role"), f("designation", "designation"), f("departmentId", "team id"), f("department", "team"), f("managerId", "manager"), f("joinedOn", "joining date")],
   task: [f("id", "id"), f("title", "title"), f("status", "status"), f("priority", "priority"), f("dueDate", "due date"), f("assignedToUserId", "assigned to"), f("createdByUserId", "created by"), f("companyId", "customer id"), f("leadId", "lead id"), f("ticketId", "ticket id")],
   form: [f("id", "id"), f("name", "name")],
   submission: [f("id", "id")],
@@ -77,6 +79,7 @@ const LABELS: Record<string, string> = {
   order: "Order",
   booking: "Booking",
   task: "Task",
+  person: "Person",
   form: "Form",
   submission: "Response",
   from: "From",

@@ -5,6 +5,7 @@ import { workspaceClock } from "@/lib/time/workspace";
 import { leadFacts } from "@/lib/automate/emit-leads";
 import { ticketFacts } from "@/lib/automate/emit-tickets";
 import { documentFacts, orderFacts, paymentFacts, taskFacts } from "@/lib/automate/emit-records";
+import { personFacts } from "@/lib/automate/emit-people";
 
 /**
  * What a test run starts from (Deskzo Automate, Phase 3): the latest real record of the kind a trigger
@@ -156,6 +157,12 @@ export async function sampleTrigger(userId: string, type: string, now: Date = ne
     const task = await db.task.findFirst({ where: { AND: [await taskAccess(userId, "view"), type === "task.completed" ? { status: "DONE" } : {}] }, orderBy: { createdAt: "desc" }, select: { id: true } });
     const facts = task ? await taskFacts(tx(), task.id) : null;
     return facts ? { payload: facts, about: `the task "${facts.task.title}"` } : null;
+  }
+
+  if (type === "person.joined") {
+    const person = await db.user.findFirst({ where: { active: true }, orderBy: { createdAt: "desc" }, select: { id: true } });
+    const facts = person ? await personFacts(tx(), person.id) : null;
+    return facts ? { payload: facts, about: `${facts.person.name}, the latest to join` } : null;
   }
 
   return null;
