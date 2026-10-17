@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireModuleUser } from "@/lib/modules-access";
+import { isModuleEntitled, requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { isModuleEnabled } from "@/actions/module";
@@ -236,7 +236,12 @@ export async function runPayroll(input: unknown): Promise<ActionResult<{ id: str
   // Approved incentives waiting to go out with this month's salary. Paid through payroll rather
   // than separately, because performance pay is taxable salary and belongs on the payslip — paying
   // it outside would leave it off Form 16 and out of the PT and ESI computation.
-  const incentives = await payableForPayroll(month, year);
+  //
+  // Only where the plan has Incentives: it is another module's action, and throws outside its plan
+  // (src/lib/modules-access.ts requireModuleUser) — Deskzo People sells payroll without Incentives.
+  // Earnings approved before a plan dropped Incentives stay approved and unpaid, never lost: the
+  // month they are back in the plan, the next run pays them.
+  const incentives = (await isModuleEntitled("incentives")) ? await payableForPayroll(month, year) : [];
   const incentiveByUser = new Map<string, { total: number; ids: string[]; labels: string[] }>();
   for (const row of incentives) {
     const bucket = incentiveByUser.get(row.userId) ?? { total: 0, ids: [], labels: [] };

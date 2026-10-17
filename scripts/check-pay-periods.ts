@@ -33,6 +33,8 @@
  *   · a salary revised inside a month is paid each part at its own rate by the run itself, a day off
  *     docked at the rate of the part it fell in; a settlement pays at the salary they left on, not a
  *     revision dated after;
+ *   · a plan without Incentives (Deskzo People on its own) still runs payroll, leaving an approved
+ *     incentive waiting, unpaid, until the plan has Incentives again;
  *   · a balance brought from the old system stands in for the carry Deskzo can't work out, the next
  *     year carries from it, and what was taken before Deskzo is counted as used — typed through the
  *     opening balances sheet by HR only, for this year or last;
@@ -74,12 +76,14 @@ const d = (iso: string) => new Date(`${iso}T00:00:00Z`);
 const num = (v: unknown) => Number(v ?? 0);
 
 async function cleanup() {
-  const fixtureMonths = [{ month: 3, year: 2001 }, { month: 10, year: 2000 }, { month: 1, year: 2001 }, { month: 5, year: 2001 }];
+  const fixtureMonths = [{ month: 3, year: 2001 }, { month: 10, year: 2000 }, { month: 1, year: 2001 }, { month: 5, year: 2001 }, { month: 6, year: 2001 }];
   await db.payslip.deleteMany({ where: { run: { OR: fixtureMonths } } });
   await db.payrollRun.deleteMany({ where: { OR: fixtureMonths } });
   // Balances and settlements go with the people and types (onDelete: Cascade).
   await db.leaveType.deleteMany({ where: { code: { in: CODES } } });
   await db.auditLog.deleteMany({ where: { user: { email: { endsWith: MAIL } } } });
+  // Before the people: an award's maker (the clerk) can't be deleted from under it.
+  await db.incentiveEarning.deleteMany({ where: { user: { email: { endsWith: MAIL } } } });
   await db.user.deleteMany({ where: { email: { endsWith: MAIL } } });
   await db.role.deleteMany({ where: { key: ROLE } });
 }
@@ -358,6 +362,44 @@ async function main() {
     ok("...and the payslip says when it changed", /Salary revised in the month/.test(raisedSlip?.note ?? ""), raisedSlip?.note);
     const earlySlip = await slipOf(earlyOff.id);
     ok("the day off before the raise is docked at the old rate: ₹38,000", num(earlySlip?.grossEarnings) === 38000, num(earlySlip?.grossEarnings));
+
+    section("A plan without Incentives — Deskzo People on its own");
+    {
+      /* eslint-disable @typescript-eslint/no-require-imports */
+      const { currentTenant, runAsTenant } = require("../src/lib/tenancy/resolve") as typeof import("../src/lib/tenancy/resolve");
+      const { moduleEntitled } = require("../src/lib/entitlements") as typeof import("../src/lib/entitlements");
+      const { productByKey } = require("../src/lib/products") as typeof import("../src/lib/products");
+      /* eslint-enable @typescript-eslint/no-require-imports */
+      const here = await currentTenant();
+      // The People product's own modules (hr, payroll, visitors, engagement): payroll is in it, Incentives is not.
+      const peopleOnly = { ...here, entitlements: { ...here.entitlements, all: false, modules: [...(productByKey("people")?.modules ?? [])] } };
+      ok(
+        "(the plan here is the People product's: payroll in it, Incentives not)",
+        moduleEntitled(peopleOnly.entitlements, here.country, "payroll") && !moduleEntitled(peopleOnly.entitlements, here.country, "incentives"),
+      );
+      // June 2001, 30 days, nobody absent: ₹30,000 — and a ₹5,000 award approved for the month.
+      const earner = await person("Earner", { joinedOn: "2000-01-10" });
+      await flat(earner.id, "2000-01-10", 30000);
+      const award = await db.incentiveEarning.create({
+        data: { userId: earner.id, createdById: clerk.id, fromDate: d("2001-06-01"), toDate: d("2001-06-30"), label: "Zzprobe award", amount: 5000, workings: TAG, status: "APPROVED" },
+      });
+      const juneSlip = () => db.payslip.findFirst({ where: { userId: earner.id, run: { month: 6, year: 2001 } } });
+      const failed = (err: unknown) => ({ ok: false as const, error: err instanceof Error ? `${err.name}: ${err.message}` : String(err) });
+      const peopleRun = await runAsTenant(peopleOnly, () => runPayroll({ month: 6, year: 2001 })).catch(failed);
+      ok("payroll runs on a plan without Incentives", peopleRun.ok, peopleRun.ok ? "" : peopleRun.error);
+      const unpaid = await juneSlip();
+      ok("...the month's salary is paid, with no incentive on the payslip", num(unpaid?.grossEarnings) === 30000 && num(unpaid?.incentive) === 0, unpaid ? `${num(unpaid.grossEarnings)} / ${num(unpaid.incentive)}` : "no payslip");
+      const waiting = await db.incentiveEarning.findUnique({ where: { id: award.id }, select: { status: true, payslipId: true } });
+      ok("...and the approved award waits, unpaid, for a plan that has Incentives", waiting?.status === "APPROVED" && waiting.payslipId === null, JSON.stringify(waiting));
+      const fullRun = await runPayroll({ month: 6, year: 2001 }).catch(failed);
+      const paid = await juneSlip();
+      const attached = await db.incentiveEarning.findUnique({ where: { id: award.id }, select: { payslipId: true } });
+      ok(
+        "with Incentives in the plan, recalculating the month puts the award on the payslip",
+        fullRun.ok && num(paid?.incentive) === 5000 && !!paid && attached?.payslipId === paid.id,
+        fullRun.ok ? `${num(paid?.incentive)} / ${attached?.payslipId ?? "not attached"}` : fullRun.error,
+      );
+    }
 
     // Leaving on 20 May with a raise saved for 1 June: the settlement pays at what they were on.
     const leaving = await person("LeavesBeforeRaise", { joinedOn: "2000-01-10", exitedOn: "2001-05-20" });
