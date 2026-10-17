@@ -17,6 +17,7 @@ import { ActionNoticeRegion } from "@/components/ui/action-notice";
 import { useWording } from "@/components/terms/wording-provider";
 import { wordedSources } from "@/components/reports/report-wording";
 import { formatCurrency, cn } from "@/lib/utils";
+import { REPORT_ROWS_SHOWN } from "@/lib/analytics/rows-shown";
 
 /**
  * Pick a thing, a number, and something to break it down by.
@@ -37,10 +38,11 @@ const TIME = "time";
  * table was the only surface with no ceiling at all, so the widest question anybody could ask was
  * also the one that stopped the page responding.
  *
- * The rows are all still in the result, in every total, in the CSV and on the printed sheet. This
- * bounds what is *painted*, and says so underneath rather than trailing off.
+ * The rows are all still in the result and in every total; the CSV and the printed sheet carry every
+ * row to whoever may export this data (src/lib/analytics/rows-shown.ts). This bounds what is
+ * *painted*, and says so underneath rather than trailing off.
  */
-const TABLE_ROW_CAP = 200;
+const TABLE_ROW_CAP = REPORT_ROWS_SHOWN;
 
 const CHART_TYPES: { key: ChartType | "table"; label: string; icon: typeof Table2 }[] = [
   { key: "table", label: "Table", icon: Table2 },
@@ -777,14 +779,14 @@ export function ReportExplorer({
                     )}
                   </table>
                 </div>
-                {/* The rows are all still in the totals, in the CSV and on the printed sheet —
+                {/* The rows are all still in the totals, and in the CSV and printed sheet for whoever may export —
                     this bounds what is painted. Outside the scroll box on purpose: a notice you
                     have to scroll two hundred rows to find is not a notice. */}
                 {result.rows.length > TABLE_ROW_CAP && (
                   <p className="border-t border-line px-4 py-2 text-xs text-muted">
                     Showing the first {TABLE_ROW_CAP.toLocaleString("en-IN")} of{" "}
-                    {result.rows.length.toLocaleString("en-IN")} rows. The totals above, the CSV and the printed
-                    sheet all cover every row.
+                    {result.rows.length.toLocaleString("en-IN")} rows. The totals above cover every row; the CSV and the printed
+                    sheet carry every row for whoever may export this data.
                   </p>
                 )}
               </>

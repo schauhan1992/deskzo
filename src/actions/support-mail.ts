@@ -276,6 +276,18 @@ async function visibleTicket(userId: string, ticketId: string) {
 }
 
 /**
+ * A ticket this person may change — as commenting asks (src/actions/ticket.ts addTicketComment): an
+ * email to the customer is more than a comment, never less.
+ */
+async function editableTicket(userId: string, ticketId: string) {
+  if (!(await hasEffectivePermission(userId, "tickets.view"))) return null;
+  return db.ticket.findFirst({
+    where: { AND: [{ id: String(ticketId ?? "") }, await ticketAccess(userId, "edit")] },
+    select: { id: true, ticketSeq: true, title: true, contact: { select: { email: true } } },
+  });
+}
+
+/**
  * The ticket's emails, oldest first, and who a reply goes to: whoever wrote to it last, else its contact.
  * `canReply` is false where the platform receives no mail — a reply nobody could answer.
  */
@@ -307,6 +319,8 @@ export async function ticketEmails(ticketId: string) {
     emails: emails.map((e) => ({ ...e, createdAt: e.createdAt.toISOString(), ...visiblePart(e.body) })),
     replyTo: lastIn?.fromAddress ?? (ticket.contact?.email ? normalizeAddress(ticket.contact.email) : null),
     canReply: inboundDomain() !== null,
+    // Only somebody who may change the ticket replies on it, as only they may comment.
+    mayReply: !!(await editableTicket(user.id, ticket.id)),
     newSenders: await newSendersOf(user.id, ticket.id, emails),
   };
 }
@@ -384,8 +398,8 @@ export async function addTicketSenderAsContact(input: { ticketId: string; addres
 
 export async function replyToTicketByEmail(input: { ticketId: string; body: string; cc?: string[] }): Promise<ActionResult<null>> {
   const user = await requireModuleUser("helpdesk");
-  const ticket = await visibleTicket(user.id, input?.ticketId);
-  if (!ticket) return { ok: false, error: "That ticket no longer exists." };
+  const ticket = await editableTicket(user.id, input?.ticketId);
+  if (!ticket) return { ok: false, error: (await visibleTicket(user.id, input?.ticketId)) ? "You can't reply on this ticket." : "That ticket no longer exists." };
   const body = String(input?.body ?? "").trim();
   if (!body) return { ok: false, error: "Write the reply first." };
   if (body.length > 20_000) return { ok: false, error: "That reply is too long for one email." };

@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 /** The same sentence the screen shows — see the note on `ReportResult.grandTotal`. */
 const NEW_DOUBLE_SENTENCE =
   "A record can fall in more than one row, so the rows and the column totals add up to more than the total.";
-import { runAnalyticsReport, type ReportRequest } from "@/actions/analytics";
+import { reportExportAllowed, runAnalyticsReport, type ReportRequest } from "@/actions/analytics";
+import { REPORT_ROWS_SHOWN, rowsShown } from "@/lib/analytics/rows-shown";
 import { getSource } from "@/lib/analytics/sources";
 import { effectiveSource } from "@/lib/analytics/custom";
 import { countActiveFilters, describeFilters, type WorkbookFilters } from "@/lib/workspace/filters";
@@ -45,7 +46,13 @@ export default async function ReportPrintPage({
     notFound();
   }
 
-  const [result, viewer, clock, w] = await Promise.all([runAnalyticsReport(request!), currentUser(), workspaceClock(), getWording()]);
+  const [result, viewer, clock, w, mayExport] = await Promise.all([
+    runAnalyticsReport(request!),
+    currentUser(),
+    workspaceClock(),
+    getWording(),
+    reportExportAllowed(request!.source),
+  ]);
   if (!result.ok) {
     return <p className="p-8 text-sm text-danger">{result.error}</p>;
   }
@@ -55,6 +62,8 @@ export default async function ReportPrintPage({
   const base = getSource(request!.source);
   const source = base && viewer ? await effectiveSource(base, viewer.id) : base;
   const data = result.data;
+  // Every row only to somebody who may download them; otherwise what the screen shows, the totals still whole.
+  const shown = rowsShown(data.rows, mayExport);
   const crossTab = data.columns.length > 1 || data.columns[0]?.key !== "__all__";
   // And in the workspace's own words, as the screen names them (src/components/reports/report-wording.ts).
   const dimensionNamed = (key: string | undefined) => {
@@ -152,7 +161,7 @@ export default async function ReportPrintPage({
             </tr>
           </thead>
           <tbody>
-            {data.rows.map((row) => (
+            {shown.rows.map((row) => (
               <tr key={row.key} className="border-b border-line last:border-0">
                 <td className="py-1.5 text-text">{row.label}</td>
                 {crossTab &&
@@ -178,6 +187,12 @@ export default async function ReportPrintPage({
             </tr>
           </tfoot>
         </table>
+        {shown.hidden > 0 && (
+          <p className="mt-3 text-xs text-muted">
+            The first {REPORT_ROWS_SHOWN.toLocaleString("en-IN")} of {data.rows.length.toLocaleString("en-IN")} rows, as on screen; the totals cover every row. Printing the
+            rest needs the permission to export this data.
+          </p>
+        )}
       </div>
     </div>
   );

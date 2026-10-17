@@ -24,6 +24,7 @@ import { changedLabel, customFieldsForCreate, customSearchWhere, fieldsFor, save
 import { customFilterWhere, type CustomFilterInputs } from "@/lib/custom-fields/filters";
 import { customSheetFor, exportCells } from "@/lib/custom-fields/sheets";
 import { hasEffectivePermission } from "@/actions/permission";
+import { can } from "@/lib/authz/resolve";
 import { canonicalColumn, cleanName, nameKey, normaliseHsn } from "@/lib/items/catalogue-import";
 import { HSN_REQUIRED_MESSAGE, hsnShapeIssue } from "@/lib/hsn";
 import { hsnIssue, hsnProblemsFor, knownHsnCodes, notInDirectory } from "@/lib/platform/hsn-directory";
@@ -520,6 +521,10 @@ export async function exportItemsCsv(): Promise<ActionResult<{ csv: string; file
   const user = await requireModuleUser("items");
   const moduleError = await requireItemsModule();
   if (moduleError) return { ok: false, error: moduleError };
+  // Prices — cost prices among them — are what a competitor would most like to have: the file asks
+  // what Settings › Import & export asks for the same rows (src/lib/portability/areas.ts), rather
+  // than being a second door to them that asked nothing.
+  if (!(await can(user.id, "data.exportCatalog"))) return { ok: false, error: "Downloading the catalog needs the permission to export it." };
 
   const items = await db.item.findMany({
     orderBy: { name: "asc" },
@@ -692,6 +697,8 @@ export async function importItems(formData: FormData): Promise<ActionResult<Impo
   const user = await requireModuleUser("items");
   const moduleError = await requireItemsModule();
   if (moduleError) return { ok: false, error: moduleError };
+  // "Import the catalog" is this upload — as it is from Settings › Import & export.
+  if (!(await can(user.id, "data.importCatalog"))) return { ok: false, error: "Importing items from a file needs the permission to import the catalog." };
 
   const file = formData.get("file");
   if (!(file instanceof File)) {

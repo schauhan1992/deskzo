@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { Prisma, type ResellerOnboardingStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
+import { isModuleEnabled } from "@/actions/module";
 import { mayAccess, type AccessAction } from "@/lib/authz/access";
 import { recordAudit } from "@/lib/audit";
 import { calculateOrderAmount } from "@/lib/gst";
@@ -97,8 +98,15 @@ export async function getResellerCreditSummary(companyId: string) {
   };
 }
 
+/**
+ * A change asks what the module's pages ask: Resellers switched on for the company and open to this
+ * person (isModuleEnabled: the switch and the role's section), not only in the plan.
+ */
+const CLOSED = "Resellers isn't open to you here.";
+
 export async function updateResellerProfile(companyId: string, input: unknown): Promise<ActionResult<null>> {
   const user = await requireModuleUser("resellers");
+  if (!(await isModuleEnabled("resellers"))) return { ok: false, error: CLOSED };
   const parsed = resellerProfileSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -109,13 +117,20 @@ export async function updateResellerProfile(companyId: string, input: unknown): 
   }
 
   const data = parsed.data;
+  // The credit limit is the Credit tab's: "Override credit terms & limits" and a reason kept on the
+  // credit record (src/actions/credit.ts). The onboarding form shows it and sends it back as it was;
+  // a different one sent here would be the same change with neither.
+  const storedLimit = profile.creditLimit == null ? null : Number(profile.creditLimit);
+  const askedLimit = data.creditLimit ?? null;
+  if (askedLimit !== storedLimit) {
+    return { ok: false, error: "Change the credit limit from the Credit tab — it needs the credit permission and a reason." };
+  }
   await db.resellerProfile.update({
     where: { companyId },
     data: {
       agreementSignedOn: data.agreementSignedOn ? new Date(data.agreementSignedOn) : null,
       agreementReference: data.agreementReference || null,
       agreementApprovedByUserId: data.agreementApprovedByUserId || null,
-      creditLimit: data.creditLimit ?? null,
       tier: data.tier || null,
       discountPercent: data.discountPercent ?? null,
       notes: data.notes || null,
@@ -134,6 +149,7 @@ export async function updateResellerProfile(companyId: string, input: unknown): 
  */
 export async function setResellerStatus(companyId: string, status: ResellerOnboardingStatus): Promise<ActionResult<null>> {
   const user = await requireModuleUser("resellers");
+  if (!(await isModuleEnabled("resellers"))) return { ok: false, error: CLOSED };
   const onboarding = await getResellerOnboarding(companyId);
   if (!onboarding || !(await reaches(user.id, companyId, "edit"))) {
     return { ok: false, error: "That company isn't a reseller." };
@@ -175,6 +191,7 @@ export async function listResellerItemPrices(resellerId: string) {
 
 export async function upsertResellerItemPrice(resellerId: string, input: unknown): Promise<ActionResult<null>> {
   const user = await requireModuleUser("resellers");
+  if (!(await isModuleEnabled("resellers"))) return { ok: false, error: CLOSED };
   const parsed = resellerItemPriceSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -205,6 +222,7 @@ export async function upsertResellerItemPrice(resellerId: string, input: unknown
 
 export async function deleteResellerItemPrice(id: string): Promise<ActionResult<null>> {
   const user = await requireModuleUser("resellers");
+  if (!(await isModuleEnabled("resellers"))) return { ok: false, error: CLOSED };
   const existing = await db.resellerItemPrice.findUnique({ where: { id } });
   if (!existing || !(await reaches(user.id, existing.resellerId, "edit"))) {
     return { ok: false, error: "Price not found." };
@@ -238,6 +256,7 @@ export async function getResellerPriceForItem(resellerId: string, itemId: string
  */
 export async function bulkUpdateResellers(input: unknown): Promise<ActionResult<{ count: number; blocked: string[] }>> {
   const user = await requireModuleUser("resellers");
+  if (!(await isModuleEnabled("resellers"))) return { ok: false, error: CLOSED };
   const parsed = bulkUpdateResellersSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };

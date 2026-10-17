@@ -1,8 +1,8 @@
+import { notFound } from "next/navigation";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { incentiveCapabilities, listEarnings } from "@/actions/incentive";
 import { targetOptions } from "@/actions/target";
-import { Card } from "@/components/ui/card";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
 import { EarningQueue } from "@/components/incentives/earning-queue";
 import { statusLabels } from "@/lib/incentives/compute";
@@ -18,17 +18,8 @@ export default async function IncentivesPage({
 
   const params = await searchParams;
   const caps = await incentiveCapabilities();
-  if (!caps.queue) {
-    return (
-      <Card className="px-6 py-10 text-center text-sm text-muted">
-        The incentive queue sits behind its own permission. Your own are on{" "}
-        <a href="/incentives/mine" className="text-brand hover:underline">
-          My incentives
-        </a>
-        .
-      </Card>
-    );
-  }
+  // A page somebody may not open is not there (owner, 8 Oct 2026); their own are on My incentives.
+  if (!caps.queue) notFound();
 
   const [earnings, options] = await Promise.all([listEarnings(params), targetOptions()]);
 

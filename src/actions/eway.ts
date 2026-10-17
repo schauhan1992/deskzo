@@ -53,8 +53,8 @@ import type { ActionResult } from "@/actions/company";
 async function gate() {
   const user = await requireModuleUser("sales_documents");
   if (!(await countryFeatureAvailable("eway"))) return { user, error: "E-way bills are India's, and this workspace is set up for another country." };
-  // Raising a bill is a filing on the company's GSTIN against a government portal — the same weight
-  // as issuing the invoice it covers, so the same permission governs it.
+  // Raising a bill is a filing on the company's GSTIN against a government portal, done by despatch:
+  // "Process orders (purchasing)" governs it — and the menu link and the page ask the same.
   if (!(await can(user.id, "orders.process"))) {
     return { user, error: "You don't have access to despatch and its paperwork." };
   }

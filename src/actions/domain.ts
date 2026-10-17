@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
+import { canSeeCompany, companyScope } from "@/lib/authz/company-scope";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
 import { toDomain } from "@/lib/domain-intel/signatures";
@@ -19,6 +20,22 @@ import { customerRelationshipTypeValues, isCustomerRelationshipType } from "@/li
  */
 const SOLD_TO = { relationshipType: { in: [...customerRelationshipTypeValues] } } satisfies Prisma.CompanyWhereInput;
 const NOT_SOLD_TO = "Domain lookups are for customers and resellers — not vendors or partners.";
+const GONE = "That company no longer exists.";
+
+/**
+ * The customers this person may see, as every company list does (src/lib/authz/company-scope.ts):
+ * their own accounts, or every one with the reach to. Its own AND term, so a search's OR beside it
+ * can never replace the account rule's.
+ */
+async function visibleSoldTo(userId: string): Promise<Prisma.CompanyWhereInput> {
+  return { AND: [SOLD_TO, await companyScope(userId)] };
+}
+
+/** One company, when it is a customer this person may see — anything else answers as if it weren't there. */
+async function visibleCustomer(userId: string, companyId: string): Promise<boolean> {
+  const company = await db.company.findUnique({ where: { id: String(companyId ?? "") }, select: { ownerUserId: true, relationshipType: true } });
+  return !!company && (await canSeeCompany(userId, company));
+}
 
 const profileSelect = {
   id: true,
@@ -62,9 +79,9 @@ export async function refreshDomainProfile(companyId: string): Promise<ActionRes
 
   const company = await db.company.findUnique({
     where: { id: companyId },
-    select: { id: true, name: true, website: true, relationshipType: true },
+    select: { id: true, name: true, website: true, relationshipType: true, ownerUserId: true },
   });
-  if (!company) return { ok: false, error: "That company no longer exists." };
+  if (!company || !(await canSeeCompany(user.id, company))) return { ok: false, error: GONE };
   if (!isCustomerRelationshipType(company.relationshipType)) return { ok: false, error: NOT_SOLD_TO };
 
   const domain = toDomain(company.website);
@@ -139,14 +156,15 @@ export async function refreshDomainProfile(companyId: string): Promise<ActionRes
 }
 
 export async function getDomainProfile(companyId: string) {
-  await requireModuleUser("domains");
+  const user = await requireModuleUser("domains");
+  if (!(await visibleCustomer(user.id, companyId))) return null;
   const profile = await db.domainProfile.findUnique({ where: { companyId }, select: profileSelect });
   return profile ? toPlain(profile) : null;
 }
 
 /** The profile plus the sales reading of it — computed, never stored, so the rules stay editable. */
 export async function getDomainBriefing(companyId: string) {
-  await requireModuleUser("domains");
+  const user = await requireModuleUser("domains");
   const [profile, company] = await Promise.all([
     db.domainProfile.findUnique({ where: { companyId }, select: profileSelect }),
     db.company.findUnique({
@@ -158,11 +176,12 @@ export async function getDomainBriefing(companyId: string) {
         category: true,
         companyType: true,
         relationshipType: true,
+        ownerUserId: true,
         industry: { select: { name: true } },
       },
     }),
   ]);
-  if (!company || !isCustomerRelationshipType(company.relationshipType)) return null;
+  if (!company || !isCustomerRelationshipType(company.relationshipType) || !(await canSeeCompany(user.id, company))) return null;
 
   const opportunities = profile
     ? rankOpportunities(
@@ -197,14 +216,18 @@ export async function listDomainProfiles(params: {
   /** "unscanned" narrows to companies with a website nobody has looked up yet. */
   view?: string;
 }) {
-  await requireModuleUser("domains");
+  const user = await requireModuleUser("domains");
 
+  // Each condition its own AND term: two filters on the profile (a platform and a mail provider) used
+  // to overwrite each other as keys of one object, and so would the account rule and the search.
   const where: Prisma.CompanyWhereInput = {
-    ...SOLD_TO,
+    AND: [
+      await visibleSoldTo(user.id),
+      ...(params.view === "unscanned" ? [{ domainProfile: { is: null } }] : []),
+      ...(params.platform ? [{ domainProfile: { is: { platform: params.platform } } }] : []),
+      ...(params.emailProvider ? [{ domainProfile: { is: { emailProvider: params.emailProvider } } }] : []),
+    ],
     website: { not: null },
-    ...(params.view === "unscanned" ? { domainProfile: { is: null } } : {}),
-    ...(params.platform ? { domainProfile: { is: { platform: params.platform } } } : {}),
-    ...(params.emailProvider ? { domainProfile: { is: { emailProvider: params.emailProvider } } } : {}),
     ...(params.search
       ? {
           OR: [
@@ -242,16 +265,17 @@ export async function listDomainProfiles(params: {
 
 /** Distinct values actually present, so the filters only offer things that will match something. */
 export async function domainFilterOptions() {
-  await requireModuleUser("domains");
+  const user = await requireModuleUser("domains");
+  const visible = await visibleSoldTo(user.id);
   const [platforms, providers] = await Promise.all([
     db.domainProfile.findMany({
-      where: { company: SOLD_TO, platform: { not: null } },
+      where: { company: visible, platform: { not: null } },
       distinct: ["platform"],
       select: { platform: true },
       orderBy: { platform: "asc" },
     }),
     db.domainProfile.findMany({
-      where: { company: SOLD_TO, emailProvider: { not: null } },
+      where: { company: visible, emailProvider: { not: null } },
       distinct: ["emailProvider"],
       select: { emailProvider: true },
       orderBy: { emailProvider: "asc" },
@@ -264,13 +288,14 @@ export async function domainFilterOptions() {
 }
 
 export async function domainSummary() {
-  await requireModuleUser("domains");
+  const user = await requireModuleUser("domains");
+  const visible = await visibleSoldTo(user.id);
   const [withWebsite, scanned, noDmarc, googleWorkspace, selfHosted] = await Promise.all([
-    db.company.count({ where: { ...SOLD_TO, website: { not: null } } }),
-    db.domainProfile.count({ where: { company: SOLD_TO } }),
-    db.domainProfile.count({ where: { company: SOLD_TO, dmarcRecord: null } }),
-    db.domainProfile.count({ where: { company: SOLD_TO, emailProvider: "Google Workspace" } }),
-    db.domainProfile.count({ where: { company: SOLD_TO, emailProvider: { in: ["Self-hosted or other", "Shared hosting mail"] } } }),
+    db.company.count({ where: { AND: [visible], website: { not: null } } }),
+    db.domainProfile.count({ where: { company: visible } }),
+    db.domainProfile.count({ where: { company: visible, dmarcRecord: null } }),
+    db.domainProfile.count({ where: { company: visible, emailProvider: "Google Workspace" } }),
+    db.domainProfile.count({ where: { company: visible, emailProvider: { in: ["Self-hosted or other", "Shared hosting mail"] } } }),
   ]);
   return { withWebsite, scanned, noDmarc, googleWorkspace, selfHosted };
 }

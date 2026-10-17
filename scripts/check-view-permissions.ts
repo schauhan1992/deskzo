@@ -162,7 +162,7 @@ async function main() {
    * doesn't have. One that says "you don't have permission" tells everybody what is behind the door,
    * so no page may say it — whatever the wording.
    */
-  const refusing = /You don(?:&apos;|&rsquo;|'|’)t (?:have (?:permission|access)|hold (?:the|any) [a-z ]*permission)|You need permission|Only an admin can view|Only somebody holding the/;
+  const refusing = /You don(?:&apos;|&rsquo;|'|’)t (?:have (?:permission|access)|hold (?:the|any) [a-z ]*permission)|You need permission|Only an admin can view|Only somebody holding the|sits? behind (?:its|their) own permission/;
   const root = path.join(__dirname, "..");
   const pagesDir = path.join(root, "src/app/(dashboard)");
   const screens = [
@@ -170,7 +170,9 @@ async function main() {
     path.join(root, "src/components/settings/settings-page.tsx"),
     path.join(root, "src/components/settings/module-disabled-notice.tsx"),
   ];
-  const sayingSo = screens.filter((f) => refusing.test(readFileSync(f, "utf8"))).map((f) => path.relative(root, f));
+  // What a page says, not what its comments explain ("Pay sits behind its own permission, so the card…").
+  const withoutComments = (source: string) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  const sayingSo = screens.filter((f) => refusing.test(withoutComments(readFileSync(f, "utf8")))).map((f) => path.relative(root, f));
   ok("no page tells somebody it is refusing them — it is not found instead", screens.length > 100 && sayingSo.length === 0, sayingSo.join(", "));
 
   /* eslint-disable @typescript-eslint/no-require-imports */

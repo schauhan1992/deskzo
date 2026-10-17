@@ -141,7 +141,9 @@ async function main() {
 
   await cleanup();
   try {
-    const make = (name: string, manage: boolean, extra: string[] = []) =>
+    // Everybody here may take the catalogue in and out as a file — "Import the catalog" and "Export the
+    // catalog" — except the one made to be refused it.
+    const make = (name: string, manage: boolean, extra: string[] = [], files = true) =>
       db.user.create({
         data: {
           name: `Zzprobe ${name}`,
@@ -151,6 +153,7 @@ async function main() {
           permissionGrants: {
             create: [
               { permission: "catalog.manage", allowed: manage, reason: TAG },
+              ...(files ? ["data.importCatalog", "data.exportCatalog"] : []).map((permission) => ({ permission, allowed: true, reason: TAG })),
               ...extra.map((permission) => ({ permission, allowed: true, reason: TAG })),
             ],
           },
@@ -159,6 +162,7 @@ async function main() {
     // Settings → Lists is rendered too, and that page is `settings.manage`'s.
     const keeper = await make("keeper", true, ["settings.manage"]);
     const reader = await make("reader", false);
+    const noFiles = await make("nofiles", true, [], false);
     actorId = keeper.id;
     if (!(await moduleActions.isModuleEnabled("items"))) throw new Error("The Items module is switched off on this database — switch it on to run this suite.");
 
@@ -230,6 +234,15 @@ async function main() {
     const i7 = await item(`${TAG}-7`);
     ok("  and a row naming ones that are goes in", limited.created === 1 && i7?.brandId === dell.id && i7.productFamilyId === latitude.id);
     ok("  and nothing was reported as added", limited.brandsCreated.length === 0 && limited.familiesCreated.length === 0);
+
+    section("The file is the catalogue's export and import permissions'");
+    actorId = noFiles.id;
+    const refusedExport = await itemActions.exportItemsCsv();
+    ok("without “Export the catalog” the download is refused, even for whoever manages the catalogue", !refusedExport.ok && /export/.test(refusedExport.ok ? "" : refusedExport.error), refusedExport.ok ? "exported" : refusedExport.error);
+    const refusedForm = new FormData();
+    refusedForm.set("file", new File([["Name,SKU,Type,Selling Price", `Zz Refused,${TAG}-NF,GOOD,100`].join(String.fromCharCode(10))], "items.csv", { type: "text/csv" }));
+    const refusedImport = await itemActions.importItems(refusedForm);
+    ok("without “Import the catalog” the upload is refused, and nothing is written", !refusedImport.ok && (await item(`${TAG}-NF`)) === null, refusedImport.ok ? "imported" : refusedImport.error);
 
     section("An export comes back in unchanged");
 

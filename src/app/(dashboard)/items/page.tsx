@@ -16,6 +16,7 @@ import { ExportItemsButton } from "@/components/items/export-items-button";
 import { ImportItemsDialog } from "@/components/items/import-items-dialog";
 import { ItemsTable } from "@/components/items/items-table";
 import { requireUser } from "@/lib/session";
+import { can } from "@/lib/authz/resolve";
 import { listColumns } from "@/lib/custom-fields/server";
 import { customFilterParams, customFilterSetup, parseCustomFilters, type CustomFilterParams } from "@/lib/custom-fields/filters";
 import { CustomFieldFilters } from "@/components/custom-fields/custom-field-filters";
@@ -55,6 +56,8 @@ export default async function ItemsPage({
     moduleAvailableForTenant("renewals"),
   ]);
   const user = await requireUser();
+  // The file buttons only for whoever may use them: the catalogue's export and import permissions.
+  const [mayExport, mayImport] = await Promise.all([can(user.id, "data.exportCatalog"), can(user.id, "data.importCatalog")]);
   // The workspace's own fields: the ones marked "a column in the list" (this table has no column
   // picker), and the filter panel.
   const [customColumns, fieldFilters] = await Promise.all([
@@ -104,8 +107,8 @@ export default async function ItemsPage({
           <Link href="/items/categories">
             <Button variant="ghost">Categories</Button>
           </Link>
-          <ImportItemsDialog />
-          <ExportItemsButton />
+          {mayImport && <ImportItemsDialog />}
+          {mayExport && <ExportItemsButton />}
           <Link href="/items/new">
             <Button>{slot(wording, "New item", "item", "New {one:lower}")}</Button>
           </Link>

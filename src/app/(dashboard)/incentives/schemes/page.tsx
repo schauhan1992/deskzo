@@ -1,7 +1,7 @@
+import { notFound } from "next/navigation";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { incentiveCapabilities, listSchemes } from "@/actions/incentive";
-import { Card } from "@/components/ui/card";
 import { SchemeManager } from "@/components/incentives/scheme-manager";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
 
@@ -10,13 +10,8 @@ export default async function SchemesPage() {
   if (!enabled) return <ModuleDisabledNotice moduleKey="incentives" />;
 
   const caps = await incentiveCapabilities();
-  if (!caps.manage) {
-    return (
-      <Card className="px-6 py-10 text-center text-sm text-muted">
-        Incentive schemes sit behind their own permission.
-      </Card>
-    );
-  }
+  // A page somebody may not open is not there (owner, 8 Oct 2026).
+  if (!caps.manage) notFound();
 
   const schemes = await listSchemes();
 

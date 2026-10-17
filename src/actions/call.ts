@@ -13,6 +13,7 @@ import { callAccess, peopleReached, throughAccount } from "@/lib/authz/access";
 import { callOutcomeValues, isConnected } from "@/lib/calls";
 import type { ActionResult } from "@/actions/company";
 import { viewerHas } from "@/actions/permission";
+import { isModuleEnabled } from "@/actions/module";
 import { workspaceClock } from "@/lib/time/workspace";
 
 const callSelect = {
@@ -41,6 +42,24 @@ const callSelect = {
  * put the phone down will log what happened if it takes five seconds, and will stop logging
  * entirely if the form insists on a duration and a note every time.
  */
+const NOT_CALLS = "You can't log calls here.";
+
+/**
+ * Whether this person may log a call here — Calls switched on for the company, and View calls theirs
+ * (`isModuleEnabled` asks both). The phone icon asks once a page and hides itself otherwise, wherever
+ * it is drawn; logCall asks again whatever the icon did.
+ */
+export async function callsAllowed(): Promise<boolean> {
+  try {
+    // Signed in, and Calls in the plan: outside it the answer is simply no, never a thrown refusal
+    // that every icon on the page would ask again.
+    await requireModuleUser("calls");
+  } catch {
+    return false;
+  }
+  return isModuleEnabled("calls");
+}
+
 export async function logCall(input: {
   companyId: string;
   contactId?: string;
@@ -56,6 +75,8 @@ export async function logCall(input: {
   companyProductId?: string;
 }): Promise<ActionResult<{ id: string }>> {
   const user = await requireModuleUser("calls");
+  // In the plan is not enough: Calls switched on for the company, and View calls this person's.
+  if (!(await isModuleEnabled("calls"))) return { ok: false, error: NOT_CALLS };
 
   if (!callOutcomeValues.includes(input.outcome as CallOutcome)) {
     return { ok: false, error: "Pick how the call went." };
@@ -181,6 +202,7 @@ export async function logCall(input: {
 /** Marks a promised callback as done, without deleting the promise that was made. */
 export async function completeFollowUp(id: string): Promise<ActionResult<null>> {
   const user = await requireModuleUser("calls");
+  if (!(await isModuleEnabled("calls"))) return { ok: false, error: NOT_CALLS };
   // A call this person may see — its company and its caller — and change (src/lib/authz/access.ts, "activities").
   const call = await db.callLog.findFirst({
     where: { AND: [{ id }, await throughAccount(user.id, "view"), await callAccess(user.id, "edit")] },

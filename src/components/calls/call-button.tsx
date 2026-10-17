@@ -3,13 +3,38 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Phone, Play, Square } from "lucide-react";
-import { logCall, listCompanyNumbers } from "@/actions/call";
+import { callsAllowed, logCall, listCompanyNumbers } from "@/actions/call";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { callOutcomeLabels, callOutcomeValues, formatDuration, hasDialableNumber } from "@/lib/calls";
 
 type NumberOption = Awaited<ReturnType<typeof listCompanyNumbers>>[number];
+
+/**
+ * Whether calls may be logged here, asked once a page however many icons it has (a list of contacts
+ * has one per row): Calls switched on, and View calls this person's. Forgotten on a failed answer, so
+ * the next icon asks again; the server refuses a call whatever this says.
+ */
+let allowed: Promise<boolean> | null = null;
+
+function useCallsAllowed(): boolean {
+  const [ok, setOk] = useState(false);
+  useEffect(() => {
+    let live = true;
+    allowed ??= callsAllowed();
+    allowed.then(
+      (yes) => live && setOk(yes),
+      () => {
+        allowed = null;
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
+  return ok;
+}
 
 /**
  * The phone icon, and everything behind it.
@@ -55,6 +80,9 @@ export function CallButton({
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
+  // Not drawn where nobody may log a call: Calls switched off, or no View calls.
+  const allowedHere = useCallsAllowed();
+  if (!allowedHere) return null;
   return (
     <>
       <Button

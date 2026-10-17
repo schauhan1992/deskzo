@@ -165,7 +165,8 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
       // With the other trade documents, because it is one. E-way bills directly below cover
       // invoices, credit notes *and* challans, so filing the challan elsewhere split a set of three.
       { href: "/sales/challans", label: "Delivery Challans", icon: PackageCheck },
-      { href: "/sales/eway-bills", label: "E-Way Bills", icon: Truck, countries: COUNTRY_FEATURES.eway },
+      // Every e-way action asks "Process orders (purchasing)" (src/actions/eway.ts gate), so the link does too.
+      { href: "/sales/eway-bills", label: "E-Way Bills", icon: Truck, countries: COUNTRY_FEATURES.eway, permission: "orders.process" },
     ],
   },
   {
@@ -212,7 +213,9 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
       // Who is safe to give terms to — the credit engine's list (src/lib/credit/engine.ts).
       { href: "/receivables/credit", label: "Customer credit", icon: ShieldCheck },
       // A salesperson's dues to chase, and the promises they logged (src/actions/collections.ts).
-      { href: "/collections", label: "My collections", icon: Coins, permission: "collections.followUp" },
+      // Either key opens the page (src/lib/collections/load.ts mayLogFollowUps): the follow-up permission, or
+      // accounts' Record payments — the link said only the first, hiding the page from accounts.
+      { href: "/collections", label: "My collections", icon: Coins, permission: ["collections.followUp", "payments.record"] },
     ],
   },
   {

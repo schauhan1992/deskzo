@@ -246,13 +246,15 @@ export async function CompanyDetail({
   const isReseller = company.relationshipType === "RESELLER";
   const managedByReseller = company.managedByReseller;
   // Modules this page borrows from without a switch of their own here: each only where the plan has it.
-  const [commissionsInPlan, expensesInPlan, resellersInPlan, portalInPlan] = await Promise.all([
-    isModuleEntitled("commission_parties"),
+  // Resellers' tools and the Commission tab are those modules' own screens on this page, so they follow
+  // the company's switch and the role's section too (isModuleEnabled), as the modules' pages do.
+  const [commissionsOn, expensesInPlan, resellersOn, portalInPlan] = await Promise.all([
+    isModuleEnabled("commission_parties"),
     isModuleEntitled("expenses"),
-    isModuleEntitled("resellers"),
+    isModuleEnabled("resellers"),
     isModuleEntitled("customer_portal"),
   ]);
-  const resellerTools = isReseller && resellersInPlan;
+  const resellerTools = isReseller && resellersOn;
   // Several accounts, one primary (owner, 8 Oct 2026); changed with payments.manage — src/actions/company-bank.ts.
   const bankAccounts = holdsBankAccounts(company.relationshipType) ? await listCompanyBankAccounts(company.id) : null;
   const payouts = bankAccounts?.ok ? bankAccounts.data : null;
@@ -265,7 +267,7 @@ export async function CompanyDetail({
     assetsVisible &&
     ((canManageAssets && !isVendor && company.stage === "CUSTOMER") || (await estateCount(company.id)) > 0);
 
-  const [linkedCompanies, commissionPartyAccounts, clientCompanyOptions, commissionEarnings] = isCommissionParty && commissionsInPlan
+  const [linkedCompanies, commissionPartyAccounts, clientCompanyOptions, commissionEarnings] = isCommissionParty && commissionsOn
     ? await Promise.all([
         listLinkedCompanies(company.id),
         listCommissionPartyAccounts(company.id),
@@ -311,7 +313,7 @@ export async function CompanyDetail({
 
   // Commission is paid on a customer's business, so it's a customer-side view; a commission party
   // sees the mirror of it (what they earned) on their own Details tab instead.
-  const showCommissionTab = !isVendor && commissionsInPlan;
+  const showCommissionTab = !isVendor && commissionsOn;
   const [commissionParties, commissions, commissionPartyOptions] = showCommissionTab
     ? await Promise.all([
         listCompanyCommissionParties(company.id),
@@ -809,7 +811,7 @@ export async function CompanyDetail({
               </Card>
             )}
 
-            {isCommissionParty && commissionsInPlan && (
+            {isCommissionParty && commissionsOn && (
               <Card>
                 <CardHeader className="text-sm font-medium text-text">{slot(w, "Linked companies", "company", "Linked {many:lower}")}</CardHeader>
                 <CardContent>
@@ -827,7 +829,7 @@ export async function CompanyDetail({
               </Card>
             )}
 
-            {isCommissionParty && commissionsInPlan && (
+            {isCommissionParty && commissionsOn && (
               <Card>
                 <CardHeader className="text-sm font-medium text-text">Commission earned</CardHeader>
                 <CardContent>
@@ -836,7 +838,7 @@ export async function CompanyDetail({
               </Card>
             )}
 
-            {isCommissionParty && commissionsInPlan && (
+            {isCommissionParty && commissionsOn && (
               <Card>
                 <CardHeader className="text-sm font-medium text-text">Related parties (payee accounts)</CardHeader>
                 <CardContent>

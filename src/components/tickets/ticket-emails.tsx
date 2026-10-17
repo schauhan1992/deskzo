@@ -67,7 +67,7 @@ export async function TicketEmails({ ticketId }: { ticketId: string }) {
             </article>
           );
         })}
-        <TicketEmailReply ticketId={ticketId} to={thread.replyTo} canReply={thread.canReply} />
+        {thread.mayReply && <TicketEmailReply ticketId={ticketId} to={thread.replyTo} canReply={thread.canReply} />}
       </CardContent>
     </Card>
   );

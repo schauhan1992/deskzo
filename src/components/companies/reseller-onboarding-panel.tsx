@@ -247,13 +247,19 @@ export function ResellerOnboardingPanel({
               <Label htmlFor={`${fieldId}-credit-limit`} className="text-xs">
                 Credit limit (₹)
               </Label>
+              {/* Shown here, changed on the Credit tab: that takes the credit permission and a reason. */}
               <Input
                 id={`${fieldId}-credit-limit`}
                 type="number"
                 step="0.01"
                 min={0}
+                readOnly
+                aria-describedby={`${fieldId}-credit-limit-hint`}
                 {...register("creditLimit")}
               />
+              <p id={`${fieldId}-credit-limit-hint`} className="text-xs text-subtle">
+                Changed from the Credit tab, with a reason.
+              </p>
               {errors.creditLimit && <p className="text-xs text-danger">{String(errors.creditLimit.message)}</p>}
             </div>
             <div className="space-y-1">

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
+import { isModuleEnabled } from "@/actions/module";
 import { mayAccess, orderAccess, type AccessAction } from "@/lib/authz/access";
 import { recordAudit } from "@/lib/audit";
 import { commissionPartyAccountSchema } from "@/lib/validation/commission-party";
@@ -31,8 +32,15 @@ export async function listLinkedCompanies(commissionPartyId: string) {
   return links.map((l) => ({ linkId: l.id, ...l.company }));
 }
 
+/**
+ * A change asks what the module's pages ask: Commission parties switched on for the company and open to this
+ * person (isModuleEnabled: the switch and the role's section), not only in the plan.
+ */
+const CLOSED = "Commission parties aren't open to you here.";
+
 export async function linkCommissionPartyToCompany(commissionPartyId: string, companyId: string): Promise<ActionResult<{ id: string }>> {
   const user = await requireModuleUser("commission_parties");
+  if (!(await isModuleEnabled("commission_parties"))) return { ok: false, error: CLOSED };
   const [commissionParty, company] = await Promise.all([
     db.company.findUnique({ where: { id: commissionPartyId } }),
     db.company.findUnique({ where: { id: companyId } }),
@@ -75,6 +83,7 @@ export async function linkCommissionPartyToCompany(commissionPartyId: string, co
 
 export async function unlinkCommissionPartyFromCompany(linkId: string): Promise<ActionResult<null>> {
   const user = await requireModuleUser("commission_parties");
+  if (!(await isModuleEnabled("commission_parties"))) return { ok: false, error: CLOSED };
   const link = await db.commissionPartyLink.findUnique({ where: { id: linkId } });
   if (!link || (!(await reaches(user.id, link.companyId, "edit")) && !(await reaches(user.id, link.commissionPartyId, "edit")))) {
     return { ok: false, error: "Link not found." };
@@ -112,6 +121,7 @@ export async function listCommissionPartyAccountOptions(commissionPartyId: strin
 
 export async function createCommissionPartyAccount(commissionPartyId: string, input: unknown): Promise<ActionResult<{ id: string }>> {
   const user = await requireModuleUser("commission_parties");
+  if (!(await isModuleEnabled("commission_parties"))) return { ok: false, error: CLOSED };
   const parsed = commissionPartyAccountSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -149,6 +159,7 @@ export async function createCommissionPartyAccount(commissionPartyId: string, in
 
 export async function updateCommissionPartyAccount(id: string, input: unknown): Promise<ActionResult<{ id: string }>> {
   const user = await requireModuleUser("commission_parties");
+  if (!(await isModuleEnabled("commission_parties"))) return { ok: false, error: CLOSED };
   const parsed = commissionPartyAccountSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -189,6 +200,7 @@ export async function updateCommissionPartyAccount(id: string, input: unknown): 
 
 export async function deleteCommissionPartyAccount(id: string): Promise<ActionResult<null>> {
   const user = await requireModuleUser("commission_parties");
+  if (!(await isModuleEnabled("commission_parties"))) return { ok: false, error: CLOSED };
   const existing = await db.commissionPartyAccount.findUnique({ where: { id } });
   if (!existing || !(await reaches(user.id, existing.commissionPartyId, "edit"))) {
     return { ok: false, error: "Account not found." };

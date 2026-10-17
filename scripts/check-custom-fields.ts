@@ -404,7 +404,8 @@ async function run(scratchUrl: string) {
       });
     const base = { "fields.manage": false, "fields.seeRestricted": false, "leads.view": true, "contacts.view": true, "orders.view": true };
     const owner = await user("Owner", {}, { isSuperAdmin: true, role: "ADMIN" });
-    const admin = await user("Admin", { ...base, "fields.manage": true, "fields.seeRestricted": true, "companies.viewAll": true });
+    // The catalogue's file export and import too: the products CSV below is theirs.
+    const admin = await user("Admin", { ...base, "fields.manage": true, "fields.seeRestricted": true, "companies.viewAll": true, "data.exportCatalog": true, "data.importCatalog": true });
     const exec = await user("Executive", { ...base, "companies.viewAll": false, "contacts.viewRestricted": false });
     // Sees the CRM, but none of the executive's accounts.
     const outsider = await user("Outsider", { ...base, "companies.viewAll": false, "orders.process": false, "orders.approve": false });

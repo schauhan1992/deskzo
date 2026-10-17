@@ -83,7 +83,7 @@ const { listRenewals } = load("../src/actions/renewal") as typeof import("../src
 const { listTradeDocuments } = load("../src/actions/trade-document") as typeof import("../src/actions/trade-document");
 const { listPayments } = load("../src/actions/payment") as typeof import("../src/actions/payment");
 const { agingReport } = load("../src/actions/receivable") as typeof import("../src/actions/receivable");
-const { runWorkbook, countWorkbook } = load("../src/actions/workspace") as typeof import("../src/actions/workspace");
+const { runWorkbook, countWorkbook, duplicateWorkbook, getWorkbook } = load("../src/actions/workspace") as typeof import("../src/actions/workspace");
 const { createCompany, getCompany } = load("../src/actions/company") as typeof import("../src/actions/company");
 const { can } = load("../src/lib/authz/resolve") as typeof import("../src/lib/authz/resolve");
 const { accountScopeIds } = load("../src/lib/authz/company-scope") as typeof import("../src/lib/authz/company-scope");
@@ -562,6 +562,29 @@ async function main() {
     }
     const left = await probe.company.count({ where: { name: { startsWith: MARK } } });
     ok("  and the check leaves nothing behind", left === 0, `${left} leftover(s)`);
+  }
+
+  // ── A saved list somebody keeps to themselves ───────────────────────────────────────────────
+  section("A private saved list stays its owner's");
+
+  const LIST = "ZZ-scope-check list";
+  try {
+    const mine = await probe.workbook.create({ data: { name: `${LIST} private`, filters: {}, shared: false, ownerUserId: unrestricted.id }, select: { id: true } });
+    const open = await probe.workbook.create({ data: { name: `${LIST} shared`, filters: {}, shared: true, ownerUserId: unrestricted.id }, select: { id: true } });
+    actor = restricted;
+    if (await can(restricted.id, "workspace.manageAny")) {
+      console.log("  (the restricted user may act on anyone's lists — skipped)");
+    } else {
+      ok("somebody else can't open it", (await getWorkbook(mine.id)) === null);
+      const copied = await duplicateWorkbook(mine.id);
+      ok("  nor copy it by its link", !copied.ok && (await probe.workbook.count({ where: { name: `${LIST} private (copy)` } })) === 0, copied.ok ? "copied" : copied.error);
+      const sharedCopy = await duplicateWorkbook(open.id);
+      ok("a shared list they can copy", sharedCopy.ok, sharedCopy.ok ? "" : sharedCopy.error);
+    }
+  } finally {
+    await probe.workbook.deleteMany({ where: { name: { startsWith: LIST } } });
+    const left = await probe.workbook.count({ where: { name: { startsWith: LIST } } });
+    ok("  and the check leaves no list behind", left === 0, `${left} leftover(s)`);
   }
 
   // ── The scope is doing something, rather than everything happening to be in it ───────────────

@@ -350,6 +350,56 @@ async function main() {
     const a5 = await orderActions.approveOrder({ orderId: fourth, approved: true });
     ok("  so the order that was over it can now be approved by anyone who approves orders", a5.ok && (await status(fourth)) === "APPROVED", a5.ok ? "" : a5.error);
 
+    section("A reseller's limit, from its onboarding form");
+
+    // The onboarding form shows the limit and sends it back as it was; a different one sent there
+    // would be the Credit tab's change with neither the permission nor a reason.
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const resellerActions = require("../src/actions/reseller") as typeof import("../src/actions/reseller");
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    const reseller = await db.company.create({
+      data: { name: `${TAG} Channel`, normalizedName: `${TAG} channel`.toLowerCase(), createdById: sales.id, ownerUserId: sales.id, relationshipType: "RESELLER", stage: "CUSTOMER" },
+    });
+    await db.resellerProfile.create({ data: { companyId: reseller.id } });
+    const limitOf = async () => {
+      const p = await db.resellerProfile.findUnique({ where: { companyId: reseller.id }, select: { creditLimit: true, tier: true } });
+      return { limit: p?.creditLimit == null ? null : Number(p.creditLimit), tier: p?.tier ?? null };
+    };
+    actorId = sales.id;
+    const raised = await resellerActions.updateResellerProfile(reseller.id, { creditLimit: 900_000, tier: "GOLD" });
+    ok("the account manager can't set a reseller's limit through onboarding", !raised.ok && /Credit tab/.test(raised.ok ? "" : raised.error) && (await limitOf()).limit === null && (await limitOf()).tier === null, raised.ok ? "saved" : raised.error);
+    const tierOnly = await resellerActions.updateResellerProfile(reseller.id, { tier: "GOLD" });
+    ok("  but the rest of onboarding saves, the limit left as it was", tierOnly.ok && (await limitOf()).tier === "GOLD" && (await limitOf()).limit === null, tierOnly.ok ? "" : tierOnly.error);
+    actorId = controller.id;
+    const set = await creditActions.setCreditLimit({ companyId: reseller.id, limit: 200_000, reason: "Partner agreement signed" });
+    ok("the limit is set from the Credit tab, with the permission and a reason", set.ok && (await limitOf()).limit === 200_000, set.ok ? "" : set.error);
+    actorId = sales.id;
+    const same = await resellerActions.updateResellerProfile(reseller.id, { creditLimit: 200_000, tier: "PLATINUM" });
+    ok("  after which onboarding saves with it shown as it is", same.ok && (await limitOf()).limit === 200_000 && (await limitOf()).tier === "PLATINUM", same.ok ? "" : same.error);
+
+    // A module switched off by the company is off for its changes too, not only for its pages.
+    const switchOf = async (key: string) => (await db.systemModule.findUnique({ where: { key }, select: { enabled: true } }))?.enabled ?? true;
+    const setSwitch = (key: string, enabled: boolean) => db.systemModule.upsert({ where: { key }, create: { key, enabled }, update: { enabled } });
+    const resellersWas = await switchOf("resellers");
+    const partiesWas = await switchOf("commission_parties");
+    try {
+      await setSwitch("resellers", false);
+      const whileOff = await resellerActions.updateResellerProfile(reseller.id, { creditLimit: 200_000, tier: "SILVER" });
+      ok("with Resellers switched off, its onboarding can't be changed", !whileOff.ok && (await limitOf()).tier === "PLATINUM", whileOff.ok ? "saved" : whileOff.error);
+      await setSwitch("commission_parties", false);
+      /* eslint-disable @typescript-eslint/no-require-imports */
+      const partyActions = require("../src/actions/commission-party") as typeof import("../src/actions/commission-party");
+      /* eslint-enable @typescript-eslint/no-require-imports */
+      const party = await db.company.create({
+        data: { name: `${TAG} Agent`, normalizedName: `${TAG} agent`.toLowerCase(), createdById: sales.id, ownerUserId: sales.id, relationshipType: "COMMISSION_PARTY", stage: "CUSTOMER" },
+      });
+      const linked = await partyActions.linkCommissionPartyToCompany(party.id, customer.id);
+      ok("  and with Commission parties off, nobody is linked to a customer", !linked.ok && (await db.commissionPartyLink.count({ where: { commissionPartyId: party.id } })) === 0, linked.ok ? "linked" : linked.error);
+    } finally {
+      await setSwitch("resellers", resellersWas);
+      await setSwitch("commission_parties", partiesWas);
+    }
+
     section("The account scope the writes were missing");
 
     actorId = outsider.id;

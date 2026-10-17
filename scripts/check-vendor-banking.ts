@@ -576,6 +576,22 @@ async function run(db: PrismaClient) {
   ok("the list has the client with a website and not the vendor", names.includes(client.name) && !names.includes(v3.name), json(names));
   const summary = await domains.domainSummary();
   ok("  and so do its counts", summary.withWebsite === 1, json(summary));
+  // Like every company list, it follows whose accounts somebody may see: the client is the first
+  // salesperson's, and the second (Sales can't see every account) is shown none of it.
+  actor = seller;
+  const ownList = (await domains.listDomainProfiles({ page: 1, pageSize: 50 })) as { rows: { name: string }[] };
+  ok("the client's own salesperson has it in the list", ownList.rows.some((r) => r.name === client.name), json(ownList.rows.map((r) => r.name)));
+  actor = otherSeller;
+  const otherList = (await domains.listDomainProfiles({ page: 1, pageSize: 50 })) as { rows: { name: string }[] };
+  ok("  another salesperson doesn't", !otherList.rows.some((r) => r.name === client.name), json(otherList.rows.map((r) => r.name)));
+  const searchedList = (await domains.listDomainProfiles({ page: 1, pageSize: 50, search: client.name })) as { rows: { name: string }[] };
+  ok("  not even by searching its name", !searchedList.rows.some((r) => r.name === client.name), json(searchedList.rows.map((r) => r.name)));
+  ok("  nor in the counts", (await domains.domainSummary()).withWebsite === 0, json(await domains.domainSummary()));
+  ok("  nor its briefing", (await domains.getDomainBriefing(client.id)) === null);
+  ok("  nor its profile", (await domains.getDomainProfile(client.id)) === null);
+  const othersLookup = await domains.refreshDomainProfile(client.id);
+  ok("  and a lookup on it is refused before anything is fetched, as if it weren't there", !othersLookup.ok && /no longer exists/.test(othersLookup.ok ? "" : othersLookup.error), othersLookup.ok ? "looked up" : othersLookup.error);
+  actor = boss;
 
   section("13b. A customer category is for customers");
   /* eslint-disable @typescript-eslint/no-require-imports */
@@ -629,6 +645,42 @@ async function run(db: PrismaClient) {
     back.ok && !(await leftContactsOf(client.id)).has(kavya.id) && (await as(seller, () => calls.listCompanyNumbers(client.id))).some((c) => c.id === kavya.id),
   );
   await as(seller, () => companies.setContactLeft(kavya.id, true));
+
+  // ── Logging a call ──────────────────────────────────────────────────────────────────────────
+
+  section("13d. Logging a call needs Calls switched on, and View calls");
+  ok("a salesperson may log calls here — the phone icon shows", await as(seller, () => calls.callsAllowed()));
+  const noCalls = await person("NoCalls", "SALES");
+  await db.userPermission.create({ data: { userId: noCalls.id, permission: "calls.view", allowed: false, reason: TAG } });
+  ok("  somebody without View calls may not — the icon hides itself", !(await as(noCalls, () => calls.callsAllowed())));
+  const sentAnyway = await as(noCalls, () => calls.logCall({ companyId: client.id, phoneNumber: "+919800000099", outcome: "NO_ANSWER" }));
+  ok("  and a call they send anyway is refused, nothing logged", !sentAnyway.ok && (await db.callLog.count({ where: { phoneNumber: "+919800000099" } })) === 0, sentAnyway.ok ? "logged" : sentAnyway.error);
+  const callsSwitch = await db.systemModule.findUnique({ where: { key: "calls" }, select: { enabled: true } });
+  await db.systemModule.upsert({ where: { key: "calls" }, create: { key: "calls", enabled: false }, update: { enabled: false } });
+  try {
+    ok("with Calls switched off for the company, nobody may", !(await as(seller, () => calls.callsAllowed())));
+    const whileOff = await as(seller, () => calls.logCall({ companyId: client.id, phoneNumber: "+919800000098", outcome: "NO_ANSWER" }));
+    ok("  not even the client's own salesperson", !whileOff.ok && (await db.callLog.count({ where: { phoneNumber: "+919800000098" } })) === 0, whileOff.ok ? "logged" : whileOff.error);
+  } finally {
+    await db.systemModule.upsert({ where: { key: "calls" }, create: { key: "calls", enabled: callsSwitch?.enabled ?? true }, update: { enabled: callsSwitch?.enabled ?? true } });
+  }
+  const loggedOn = await as(seller, () => calls.logCall({ companyId: client.id, phoneNumber: "+919800000097", outcome: "NO_ANSWER" }));
+  ok("switched back on, the salesperson logs it", loggedOn.ok, loggedOn.ok ? "" : loggedOn.error);
+
+  section("13e. E-Way Bills are despatch's");
+  {
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const EwayPage = (require("../src/app/(dashboard)/sales/eway-bills/page") as { default: (p: unknown) => Promise<unknown> }).default;
+    const { MODULE_REGISTRY } = require("../src/lib/modules") as typeof import("../src/lib/modules");
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    const link = MODULE_REGISTRY.flatMap((m) => m.navItems).find((i) => i.href === "/sales/eway-bills");
+    ok("the menu link asks what every e-way action asks", link?.permission === "orders.process", JSON.stringify(link?.permission));
+    const params = { searchParams: Promise.resolve({}) };
+    const forSeller = await as(seller, () => EwayPage(params).then(() => "rendered", (err: unknown) => (err instanceof Error ? err.message : String(err))));
+    ok("  and the page is not there for a salesperson without it", forSeller === "NOT_FOUND_CALLED", forSeller);
+    const forBoss = await as(boss, () => EwayPage(params).then(() => "rendered", (err: unknown) => (err instanceof Error ? err.message : String(err))));
+    ok("  while it opens for somebody with it", forBoss === "rendered", forBoss);
+  }
 
   // ── Designations from a list of the workspace's own ─────────────────────────────────────────
 

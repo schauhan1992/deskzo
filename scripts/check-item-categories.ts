@@ -79,7 +79,13 @@ async function main() {
           email: `${key}${MAIL}`,
           role: "PROFILE",
           passwordHash: "x".repeat(60),
-          permissionGrants: { create: [{ permission: "catalog.manage", allowed: manage, reason: TAG }] },
+          // Both import items from a file, which is "Import the catalog"'s.
+          permissionGrants: {
+            create: [
+              { permission: "catalog.manage", allowed: manage, reason: TAG },
+              { permission: "data.importCatalog", allowed: true, reason: TAG },
+            ],
+          },
         },
       });
     const keeper = await person("keeper", true);

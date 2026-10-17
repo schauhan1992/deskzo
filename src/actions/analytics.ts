@@ -162,6 +162,16 @@ const EXPORT_PERMISSION: Record<string, "data.exportCrm" | "data.exportFinance">
  * Recorded as an EXPORT too. The security log treats volume as the one signal a scraper cannot
  * hide, and a download that logs only as a SEARCH is a download nobody reviewing that log can see.
  */
+/**
+ * Whether this person may take this report's rows out as a file — the CSV's rule, asked by the printed
+ * sheet too, which shows every row only to somebody who may (src/lib/analytics/rows-shown.ts).
+ */
+export async function reportExportAllowed(source: string): Promise<boolean> {
+  const user = await requireModuleUser("reports");
+  const permission = EXPORT_PERMISSION[String(source ?? "")];
+  return !!permission && (await can(user.id, permission));
+}
+
 export async function exportReportCsv(input: ReportRequest): Promise<ActionResult<{ filename: string; csv: string }>> {
   const user = await requireModuleUser("reports");
   const permission = EXPORT_PERMISSION[input.source];

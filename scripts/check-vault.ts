@@ -334,6 +334,28 @@ async function main() {
   const agentEdit = await vault.saveCredential({ id, loginName: `${PREFIX} GoDaddy` });
   ok("  and a MANAGE department share can edit", agentEdit.ok, agentEdit.ok ? "" : agentEdit.error);
 
+  section("Without “Use the credential vault”, even its owner keeps no door");
+
+  actAs(owner);
+  await db.userPermission.deleteMany({ where: { userId: owner.id, permission: "vault.use" } });
+  await db.userPermission.create({ data: { userId: owner.id, permission: "vault.use", allowed: false, grantedById: admin.id } });
+  try {
+    const mateShareRow = await db.vaultShare.findFirstOrThrow({ where: { credentialId: id, userId: mate.id }, select: { id: true } });
+    const sharesBefore = await db.vaultShare.count({ where: { credentialId: id } });
+    const noShare = await vault.shareCredential({ credentialId: id, userId: stranger.id, level: "VIEW" });
+    const noUnshare = await vault.unshareCredential(mateShareRow.id);
+    const noDelete = await vault.deleteCredential(id);
+    ok(
+      "sharing, unsharing and deleting their own record are each refused",
+      !noShare.ok && !noUnshare.ok && !noDelete.ok,
+      JSON.stringify([noShare, noUnshare, noDelete].map((r) => (r.ok ? "done" : r.error))),
+    );
+    const after = await db.vaultCredential.findUniqueOrThrow({ where: { id }, select: { archivedAt: true } });
+    ok("  and nothing changed — the same shares, the record still there", (await db.vaultShare.count({ where: { credentialId: id } })) === sharesBefore && after.archivedAt === null);
+  } finally {
+    await db.userPermission.deleteMany({ where: { userId: owner.id, permission: "vault.use" } });
+  }
+
   section("The admin override, and what the owner hears about it");
 
   actAs(admin);

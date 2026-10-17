@@ -1,6 +1,9 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { AlertTriangle, Settings2 } from "lucide-react";
 import { isModuleEnabled } from "@/actions/module";
+import { can } from "@/lib/authz/resolve";
+import { requireUser } from "@/lib/session";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { ewayDocuments } from "@/actions/eway";
 import { transporterOptions } from "@/actions/transporter";
@@ -51,6 +54,10 @@ export default async function EwayBillsPage({
 }) {
   const enabled = await isModuleEnabled("sales_documents");
   if (!enabled) return <ModuleDisabledNotice moduleKey="sales_documents" />;
+  // The bills are despatch's ("Process orders (purchasing)", as every action here asks): to anybody
+  // else the page is not there, as a refused page is (owner, 8 Oct 2026).
+  const viewer = await requireUser();
+  if (!(await can(viewer.id, "orders.process"))) notFound();
 
   const sp = await searchParams;
   const page = Math.max(1, Number(sp.page) || 1);

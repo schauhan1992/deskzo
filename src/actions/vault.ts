@@ -647,6 +647,10 @@ export async function revealSecret(
  */
 export async function deleteCredential(id: string, reason?: string): Promise<ActionResult<null>> {
   const user = await requireModuleUser("vault");
+  // As every other way into the vault does: an owner who has since lost the permission keeps no door.
+  if (!(await hasEffectivePermission(user.id, "vault.use"))) {
+    return { ok: false, error: "You don't have access to the credential vault." };
+  }
   const credential = await db.vaultCredential.findFirst({
     where: { id, archivedAt: null },
     select: { id: true, loginName: true, ownerId: true, shares: { select: { userId: true, departmentId: true, level: true, expiresAt: true } } },
@@ -895,6 +899,9 @@ export async function shareCredential(input: {
   expiresAt?: string;
 }): Promise<ActionResult<null>> {
   const user = await requireModuleUser("vault");
+  if (!(await hasEffectivePermission(user.id, "vault.use"))) {
+    return { ok: false, error: "You don't have access to the credential vault." };
+  }
   const credential = await db.vaultCredential.findFirst({
     where: { id: input.credentialId, archivedAt: null },
     select: {
@@ -963,6 +970,9 @@ export async function shareCredential(input: {
  */
 export async function unshareCredential(shareId: string): Promise<ActionResult<null>> {
   const user = await requireModuleUser("vault");
+  if (!(await hasEffectivePermission(user.id, "vault.use"))) {
+    return { ok: false, error: "You don't have access to the credential vault." };
+  }
   const share = await db.vaultShare.findUnique({
     where: { id: shareId },
     select: {

@@ -164,8 +164,11 @@ export async function deleteWorkbook(id: string): Promise<ActionResult<null>> {
 /** Copies someone else's list so it can be changed without touching theirs. */
 export async function duplicateWorkbook(id: string): Promise<ActionResult<{ id: string }>> {
   const user = await requireModuleUser("workspace");
-  const source = await db.workbook.findUnique({ where: { id }, select: { name: true, description: true, filters: true } });
-  if (!source) return { ok: false, error: "That list no longer exists." };
+  const source = await db.workbook.findUnique({ where: { id }, select: { name: true, description: true, filters: true, shared: true, ownerUserId: true } });
+  // Only a list this person could open (getWorkbook's rule): a private one copied by its link was a
+  // way to read somebody else's working list — its filters, and so who is on it.
+  const visible = !!source && (source.shared || source.ownerUserId === user.id || (await hasEffectivePermission(user.id, "workspace.manageAny")));
+  if (!source || !visible) return { ok: false, error: "That list no longer exists." };
 
   const copy = await db.workbook.create({
     data: {

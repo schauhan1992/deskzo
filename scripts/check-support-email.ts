@@ -469,6 +469,25 @@ async function run(db: PrismaClient) {
   ok("  nor its conversation", (await actions.ticketEmails(ticket.id)) === null);
   ok("  nor may they reply on it", !(await actions.replyToTicketByEmail({ ticketId: ticket.id, body: "x" })).ok);
   actor = owner;
+  // Somebody who may read every ticket but change none (an admin set their role's ticket edit to None):
+  // replying by email is changing the ticket, as a comment is.
+  await db.role.create({ data: { key: "ZZSM_READER", name: "Zz Reader", sortOrder: 991 } });
+  await db.rolePermission.createMany({
+    data: [
+      { role: "ZZSM_READER", permission: "tickets.view", allowed: true },
+      { role: "ZZSM_READER", permission: "companies.viewAll", allowed: true },
+    ],
+  });
+  await db.roleAccessLevel.create({ data: { role: "ZZSM_READER", record: "tickets", action: "edit", level: "NONE" } });
+  const reader = await db.user.create({ data: { name: "Zz Reader", email: "reader@zzsm.test", role: "ZZSM_READER", passwordHash: "!" }, select: { id: true, name: true, email: true, role: true } });
+  actor = reader;
+  const readersThread = await actions.ticketEmails(ticket.id);
+  ok("one who may read but not change the ticket sees its conversation", !!readersThread && readersThread.emails.length >= 6);
+  ok("  without a reply box", readersThread?.mayReply === false);
+  const readersReply = await actions.replyToTicketByEmail({ ticketId: ticket.id, body: "Read-only reply" });
+  ok("  and a reply sent anyway is refused, nothing sent", !readersReply.ok && /can't reply/.test(readersReply.ok ? "" : readersReply.error) && (await db.supportEmail.count({ where: { body: { contains: "Read-only reply" } } })) === 0, readersReply.ok ? "sent" : readersReply.error);
+  actor = owner;
+  ok("whoever may change it has the reply box", (await actions.ticketEmails(ticket.id))?.mayReply === true);
 
   // ── 8. Settings ──────────────────────────────────────────────────────────────────────────────
   section("8. Settings");

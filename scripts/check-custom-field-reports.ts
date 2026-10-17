@@ -737,6 +737,21 @@ async function run(scratchUrl: string, scratchName: string) {
     );
     ok("  says what it was filtered to", printed.includes("Customer · Segments: SMB"), printed.slice(0, 400));
     ok("  and carries the rows", printed.includes(" North ") && printed.includes(" South "));
+    // Every row on paper only for somebody who may download them; otherwise what the screen paints.
+    {
+      /* eslint-disable @typescript-eslint/no-require-imports */
+      const { rowsShown, REPORT_ROWS_SHOWN } = require("../src/lib/analytics/rows-shown") as typeof import("../src/lib/analytics/rows-shown");
+      /* eslint-enable @typescript-eslint/no-require-imports */
+      const many = Array.from({ length: REPORT_ROWS_SHOWN + 5 }, (_, i) => i);
+      const capped = rowsShown(many, false);
+      ok("without the export permission the sheet draws the screen's first rows, and says how many more", capped.rows.length === REPORT_ROWS_SHOWN && capped.hidden === 5, `${capped.rows.length} / ${capped.hidden}`);
+      ok("  with it, every row", rowsShown(many, true).rows.length === many.length && rowsShown(many, true).hidden === 0);
+      ok("  and a short report is whole either way", rowsShown([1, 2, 3], false).rows.length === 3 && rowsShown([1, 2, 3], false).hidden === 0);
+      as(admin);
+      ok("whether the sheet may carry every row is the CSV's rule: yes with the CRM export", await analytics.reportExportAllowed("orders"));
+      ok("  no for a source whose rows need the financial export, which nobody here holds", !(await analytics.reportExportAllowed("invoices")));
+      ok("  and no for one that can't be exported at all", !(await analytics.reportExportAllowed("nonsense")));
+    }
     const refusedSheet = await sheet(exec, ordersBy("cf:company:internal_rating"));
     ok(
       "an old link naming a restricted field prints the refusal for somebody who may not see it, and nothing of the field",
