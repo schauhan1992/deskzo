@@ -1,6 +1,7 @@
 import type { BlockType, SiteBlock } from "@/components/site/blocks/types";
 import { BLOCK_INFO } from "@/components/cms/editor/catalog";
 import { POST_BLOCK_TYPES, TAG_NAME_MAX, TERM_SLUG_MAX, type CmsIssue, type MediaRow, type PageDocument, type PostInput } from "@/lib/cms/types";
+import { guidePageIssues } from "@/lib/help/guides";
 import { checkPageDocument, checkPostBody, checkPostSeo, isReservedPostSlug, mediaIdsIn, mediaIssues, POST_SLUG, slugify, stableJson, TERM_SLUG } from "@/lib/cms/validate";
 
 /**
@@ -17,10 +18,11 @@ export function altIssues(value: unknown, media: Record<string, MediaRow>): CmsI
   return mediaIssues(value, new Set(ids), (id) => `“${media[id]?.filename ?? "This image"}” has no alt text yet — add it in the media library.`);
 }
 
-/** What would stop this page from being published. */
-export function pagePublishIssues(doc: PageDocument, media: Record<string, MediaRow>, requiredBlock: BlockType | null): CmsIssue[] {
+/** What would stop this page from being published. `slug`: its address, for the Help Center's rules (src/lib/help/guides.ts guidePageIssues). */
+export function pagePublishIssues(doc: PageDocument, media: Record<string, MediaRow>, requiredBlock: BlockType | null, slug?: string): CmsIssue[] {
   const checked = checkPageDocument(doc, "publish");
   const out: CmsIssue[] = checked.ok ? [] : [...checked.issues];
+  if (slug !== undefined) out.push(...guidePageIssues(slug, doc.blocks));
   if (requiredBlock && !doc.blocks.some((b) => b.type === requiredBlock)) {
     out.push({ path: "blocks", message: `Keep the ${BLOCK_INFO[requiredBlock].label} block — this page exists for it. Add it back, or reset the page to its default.` });
   }

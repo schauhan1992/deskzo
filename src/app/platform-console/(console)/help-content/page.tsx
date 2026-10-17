@@ -7,6 +7,8 @@ import { EmptyState } from "@/components/console/kit/empty-state";
 import { FilterBar, ViewTabs } from "@/components/console/kit/filters";
 import { PageHeader } from "@/components/console/kit/page-header";
 import { Panel } from "@/components/console/kit/panel";
+import { OutboundLink } from "@/components/ui/outbound-link";
+import { cmsOrigin } from "@/lib/cms/users";
 import { plural } from "@/lib/console-shared/format";
 import { PAGE_ROLES } from "@/lib/console-shared/nav";
 import { one, withParams } from "@/lib/console-shared/params";
@@ -92,6 +94,13 @@ export default async function ConsoleHelpContentPage({ searchParams }: PageProps
   return (
     <>
       <PageHeader title="Help and What's new" subtitle={subtitle} asOf={list.asOf} actions={archived ? undefined : newButton} />
+      <p className="mb-4 max-w-3xl text-sm text-muted">
+        The guide to each module is a page in the website&apos;s Help Center, written and published in the website CMS under{" "}
+        <OutboundLink href={`${cmsOrigin()}/help-guides`} className="font-medium text-brand hover:underline">
+          Help guides
+        </OutboundLink>
+        . The app&apos;s Help panel offers each page&apos;s guide by itself once it is published — it needs no link here.
+      </p>
 
       <FilterBar
         trailing={

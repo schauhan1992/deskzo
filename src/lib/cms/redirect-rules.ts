@@ -23,6 +23,8 @@ export const REDIRECT_PATH_MAX = 2000;
 export const REDIRECT_NOTE_MAX = 500;
 
 const BUILTIN_MESSAGE = "That page is part of the site and can't be redirected.";
+/** The Help Center's index (src/lib/help/guides.ts HELP_PATH; not imported, to keep this file free of the registries). */
+const HELP_INDEX_PATH = "/help";
 const MACHINERY_MESSAGE = "That address is used by the site itself and can't be redirected.";
 const SYSTEM_PREFIXES = ["/api", "/_next", "/media", "/preview", "/platform-site", "/platform-console", "/platform-cms", "/platform-partners"] as const;
 const SYSTEM_FILES = ["/favicon.ico", "/robots.txt", "/sitemap.xml", "/manifest.webmanifest"] as const;
@@ -67,6 +69,9 @@ export function reservedSource(fromPath: string): string | null {
   if (prefix && (base === "" || base === "/")) return "That would redirect the whole site.";
   if (base === "" || base === "/") return BUILTIN_MESSAGE;
   if (SITE_BUILTIN_ROUTES.some((route) => under(base, route))) return BUILTIN_MESSAGE;
+  // The Help Center's index, and all of it at once ("/help/*"). One guide's old address may still be
+  // sent on — that is how a guide that moved keeps its links (src/lib/cms/content.ts changePageSlug).
+  if (base === HELP_INDEX_PATH) return BUILTIN_MESSAGE;
   if (SYSTEM_PREFIXES.some((root) => under(base, root)) || (SYSTEM_FILES as readonly string[]).includes(base) || STATIC_FILE.test(base)) return MACHINERY_MESSAGE;
   return null;
 }

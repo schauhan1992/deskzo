@@ -1,6 +1,7 @@
 import {
   BadgeCheck,
   BarChart3,
+  BookOpen,
   Building2,
   CreditCard,
   FileText,
@@ -9,6 +10,7 @@ import {
   Image as ImageIcon,
   LayoutGrid,
   LayoutTemplate,
+  LifeBuoy,
   Link2,
   LogIn,
   Mail,
@@ -87,6 +89,14 @@ export const BLOCK_INFO: Record<BlockType, BlockInfo> = {
     group: "Live data and forms",
   },
   moduleHighlights: { label: "Page map", description: "For a hub page: groups of links to the pages under it, each with what it covers.", icon: LayoutGrid, group: "Sections" },
+  helpGuide: {
+    label: "Module guide",
+    description: "A Help Center guide to one module, on the outline every guide follows. Its heading is the page's main title; which products include the module is added from the product list. For pages under help/.",
+    icon: BookOpen,
+    group: "Top of page",
+    pageTop: true,
+  },
+  helpIndex: { label: "Help Center index", description: "Every published guide, grouped by product, with a search box. For the Help Center page.", icon: LifeBuoy, group: "Live data and forms" },
 };
 
 export const BLOCK_GROUPS: BlockGroup[] = ["Top of page", "Sections", "Text", "Live data and forms"];
@@ -188,6 +198,21 @@ const STARTERS: { [K in BlockType]: () => BlockPropsMap[K] } = {
     heading: "Section heading",
     groups: [{ title: "Group name", items: [{ label: "Page name", href: "/pricing", description: "What the page covers, in a line." }] }],
   }),
+  // The outline, with a line in each section saying what goes there — every one obviously a placeholder.
+  helpGuide: () => ({
+    module: "",
+    heading: "Module name",
+    summary: "One or two sentences on what the module does, for the Help Center and the app's Help panel.",
+    purpose: [{ type: "paragraph", text: "What the module is for, and the problem it solves." }],
+    access: [{ type: "paragraph", text: "Who can use it, in plain words." }],
+    permissions: [],
+    setup: [{ type: "paragraph", text: "What is done once, and by whom." }],
+    tasks: [{ title: "An everyday task", body: [{ type: "list", ordered: true, items: ["The first step.", "The next step."] }] }],
+    settings: [],
+    faq: [{ question: "A question people ask?", answer: [{ type: "paragraph", text: "The answer, in plain words." }] }],
+    related: [],
+  }),
+  helpIndex: () => siteDefault("helpIndex") ?? { searchLabel: "Search the guides", everyProductHeading: "In every product", emptyText: "The guides are on their way." },
 };
 
 /** A new block of `type`, with a fresh id. Call from an event handler (the id is random). */
@@ -238,6 +263,10 @@ export function blockSummary(block: SiteBlock): string {
       return clip(first("heading") || (block.props.groups ?? []).map((g) => g.title).join(", "));
     case "signatureGenerator":
       return clip(first("heading", "upsellHeading"));
+    case "helpGuide":
+      return clip([first("heading"), block.props.module ? `(${block.props.module})` : ""].filter(Boolean).join(" "));
+    case "helpIndex":
+      return clip(first("searchLabel"));
     default:
       return clip(first("heading", "eyebrow", "intro"));
   }

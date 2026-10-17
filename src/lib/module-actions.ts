@@ -270,6 +270,7 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   // The website CMS (cms.<domain>): its own accounts, and only the control plane's site tables.
   "cms/auth.ts": "platform",
   "cms/categories.ts": "platform",
+  "cms/guides.ts": "platform",
   "cms/leads.ts": "platform",
   "cms/media.ts": "platform",
   "cms/pages.ts": "platform",

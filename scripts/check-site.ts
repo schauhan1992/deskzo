@@ -535,7 +535,7 @@ async function main() {
     at(`zzsite-a.${ROOT}`);
     const wsMap = await sitemap();
     const mapped = rootMap.map((e) => new URL(e.url).pathname).sort().join(" ");
-    ok("the sitemap: the public pages, not signup", mapped === "/ /contact /partners /pricing /privacy /security /signin /terms", mapped);
+    ok("the sitemap: the public pages, not signup", mapped === "/ /contact /help /partners /pricing /privacy /security /signin /terms", mapped);
     ok("  and nothing on a workspace's host", wsMap.length === 0);
     // The blog's archives: a category with a child, a tag and one live post (in the child); a category with only a draft, and a tag with no posts.
     const siteContent = require("../src/lib/platform/site-content") as typeof import("../src/lib/platform/site-content");
@@ -555,7 +555,7 @@ async function main() {
     const withArchives = (await sitemap()).map((e) => new URL(e.url).pathname).sort().join(" ");
     ok(
       "  a live post adds the blog, the post and the archives it is in (a child's post counts for its parent) — not a category with only a draft, nor an unused tag",
-      withArchives === "/ /blog /blog/category/zz-guides /blog/category/zz-how-to /blog/tag/zz-news /blog/zz-archive-post /contact /partners /pricing /privacy /security /signin /terms",
+      withArchives === "/ /blog /blog/category/zz-guides /blog/category/zz-how-to /blog/tag/zz-news /blog/zz-archive-post /contact /help /partners /pricing /privacy /security /signin /terms",
       withArchives,
     );
 

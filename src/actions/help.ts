@@ -11,7 +11,9 @@ import { workspaceClock } from "@/lib/time/workspace";
 import { checkLink, youtubeId } from "@/lib/help/links";
 import type { GettingStartedStep } from "@/lib/help/getting-started";
 import { gettingStartedFor } from "@/lib/help/onboarding-facts";
+import { moduleForPath } from "@/lib/help/guides";
 import { deskzoContentFor, deskzoSeenThrough, type DeskzoContent, type PlatformHelpKindKey } from "@/lib/platform/help-content";
+import { deskzoGuidesFor, helpCenterUrl, type DeskzoGuide } from "@/lib/platform/help-guides";
 import { currentTenant } from "@/lib/tenancy/resolve";
 import type { ActionResult } from "@/actions/company";
 
@@ -407,6 +409,26 @@ export async function deskzoHelpLinks(kind?: PlatformHelpKindKey): Promise<Deskz
     ok: content.ok,
     links: links.map((l) => ({ id: l.id, kind: l.kind, title: l.title, url: l.url, description: l.description, external: l.external, youtubeId: l.youtubeId })),
   };
+}
+
+/**
+ * Deskzo's guides to its modules (the Help Center on the public website, src/lib/platform/help-guides.ts):
+ * the guide for the page somebody is on — its module worked out from `pathname` (src/lib/help/guides.ts
+ * moduleForPath) — and every guide for a module this workspace's plan has, for the panel's search, each
+ * a link to the website. Never a company's guide: those are `listHelpLinks`.
+ */
+export type DeskzoGuidesView = { ok: boolean; current: DeskzoGuide | null; guides: DeskzoGuide[]; helpCenterUrl: string };
+
+export async function deskzoGuides(pathname?: string): Promise<DeskzoGuidesView> {
+  await requireUser();
+  let got: { ok: boolean; guides: DeskzoGuide[] };
+  try {
+    got = await deskzoGuidesFor(await currentTenant());
+  } catch {
+    got = { ok: false, guides: [] };
+  }
+  const moduleKey = moduleForPath(typeof pathname === "string" ? pathname.slice(0, 500) : null);
+  return { ok: got.ok, current: moduleKey ? (got.guides.find((g) => g.module === moduleKey) ?? null) : null, guides: got.guides, helpCenterUrl: helpCenterUrl() };
 }
 
 export async function deskzoUpdates(limit = 30): Promise<DeskzoFeed> {

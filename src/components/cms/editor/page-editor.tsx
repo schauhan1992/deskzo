@@ -139,7 +139,7 @@ export function PageEditor({ pageRef, page, caps, ctx, year, siteOrigin, sitePat
   // ─── Checks and issues ─────────────────────────────────────────────────────────────────────────
   const draftCheck = useMemo(() => checkPageDocument(doc, "draft"), [doc]);
   const [publishCheck, setPublishCheck] = useState(false);
-  const publishIssues = useMemo(() => (publishCheck ? pagePublishIssues(deferred, media, page.requiredBlock) : []), [publishCheck, deferred, media, page.requiredBlock]);
+  const publishIssues = useMemo(() => (publishCheck ? pagePublishIssues(deferred, media, page.requiredBlock, page.slug) : []), [publishCheck, deferred, media, page.requiredBlock, page.slug]);
   const issues = useMemo(() => mergeIssues(draftCheck.ok ? [] : draftCheck.issues, publishIssues, editor.serverIssues), [draftCheck, publishIssues, editor.serverIssues]);
   const grouped = useMemo(() => groupIssues(issues, doc.blocks, "blocks"), [issues, doc.blocks]);
   const settingsIssues = grouped.document.filter((i) => i.path === "title" || i.path.startsWith("seo"));
@@ -248,7 +248,7 @@ export function PageEditor({ pageRef, page, caps, ctx, year, siteOrigin, sitePat
   }
 
   const askPublish = () => {
-    const problems = pagePublishIssues(doc, media, page.requiredBlock);
+    const problems = pagePublishIssues(doc, media, page.requiredBlock, page.slug);
     setPublishCheck(true);
     if (problems.length) {
       notice.show("error", `${problems.length === 1 ? "One field needs" : `${problems.length} fields need`} attention before this can be published.`);

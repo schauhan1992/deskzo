@@ -10,6 +10,7 @@ import { auditNewTags, MAX_POST_CATEGORIES, MAX_POST_TAGS, planPostTerms, writeP
 import {
   BUILTIN_PAGE_SLUGS,
   CmsRefused,
+  GUIDE_PAGE_SEGMENT,
   POST_BLOCK_TYPES,
   REQUIRED_BLOCKS,
   type BuiltinPageSlug,
@@ -49,6 +50,7 @@ import {
   TERM_SLUG,
   type ValidationMode,
 } from "@/lib/cms/validate";
+import { guideModuleOf, guidePageIssues, isGuideSlug } from "@/lib/help/guides";
 import { consoleClock } from "@/lib/platform/console-clock";
 import { controlDb } from "@/lib/platform/control-db";
 import { invalidateSiteContent, mergeSiteSettings, sitePath } from "@/lib/platform/site-content";
@@ -312,6 +314,7 @@ export async function publishPage(ref: string, input: { document?: unknown; vers
   if (required && !doc.blocks.some((b) => b.type === required)) {
     throw new CmsRefused(`This page exists for its ${required} block — put it back before publishing.`, { issues: [{ path: "blocks", message: `Keep the ${required} block.` }] });
   }
+  await assertGuidePage(target, doc);
   await assertMedia(doc, media, true);
   const note = cleanLine(input?.note, 200) || null;
   const by = actorRef(actorOf(me));
@@ -349,6 +352,29 @@ export async function publishPage(ref: string, input: { document?: unknown; vers
   await cmsAudit(actorOf(me), "page.publish", "page", published.id, { slug: target.slug, title, blocks: doc.blocks.length, versionId: published.versionId });
   await refreshSeoScores({ type: "PAGE", key: target.slug });
   return savedOf(await controlDb().sitePage.findUniqueOrThrow({ where: { id: published.id } }));
+}
+
+/**
+ * The Help Center's rules for a page about to be published (src/lib/help/guides.ts guidePageIssues):
+ * a guide only under help/, one to a page, naming only modules, permissions and products that exist —
+ * and, from the database, no other published guide for the same module, so the app's Help panel and
+ * the index each have one guide to show for it.
+ */
+async function assertGuidePage(target: Target, doc: PageDocument): Promise<void> {
+  const issues: CmsIssue[] = guidePageIssues(target.slug, doc.blocks);
+  const moduleKey = isGuideSlug(target.slug) ? guideModuleOf(doc.blocks) : null;
+  if (moduleKey && !issues.length) {
+    const others = await controlDb().sitePage.findMany({
+      where: { status: "PUBLISHED", archivedAt: null, slug: { startsWith: `${GUIDE_PAGE_SEGMENT}/` }, ...(target.row ? { NOT: { id: target.row.id } } : {}) },
+      select: { slug: true, published: true },
+    });
+    const taken = others.find((p) => guideModuleOf((p.published as { blocks?: unknown } | null)?.blocks) === moduleKey);
+    if (taken) {
+      const index = doc.blocks.findIndex((b) => b.type === "helpGuide");
+      issues.push({ path: `blocks[${index}].props.module`, blockId: doc.blocks[index]?.id, message: `The guide at /${taken.slug} already covers this module. Unpublish that one first, or choose another module.` });
+    }
+  }
+  if (issues.length) throw new CmsRefused(issues.length === 1 ? issues[0]!.message : "Some of this guide needs attention before it can be published.", { issues });
 }
 
 /** Takes an added page off the site. A built-in page is never unpublished: publish the content it should have instead. */
@@ -416,6 +442,12 @@ export async function changePageSlug(ref: string, slugInput: string, me: CmsMe):
   if (target.builtin || !target.row) throw new CmsRefused("The site's own pages keep their addresses.");
   const slug = await checkNewPageSlug(slugInput, target.row.id);
   if (slug === target.row.slug) return savedOf(target.row);
+  // A published guide stays under help/, and only a guide goes there (src/lib/help/guides.ts).
+  if (target.row.status === "PUBLISHED") {
+    const blocks = (target.row.published as { blocks?: unknown } | null)?.blocks;
+    const problem = guidePageIssues(slug, Array.isArray(blocks) ? blocks : []).find((i) => !i.path.includes(".props"));
+    if (problem) throw new CmsRefused(problem.message, { issues: [{ path: "slug", message: problem.message }] });
+  }
   const row = await controlDb().sitePage.update({ where: { id: target.row.id }, data: { slug, updatedBy: actorRef(actorOf(me)) } });
   const redirect = row.status === "PUBLISHED" && !row.archivedAt ? await autoRedirect(sitePath(target.row.slug), sitePath(slug), actorOf(me)) : null;
   if (row.status === "PUBLISHED") invalidateSiteContent();

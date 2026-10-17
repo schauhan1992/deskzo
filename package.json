@@ -166,6 +166,8 @@
     "check:copilot": "tsx scripts/check-copilot.ts",
     "check:help": "tsx scripts/check-help.ts",
     "check:help-content": "tsx scripts/check-help-content.ts",
+    "check:help-guides": "tsx scripts/check-help-guides.ts",
+    "help:seed-guides": "tsx scripts/help-guides-seed.ts",
     "check:document-mail": "tsx scripts/check-document-mail.ts",
     "check:document-mail-routes": "tsx scripts/check-document-mail-routes.ts",
     "check:geonames": "tsx scripts/check-geonames.ts",

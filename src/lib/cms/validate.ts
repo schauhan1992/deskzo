@@ -10,7 +10,7 @@ import {
   type SiteSeo,
   type SiteSettings,
 } from "@/components/site/blocks/types";
-import { BUILTIN_PAGE_SLUGS, RESERVED_PAGE_SEGMENTS, type CmsIssue, type PageDocument, type PostSeo } from "@/lib/cms/types";
+import { BUILTIN_PAGE_SLUGS, GUIDE_PAGE_SEGMENT, RESERVED_PAGE_SEGMENTS, type CmsIssue, type PageDocument, type PostSeo } from "@/lib/cms/types";
 import { keywordProblems, MAX_KEYWORDS, normaliseKeywords } from "@/lib/seo/keywords";
 import { PRODUCT_KEYS, productByKey } from "@/lib/products";
 
@@ -201,6 +201,24 @@ const BLOCK_SPECS = {
     ...SECTION_HEAD,
     groups: list({ title: text(SHORT, true), items: list({ label: text(LABEL, true), href: INTERNAL_HREF, description: text(200, true) }, 12, true, undefined, "links in a group") }, 6, true, undefined, "groups"),
   },
+  // A module's guide. Whether its module, permissions and related guides exist — and the product names
+  // in its text — is checked on publishing (src/lib/help/guides.ts guideReferenceIssues), not here:
+  // the registries would weigh down every page of the editor that checks as it types.
+  helpGuide: {
+    // Empty while a new guide waits for its module; publishing refuses it then ("Choose the module…").
+    module: keep(60),
+    heading: text(HEADING, true),
+    summary: text(300, true),
+    purpose: { k: "rich", maxItems: 60, req: true },
+    access: { k: "rich", maxItems: 40, req: true },
+    permissions: list({ key: text(80, true), text: text(400, true) }, 40, false, undefined, "permissions"),
+    setup: { k: "rich", maxItems: 80, req: true },
+    tasks: list({ title: text(SHORT, true), anchor: { k: "anchor" }, body: { k: "rich", maxItems: 60, req: true } }, 30, true, undefined, "tasks"),
+    settings: list({ name: text(SHORT, true), where: text(SHORT), body: { k: "rich", maxItems: 40, req: true } }, 40, false, undefined, "settings"),
+    faq: list({ question: text(300, true), answer: { k: "rich", maxItems: 30, req: true } }, 40, true, undefined, "questions"),
+    related: { k: "texts", max: 60, maxItems: 12 },
+  },
+  helpIndex: { anchor: { k: "anchor" }, searchLabel: text(LABEL, true), everyProductHeading: text(SHORT, true), emptyText: text(BODY, true) },
 } satisfies { [K in BlockType]: Record<keyof BlockPropsMap[K], Field> };
 
 const SEO_SPEC: Fields = {
@@ -321,6 +339,8 @@ export function pageSlugProblem(slug: string): string | null {
   const first = segments[0]!;
   if ((RESERVED_PAGE_SEGMENTS as readonly string[]).includes(first) || first.startsWith("platform-")) return "That address is used by the site itself. Choose another.";
   if ((BUILTIN_PAGE_SLUGS as readonly string[]).includes(slug)) return "That address belongs to one of the site's own pages.";
+  // The Help Center's guides are the one family of pages under a built-in page: help/<guide>, one level.
+  if (first === GUIDE_PAGE_SEGMENT) return segments.length === 2 ? null : `A guide's address is ${GUIDE_PAGE_SEGMENT}/ and one more part, like ${GUIDE_PAGE_SEGMENT}/leads.`;
   if ((BUILTIN_PAGE_SLUGS as readonly string[]).includes(first)) return `Pages can't go under /${first}, one of the site's own pages. Start the address with another word.`;
   return null;
 }

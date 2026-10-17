@@ -23,6 +23,11 @@ export function RichTextBlock({ props, ctx }: { props: RichTextProps; ctx: SiteR
   );
 }
 
+/** Rich text on its own, without the block's section and container — for blocks that hold some (a guide's sections). */
+export function RichContent({ nodes, ctx }: { nodes: RichNode[] | undefined; ctx: SiteRenderContext }) {
+  return <>{(nodes ?? []).map((node, i) => renderNode(node, i, ctx))}</>;
+}
+
 function inline(value: RichInline, ctx: SiteRenderContext): ReactNode {
   if (typeof value === "string") return fill(value, ctx);
   return value.map((span, i) => {

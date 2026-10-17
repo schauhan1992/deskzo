@@ -14,12 +14,12 @@ import { CMS_ADMINS, CMS_PUBLISHERS, type CmsRole } from "@/lib/cms/types";
  * Pure and client-safe: nothing here reaches the database.
  */
 
-export type CmsPageKey = "dashboard" | "pages" | "posts" | "categories" | "tags" | "media" | "leads" | "seo" | "navigation" | "redirects" | "settings" | "users" | "activity" | "account";
+export type CmsPageKey = "dashboard" | "pages" | "helpGuides" | "posts" | "categories" | "tags" | "media" | "leads" | "seo" | "navigation" | "redirects" | "settings" | "users" | "activity" | "account";
 
 export type CmsNavGroup = "home" | "content" | "inbox" | "site" | "team";
 
 /** lucide-react names; the shell turns them into glyphs (src/components/cms/shell/nav-icons.tsx). */
-export type CmsNavIconName = "LayoutDashboard" | "FileText" | "Newspaper" | "FolderTree" | "Tags" | "Images" | "Inbox" | "Gauge" | "PanelsTopLeft" | "Signpost" | "Settings" | "Users" | "Activity" | "UserRound";
+export type CmsNavIconName = "LayoutDashboard" | "FileText" | "Newspaper" | "FolderTree" | "Tags" | "Images" | "Inbox" | "Gauge" | "PanelsTopLeft" | "Signpost" | "Settings" | "Users" | "Activity" | "UserRound" | "LifeBuoy";
 
 /** A count the layout works out for the sidebar. */
 export type CmsNavBadgeKey = "leads";
@@ -50,6 +50,7 @@ export type CmsNavPage = {
 export const CMS_PAGE_ROLES: Record<CmsPageKey, readonly CmsRole[] | undefined> = {
   dashboard: undefined,
   pages: undefined,
+  helpGuides: undefined,
   posts: undefined,
   categories: undefined,
   tags: undefined,
@@ -71,6 +72,8 @@ export const CMS_ROUTES = {
   page: (id: string) => `/pages/${encodeURIComponent(id)}`,
   /** A built-in page by its slug, saved or not ("builtin-home"). */
   builtinPage: (slug: string) => `/pages/builtin-${encodeURIComponent(slug)}`,
+  /** The Help Center's guides, one per module (src/lib/help/guides.ts): which there are, and which are drafts. */
+  helpGuides: "/help-guides",
   posts: "/posts",
   post: (id: string) => `/posts/${encodeURIComponent(id)}`,
   categories: "/categories",
@@ -100,6 +103,7 @@ export const CMS_ROUTES = {
 export const CMS_PAGES: readonly CmsNavPage[] = [
   { key: "dashboard", href: CMS_ROUTES.dashboard, label: "Dashboard", group: "home", icon: "LayoutDashboard", description: "What's live, what's in progress, what just happened", shortcut: "d", inNav: true },
   { key: "pages", href: CMS_ROUTES.pages, label: "Pages", group: "content", icon: "FileText", description: "The site's pages, drafts and published versions", roles: CMS_PAGE_ROLES.pages, shortcut: "p", inNav: true },
+  { key: "helpGuides", href: CMS_ROUTES.helpGuides, label: "Help guides", group: "content", icon: "LifeBuoy", description: "The Help Center's guide to each module: missing, draft, published", roles: CMS_PAGE_ROLES.helpGuides, shortcut: "h", inNav: true },
   { key: "posts", href: CMS_ROUTES.posts, label: "Posts", group: "content", icon: "Newspaper", description: "Blog and news posts, scheduled or live", roles: CMS_PAGE_ROLES.posts, shortcut: "o", inNav: true },
   { key: "categories", href: CMS_ROUTES.categories, label: "Categories", group: "content", icon: "FolderTree", description: "The blog's categories, one level deep, each with its own archive page", roles: CMS_PAGE_ROLES.categories, shortcut: "c", inNav: true },
   { key: "tags", href: CMS_ROUTES.tags, label: "Tags", group: "content", icon: "Tags", description: "The blog's tags: rename, merge and tidy them", roles: CMS_PAGE_ROLES.tags, shortcut: "t", inNav: true },

@@ -20,6 +20,8 @@ import { normaliseKeywords } from "@/lib/seo/keywords";
 import { jsonLdFor, shownUpdatedAt } from "@/lib/seo/schema";
 import { countWords, squash } from "@/lib/seo/text";
 import { productByKey } from "@/lib/products";
+import { GUIDE_SECTIONS, moduleAvailability } from "@/lib/help/guides";
+import { getPermissionDefinition } from "@/lib/permissions";
 import { comparisonRows } from "@/components/site/blocks/product-vs-suite-view";
 import type {
   SeoContent,
@@ -273,6 +275,17 @@ function inlineLinks(c: Collector, value: RichInline | undefined, ctx: FillCtx, 
     const s = obj(span);
     if (s.href) link(c, s.href, fill(str(s.text), ctx), field);
   }
+}
+
+/** A guide's answer (rich text) as the paragraphs an FAQ answer is read as: each paragraph, note and list item, headings left out. */
+function richAnswer(nodes: unknown, ctx: FillCtx): string[] {
+  return arr<RichNode>(nodes).flatMap((node) => {
+    const n = obj(node);
+    if (n.type === "paragraph" || n.type === "note") return [inlineText(n.text as RichInline, ctx)];
+    if (n.type === "list") return arr<RichInline>(n.items).map((i) => inlineText(i, ctx));
+    if (n.type === "table") return arr<RichInline[]>(n.rows).map((r) => arr<RichInline>(r).map((cell) => inlineText(cell, ctx)).join(" — "));
+    return [];
+  });
 }
 
 /** A SectionHead: the eyebrow, the h2, the introduction. */
@@ -537,6 +550,51 @@ function block(c: Collector, b: SiteBlock, index: number, root: "blocks" | "body
       paragraph(c, t(p.demoNote), field);
       break;
     }
+    case "helpGuide": {
+      // A module's guide, as src/components/site/blocks/help-guide.tsx renders it: its h1 and summary,
+      // then the outline's own headings over what each section holds, and the products from products.ts.
+      const section = (key: (typeof GUIDE_SECTIONS)[number]["key"]) => heading(c, 2, GUIDE_SECTIONS.find((s) => s.key === key)!.heading, field);
+      const rich = (nodes: unknown) => {
+        for (const node of arr<RichNode>(nodes)) richNode(c, node, ctx, field);
+      };
+      label(c, "Help Center");
+      heading(c, 1, t(p.heading), field);
+      paragraph(c, t(p.summary), field);
+      section("purpose");
+      rich(p.purpose);
+      section("access");
+      rich(p.access);
+      for (const perm of arr(p.permissions).map(obj)) {
+        label(c, getPermissionDefinition(str(perm.key))?.label ?? "");
+        paragraph(c, t(perm.text), field);
+      }
+      section("setup");
+      rich(p.setup);
+      section("tasks");
+      for (const task of arr(p.tasks).map(obj)) {
+        heading(c, 3, t(task.title), field);
+        rich(task.body);
+      }
+      section("settings");
+      for (const s of arr(p.settings).map(obj)) {
+        heading(c, 3, t(s.name), field);
+        label(c, t(s.where));
+        rich(s.body);
+      }
+      section("faq");
+      for (const q of arr(p.faq).map(obj)) faq(c, t(q.question), richAnswer(q.answer, ctx), field);
+      const availability = moduleAvailability(str(p.module));
+      if (availability) {
+        section("products");
+        if (!availability.everywhere) list(c, [...availability.products.map((pr) => `${pr.name}. ${pr.tagline}`), ...(availability.addOn ? [availability.addOn.addOn.name] : [])], false, field);
+      }
+      break;
+    }
+    case "helpIndex":
+      // The guides themselves are read live; what the content holds is the words around them.
+      label(c, t(p.searchLabel));
+      label(c, t(p.everyProductHeading));
+      break;
     case "signatureGenerator":
       // The generator itself is drawn in the browser; what the content holds is the words around it.
       heading(c, 2, t(p.heading), field);

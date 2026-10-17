@@ -2,12 +2,13 @@
 
 import { Component, type ReactNode } from "react";
 import { ArrowLeft, Check, Globe } from "lucide-react";
-import type { PricingTableProps, SiteBlock, SiteRenderContext } from "@/components/site/blocks/types";
+import type { HelpIndexProps, PricingTableProps, SiteBlock, SiteRenderContext } from "@/components/site/blocks/types";
 import { ContactFormBlock } from "@/components/site/blocks/contact-form";
 import { ComparisonTableBlock } from "@/components/site/blocks/comparison-table";
 import { CtaBlock } from "@/components/site/blocks/cta";
 import { FaqBlock } from "@/components/site/blocks/faq";
 import { FeatureGridBlock } from "@/components/site/blocks/feature-grid";
+import { HelpGuideView } from "@/components/site/blocks/help-guide-view";
 import { HeroBlock } from "@/components/site/blocks/hero";
 import { ImageTextBlock } from "@/components/site/blocks/image-text";
 import { LogoCloudBlock } from "@/components/site/blocks/logo-cloud";
@@ -28,6 +29,7 @@ import { SiteFooter } from "@/components/site/footer";
 import { SiteHeader } from "@/components/site/header";
 import { anchorId, fill, resolveAction, safeSrc } from "@/components/site/links";
 import { fillNav } from "@/components/site/nav";
+import { HelpSearch } from "@/components/site/help-search";
 import { Container } from "@/components/site/ui";
 import { BLOCK_INFO } from "@/components/cms/editor/catalog";
 import { cn } from "@/lib/utils";
@@ -114,6 +116,19 @@ function PricingPlaceholder({ props, ctx }: { props: PricingTableProps; ctx: Sit
   );
 }
 
+/** The Help Center's index lists the published guides, read when the page is served: the preview shows its search box and says so. */
+function HelpIndexPlaceholder({ props, ctx }: { props: HelpIndexProps; ctx: SiteRenderContext }) {
+  const t = (s?: string) => fill(s, ctx);
+  return (
+    <section id={anchorId(props.anchor)} className="pb-16">
+      <Container>
+        <HelpSearch groups={[{ key: "preview", title: t(props.everyProductHeading), tagline: null, path: null, guides: [] }]} searchLabel={t(props.searchLabel)} emptyText={t(props.emptyText)} />
+        <p className="mt-6 rounded-lg border border-info/30 bg-info-bg px-4 py-2 text-center text-xs text-info">The published guides appear here, grouped by product. Use Preview to see them with this page.</p>
+      </Container>
+    </section>
+  );
+}
+
 function renderBlock(block: SiteBlock, ctx: SiteRenderContext): ReactNode {
   switch (block.type) {
     case "hero":
@@ -161,6 +176,11 @@ function renderBlock(block: SiteBlock, ctx: SiteRenderContext): ReactNode {
     case "productVsSuite":
       // Prices are read when the page is served; the preview shows the rest, its cards pointing to the pricing page.
       return <ProductVsSuiteView props={block.props} ctx={ctx} offer={null} />;
+    case "helpGuide":
+      // "Read next" links only to published guides, read when the page is served.
+      return <HelpGuideView props={block.props} ctx={ctx} related={[]} />;
+    case "helpIndex":
+      return <HelpIndexPlaceholder props={block.props} ctx={ctx} />;
     default:
       return null;
   }

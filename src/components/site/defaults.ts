@@ -865,5 +865,38 @@ const PRIVACY: SitePage = {
   ],
 };
 
+/**
+ * The Help Center: every module's guide (pages at help/<guide>, src/lib/help/guides.ts), listed by the
+ * helpIndex block once each is published in the CMS.
+ */
+const HELP: SitePage = {
+  slug: "help",
+  title: "Help Center",
+  seo: {
+    title: "Help Center: a guide to every module",
+    description: "Step-by-step guides to every {siteName} module: what it is for, who can use it, setting it up, everyday tasks, each setting, and answers to common questions.",
+  },
+  blocks: [
+    {
+      id: "help-header",
+      type: "pageHeader",
+      props: {
+        eyebrow: "Help Center",
+        heading: "How to use {siteName}",
+        intro: "A guide to every module: what it is for, who can use it, how to set it up, the everyday tasks step by step, what each setting does, and answers to the questions people ask.",
+      },
+    },
+    {
+      id: "help-index",
+      type: "helpIndex",
+      props: {
+        searchLabel: "Search the guides",
+        everyProductHeading: "In every product",
+        emptyText: "The guides are on their way. In the meantime, the Help panel in the app has the support contact for your workspace.",
+      },
+    },
+  ],
+};
+
 /** Every page the site has by default, in the order the sitemap lists them. */
-export const DEFAULT_SITE_PAGES: SitePage[] = [HOME, PRICING, SECURITY, CONTACT, SIGNIN, SIGNUP, TERMS, PRIVACY];
+export const DEFAULT_SITE_PAGES: SitePage[] = [HOME, PRICING, SECURITY, CONTACT, SIGNIN, SIGNUP, TERMS, PRIVACY, HELP];

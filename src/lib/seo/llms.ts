@@ -9,7 +9,7 @@ import { isNavMenu } from "@/components/site/nav";
  * The pages are grouped as the header groups them: each menu (Product, Solutions…) is a section with the
  * pages its columns link to, in the menu's order, then any page under one of those ("/product/crm" with
  * "/product"). Pages no menu holds — the home page, pricing, legal — come first under "Pages", in the
- * sitemap's order; posts last under "Blog", newest first. Only what the
+ * sitemap's order; the Help Center and its guides under "Help Center"; posts last under "Blog", newest first. Only what the
  * caller gives is listed: src/app/llms.txt/route.ts passes what the sitemap would, less anything an
  * editor left out of llms.txt.
  *
@@ -29,6 +29,9 @@ export type LlmsInput = {
   pages: readonly LlmsEntry[];
   posts: readonly LlmsEntry[];
 };
+
+/** The Help Center's index (src/lib/help/guides.ts HELP_PATH, kept here so this file stays free of the registries). */
+const HELP_INDEX = "/help";
 
 /** "/product/crm?x#y" and "/product/crm/" both as "/product/crm"; anything off the site, null. */
 function sitePathOf(href: unknown): string | null {
@@ -83,7 +86,13 @@ export function buildLlmsTxt(input: LlmsInput): string {
     if (home) home.entries.push(page);
     else rest.push(page);
   }
-  if (rest.length) sections.unshift({ title: "Pages", entries: rest });
+  // The Help Center and its module guides (src/lib/help/guides.ts) are a section of their own, before the
+  // blog, unless a menu already holds them — forty-odd guides would otherwise bury the site's own pages.
+  const isHelp = (path: string) => path === HELP_INDEX || path.startsWith(`${HELP_INDEX}/`);
+  const help = rest.filter((p) => isHelp(p.path)).sort((a, b) => Number(b.path === HELP_INDEX) - Number(a.path === HELP_INDEX));
+  const others = rest.filter((p) => !isHelp(p.path));
+  if (others.length) sections.unshift({ title: "Pages", entries: others });
+  if (help.length) sections.push({ title: "Help Center", entries: help });
   if (input.posts.length) sections.push({ title: "Blog", entries: [...input.posts] });
 
   const out = [`# ${oneLine(input.siteName)}`, ""];

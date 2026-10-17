@@ -130,8 +130,14 @@ export type CmsTwoFactorMode = "optional" | "required";
 export type PageDocument = { title: string; seo: SiteSeo; blocks: SiteBlock[] };
 
 /** The site's own pages: always there, editable, never unpublished or deleted (they fall back to src/components/site/defaults.ts). */
-export const BUILTIN_PAGE_SLUGS = ["home", "pricing", "security", "contact", "signin", "signup", "terms", "privacy"] as const;
+export const BUILTIN_PAGE_SLUGS = ["home", "pricing", "security", "contact", "signin", "signup", "terms", "privacy", "help"] as const;
 export type BuiltinPageSlug = (typeof BUILTIN_PAGE_SLUGS)[number];
+
+/**
+ * The Help Center (src/lib/help/guides.ts): /help is a built-in page, and each module's guide a page
+ * at help/<guide> — the one family of pages allowed under a built-in page's address.
+ */
+export const GUIDE_PAGE_SEGMENT = "help";
 
 /** The block each form page must keep, or the page stops working. */
 export const REQUIRED_BLOCKS: Partial<Record<BuiltinPageSlug, BlockType>> = {
@@ -139,6 +145,7 @@ export const REQUIRED_BLOCKS: Partial<Record<BuiltinPageSlug, BlockType>> = {
   contact: "contactForm",
   signin: "workspaceSignin",
   signup: "signupForm",
+  help: "helpIndex",
 };
 
 /**

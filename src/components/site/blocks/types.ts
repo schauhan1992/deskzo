@@ -275,6 +275,56 @@ export type ProductVsSuiteProps = {
   demoNote?: string;
 };
 
+/**
+ * A module's guide in the Help Center (/help/<slug>, src/lib/help/guides.ts): one per module in
+ * src/lib/modules.ts, every one on the same outline, in this order — what it is for, who can use it,
+ * setting it up, everyday tasks step by step, each setting explained, questions and troubleshooting —
+ * and then which products include it, which is never written here: the block reads it from
+ * src/lib/products.ts and src/lib/modules.ts, so a product's name is never typed into a guide.
+ *
+ * The section headings are the block's own, so every guide reads the same way. The block's heading is
+ * the page's h1; a guide page has this block and no other top-of-page block.
+ */
+export type HelpGuideProps = {
+  /** The module it is for — a key in src/lib/modules.ts. One guide per module. */
+  module: string;
+  /** The page's h1: "Leads". */
+  heading: string;
+  /** One or two sentences under the heading — also the guide's line in the Help Center and in the app's Help panel. */
+  summary: string;
+  /** What the module is for. */
+  purpose: RichNode[];
+  /** Who can use it, in plain words. */
+  access: RichNode[];
+  /** The permissions that open or limit it (src/lib/permissions.ts keys), each in plain words. The block shows each one's name as the permission screen does. */
+  permissions: { key: string; text: string }[];
+  /** Setting it up: what is done once, and by whom. */
+  setup: RichNode[];
+  /** Everyday tasks, step by step. */
+  tasks: { title: string; anchor?: string; body: RichNode[] }[];
+  /** Each setting explained: its name, where it is ("Settings › Leads"), and what it changes. */
+  settings: { name: string; where?: string; body: RichNode[] }[];
+  /** Questions and troubleshooting. */
+  faq: { question: string; answer: RichNode[] }[];
+  /** Guides to read next, by module key. */
+  related?: string[];
+};
+
+/**
+ * The Help Center's index (/help): every published guide, grouped by the product that includes its
+ * module (src/lib/products.ts), with a search box. The guides are read from the site's published pages;
+ * only the words around them are written here.
+ */
+export type HelpIndexProps = {
+  anchor?: string;
+  /** In the search box. */
+  searchLabel: string;
+  /** Above the modules every product comes with. */
+  everyProductHeading: string;
+  /** Shown while no guide is published yet. */
+  emptyText: string;
+};
+
 export type BlockPropsMap = {
   hero: HeroProps;
   pageHeader: PageHeaderProps;
@@ -298,6 +348,8 @@ export type BlockPropsMap = {
   moduleHighlights: ModuleHighlightsProps;
   signatureGenerator: SignatureGeneratorProps;
   productVsSuite: ProductVsSuiteProps;
+  helpGuide: HelpGuideProps;
+  helpIndex: HelpIndexProps;
 };
 
 export type BlockType = keyof BlockPropsMap;
@@ -326,6 +378,8 @@ export const BLOCK_TYPES = [
   "moduleHighlights",
   "signatureGenerator",
   "productVsSuite",
+  "helpGuide",
+  "helpIndex",
 ] as const satisfies readonly BlockType[];
 // Every block type is in the list: this fails to compile if one is added to BlockPropsMap and not here.
 type Assert<T extends true> = T;

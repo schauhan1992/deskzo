@@ -9,6 +9,8 @@ import type {
   CtaProps,
   FaqProps,
   FeatureGridProps,
+  HelpGuideProps,
+  HelpIndexProps,
   HeroProps,
   ImageTextProps,
   LogoCloudProps,
@@ -47,7 +49,9 @@ import {
   TextField,
 } from "@/components/cms/editor/fields";
 import { RichTextField } from "@/components/cms/editor/rich-text-field";
+import { GUIDE_SECTIONS } from "@/lib/help/guides";
 import { MODULE_REGISTRY } from "@/lib/modules";
+import { PERMISSIONS } from "@/lib/permissions";
 import { PRODUCTS, type ProductKey } from "@/lib/products";
 
 /**
@@ -776,6 +780,164 @@ function ModuleHighlightsForm({ props, onChange }: FormProps<"moduleHighlights">
   );
 }
 
+// ─── The Help Center ─────────────────────────────────────────────────────────────────────────────
+
+type GuidePermission = HelpGuideProps["permissions"][number];
+type GuideTask = HelpGuideProps["tasks"][number];
+type GuideSetting = HelpGuideProps["settings"][number];
+type GuideQuestion = HelpGuideProps["faq"][number];
+type GuideRelated = { key: string };
+
+const PERMISSION_OPTIONS = [...PERMISSIONS].sort((a, b) => a.label.localeCompare(b.label)).map((p) => ({ value: p.key, label: `${p.label} — ${p.key}` }));
+const GUIDE_HEADING = (key: (typeof GUIDE_SECTIONS)[number]["key"]) => GUIDE_SECTIONS.find((s) => s.key === key)!.heading;
+
+/**
+ * A module's guide: the outline every guide follows, one field per section, under the headings the
+ * page shows (src/lib/help/guides.ts GUIDE_SECTIONS). Which products include the module isn't a field —
+ * the page reads it from the product list. Publishing checks that the module, every permission and
+ * every related guide exist, and that no product is named that isn't one.
+ */
+function HelpGuideForm({ props, onChange }: FormProps<"helpGuide">) {
+  const set = <K extends keyof HelpGuideProps>(key: K, value: HelpGuideProps[K]) => onChange({ ...props, [key]: value });
+  const related: GuideRelated[] = (props.related ?? []).map((key) => ({ key }));
+  return (
+    <>
+      <p className="rounded-md border border-info/30 bg-info-bg px-3 py-2 text-xs text-info">
+        Every guide has the same sections, in this order, under these headings. Write the brand as {"{siteName}"}; the products that include the module are added at the end from the product list.
+      </p>
+      <Section title="The guide">
+        <Row>
+          <SelectField label="Module" name="module" value={props.module || undefined} options={MODULE_OPTIONS} onChange={(v) => set("module", v ?? "")} hint="One guide per module. The app's Help panel opens this guide from the module's pages." />
+          <TextField label="Heading" name="heading" value={props.heading} onChange={(v) => set("heading", v)} max={HEADING} required hint="The page's main title." />
+        </Row>
+        <TextField label="Summary" name="summary" value={props.summary} onChange={(v) => set("summary", v)} max={300} multiline rows={2} required hint="Under the heading, in the Help Center's list and in the app's Help panel." />
+      </Section>
+      <Section title={GUIDE_HEADING("purpose")}>
+        <RichTextField label="What the module is for" name="purpose" value={props.purpose} onChange={(v) => set("purpose", v)} maxItems={60} />
+      </Section>
+      <Section title={GUIDE_HEADING("access")}>
+        <RichTextField label="Who can use it, in plain words" name="access" value={props.access} onChange={(v) => set("access", v)} maxItems={40} />
+        <ListField<GuidePermission>
+          label="Permissions"
+          name="permissions"
+          items={props.permissions}
+          onChange={(v) => set("permissions", v)}
+          newItem={() => ({ key: "", text: "" })}
+          itemNoun="permission"
+          itemTitle={(p) => PERMISSION_OPTIONS.find((o) => o.value === p.key)?.label ?? p.key}
+          maxItems={40}
+          required={false}
+          hint="Each one shows under its name on the permission screen, with what holding it lets somebody do."
+          render={(item, setItem) => (
+            <>
+              <SelectField label="Permission" name="key" value={item.key || undefined} options={PERMISSION_OPTIONS} onChange={(key) => setItem({ ...item, key: key ?? "" })} />
+              <TextField label="What it lets somebody do" name="text" value={item.text} onChange={(text) => setItem({ ...item, text })} max={400} multiline rows={2} required />
+            </>
+          )}
+        />
+      </Section>
+      <Section title={GUIDE_HEADING("setup")}>
+        <RichTextField label="What is done once, and by whom" name="setup" value={props.setup} onChange={(v) => set("setup", v)} maxItems={80} />
+      </Section>
+      <Section title={GUIDE_HEADING("tasks")}>
+        <ListField<GuideTask>
+          label="Tasks"
+          name="tasks"
+          items={props.tasks}
+          onChange={(v) => set("tasks", v)}
+          newItem={() => ({ title: "", body: [{ type: "list", ordered: true, items: [""] }] })}
+          itemNoun="task"
+          itemTitle={(task) => task.title}
+          maxItems={30}
+          hint="Each a heading of its own, with numbered steps. The words on the screen in bold."
+          render={(item, setItem) => (
+            <>
+              <Row>
+                <TextField label="Task" name="title" value={item.title} onChange={(title) => setItem({ ...item, title })} max={SHORT} required />
+                <AnchorField value={item.anchor} onChange={(anchor) => setItem({ ...item, anchor })} />
+              </Row>
+              <RichTextField label="Steps" name="body" value={item.body} onChange={(body) => setItem({ ...item, body })} maxItems={60} />
+            </>
+          )}
+        />
+      </Section>
+      <Section title={GUIDE_HEADING("settings")}>
+        <ListField<GuideSetting>
+          label="Settings"
+          name="settings"
+          items={props.settings}
+          onChange={(v) => set("settings", v)}
+          newItem={() => ({ name: "", body: [{ type: "paragraph", text: "" }] })}
+          itemNoun="setting"
+          itemTitle={(s) => s.name}
+          maxItems={40}
+          required={false}
+          hint="Left empty, the page says the module has no settings of its own."
+          render={(item, setItem) => (
+            <>
+              <Row>
+                <TextField label="Setting" name="name" value={item.name} onChange={(name) => setItem({ ...item, name })} max={SHORT} required />
+                <TextField label="Where it is" name="where" value={item.where} onChange={(where) => setItem({ ...item, where: where || undefined })} max={SHORT} hint="“Settings › Pipeline”." />
+              </Row>
+              <RichTextField label="What it changes" name="body" value={item.body} onChange={(body) => setItem({ ...item, body })} maxItems={40} />
+            </>
+          )}
+        />
+      </Section>
+      <Section title={GUIDE_HEADING("faq")}>
+        <ListField<GuideQuestion>
+          label="Questions"
+          name="faq"
+          items={props.faq}
+          onChange={(v) => set("faq", v)}
+          newItem={() => ({ question: "", answer: [{ type: "paragraph", text: "" }] })}
+          itemNoun="question"
+          itemTitle={(q) => q.question}
+          maxItems={40}
+          render={(item, setItem) => (
+            <>
+              <TextField label="Question" name="question" value={item.question} onChange={(question) => setItem({ ...item, question })} max={300} required />
+              <RichTextField label="Answer" name="answer" value={item.answer} onChange={(answer) => setItem({ ...item, answer })} maxItems={30} />
+            </>
+          )}
+        />
+      </Section>
+      <Section title="Read next">
+        <ListField<GuideRelated>
+          label="Other guides"
+          name="related"
+          items={related}
+          onChange={(v) => set("related", v.map((r) => r.key).filter(Boolean))}
+          newItem={() => ({ key: "" })}
+          itemNoun="guide"
+          itemTitle={(r) => MODULE_OPTIONS.find((o) => o.value === r.key)?.label ?? r.key}
+          maxItems={12}
+          required={false}
+          hint="By module. Each shows once its guide is published."
+          render={(item, setItem) => <SelectField label="Module" name="key" value={item.key || undefined} options={MODULE_OPTIONS} onChange={(key) => setItem({ key: key ?? "" })} />}
+        />
+      </Section>
+    </>
+  );
+}
+
+function HelpIndexForm({ props, onChange }: FormProps<"helpIndex">) {
+  const set = <K extends keyof HelpIndexProps>(key: K, value: HelpIndexProps[K]) => onChange({ ...props, [key]: value });
+  return (
+    <>
+      <p className="rounded-md border border-info/30 bg-info-bg px-3 py-2 text-xs text-info">
+        The guides are listed by themselves once each is published, grouped by the products that include their modules. These are the words around them.
+      </p>
+      <Row>
+        <TextField label="Search box" name="searchLabel" value={props.searchLabel} onChange={(v) => set("searchLabel", v)} max={LABEL} required />
+        <AnchorField value={props.anchor} onChange={(v) => set("anchor", v)} />
+      </Row>
+      <TextField label="Above the modules every product has" name="everyProductHeading" value={props.everyProductHeading} onChange={(v) => set("everyProductHeading", v)} max={SHORT} required />
+      <TextField label="While no guide is published" name="emptyText" value={props.emptyText} onChange={(v) => set("emptyText", v)} max={BODY} multiline rows={2} required />
+    </>
+  );
+}
+
 /** The form for one block, by its type. */
 export function BlockForm({ block, onChange }: { block: SiteBlock; onChange: (next: SiteBlock) => void }) {
   switch (block.type) {
@@ -823,6 +985,10 @@ export function BlockForm({ block, onChange }: { block: SiteBlock; onChange: (ne
       return <SignatureGeneratorForm props={block.props} onChange={(props) => onChange({ ...block, props })} />;
     case "productVsSuite":
       return <ProductVsSuiteForm props={block.props} onChange={(props) => onChange({ ...block, props })} />;
+    case "helpGuide":
+      return <HelpGuideForm props={block.props} onChange={(props) => onChange({ ...block, props })} />;
+    case "helpIndex":
+      return <HelpIndexForm props={block.props} onChange={(props) => onChange({ ...block, props })} />;
     default:
       return <p className="text-sm text-muted">This block&apos;s type is not known to this editor. It is kept as it is.</p>;
   }

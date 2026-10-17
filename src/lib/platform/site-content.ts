@@ -3,6 +3,7 @@ import type { Prisma } from "@deskzo/control-client";
 import type { SiteBlock, SitePage, SiteSettings } from "@/components/site/blocks/types";
 import { DEFAULT_SITE_PAGES, DEFAULT_SITE_SETTINGS } from "@/components/site/defaults";
 import { controlConfigured, controlDb } from "@/lib/platform/control-db";
+import { forgetHelpGuides } from "@/lib/platform/help-guides";
 import { signupOpen, trialDays } from "@/lib/platform/settings";
 import { PLATFORM_DOMAIN, protocolFor } from "@/lib/tenancy/host";
 
@@ -59,6 +60,8 @@ let lastFailureLog = 0;
 export function invalidateSiteContent(): void {
   generation += 1;
   cache.clear();
+  // The workspaces' copy of the Help Center's guides (their Help panel), in this process.
+  forgetHelpGuides();
 }
 
 function logFailure(err: unknown) {
@@ -201,6 +204,54 @@ export async function listSitePages(): Promise<SitePageSummary[]> {
     .sort((a, b) => a.page.slug.localeCompare(b.page.slug))
     .map(({ page, publishedAt }) => pageSummary(page, publishedAt));
   return [...builtins, ...added];
+}
+
+// ─── The Help Center's guides ────────────────────────────────────────────────────────────────────
+
+/**
+ * A published guide (src/lib/help/guides.ts): a page at help/<guide> whose first `helpGuide` block names
+ * its module. `words` is what the Help Center's search looks in besides the title and summary — the
+ * tasks' titles and the questions.
+ */
+export type SiteGuideSummary = { slug: string; path: string; module: string; title: string; summary: string; words: string; updatedAt: Date | null };
+
+const GUIDE_PAGE = /^help\/[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/** A page's guide, when it is one: its first helpGuide block's props. */
+function guideOf(page: SitePage): Extract<SiteBlock, { type: "helpGuide" }>["props"] | null {
+  if (!GUIDE_PAGE.test(page.slug)) return null;
+  const block = page.blocks.find((b): b is Extract<SiteBlock, { type: "helpGuide" }> => b?.type === "helpGuide");
+  return block && isObj(block.props) && typeof block.props.module === "string" ? block.props : null;
+}
+
+/**
+ * Every published guide, by its heading — one per module: were two published for one module (the CMS
+ * refuses it, src/lib/cms/content.ts), the one at the first address in order is the module's. From the
+ * same cached pages as the rest of the site, so it costs no query of its own.
+ */
+export async function listHelpGuides(): Promise<SiteGuideSummary[]> {
+  const published = await publishedPages();
+  const byModule = new Map<string, SiteGuideSummary>();
+  for (const { page, publishedAt } of [...published.values()].sort((a, b) => a.page.slug.localeCompare(b.page.slug))) {
+    const guide = guideOf(page);
+    if (!guide || byModule.has(guide.module)) continue;
+    const words = [
+      ...(Array.isArray(guide.tasks) ? guide.tasks.map((t) => (isObj(t) ? String(t.title ?? "") : "")) : []),
+      ...(Array.isArray(guide.faq) ? guide.faq.map((q) => (isObj(q) ? String(q.question ?? "") : "")) : []),
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    byModule.set(guide.module, {
+      slug: page.slug,
+      path: sitePath(page.slug),
+      module: guide.module,
+      title: String(guide.heading || page.title),
+      summary: String(guide.summary ?? ""),
+      words,
+      updatedAt: publishedAt,
+    });
+  }
+  return [...byModule.values()].sort((a, b) => a.title.localeCompare(b.title));
 }
 
 // ─── Posts ───────────────────────────────────────────────────────────────────────────────────────
