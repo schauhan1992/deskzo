@@ -71,9 +71,14 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
           </p>
         </div>
         {caps.manage && (
-          <Link href="/people/holidays" className="text-sm text-brand hover:underline">
-            Holiday calendar &amp; leave types →
-          </Link>
+          <div className="flex flex-col items-end gap-1">
+            <Link href="/people/holidays" className="text-sm text-brand hover:underline">
+              Holiday calendar &amp; leave types →
+            </Link>
+            <Link href="/people/leave/opening" className="text-sm text-brand hover:underline">
+              Opening balances →
+            </Link>
+          </div>
         )}
       </div>
 

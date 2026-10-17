@@ -704,6 +704,7 @@ model User {
   salaryStructures         SalaryStructure[]          @relation("UserSalaryStructures")
   salaryStructuresCreated  SalaryStructure[]          @relation("SalaryStructureCreatedBy")
   payslips                 Payslip[]                  @relation("UserPayslips")
+  taxDeclarations          TaxDeclaration[]           @relation("UserTaxDeclarations")
   payrollRunsCreated       PayrollRun[]               @relation("PayrollCreatedBy")
   payrollRunsLocked        PayrollRun[]               @relation("PayrollLockedBy")
   celebrationsAbout        Celebration[]              @relation("CelebrationSubject")
@@ -5124,7 +5125,7 @@ model LeaveBalance {
    */
   credited       Decimal @default(0) @db.Decimal(5, 2)
   /**
-   * Taken, from approved requests only.
+   * Taken, from approved requests — and `usedBefore`, counted in when it was typed.
    */
   used           Decimal @default(0) @db.Decimal(5, 2)
   /**
@@ -5132,6 +5133,18 @@ model LeaveBalance {
    */
   adjustment     Decimal @default(0) @db.Decimal(5, 2)
   adjustmentNote String?
+
+  /**
+   * Brought from the company's old system when it moved to Deskzo (owner, 17 Oct 2026): what this
+   * person carried into the year. Typed, it takes the place of the carry worked out from last year —
+   * there is no last year in Deskzo to work it out from. Null: worked out as usual.
+   */
+  openingTyped Decimal? @db.Decimal(5, 2)
+  /**
+   * Leave taken this year before the company used Deskzo, from the old system. Already in `used`.
+   */
+  usedBefore   Decimal  @default(0) @db.Decimal(5, 2)
+  openingNote  String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -5355,9 +5368,20 @@ model Payslip {
   esiEmployer        Decimal @default(0) @db.Decimal(12, 2)
   professionalTax    Decimal @default(0) @db.Decimal(12, 2)
   /**
-   * Entered, not computed — see src/lib/hr/payroll.ts on why income tax is not guessed here.
+   * TDS on salary: worked out by Deskzo (src/lib/hr/income-tax.ts), or typed by whoever runs payroll —
+   * `incomeTaxBasis` says which.
    */
   incomeTax          Decimal @default(0) @db.Decimal(12, 2)
+  /**
+   * WORKED_OUT, or TYPED by hand — which a recalculation keeps. Null on payslips from before Deskzo worked
+   * it out (owner, 17 Oct 2026): every one of those was typed, so a figure on one is kept as typed.
+   */
+  incomeTaxBasis     IncomeTaxBasis?
+  /**
+   * How a worked-out figure was reached, line by line — what the payslip shows under "How TDS was
+   * worked out". Null when typed.
+   */
+  taxWorking         Json?
   otherDeduction     Decimal @default(0) @db.Decimal(12, 2)
   otherDeductionNote String?
 
@@ -5377,6 +5401,66 @@ model Payslip {
   @@unique([runId, userId])
   @@index([userId])
   @@map("payslips")
+}
+
+enum IncomeTaxBasis {
+  WORKED_OUT
+  TYPED
+}
+
+/**
+ * One person's income tax position for a tax year (the April it starts in), for working out TDS on salary
+ * (owner, 17 Oct 2026; Income-tax Act, 2025 s.392). Set by whoever runs payroll, from what the employee
+ * declares and the evidence behind it (Form 124, formerly 12BB) and from Form 122 (formerly 12B).
+ */
+model TaxDeclaration {
+  id      String @id @default(cuid())
+  userId  String
+  user    User   @relation("UserTaxDeclarations", fields: [userId], references: [id], onDelete: Cascade)
+  taxYear Int
+
+  /**
+   * NEW unless the employee has told the employer they want the old regime this year — the new one is
+   * the default in law (s.202), and an employee who says nothing is taxed under it (Circular 4/2023).
+   */
+  regime TaxRegime @default(NEW)
+
+  /**
+   * The old regime's exemptions and deductions the employer allows on evidence, for the year, in rupees.
+   * `section80C` is besides their own PF, which Deskzo counts from the payslips. Ignored in the new regime.
+   */
+  hraExemption     Decimal @default(0) @db.Decimal(12, 2)
+  section80C       Decimal @default(0) @db.Decimal(12, 2)
+  section80CCD1B   Decimal @default(0) @db.Decimal(12, 2)
+  section80D       Decimal @default(0) @db.Decimal(12, 2)
+  homeLoanInterest Decimal @default(0) @db.Decimal(12, 2)
+  otherDeductions  Decimal @default(0) @db.Decimal(12, 2)
+
+  /**
+   * Salary this tax year not paid through Deskzo: a previous employer's (Form 122), or this company's own
+   * payroll before it moved to Deskzo. With the tax, professional tax and PF taken from it.
+   */
+  previousGross Decimal @default(0) @db.Decimal(12, 2)
+  previousTds   Decimal @default(0) @db.Decimal(12, 2)
+  previousPt    Decimal @default(0) @db.Decimal(12, 2)
+  previousPf    Decimal @default(0) @db.Decimal(12, 2)
+
+  /** Other income the employee asks to be taxed through salary (s.392(4)(a)), and tax already deducted on it. */
+  otherIncome Decimal @default(0) @db.Decimal(12, 2)
+  otherTds    Decimal @default(0) @db.Decimal(12, 2)
+
+  note        String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, taxYear])
+  @@map("tax_declarations")
+}
+
+enum TaxRegime {
+  NEW
+  OLD
 }
 
 // ─── Biometric attendance (eSSL / ZKTeco) ─────────────────────────────────────

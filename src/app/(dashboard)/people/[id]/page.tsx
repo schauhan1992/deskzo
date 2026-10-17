@@ -7,12 +7,13 @@ import { formatUserId } from "@/lib/order-id";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { getPerson, hrCapabilities, hrTasksFor, personChecklist } from "@/actions/hr";
 import { leaveBalances } from "@/actions/leave";
-import { salaryHistory } from "@/actions/payroll";
+import { salaryHistory, taxDeclarations } from "@/actions/payroll";
 import { listEmployeeDocuments, listEmployeeLetters, listEmploymentHistory } from "@/actions/employee-docs";
 import { EmployeeFile } from "@/components/hr/employee-file";
 import { availableLetters } from "@/lib/hr/letters";
 import { serviceYears } from "@/lib/hr/settlement";
 import { SalaryCard } from "@/components/hr/salary-card";
+import { TaxDeclarationCard } from "@/components/hr/tax-declaration-card";
 import { EmployeeRecord } from "@/components/hr/employee-record";
 import { HrChecklist } from "@/components/hr/hr-checklist";
 import { HrTasks } from "@/components/hr/hr-tasks";
@@ -54,9 +55,10 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
    */
   // Salary is the payroll module's: a plan without it shows no salary card, and asks for none.
   const payrollInPlan = await isModuleEntitled("payroll");
-  const [balances, structures, documents, history, letters, checklist, tasks, handovers] = await Promise.all([
+  const [balances, structures, tax, documents, history, letters, checklist, tasks, handovers] = await Promise.all([
     leaveBalances(person.id),
     payrollInPlan ? salaryHistory(person.id) : Promise.resolve([]),
+    payrollInPlan ? taxDeclarations(person.id) : Promise.resolve(null),
     listEmployeeDocuments(person.id),
     listEmploymentHistory(person.id),
     listEmployeeLetters(person.id),
@@ -95,8 +97,11 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
       {/* Pay sits behind its own permission, so the card only renders for payroll or for the
           person themselves — and salaryHistory returns nothing to anybody else regardless. */}
       {payrollInPlan && (caps.payroll || caps.userId === person.id) && (
-        <div className="mt-5 max-w-md">
+        <div className="mt-5 grid max-w-4xl gap-4 md:grid-cols-2">
           <SalaryCard userId={person.id} name={person.name} structures={structures} canEdit={caps.payroll} />
+          {tax && tax.declarations.length > 0 && (
+            <TaxDeclarationCard userId={person.id} name={person.name} years={tax.years} current={tax.current} declarations={tax.declarations} canEdit={caps.payroll} />
+          )}
         </div>
       )}
 

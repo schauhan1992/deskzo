@@ -15,6 +15,12 @@ import {
   countLeaveDaysProbe,
   PT_STATES,
   employmentInMonth,
+  salaryPartsInMonth,
+  seniorCitizenIn,
+  ageBandIn,
+  annualTax,
+  monthlyTds,
+  monthsLeftInTaxYear,
 } from "./payroll-cases";
 
 let failures = 0;
@@ -155,9 +161,85 @@ console.log("\n— Professional tax —");
   eq("...nothing once 2,500 is reached", pt("Karnataka", 30000, 3, { paidThisYear: 2500 }).amount, 0, "the year is paid");
 
   eq("Delhi, 100,000", pt("Delhi", 100000, 6).amount, 0, "Delhi levies none");
-  const unknown = pt("Assam", 50000, 6);
-  truthy("an unlisted state is flagged, not guessed", !unknown.known, "returns zero and says it does not know");
-  truthy("every state's rule is marked awaiting the CA until one confirms it", Object.values(PT_STATES).every((s) => s.awaitingCa), Object.entries(PT_STATES).filter(([, s]) => !s.awaitingCa).map(([k]) => k).join(", "));
+  const unknown = pt("Meghalaya", 50000, 6);
+  truthy("a state whose law couldn't be confirmed is flagged, not guessed", !unknown.known, "returns zero and says it does not know");
+  truthy(
+    "every state's table was checked against the law on a day, and every rule names where it comes from",
+    Object.values(PT_STATES).every((s) => /^\d{4}-\d{2}-\d{2}$/.test(s.checked.on) && s.rules.every((r) => r.source.length > 20)),
+    Object.entries(PT_STATES).filter(([, s]) => !s.checked.on).map(([k]) => k).join(", "),
+  );
+}
+
+console.log("\n— Professional tax, checked against the law (17 Oct 2026) —");
+{
+  const at = (state: string, monthGross: number, month: number, year: number, more: Partial<Parameters<typeof computeProfessionalTax>[0]> = {}) =>
+    computeProfessionalTax({ monthGross, state, month, year, applicable: true, ...more });
+
+  // West Bengal: a new schedule from 1 Oct 2026 (Finance Act 2026; notification 1607-F.T.).
+  eq("West Bengal, 25,000, September 2026", at("West Bengal", 25000, 9, 2026).amount, 130, "the 2016 table: above 15,000 to 25,000");
+  eq("...October 2026", at("West Bengal", 25000, 10, 2026).amount, 100, "the 2026 table: above 20,000 to 30,000");
+  eq("...20,000 in October", at("West Bengal", 20000, 10, 2026).amount, 0, "not exceeding 20,000 is nil");
+  eq("...50,000 in October", at("West Bengal", 50000, 10, 2026).amount, 140, "50,000 is inside 'not exceeding 50,000'");
+  eq("...50,001 in October", at("West Bengal", 50001, 10, 2026).amount, 170, "");
+  eq("...1,50,000 in October", at("West Bengal", 150000, 10, 2026).amount, 208, "above 1,00,000");
+  eq("...9,000 in 2015", at("West Bengal", 9000, 6, 2015).amount, 90, "the 2014 table's 8,500–10,000 slab, nil from August 2016");
+
+  // Gujarat: "if pay exceeds ₹12,000" — 12,000 itself is nil, from 2022.
+  eq("Gujarat, 12,000, June 2026", at("Gujarat", 12000, 6, 2026).amount, 0, "exactly 12,000 is nil — the engine charged 200 here");
+  eq("...12,001", at("Gujarat", 12001, 6, 2026).amount, 200, "");
+  eq("...12,000 in June 2021", at("Gujarat", 12000, 6, 2021).amount, 200, "the 2008 table: 12,000 and above");
+  eq("...7,000 in June 2021", at("Gujarat", 7000, 6, 2021).amount, 80, "the 2008 table's 6,000–8,999 slab");
+
+  eq("Karnataka, 20,000 in 2020", at("Karnataka", 20000, 6, 2020).amount, 200, "₹15,000 and above, before April 2023");
+  eq("Maharashtra, a woman on 9,000 in 2020", at("Maharashtra", 9000, 6, 2020, { gender: "FEMALE" }).amount, 0, "women up to 10,000 nil from April 2015");
+  eq("...in 2014", at("Maharashtra", 9000, 6, 2014, { gender: "FEMALE" }).amount, 175, "no women's table before April 2015");
+  eq("Tamil Nadu, 50,000 a half, September 2017", at("Tamil Nadu", 8333, 9, 2017, { halfYearGrossBefore: 41667 }).amount, 510, "Chennai's table before April 2018");
+  eq("Tamil Nadu, typed 'tamil-nadu'", at("tamil-nadu", 50000, 9, 2026, { halfYearGrossBefore: 250000 }).amount, 1250, "however the state is written");
+  eq("Tamil Nadu, a half already charged", at("Tamil Nadu", 20000, 9, 2026, { halfYearGrossBefore: 100000, paidThisHalf: 1250, leavingThisMonth: true }).amount, 0, "a half is charged once");
+
+  eq("Punjab, a senior citizen with income tax", at("Punjab", 80000, 6, 2026, { deductsIncomeTax: true, seniorCitizen: true }).amount, 0, "senior citizens are exempt (s.4)");
+  truthy("...and says why", at("Punjab", 80000, 6, 2026, { deductsIncomeTax: true, seniorCitizen: true }).notes.some((n) => n.includes("senior citizen")), "");
+  truthy("a senior citizen: born 1 April 1967 is, for 2026-27 — 60 on 31 March 2027", seniorCitizenIn(new Date(Date.UTC(1967, 3, 1)), 2026), "");
+  truthy("...born 2 April 1967 isn't", !seniorCitizenIn(new Date(Date.UTC(1967, 3, 2)), 2026), "");
+
+  // Odisha repealed its Act from 1 Apr 2026.
+  eq("Odisha, 50,000 a month, June 2025", at("Odisha", 50000, 6, 2025).amount, 200, "6,00,000 a year, above 3,00,000");
+  eq("...March 2026", at("Odisha", 50000, 3, 2026).amount, 300, "the year's last month");
+  const odisha = at("Odisha", 50000, 6, 2026);
+  truthy("...June 2026: nothing, and known", odisha.amount === 0 && odisha.known, "repealed from 1 April 2026");
+  truthy("Chhattisgarh: nothing, and known", at("Chhattisgarh", 50000, 6, 2026).known && at("Chhattisgarh", 50000, 6, 2026).amount === 0, "exempt from the whole Act since 2011");
+  truthy("Andaman and Nicobar, however it's written: none", at("Andaman and Nicobar Islands", 50000, 6, 2026).known, "");
+
+  // Madhya Pradesh: the year's salary, ₹208 × 11 + ₹212 at the top.
+  eq("Madhya Pradesh, 30,000 a month", at("Madhya Pradesh", 30000, 6, 2026).amount, 166, "3,60,000 a year: the 3–4 lakh slab");
+  eq("...March", at("Madhya Pradesh", 30000, 3, 2027).amount, 174, "its last month rounds the year to 2,000");
+  eq("...18,000 a month", at("Madhya Pradesh", 18000, 6, 2026).amount, 0, "2,16,000 a year, under 2,25,000");
+  eq("...40,000 a month, March", at("Madhya Pradesh", 40000, 3, 2027).amount, 212, "4,80,000 a year: 208 × 11 + 212");
+  eq("...loss of pay doesn't move the slab", at("Madhya Pradesh", 20000, 6, 2026, { monthRate: 30000 }).amount, 166, "read on the month's rate");
+  eq("Jharkhand, 50,000 a month", at("Jharkhand", 50000, 6, 2026).amount, 150, "6,00,000 a year: the 5–8 lakh slab");
+
+  // Kerala: half-yearly, collected in August and February.
+  eq("Kerala, 30,000 a month, July", at("Kerala", 30000, 7, 2026, { halfYearGrossBefore: 90000 }).amount, 0, "not a month it's collected in");
+  const august = at("Kerala", 30000, 8, 2026, { halfYearGrossBefore: 120000 });
+  eq("...August", august.amount, 1250, "1,20,000 to July + 30,000 + September's 30,000 = 1,80,000: the top band");
+  truthy("...and says the rest of the half was taken at this month's rate", august.notes.some((n) => n.includes("rest of the half")), august.notes.join(" | "));
+  eq("...leaving in September, the half already charged", at("Kerala", 30000, 9, 2026, { halfYearGrossBefore: 150000, paidThisHalf: 1250, leavingThisMonth: true }).amount, 0, "charged once");
+  eq("...7,000 a month, August", at("Kerala", 7000, 8, 2026, { halfYearGrossBefore: 28000 }).amount, 600, "42,000 for the half: the 30,000–44,999 band");
+
+  // Bihar: the year's tax, from September's salary; February for anyone not charged then.
+  eq("Bihar, 50,000 a month, June", at("Bihar", 50000, 6, 2026).amount, 0, "not September");
+  eq("...September", at("Bihar", 50000, 9, 2026).amount, 2000, "6,00,000 a year: the 5–10 lakh slab, once");
+  eq("...February, joined in October", at("Bihar", 50000, 2, 2027).amount, 2000, "not charged in September, so now");
+  eq("...February, already charged", at("Bihar", 50000, 2, 2027, { paidThisYear: 2000 }).amount, 0, "");
+
+  eq("Assam, 20,000, June 2026", at("Assam", 20000, 6, 2026).amount, 180, "the 2025 table");
+  eq("...15,000", at("Assam", 15000, 6, 2026).amount, 0, "up to 15,000 nil from April 2025");
+  eq("...12,000 in 2024", at("Assam", 12000, 6, 2024).amount, 150, "the 2014 table");
+  eq("Andhra Pradesh, 20,000", at("Andhra Pradesh", 20000, 6, 2026).amount, 150, "20,000 is in the 15,001–20,000 slab");
+  eq("Sikkim, 30,000", at("Sikkim", 30000, 6, 2026).amount, 125, "less than 30,001");
+  eq("Tripura, 15,001", at("Tripura", 15001, 6, 2026).amount, 208, "");
+  eq("Mizoram, 18,000", at("Mizoram", 18000, 6, 2026).amount, 195, "the 2024 band");
+  eq("Nagaland, 12,000", at("Nagaland", 12000, 6, 2026).amount, 208, "12,000 or more");
 }
 
 console.log("\n— A full payslip —");
@@ -362,6 +444,107 @@ console.log("\n— Professional tax on a payslip —");
   eq("...and without", slip("Punjab", 6).professionalTax, 0, "none where none is deducted");
   eq("Maharashtra payslip for a woman on 20,000", computePayslip({ components: { ...comps, basic: 10000, hra: 5000, specialAllowance: 5000 }, flags, monthDays: 30, lopDays: 0, state: "Maharashtra", month: 6, year: 2026, gender: "FEMALE" }).professionalTax, 0, "exempt up to 25,000");
   eq("a payslip after 2,400 this year, in February", slip("Maharashtra", 2, { year: 2027, ptHistory: { halfYearGrossBefore: 0, paidThisYear: 2400 } }).professionalTax, 100, "capped at the year's 2,500");
+}
+
+console.log("\n— A salary revised inside the month —");
+{
+  // October 2026, 31 days: ₹31,000 a month to the 15th, ₹46,500 from the 16th — 15 days and 16.
+  const at = (iso: string) => ({ effectiveFrom: new Date(`${iso}T00:00:00Z`) });
+  const spans = (list: { firstDay: number; lastDay: number }[]) => list.map((p) => `${p.firstDay}–${p.lastDay}`).join(", ");
+  const split = salaryPartsInMonth([at("2026-04-01"), at("2026-10-16")], 2026, 10);
+  truthy("a revision on the 16th splits the month 1–15 and 16–31", spans(split) === "1–15, 16–31", spans(split));
+  const onFirst = salaryPartsInMonth([at("2026-04-01"), at("2026-10-01")], 2026, 10);
+  truthy("...one on the 1st is the whole month at the new rate", spans(onFirst) === "1–31" && onFirst[0]!.structure.effectiveFrom.getUTCMonth() === 9, spans(onFirst));
+  truthy("...two revisions, three parts", spans(salaryPartsInMonth([at("2026-04-01"), at("2026-10-10"), at("2026-10-20")], 2026, 10)) === "1–9, 10–19, 20–31", "");
+  truthy("...one dated next month changes nothing yet", spans(salaryPartsInMonth([at("2026-04-01"), at("2026-11-01")], 2026, 10)) === "1–31", "");
+  const late = salaryPartsInMonth([at("2026-10-10")], 2026, 10);
+  truthy("...the first structure dated the 10th covers the days before it, and says so", spans(late) === "1–31" && late[0]!.backdated, "nobody's days go unpaid for a date typed late");
+  truthy("...none at all, nothing", salaryPartsInMonth([at("2026-11-01")], 2026, 10).length === 0, "");
+
+  const old = { basic: 15500, hra: 7750, conveyance: 0, medical: 0, specialAllowance: 7750, otherAllowance: 0 };
+  const raised = { basic: 23250, hra: 11625, conveyance: 0, medical: 0, specialAllowance: 11625, otherAllowance: 0 };
+  const october = { flags: { pfApplicable: false, esiApplicable: false, ptApplicable: false }, monthDays: 31, lopDays: 0, month: 10, year: 2026, incomeTax: 1 };
+  const parts = (lopNew = 0) => [
+    { components: old, firstDay: 1, lastDay: 15, lopDays: 0 },
+    { components: raised, firstDay: 16, lastDay: 31, lopDays: lopNew },
+  ];
+  const revised = computePayslip({ ...october, components: raised, parts: parts() });
+  eq("revised on the 16th: gross", revised.grossEarnings, 39000, "31,000 × 15/31 + 46,500 × 16/31 = 15,000 + 24,000");
+  eq("...basic", revised.components.basic, 19500, "15,500 × 15/31 + 23,250 × 16/31 = 7,500 + 12,000");
+  eq("...paid days", revised.paidDays, 31, "the whole month");
+  truthy("...and the payslip says so", revised.warnings.some((w) => w.startsWith("Salary revised in the month")), revised.warnings.join(" | "));
+  const docked = computePayslip({ ...october, components: raised, parts: parts(2), lopDays: 2 });
+  eq("two days off after the raise: gross", docked.grossEarnings, 36000, "docked at the new rate: 15,000 + 46,500 × 14/31 = 15,000 + 21,000");
+  eq("...loss of pay", docked.lopDays, 2, "");
+  const joiner = computePayslip({ ...october, components: raised, parts: parts(), employment: { firstDay: 10, lastDay: 31 } });
+  eq("joined on the 10th, raised on the 16th: gross", joiner.grossEarnings, 30000, "31,000 × 6/31 + 46,500 × 16/31 = 6,000 + 24,000");
+  eq("no parts: the month at the one rate, as before", computePayslip({ ...october, components: raised }).grossEarnings, 46500, "");
+  // ESI coverage is settled at the start of a contribution period: ₹20,000 a month to the 15th, then ₹25,000.
+  const flat = (basic: number) => ({ basic, hra: 0, conveyance: 0, medical: 0, specialAllowance: 0, otherAllowance: 0 });
+  const esi = computePayslip({
+    ...october,
+    flags: { pfApplicable: false, esiApplicable: true, ptApplicable: false },
+    components: flat(25000),
+    parts: [
+      { components: flat(20000), firstDay: 1, lastDay: 15, lopDays: 0 },
+      { components: flat(25000), firstDay: 16, lastDay: 31, lopDays: 0 },
+    ],
+  });
+  truthy("a raise past the ESI limit inside the month: still covered this month", esi.esiEmployee > 0, `ESI ${esi.esiEmployee} on ${esi.grossEarnings}`);
+}
+
+console.log("\n— Income tax for the year (tax year 2026-27, checked 17 Oct 2026) —");
+{
+  const tax = (income: number, regime: "NEW" | "OLD", band: "BELOW_60" | "60_TO_79" | "80_PLUS" = "BELOW_60") => annualTax(income, regime, band, 2026).total;
+  eq("new regime, 12,00,000", tax(1200000, "NEW"), 0, "60,000 of slab tax, all rebated (s.156(2)(a))");
+  eq("...12,10,000", tax(1210000, "NEW"), 10400, "61,500 of slab tax, but never more than the 10,000 above 12 lakh; + 4% cess");
+  eq("...15,00,000", tax(1500000, "NEW"), 109200, "20,000 + 40,000 + 15% of 3 lakh = 1,05,000; + 4,200 cess");
+  eq("...17,25,000", tax(1725000, "NEW"), 150800, "1,20,000 + 20% of 1,25,000 = 1,45,000; + cess");
+  eq("...55,00,000", tax(5500000, "NEW"), 1407120, "12,30,000 + 10% surcharge 1,23,000, no relief needed; + cess");
+  eq("...50,10,000", tax(5010000, "NEW"), 1133600, "10,83,000; surcharge held to 7,000 by marginal relief (10,80,000 at 50 lakh + the 10,000 above); + cess");
+  eq("old regime, under 60, 10,00,000", tax(1000000, "OLD"), 117000, "12,500 + 20% of 5 lakh = 1,12,500; + cess");
+  eq("...5,00,000", tax(500000, "OLD"), 0, "12,500, rebated");
+  eq("...5,00,010", tax(500010, "OLD"), 13002.08, "the old rebate has no marginal relief: 12,502 + cess");
+  eq("...60 to 79, 6,00,000", tax(600000, "OLD", "60_TO_79"), 31200, "5% of 2 lakh + 20% of 1 lakh = 30,000; + cess");
+  eq("...80 and over, 6,00,000", tax(600000, "OLD", "80_PLUS"), 20800, "20% of the 1 lakh over 5 lakh; + cess");
+  truthy("age bands: born 1 Apr 1967 is 60 in 2026-27, born 2 Apr isn't, born 1 Apr 1947 is 80", ageBandIn(new Date(Date.UTC(1967, 3, 1)), 2026) === "60_TO_79" && ageBandIn(new Date(Date.UTC(1967, 3, 2)), 2026) === "BELOW_60" && ageBandIn(new Date(Date.UTC(1947, 3, 1)), 2026) === "80_PLUS", "");
+  truthy("months to come: April 11, October 5, January 2, March 0", [4, 10, 1, 3].map(monthsLeftInTaxYear).join() === "11,5,2,0", [4, 10, 1, 3].map(monthsLeftInTaxYear).join());
+}
+
+console.log("\n— This month's TDS, by the average rate —");
+{
+  const none = { gross: 0, tds: 0, pt: 0, pf: 0 };
+  const nothingDeclared = { hraExemption: 0, section80C: 0, section80CCD1B: 0, section80D: 0, homeLoanInterest: 0, otherDeductions: 0 };
+  const tds = (month: number, monthly: number, more: Partial<Parameters<typeof monthlyTds>[0]> = {}) =>
+    monthlyTds({
+      taxYear: 2026,
+      regime: "NEW",
+      band: "BELOW_60",
+      thisMonth: { gross: monthly, pf: 0, pt: 0 },
+      toCome: { months: monthsLeftInTaxYear(month), gross: monthly, pf: 0, pt: 0 },
+      earlier: none,
+      previous: none,
+      otherIncome: 0,
+      otherTds: 0,
+      declared: nothingDeclared,
+      ...more,
+    });
+  eq("1,50,000 a month, April", tds(4, 150000).amount, 12567, "18 lakh − 75,000 = 17,25,000: 1,50,800 for the year ÷ 12");
+  eq("...October, six months deducted", tds(10, 150000, { earlier: { gross: 900000, tds: 75402, pt: 0, pf: 0 } }).amount, 12566, "1,50,800 − 75,402 ÷ 6");
+  eq("1,00,000 a month all year", tds(4, 100000).amount, 0, "11,25,000 after the standard deduction: under 12 lakh, all rebated");
+  eq("raised from 1 to 2 lakh in October", tds(10, 200000, { earlier: { gross: 600000, tds: 0, pt: 0, pf: 0 } }).amount, 25133, "6 lakh + 12 lakh = 18 lakh: 1,50,800 over the 6 months left");
+  eq("more already deducted than the year's tax", tds(10, 150000, { earlier: { gross: 900000, tds: 200000, pt: 0, pf: 0 } }).amount, 0, "nothing more this month");
+  eq("joined in October from a previous employer (Form 122)", tds(10, 200000, { previous: { gross: 600000, tds: 30000, pt: 0, pf: 0 } }).amount, 20133, "18 lakh with the previous pay: 1,50,800 − their 30,000 ÷ 6");
+  eq("leaving in October: whatever is left, now", tds(10, 300000, { earlier: { gross: 1800000, tds: 100000, pt: 0, pf: 0 }, toCome: { months: 0, gross: 300000, pf: 0, pt: 0 } }).amount, 114500, "21 lakh − 75,000: 2,14,500 for the year, 1,00,000 already deducted");
+  const old = tds(4, 100000, {
+    regime: "OLD",
+    thisMonth: { gross: 100000, pf: 1800, pt: 200 },
+    toCome: { months: 11, gross: 100000, pf: 1800, pt: 200 },
+    declared: { ...nothingDeclared, hraExemption: 120000, section80C: 100000, section80D: 25000 },
+  });
+  eq("old regime, 1 lakh a month with HRA, 80C and 80D declared", old.amount, 7687, "12L − 50,000 − PT 2,400 − HRA 1,20,000 − 80C 1,21,600 (with PF) − 80D 25,000 = 8,81,000: 92,248 ÷ 12");
+  eq("...80C capped at 1,50,000 with their PF", tds(4, 100000, { regime: "OLD", thisMonth: { gross: 100000, pf: 1800, pt: 0 }, toCome: { months: 11, gross: 100000, pf: 1800, pt: 0 }, declared: { ...nothingDeclared, section80C: 150000 } }).taxableIncome, 1000000, "12L − 50,000 − 1,50,000, not − 1,71,600");
+  truthy("the working ends with this month's figure", old.lines[old.lines.length - 1]!.amount === old.amount, old.lines.map((l) => `${l.label}: ${l.amount}`).join(" | "));
 }
 
 console.log("\n— Leave day counting —");

@@ -32,6 +32,11 @@ export type PayrollPerson = {
   leaving: boolean;
   /** For professional tax: Maharashtra has a table of its own for women. */
   gender: "FEMALE" | "MALE" | "OTHER" | "UNDISCLOSED" | null;
+  /** For professional tax (Punjab's development tax spares senior citizens) and income tax's age bands. */
+  dateOfBirth: Date | null;
+  /** For TDS: the months of the tax year they were here, and the month they leave in. */
+  joinedOn: Date | null;
+  exitedOn: Date | null;
 };
 
 /**
@@ -67,7 +72,7 @@ export async function payrollMonth(year: number, month: number): Promise<{ peopl
       id: true,
       name: true,
       branchId: true,
-      employeeProfile: { select: { state: true, joinedOn: true, exitedOn: true, gender: true } },
+      employeeProfile: { select: { state: true, joinedOn: true, exitedOn: true, gender: true, dateOfBirth: true } },
     },
     orderBy: { name: "asc" },
   });
@@ -101,7 +106,7 @@ export async function payrollMonth(year: number, month: number): Promise<{ peopl
     const settlementDay = settledOn.get(c.id);
     const salaryInSettlement = !!settlementDay && !!profile?.exitedOn && settlementDay === toKey(profile.exitedOn);
     const leaving = !!profile?.exitedOn && profile.exitedOn >= from && profile.exitedOn <= to;
-    people.push({ id: c.id, name: c.name, branchId: c.branchId, state: profile?.state ?? null, employment, salaryInSettlement, leaving, gender: profile?.gender ?? null });
+    people.push({ id: c.id, name: c.name, branchId: c.branchId, state: profile?.state ?? null, employment, salaryInSettlement, leaving, gender: profile?.gender ?? null, dateOfBirth: profile?.dateOfBirth ?? null, joinedOn: profile?.joinedOn ?? null, exitedOn: profile?.exitedOn ?? null });
   }
   return { people, skipped };
 }
@@ -229,15 +234,23 @@ function sameHalf(a: number, b: number) {
 }
 
 /**
- * Professional tax's look back, for each person: the gross of this half-year's earlier payslips (Tamil
- * Nadu is charged on the half's income) and the tax this financial year's earlier payslips took (the
- * ₹2,500 cap counts down from it). Every earlier month's payslip counts, locked or not — a draft month
- * that is later locked is the same money.
+ * Professional tax's look back, for each person: the gross of this half-year's earlier payslips and the
+ * tax they took (Tamil Nadu and Kerala charge on the half's income, once a half), and the tax this
+ * financial year's earlier payslips took (the ₹2,500 cap counts down from it). Every earlier month's
+ * payslip counts, locked or not — a draft month that is later locked is the same money. So does the
+ * professional tax on pay this year that never went through Deskzo — a previous employer's, or the
+ * company's own payroll before it moved — as typed on their tax declaration: the cap is the year's.
  */
-export async function ptHistoryFor(userIds: string[], year: number, month: number): Promise<Map<string, { halfYearGrossBefore: number; paidThisYear: number }>> {
-  const history = new Map(userIds.map((id) => [id, { halfYearGrossBefore: 0, paidThisYear: 0 }]));
+export async function ptHistoryFor(userIds: string[], year: number, month: number): Promise<Map<string, { halfYearGrossBefore: number; paidThisHalf: number; paidThisYear: number }>> {
+  const history = new Map(userIds.map((id) => [id, { halfYearGrossBefore: 0, paidThisHalf: 0, paidThisYear: 0 }]));
+  if (userIds.length === 0) return history;
+  const declared = await db.taxDeclaration.findMany({
+    where: { userId: { in: userIds }, taxYear: month >= 4 ? year : year - 1, previousPt: { gt: 0 } },
+    select: { userId: true, previousPt: true },
+  });
+  for (const d of declared) history.get(d.userId)!.paidThisYear += Number(d.previousPt);
   const earlier = monthsBefore(year, month);
-  if (userIds.length === 0 || earlier.length === 0) return history;
+  if (earlier.length === 0) return history;
   const slips = await db.payslip.findMany({
     where: { userId: { in: userIds }, run: { OR: earlier } },
     select: { userId: true, grossEarnings: true, professionalTax: true, run: { select: { month: true } } },
@@ -245,10 +258,14 @@ export async function ptHistoryFor(userIds: string[], year: number, month: numbe
   for (const slip of slips) {
     const h = history.get(slip.userId)!;
     h.paidThisYear += Number(slip.professionalTax);
-    if (sameHalf(slip.run.month, month)) h.halfYearGrossBefore += Number(slip.grossEarnings);
+    if (sameHalf(slip.run.month, month)) {
+      h.halfYearGrossBefore += Number(slip.grossEarnings);
+      h.paidThisHalf += Number(slip.professionalTax);
+    }
   }
   for (const h of history.values()) {
     h.paidThisYear = Math.round(h.paidThisYear * 100) / 100;
+    h.paidThisHalf = Math.round(h.paidThisHalf * 100) / 100;
     h.halfYearGrossBefore = Math.round(h.halfYearGrossBefore * 100) / 100;
   }
   return history;

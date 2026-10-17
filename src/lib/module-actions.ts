@@ -137,6 +137,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   // Unmasking a lead's fields on its page, against the daily limit (src/lib/authz/unmask.ts).
   "lead-unmask.ts": ["leads"],
   "leave.ts": ["hr"],
+  // Opening leave balances for a company moving to Deskzo mid-year (owner, 17 Oct 2026).
+  "leave-openings.ts": ["hr"],
   "ledger-reports.ts": ["accounting"],
   "ledger.ts": ["accounting"],
   // Linked sign-in: a person's own accounts in other workspaces, and the Security card's rule — every plan (owner decision 10).

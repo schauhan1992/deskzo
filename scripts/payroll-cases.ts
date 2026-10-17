@@ -1,6 +1,7 @@
 /** Re-exports plus the leave-calendar cases, kept apart so check-payroll.ts stays readable. */
-export { computeEsi, computePf, computePayslip, employmentInMonth } from "../src/lib/hr/payroll";
-export { computeProfessionalTax, PT_STATES } from "../src/lib/hr/professional-tax";
+export { computeEsi, computePf, computePayslip, employmentInMonth, salaryPartsInMonth } from "../src/lib/hr/payroll";
+export { computeProfessionalTax, PT_STATES, seniorCitizenIn } from "../src/lib/hr/professional-tax";
+export { ageBandIn, annualTax, monthlyTds, monthsLeftInTaxYear } from "../src/lib/hr/income-tax";
 import { countLeaveDays } from "../src/lib/hr/calendar";
 
 type Eq = (label: string, actual: number, expected: number, why: string) => void;

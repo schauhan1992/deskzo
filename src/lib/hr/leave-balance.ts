@@ -113,15 +113,27 @@ export async function ensureBalance(userId: string, typeId: string, year: number
 
 type Person = { createdAt: Date; employeeProfile: { joinedOn: Date | null; exitedOn: Date | null } | null };
 
+/**
+ * The opening brought from a company's old system (src/actions/leave-openings.ts), asked for by name:
+ * the columns are in NOT_YET_EVERYWHERE (src/lib/tenancy/clients.ts) until every workspace has them.
+ */
+export const TYPED_OPENING = { openingTyped: false, usedBefore: false, openingNote: false } as const;
+
 async function balanceFor(userId: string, type: LeaveType, person: Person, year: number, today: Date, depth: number) {
   const existing = await db.leaveBalance.findUnique({
     where: { userId_typeId_year: { userId, typeId: type.id, year } },
+    omit: TYPED_OPENING,
   });
 
   const credited = Math.max(accruedTo(type, year, today, person.employeeProfile ?? undefined), n(existing?.credited));
-  const opening = type.carryForward
-    ? await openingFor(userId, type, person, year, today, depth, n(existing?.opening))
-    : n(existing?.opening);
+  // What they brought from the old system stands in for the carry from last year — a year Deskzo
+  // never saw, so it has nothing to work one out from.
+  const opening =
+    existing?.openingTyped != null
+      ? n(existing.openingTyped)
+      : type.carryForward
+        ? await openingFor(userId, type, person, year, today, depth, n(existing?.opening))
+        : n(existing?.opening);
 
   if (!existing) {
     // An upsert, not a create: two tabs opening the leave page at once both find nothing.
@@ -129,12 +141,14 @@ async function balanceFor(userId: string, type: LeaveType, person: Person, year:
       where: { userId_typeId_year: { userId, typeId: type.id, year } },
       create: { userId, typeId: type.id, year, credited: new Prisma.Decimal(credited), opening: new Prisma.Decimal(opening) },
       update: {},
+      omit: TYPED_OPENING,
     });
   }
   if (credited !== n(existing.credited) || opening !== n(existing.opening)) {
     return db.leaveBalance.update({
       where: { id: existing.id },
       data: { credited: new Prisma.Decimal(credited), opening: new Prisma.Decimal(opening) },
+      omit: TYPED_OPENING,
     });
   }
   return existing;

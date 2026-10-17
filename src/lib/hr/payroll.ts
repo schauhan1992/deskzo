@@ -8,11 +8,9 @@ import { computeProfessionalTax } from "@/lib/hr/professional-tax";
  * about without a database. Money is wrong more often than it is noticed, and the only defence is
  * being able to re-run the sum.
  *
- * WHAT THIS DOES NOT DO: income tax. TDS on salary depends on the employee's declared investments,
- * their choice of old or new regime, income from elsewhere, and a projection across the whole year
- * that has to be trued up before March. Guessing at it would put a wrong number on a statutory
- * document and under-deduct tax the employer is liable for. `incomeTax` is therefore an amount
- * somebody enters, from wherever they compute it today — see the roadmap.
+ * Income tax is not worked out here: TDS needs the whole tax year — earlier payslips, the employee's
+ * declaration, the months to come — so it is src/lib/hr/income-tax.ts (the arithmetic) and
+ * src/lib/hr/tds.ts (gathering it), and arrives here as `incomeTax`, worked out or typed.
  */
 
 export type SalaryComponents = {
@@ -174,7 +172,7 @@ export function computeEsi(gross: number, opts: { applicable: boolean; wageRate?
 
 // Dated rules per state, half-yearly Tamil Nadu, Punjab's development tax and the ₹2,500 cap: their own
 // module (./professional-tax.ts), re-exported here for the callers that import it from payroll.
-export { computeProfessionalTax, normaliseState, PT_ANNUAL_CAP, PT_EXEMPT_STATES, PT_STATES, type PtResult } from "@/lib/hr/professional-tax";
+export { computeProfessionalTax, normaliseState, PT_ANNUAL_CAP, PT_EXEMPT_STATES, PT_STATES, seniorCitizenIn, type PtResult } from "@/lib/hr/professional-tax";
 
 // ─── Joining and leaving ──────────────────────────────────────────────────────
 
@@ -212,10 +210,52 @@ export function employmentInMonth(
   return { firstDay, lastDay, days: lastDay - firstDay + 1 };
 }
 
+/**
+ * A month's salary structures as the days each one covers: the one in force on the 1st until the day
+ * before the next takes effect, and so on to the month's end. A revision on the 15th pays the 1st–14th
+ * at the old rate and the 15th onwards at the new — taking the structure in force on the month's last
+ * day for all of it, as the run used to, paid a raise from the 1st (or a cut).
+ *
+ * A month whose earliest structure starts after the 1st, with none before it, has the days before it
+ * covered by that one: pay was being made at it, and a structure typed in with a later date than the
+ * joining day shouldn't leave days unpaid. `backdated` says so, for the payslip's note.
+ *
+ * `structures` may be anybody's whole history; only those that touch the month are returned.
+ */
+export function salaryPartsInMonth<T extends { effectiveFrom: Date }>(
+  structures: readonly T[],
+  year: number,
+  month: number,
+): { structure: T; firstDay: number; lastDay: number; backdated: boolean }[] {
+  const monthDays = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const first = Date.UTC(year, month - 1, 1);
+  const last = Date.UTC(year, month - 1, monthDays);
+  const sorted = structures.filter((s) => s.effectiveFrom.getTime() <= last).sort((a, b) => a.effectiveFrom.getTime() - b.effectiveFrom.getTime());
+  let start = 0;
+  sorted.forEach((s, i) => {
+    if (s.effectiveFrom.getTime() <= first) start = i;
+  });
+  const used = sorted.slice(start);
+  return used
+    .map((structure, i) => {
+      const next = used[i + 1];
+      const starts = structure.effectiveFrom.getTime() <= first ? 1 : structure.effectiveFrom.getUTCDate();
+      return { structure, firstDay: i === 0 ? 1 : starts, lastDay: next ? next.effectiveFrom.getUTCDate() - 1 : monthDays, backdated: i === 0 && starts > 1 };
+    })
+    .filter((p) => p.lastDay >= p.firstDay);
+}
+
 // ─── The payslip ──────────────────────────────────────────────────────────────
 
 export type PayslipInput = {
+  /** The monthly rates — in force at the month's end, when `parts` splits the month. */
   components: SalaryComponents;
+  /**
+   * The month in parts, when the salary was revised inside it (`salaryPartsInMonth`): each part's
+   * monthly rates, the days of the month it covers, and the loss of pay that fell in those days. Each
+   * part is paid its days at its own rate. Left out, `components` is the rate for the whole month.
+   */
+  parts?: { components: SalaryComponents; firstDay: number; lastDay: number; lopDays: number }[];
   flags: StatutoryFlags;
   /** Calendar days in the month, and the days not paid for. */
   monthDays: number;
@@ -239,7 +279,9 @@ export type PayslipInput = {
    * Professional tax's look back at this financial year's earlier payslips: the gross of this half-year
    * (Tamil Nadu is charged on the half's income), and the tax already taken (the ₹2,500 annual cap).
    */
-  ptHistory?: { halfYearGrossBefore: number; paidThisYear: number };
+  ptHistory?: { halfYearGrossBefore: number; paidThisHalf?: number; paidThisYear: number };
+  /** 60 or over at some point in this financial year — Punjab's development tax spares them. */
+  seniorCitizen?: boolean;
   /**
    * Their last working day is in this month — when a half-yearly professional tax falls due early. Left
    * out, it is read from `employment`, which can't tell a leaver on the month's last day.
@@ -248,8 +290,10 @@ export type PayslipInput = {
   /** The wage month (1–12) and its year: professional tax's slab and the PF wage ceiling in force. */
   month: number;
   year: number;
-  /** Entered by whoever runs payroll — see the note at the top of this file. */
+  /** TDS: worked out by src/lib/hr/tds.ts, or typed by whoever runs payroll. */
   incomeTax?: number;
+  /** Worked out, a nil TDS is the answer, not a gap — the payslip says nothing about it. */
+  incomeTaxWorkedOut?: boolean;
   otherDeduction?: number;
   pfOnFullBasic?: boolean;
   /**
@@ -299,18 +343,25 @@ export function computePayslip(input: PayslipInput): PayslipResult {
   const firstDay = Math.max(1, input.employment?.firstDay ?? 1);
   const lastDay = Math.min(monthDays, input.employment?.lastDay ?? monthDays);
   const employedDays = input.salaryInSettlement ? 0 : Math.max(0, lastDay - firstDay + 1);
-  const lopDays = Math.max(0, Math.min(input.lopDays, employedDays));
-  const paidDays = round2(employedDays - lopDays);
-  const factor = paidDays / monthDays;
 
+  // Each part of the month at its own rate: the days of it they were employed, less the loss of pay
+  // that fell in those days. A month with no revision is one part, at `components`.
   const c = input.components;
+  const parts = (input.parts?.length ? input.parts : [{ components: c, firstDay: 1, lastDay: monthDays, lopDays: input.lopDays }]).map((p) => {
+    const days = input.salaryInSettlement ? 0 : Math.max(0, Math.min(lastDay, p.lastDay) - Math.max(firstDay, p.firstDay) + 1);
+    const lop = Math.max(0, Math.min(p.lopDays, days));
+    return { ...p, days, lop, paid: days - lop };
+  });
+  const lopDays = round2(parts.reduce((sum, p) => sum + p.lop, 0));
+  const paidDays = round2(parts.reduce((sum, p) => sum + p.paid, 0));
+  const earned = (key: keyof SalaryComponents) => round2(parts.reduce((sum, p) => sum + p.components[key] * (p.paid / monthDays), 0));
   const components: SalaryComponents = {
-    basic: round2(c.basic * factor),
-    hra: round2(c.hra * factor),
-    conveyance: round2(c.conveyance * factor),
-    medical: round2(c.medical * factor),
-    specialAllowance: round2(c.specialAllowance * factor),
-    otherAllowance: round2(c.otherAllowance * factor),
+    basic: earned("basic"),
+    hra: earned("hra"),
+    conveyance: earned("conveyance"),
+    medical: earned("medical"),
+    specialAllowance: earned("specialAllowance"),
+    otherAllowance: earned("otherAllowance"),
   };
   // Added after the loss-of-pay factor, not inside it: the components above are pay for time, and
   // this is pay for result.
@@ -326,19 +377,24 @@ export function computePayslip(input: PayslipInput): PayslipResult {
     period,
     employed: { firstDay, lastDay },
   });
-  // ESI's coverage is on the full month's rate, its contribution on what was earned (computeEsi).
-  const wageRate = round2(monthlyGross(c) + incentive);
+  // ESI's coverage is on the full month's rate, its contribution on what was earned (computeEsi). With
+  // a revision inside the month, the rate it began on: coverage is settled at the start of a
+  // contribution period, and a raise inside one doesn't end it.
+  const wageRate = round2(monthlyGross(parts[0]!.components) + incentive);
   const esi = computeEsi(grossEarnings, { applicable: input.flags.esiApplicable, wageRate });
   const pt = computeProfessionalTax({
     monthGross: grossEarnings,
+    monthRate: wageRate,
     state: input.state,
     month: input.month,
     year: input.year,
     applicable: input.flags.ptApplicable,
     gender: input.gender,
     halfYearGrossBefore: input.ptHistory?.halfYearGrossBefore,
+    paidThisHalf: input.ptHistory?.paidThisHalf,
     paidThisYear: input.ptHistory?.paidThisYear,
     deductsIncomeTax: (input.incomeTax ?? 0) > 0,
+    seniorCitizen: input.seniorCitizen,
     leavingThisMonth: input.leavingThisMonth ?? (input.employment !== undefined && input.employment.lastDay < monthDays),
   });
   warnings.push(...pt.notes);
@@ -372,7 +428,7 @@ export function computePayslip(input: PayslipInput): PayslipResult {
       `Gross is above the ₹${ESI_WAGE_LIMIT.toLocaleString("en-IN")} ESI limit, so no ESI was deducted. If they were covered earlier in this contribution period, it may still be due.`,
     );
   }
-  if (!input.incomeTax) {
+  if (!input.incomeTax && !input.incomeTaxWorkedOut) {
     warnings.push("No income tax entered. This payslip deducts no TDS.");
   }
   if (input.salaryInSettlement) {
@@ -386,6 +442,14 @@ export function computePayslip(input: PayslipInput): PayslipResult {
           ? `Joined on ${day(firstDay)}`
           : `Last working day ${day(lastDay)}`;
     warnings.push(`${span} — paid for ${employedDays} of ${monthDays} days.`);
+  }
+  const revised = parts.filter((p) => p.days > 0);
+  if (revised.length > 1) {
+    const day = (d: number) => formatCalendarDay(new Date(Date.UTC(input.year, input.month - 1, d)));
+    const rupees = (v: number) => `₹${v.toLocaleString("en-IN")}`;
+    warnings.push(
+      `Salary revised in the month — ${revised.map((p) => `${p.paid} day(s) from ${day(Math.max(firstDay, p.firstDay))} at ${rupees(monthlyGross(p.components))} a month`).join(", ")}.`,
+    );
   }
   if (lopDays > 0) {
     warnings.push(

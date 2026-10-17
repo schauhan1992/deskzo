@@ -154,6 +154,22 @@ export default async function PrintPayslipPage({
         </section>
       )}
 
+      {slip.incomeTaxBasis === "WORKED_OUT" && slip.taxWorking && (
+        <section className="py-3 text-xs text-neutral-600">
+          <p className="font-semibold uppercase tracking-wide">How this month&apos;s income tax was worked out</p>
+          <table className="mt-1 w-full max-w-md">
+            <tbody>
+              {(slip.taxWorking as unknown as { lines: { label: string; amount: number }[] }).lines.map((l, i) => (
+                <tr key={i}>
+                  <td className="py-0.5 pr-3">{l.label}</td>
+                  <td className="py-0.5 text-right tabular-nums">{formatCurrency(l.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+
       <footer className="mt-6 border-t border-neutral-300 pt-3 text-[10px] text-neutral-500">
         <p>
           Computer generated — no signature required.

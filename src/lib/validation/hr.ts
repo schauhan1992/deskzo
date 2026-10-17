@@ -201,6 +201,8 @@ export const payrollRunSchema = z.object({
 export const payslipAdjustSchema = z.object({
   id: z.string().min(1),
   incomeTax: z.coerce.number().min(0).default(0),
+  /** Let Deskzo work the TDS out again, over a figure typed before. `incomeTax` is then ignored. */
+  workOutTax: z.boolean().optional(),
   otherDeduction: z.coerce.number().min(0).default(0),
   otherDeductionNote: optionalText(120),
   note: optionalText(200),
@@ -209,3 +211,25 @@ export const payslipAdjustSchema = z.object({
 export type EmployeeProfileInput = z.infer<typeof employeeProfileSchema>;
 export type LeaveRequestInput = z.infer<typeof leaveRequestSchema>;
 export type SalaryStructureInput = z.infer<typeof salaryStructureSchema>;
+
+const rupees = z.coerce.number().min(0, "Amounts can't be negative.").max(1e10, "That's more than any salary.");
+
+/** One person's income tax position for a tax year (src/lib/hr/income-tax.ts). */
+export const taxDeclarationSchema = z.object({
+  userId: z.string().min(1),
+  taxYear: z.coerce.number().int().min(2025).max(2100),
+  regime: z.enum(["NEW", "OLD"]),
+  hraExemption: rupees.default(0),
+  section80C: rupees.default(0),
+  section80CCD1B: rupees.default(0),
+  section80D: rupees.default(0),
+  homeLoanInterest: rupees.default(0),
+  otherDeductions: rupees.default(0),
+  previousGross: rupees.default(0),
+  previousTds: rupees.default(0),
+  previousPt: rupees.default(0),
+  previousPf: rupees.default(0),
+  otherIncome: rupees.default(0),
+  otherTds: rupees.default(0),
+  note: optionalText(300),
+});

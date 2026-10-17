@@ -278,6 +278,12 @@ const NOT_YET_EVERYWHERE = {
   // 20261110100000_field_access_unmask. Read by name in src/lib/authz/role-registry.ts and
   // src/actions/role.ts, which treat a workspace without it as having every role active.
   role: { active: true },
+  // 20261110160000_income_tax_tds. Read by name in src/actions/payroll.ts and the payslip screens, which
+  // show how TDS was worked out — the payroll pages need the migration.
+  payslip: { incomeTaxBasis: true, taxWorking: true },
+  // 20261110150000_leave_opening_balances. Asked for with `omit: TYPED_OPENING` in
+  // src/lib/hr/leave-balance.ts, which every balance goes through — so the leave pages need the migration.
+  leaveBalance: { openingTyped: true, usedBefore: true, openingNote: true },
   // 20261110140000_tasks_advanced. Asked for with `omit: ADVANCED` (src/lib/tasks/server.ts) by the task
   // actions — the Tasks page and the task lists on a company, lead and ticket — which need the migration;
   // everything else that reads a task keeps to the columns it always had.

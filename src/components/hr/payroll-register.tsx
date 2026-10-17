@@ -21,6 +21,8 @@ type Run = NonNullable<Awaited<ReturnType<typeof getPayrollRun>>>;
 type Slip = Run["payslips"][number];
 
 const num = (v: unknown) => Number(v ?? 0);
+type Working = { lines: { label: string; amount: number }[]; warnings?: string[] };
+const workingOf = (slip: Slip) => (slip.incomeTaxBasis === "WORKED_OUT" && slip.taxWorking ? (slip.taxWorking as unknown as Working) : null);
 
 /**
  * A month's payslips, and the controls that move it from draft to paid.
@@ -43,6 +45,7 @@ export function PayrollRegister({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Slip | null>(null);
+  const [explaining, setExplaining] = useState<Slip | null>(null);
 
   const draft = run.status === "DRAFT";
   const shown = totals ?? { count: run.payslips.length, gross: 0, deductions: 0, net: 0, cost: 0 };
@@ -194,7 +197,16 @@ export function PayrollRegister({
                   <td className="px-3 py-2.5 text-right tabular-nums text-muted">{formatCurrency(num(s.pfEmployee))}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums text-muted">{formatCurrency(num(s.esiEmployee))}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums text-muted">{formatCurrency(num(s.professionalTax))}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums text-muted">{formatCurrency(num(s.incomeTax))}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums text-muted">
+                    {workingOf(s) ? (
+                      <button type="button" onClick={() => setExplaining(s)} className="underline decoration-dotted underline-offset-2 hover:text-text" title="Worked out by Deskzo — how">
+                        {formatCurrency(num(s.incomeTax))}
+                      </button>
+                    ) : (
+                      formatCurrency(num(s.incomeTax))
+                    )}
+                    {s.incomeTaxBasis === "TYPED" && <div className="text-[10px] text-subtle">typed</div>}
+                  </td>
                   <td className="px-3 py-2.5 text-right font-medium tabular-nums text-text">{formatCurrency(num(s.netPay))}</td>
                   <td className="px-3 py-2.5">
                     <span className="flex items-center gap-1.5">
@@ -229,6 +241,7 @@ export function PayrollRegister({
       </Card>
 
       {editing && <AdjustDialog key={editing.id} slip={editing} onClose={() => setEditing(null)} />}
+      {explaining && <TaxWorkingDialog slip={explaining} onClose={() => setExplaining(null)} />}
     </div>
   );
 }
@@ -241,11 +254,12 @@ function AdjustDialog({ slip, onClose }: { slip: Slip; onClose: () => void }) {
   const [otherDeduction, setOtherDeduction] = useState(String(num(slip.otherDeduction)));
   const [otherDeductionNote, setOtherDeductionNote] = useState(slip.otherDeductionNote ?? "");
 
-  function submit() {
+  function submit(workOutTax = false) {
     setError(null);
     startTransition(async () => {
       const result = await adjustPayslip({
         id: slip.id,
+        workOutTax,
         incomeTax: Number(incomeTax) || 0,
         otherDeduction: Number(otherDeduction) || 0,
         otherDeductionNote,
@@ -264,8 +278,16 @@ function AdjustDialog({ slip, onClose }: { slip: Slip; onClose: () => void }) {
       <div className="space-y-4">
         <p className="rounded-base border border-line bg-surface-sunken px-3 py-2 text-xs text-muted">
           PF, ESI and professional tax are computed from the rules and can&apos;t be edited here — change the salary
-          structure instead. Income tax is entered, not computed: it depends on the declarations and regime choice this
-          app doesn&apos;t hold.
+          structure instead. Income tax is worked out from the tax year so far and their declaration on their record;
+          type a different figure and it&apos;s kept when the month is recalculated.
+        </p>
+        <p className="text-xs text-muted">
+          TDS on this payslip: {slip.incomeTaxBasis === "TYPED" ? "typed" : slip.incomeTaxBasis === "WORKED_OUT" ? "worked out by Deskzo" : num(slip.incomeTax) > 0 ? "typed" : "none"}.
+          {slip.incomeTaxBasis !== "WORKED_OUT" && (
+            <button type="button" className="ml-2 font-medium text-brand hover:underline" disabled={pending} onClick={() => submit(true)}>
+              Let Deskzo work it out
+            </button>
+          )}
         </p>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -297,7 +319,7 @@ function AdjustDialog({ slip, onClose }: { slip: Slip; onClose: () => void }) {
         {error && <p className="text-sm text-danger">{error}</p>}
 
         <div className="flex gap-2">
-          <Button disabled={pending} onClick={submit}>
+          <Button disabled={pending} onClick={() => submit()}>
             {pending ? "Saving…" : "Save"}
           </Button>
           <Button variant="secondary" onClick={onClose}>
@@ -305,6 +327,37 @@ function AdjustDialog({ slip, onClose }: { slip: Slip; onClose: () => void }) {
           </Button>
         </div>
       </div>
+    </Dialog>
+  );
+}
+
+/** How a worked-out TDS figure was reached — the estimate of the year, its tax, and what's left over the months. */
+function TaxWorkingDialog({ slip, onClose }: { slip: Slip; onClose: () => void }) {
+  const working = workingOf(slip);
+  return (
+    <Dialog open onClose={onClose} title={`${slip.user.name} — how this month's TDS was worked out`}>
+      {working ? (
+        <div className="space-y-3 text-sm">
+          <table className="w-full">
+            <tbody className="divide-y divide-line">
+              {working.lines.map((l, i) => (
+                <tr key={i}>
+                  <td className="py-1.5 pr-3 text-muted">{l.label}</td>
+                  <td className="py-1.5 text-right tabular-nums text-text">{formatCurrency(l.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {working.warnings?.map((w) => (
+            <p key={w} className="rounded-base bg-warning-bg px-3 py-2 text-xs text-warning">
+              {w}
+            </p>
+          ))}
+          <p className="text-xs text-subtle">By the average rate (Income-tax Act, 2025 s.392): the year&apos;s estimated tax, less what&apos;s already deducted, spread over this month and the months to come.</p>
+        </div>
+      ) : (
+        <p className="text-sm text-muted">This figure was typed.</p>
+      )}
     </Dialog>
   );
 }

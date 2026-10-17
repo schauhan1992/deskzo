@@ -354,6 +354,9 @@ async function main() {
   for (const userId of userIds) {
     for (const t of LEAVE_TYPES) {
       const credited = t.accrual === "MONTHLY" ? Math.round((t.annualQuota / 12) * monthsElapsed * 100) / 100 : t.annualQuota;
+      // What they brought from the company's old system — typed, so it stands in for a carry from a year
+      // Deskzo never saw rather than being worked out again to nothing the first time it's looked at.
+      const brought = t.carryForward ? int(0, 6) : 0;
       await db.leaveBalance.upsert({
         where: { userId_typeId_year: { userId, typeId: typeByCode.get(t.code)!.id, year: fy } },
         update: {},
@@ -362,7 +365,9 @@ async function main() {
           typeId: typeByCode.get(t.code)!.id,
           year: fy,
           credited: dec(credited),
-          opening: dec(t.carryForward ? int(0, 6) : 0),
+          opening: dec(brought),
+          openingTyped: t.carryForward ? dec(brought) : null,
+          openingNote: t.carryForward ? "Brought from the old system" : null,
         },
       });
     }

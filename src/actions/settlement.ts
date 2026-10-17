@@ -68,7 +68,7 @@ export async function buildSettlement(
     select: {
       name: true,
       employeeProfile: true,
-      salaryStructures: { orderBy: { effectiveFrom: "desc" }, take: 1 },
+      salaryStructures: { orderBy: { effectiveFrom: "desc" } },
     },
   });
   if (!person) return { ok: false, error: "That user no longer exists." };
@@ -80,7 +80,9 @@ export async function buildSettlement(
   if (!profile.joinedOn) {
     return { ok: false, error: "No joining date on the record, so service and gratuity can't be worked out." };
   }
-  const structure = person.salaryStructures[0];
+  // The salary they were on when they left — not a revision dated after the last working day, which
+  // they never earned at.
+  const structure = person.salaryStructures.find((s) => s.effectiveFrom <= profile.exitedOn!) ?? person.salaryStructures[person.salaryStructures.length - 1];
   if (!structure) return { ok: false, error: "No salary structure on file, so there is nothing to settle." };
 
   const existing = await db.finalSettlement.findUnique({ where: { userId }, select: { id: true, status: true } });

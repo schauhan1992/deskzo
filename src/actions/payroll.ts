@@ -13,12 +13,16 @@ import { attachToPayslips } from "@/lib/hr/incentive-payout";
 import { hasEffectivePermission } from "@/actions/permission";
 import { dateOnly, daysInMonth, monthLabel, monthRange } from "@/lib/hr/calendar";
 import { lossOfPayDays } from "@/lib/hr/loss-of-pay";
-import { annualCtcOf, computePayslip, suggestStructure } from "@/lib/hr/payroll";
-import { computeProfessionalTax, normaliseState, ptRuleFor } from "@/lib/hr/professional-tax";
+import { annualCtcOf, computePayslip, salaryPartsInMonth, suggestStructure } from "@/lib/hr/payroll";
+import { formatCalendarDay } from "@/lib/time/zone";
+import { workOutTds } from "@/lib/hr/tds";
+import { computeProfessionalTax, normaliseState, ptRuleFor, seniorCitizenIn } from "@/lib/hr/professional-tax";
 import { alsoPaidBySettlement, payrollMonth, ptHistoryFor, settlementsRelyingOn, workStateOf } from "@/lib/hr/payroll-month";
 import { GST_STATE_CODES } from "@/lib/gst-engine";
 import { branchIdentity } from "@/lib/branches/identity";
-import { payrollRunSchema, payslipAdjustSchema, salaryStructureSchema } from "@/lib/validation/hr";
+import { payrollRunSchema, payslipAdjustSchema, salaryStructureSchema, taxDeclarationSchema } from "@/lib/validation/hr";
+import { TAX_YEARS, taxYearOf } from "@/lib/hr/income-tax";
+import { workspaceClock } from "@/lib/time/workspace";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -63,6 +67,21 @@ async function structureOn(userId: string, on: Date) {
     orderBy: { effectiveFrom: "desc" },
   });
 }
+
+/** Every structure that has taken effect by `on` — split into the month's parts by `salaryPartsInMonth`. */
+async function structuresBy(userId: string, on: Date) {
+  return db.salaryStructure.findMany({ where: { userId, effectiveFrom: { lte: on } }, orderBy: { effectiveFrom: "asc" } });
+}
+
+type Money = Parameters<typeof n>[0];
+const componentsOf = (s: { basic: Money; hra: Money; conveyance: Money; medical: Money; specialAllowance: Money; otherAllowance: Money }) => ({
+  basic: n(s.basic),
+  hra: n(s.hra),
+  conveyance: n(s.conveyance),
+  medical: n(s.medical),
+  specialAllowance: n(s.specialAllowance),
+  otherAllowance: n(s.otherAllowance),
+});
 
 export async function saveSalaryStructure(input: unknown): Promise<ActionResult<{ id: string }>> {
   const { user, allowed } = await requirePayrollAccess();
@@ -202,14 +221,14 @@ export async function runPayroll(input: unknown): Promise<ActionResult<{ id: str
 
   const slips: Prisma.PayslipCreateManyInput[] = [];
 
-  // Read before anything is replaced. Income tax and any manual deduction are typed in by whoever
-  // runs payroll, not computed, so a recalculation must carry them across or it would silently
-  // wipe them — see the note at the top of src/lib/hr/payroll.ts on why tax is not derived here.
+  // Read before anything is replaced. A manual deduction, and income tax wherever somebody typed it
+  // over Deskzo's figure, were typed by whoever runs payroll, so a recalculation carries them across
+  // rather than silently wipe them. Worked-out TDS is worked out again.
   const carried = new Map(
     (
       await db.payslip.findMany({
         where: { runId: run.id },
-        select: { userId: true, incomeTax: true, otherDeduction: true, otherDeductionNote: true },
+        select: { userId: true, incomeTax: true, incomeTaxBasis: true, otherDeduction: true, otherDeductionNote: true },
       })
     ).map((slip) => [slip.userId, slip]),
   );
@@ -240,45 +259,77 @@ export async function runPayroll(input: unknown): Promise<ActionResult<{ id: str
       skipped.push(`${person.name} — this month's salary is in their full and final settlement`);
       continue;
     }
-    const structure = await structureOn(person.id, to);
+    // The month by salary structure: a revision inside it pays each part at its own rate.
+    const salaryParts = salaryPartsInMonth(await structuresBy(person.id, to), year, month);
+    const structure = salaryParts[salaryParts.length - 1]?.structure;
     if (!structure) {
       skipped.push(`${person.name} — no salary structure`);
       continue;
     }
 
     const lop = person.salaryInSettlement ? 0 : await lossOfPayDays(person.id, year, month, person.employment);
+    // With a revision, the loss of pay is counted in each part's own days, so a day off is docked at
+    // the rate it would have been paid at.
+    const employed = person.employment;
+    const parts =
+      salaryParts.length > 1 && !person.salaryInSettlement
+        ? await Promise.all(
+            salaryParts.map(async (p) => {
+              const firstDay = Math.max(p.firstDay, employed.firstDay);
+              const lastDay = Math.min(p.lastDay, employed.lastDay);
+              const lopDays = lastDay >= firstDay ? await lossOfPayDays(person.id, year, month, { firstDay, lastDay }) : 0;
+              return { components: componentsOf(p.structure), firstDay: p.firstDay, lastDay: p.lastDay, lopDays };
+            }),
+          )
+        : undefined;
+    const backdated = salaryParts[0]?.backdated && employed.firstDay < salaryParts[0].structure.effectiveFrom.getUTCDate();
     const prior = carried.get(person.id);
-    const result = computePayslip({
-      components: {
-        basic: n(structure.basic),
-        hra: n(structure.hra),
-        conveyance: n(structure.conveyance),
-        medical: n(structure.medical),
-        specialAllowance: n(structure.specialAllowance),
-        otherAllowance: n(structure.otherAllowance),
-      },
-      flags: {
-        pfApplicable: structure.pfApplicable,
-        esiApplicable: structure.esiApplicable,
-        ptApplicable: structure.ptApplicable,
-      },
+    const flags = { pfApplicable: structure.pfApplicable, esiApplicable: structure.esiApplicable, ptApplicable: structure.ptApplicable };
+    const workState = (person.branchId ? workStates.get(person.branchId) : null) ?? person.state ?? null;
+    const slipInput = {
+      components: componentsOf(structure),
+      parts,
+      flags,
       monthDays,
       lopDays: lop,
       employment: person.employment,
       salaryInSettlement: person.salaryInSettlement,
-      state: (person.branchId ? workStates.get(person.branchId) : null) ?? person.state ?? null,
+      state: workState,
       gender: person.gender,
       ptHistory: ptHistory.get(person.id),
+      seniorCitizen: seniorCitizenIn(person.dateOfBirth, month >= 4 ? year : year - 1),
       leavingThisMonth: person.leaving,
-      // The income tax typed on this month's draft before, carried across: Punjab's development tax
-      // is charged only where income tax is deducted.
-      incomeTax: n(prior?.incomeTax),
       month,
       year,
       incentive,
-    });
+    };
 
-    const incomeTax = n(prior?.incomeTax);
+    // TDS: a figure typed on this month's draft is kept — and so is one on a payslip from before Deskzo
+    // worked it out (no basis), where every figure was typed. Otherwise it's worked out from the tax
+    // year so far (src/lib/hr/tds.ts), on the payslip as computed without it; then the payslip is
+    // computed again with it, since Punjab's development tax follows income tax.
+    const typed = !!prior && (prior.incomeTaxBasis === "TYPED" || (prior.incomeTaxBasis === null && n(prior.incomeTax) > 0));
+    let incomeTax = typed ? n(prior.incomeTax) : 0;
+    let tds: Awaited<ReturnType<typeof workOutTds>> = null;
+    if (!typed) {
+      const first = computePayslip({ ...slipInput, incomeTax: 0, incomeTaxWorkedOut: true });
+      tds = await workOutTds({
+        userId: person.id,
+        year,
+        month,
+        thisMonth: { gross: first.grossEarnings, pf: first.pfEmployee, pt: first.professionalTax },
+        rate: { components: componentsOf(structure), flags, state: workState, gender: person.gender },
+        joinedOn: person.joinedOn,
+        exitedOn: person.exitedOn,
+        dateOfBirth: person.dateOfBirth,
+      });
+      incomeTax = tds?.amount ?? 0;
+    }
+    const result = computePayslip({ ...slipInput, incomeTax, incomeTaxWorkedOut: !!tds });
+    const basis = typed ? ("TYPED" as const) : tds ? ("WORKED_OUT" as const) : null;
+    if (!typed && !tds && result.grossEarnings > 0) {
+      result.warnings = [...result.warnings.filter((w) => !w.startsWith("No income tax entered")), "Deskzo doesn't work out TDS for this tax year — type it on the payslip."];
+    }
     const otherDeduction = n(prior?.otherDeduction);
     const totalDeductions =
       result.pfEmployee + result.esiEmployee + result.professionalTax + incomeTax + otherDeduction;
@@ -303,12 +354,19 @@ export async function runPayroll(input: unknown): Promise<ActionResult<{ id: str
       esiEmployer: dec(result.esiEmployer),
       professionalTax: dec(result.professionalTax),
       incomeTax: dec(incomeTax),
+      incomeTaxBasis: basis,
+      taxWorking: tds ? (tds as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
       otherDeduction: dec(otherDeduction),
       otherDeductionNote: prior?.otherDeductionNote ?? null,
       totalDeductions: dec(totalDeductions),
       netPay: dec(result.grossEarnings - totalDeductions),
       employerCost: dec(result.employerCost),
-      note: result.warnings.length > 0 ? result.warnings.join(" ") : null,
+      note:
+        [
+          ...result.warnings,
+          ...(tds?.warnings ?? []),
+          ...(backdated ? [`No salary structure before ${formatCalendarDay(salaryParts[0]!.structure.effectiveFrom)} — the days before it were paid at the one from that day.`] : []),
+        ].join(" ") || null,
     });
   }
 
@@ -380,6 +438,7 @@ export async function getPayrollRun(
             : {}),
         },
         orderBy,
+        omit: { incomeTaxBasis: false, taxWorking: false },
         include: { user: { select: { id: true, userSeq: true, name: true, employeeProfile: { select: { employeeCode: true, designation: true } } } } },
       },
     },
@@ -416,21 +475,58 @@ export async function adjustPayslip(input: unknown): Promise<ActionResult<null>>
 
   const slip = await db.payslip.findUnique({
     where: { id: data.id },
+    omit: { incomeTaxBasis: false, taxWorking: false },
     include: { run: { select: { status: true, month: true, year: true } }, user: { select: { name: true } } },
   });
   if (!slip) return { ok: false, error: "That payslip no longer exists." };
   if (slip.run.status !== "DRAFT") {
     return { ok: false, error: "That month is locked. A locked payslip is a record, not a draft." };
   }
+  const state = await workStateOf(slip.userId);
+  const { year, month } = slip.run;
+  const monthEnd = monthRange(year, month).to;
+
+  // TDS: worked out again on request; a figure changed from the one on the payslip is typed, and a
+  // recalculation keeps it; the same figure saved again keeps whatever it was.
+  let incomeTax = data.incomeTax;
+  let incomeTaxBasis = slip.incomeTaxBasis;
+  let taxWorking: Prisma.InputJsonValue | typeof Prisma.DbNull | undefined;
+  if (data.workOutTax) {
+    const structure = await structureOn(slip.userId, monthEnd);
+    const profile = await db.employeeProfile.findUnique({ where: { userId: slip.userId }, select: { joinedOn: true, exitedOn: true, dateOfBirth: true, gender: true } });
+    if (!structure) return { ok: false, error: "No salary structure on file, so there's no rate to work the year out on." };
+    const tds = await workOutTds({
+      userId: slip.userId,
+      year,
+      month,
+      thisMonth: { gross: n(slip.grossEarnings), pf: n(slip.pfEmployee), pt: n(slip.professionalTax) },
+      rate: {
+        components: componentsOf(structure),
+        flags: { pfApplicable: structure.pfApplicable, esiApplicable: structure.esiApplicable, ptApplicable: structure.ptApplicable },
+        state,
+        gender: profile?.gender ?? null,
+      },
+      joinedOn: profile?.joinedOn ?? null,
+      exitedOn: profile?.exitedOn ?? null,
+      dateOfBirth: profile?.dateOfBirth ?? null,
+    });
+    if (!tds) return { ok: false, error: "Deskzo doesn't work out TDS for this tax year — type it." };
+    incomeTax = tds.amount;
+    incomeTaxBasis = "WORKED_OUT";
+    taxWorking = tds as unknown as Prisma.InputJsonValue;
+  } else if (Math.abs(data.incomeTax - n(slip.incomeTax)) >= 0.005) {
+    incomeTaxBasis = "TYPED";
+    taxWorking = Prisma.DbNull;
+  }
 
   // Punjab's development tax follows income tax (src/lib/hr/professional-tax.ts): typing income tax in,
   // or taking it out, decides whether this payslip owes it. Every other state's stands as the run set it.
   let professionalTax = n(slip.professionalTax);
-  const state = await workStateOf(slip.userId);
-  const rule = state ? ptRuleFor(normaliseState(state), slip.run.year, slip.run.month) : null;
+  const rule = state ? ptRuleFor(normaliseState(state), year, month) : null;
   if (rule?.rule.kind === "INCOME_TAX_PAYERS") {
-    const structure = await structureOn(slip.userId, monthRange(slip.run.year, slip.run.month).to);
+    const structure = await structureOn(slip.userId, monthEnd);
     const history = (await ptHistoryFor([slip.userId], slip.run.year, slip.run.month)).get(slip.userId);
+    const profile = await db.employeeProfile.findUnique({ where: { userId: slip.userId }, select: { dateOfBirth: true } });
     professionalTax = computeProfessionalTax({
       monthGross: n(slip.grossEarnings),
       state,
@@ -438,18 +534,21 @@ export async function adjustPayslip(input: unknown): Promise<ActionResult<null>>
       year: slip.run.year,
       applicable: structure?.ptApplicable ?? false,
       paidThisYear: history?.paidThisYear,
-      deductsIncomeTax: data.incomeTax > 0,
+      deductsIncomeTax: incomeTax > 0,
+      seniorCitizen: seniorCitizenIn(profile?.dateOfBirth, slip.run.month >= 4 ? slip.run.year : slip.run.year - 1),
     }).amount;
   }
 
   const statutory = n(slip.pfEmployee) + n(slip.esiEmployee) + professionalTax;
-  const totalDeductions = statutory + data.incomeTax + data.otherDeduction;
+  const totalDeductions = statutory + incomeTax + data.otherDeduction;
 
   await db.payslip.update({
     where: { id: data.id },
     data: {
       professionalTax: dec(professionalTax),
-      incomeTax: dec(data.incomeTax),
+      incomeTax: dec(incomeTax),
+      incomeTaxBasis,
+      ...(taxWorking !== undefined ? { taxWorking } : {}),
       otherDeduction: dec(data.otherDeduction),
       otherDeductionNote: data.otherDeductionNote?.trim() || null,
       totalDeductions: dec(totalDeductions),
@@ -609,6 +708,59 @@ export async function postPayrollRunToLedger(runId: string): Promise<ActionResul
 }
 
 /** Somebody's own payslips — the one payroll read that needs no permission. */
+// ─── Income tax declarations ──────────────────────────────────────────────────
+
+const DECLARED = ["hraExemption", "section80C", "section80CCD1B", "section80D", "homeLoanInterest", "otherDeductions", "previousGross", "previousTds", "previousPt", "previousPf", "otherIncome", "otherTds"] as const;
+export type TaxDeclarationView = { taxYear: number; regime: "NEW" | "OLD"; note: string | null; updatedAt: string | null } & Record<(typeof DECLARED)[number], number>;
+
+/**
+ * Somebody's income tax declarations — this tax year's and last year's, whichever Deskzo works TDS out
+ * for — what TDS is worked out from (src/lib/hr/tds.ts). Payroll's to see and set; a person sees their
+ * own.
+ */
+export async function taxDeclarations(userId: string): Promise<{ years: number[]; current: number; declarations: TaxDeclarationView[] } | null> {
+  const { user, allowed } = await requirePayrollAccess();
+  if (!allowed && user.id !== userId) return null;
+  const today = (await workspaceClock()).calendarDate(new Date());
+  const current = taxYearOf(today.getUTCFullYear(), today.getUTCMonth() + 1);
+  const years = [current, current - 1].filter((y) => TAX_YEARS[y]);
+  const rows = await db.taxDeclaration.findMany({ where: { userId, taxYear: { in: years } } });
+  const declarations = years.map((taxYear) => {
+    const row = rows.find((r) => r.taxYear === taxYear);
+    return {
+      taxYear,
+      regime: row?.regime ?? ("NEW" as const),
+      note: row?.note ?? null,
+      updatedAt: row?.updatedAt.toISOString() ?? null,
+      ...(Object.fromEntries(DECLARED.map((k) => [k, n(row?.[k])])) as Record<(typeof DECLARED)[number], number>),
+    };
+  });
+  return { years, current, declarations };
+}
+
+export async function saveTaxDeclaration(input: unknown): Promise<ActionResult<null>> {
+  const { user, allowed } = await requirePayrollAccess();
+  if (!allowed) return { ok: false, error: "You can't set income tax declarations." };
+  const parsed = taxDeclarationSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  const { userId, taxYear, regime, note, ...amounts } = parsed.data;
+  if (!TAX_YEARS[taxYear]) return { ok: false, error: "Deskzo doesn't work out TDS for that tax year." };
+  const person = await db.user.findUnique({ where: { id: userId }, select: { name: true } });
+  if (!person) return { ok: false, error: "That person no longer exists." };
+
+  const data = { regime, note: note || null, updatedById: user.id, ...Object.fromEntries(DECLARED.map((k) => [k, dec(amounts[k])])) };
+  await db.taxDeclaration.upsert({ where: { userId_taxYear: { userId, taxYear } }, create: { userId, taxYear, ...data }, update: data });
+  await recordAudit({
+    userId: user.id,
+    action: "UPDATE",
+    entityType: "TaxDeclaration",
+    entityId: `${userId}:${taxYear}`,
+    entityLabel: `Income tax declaration for ${person.name}, tax year ${taxYear}-${String((taxYear + 1) % 100).padStart(2, "0")} (${regime === "NEW" ? "new" : "old"} regime)`,
+  });
+  revalidatePath("/people");
+  return { ok: true, data: null };
+}
+
 export async function myPayslips() {
   const user = await requireModuleUser("payroll");
   return toPlain(
@@ -625,6 +777,7 @@ export async function getPayslip(id: string) {
   const user = await requireModuleUser("payroll");
   const slip = await db.payslip.findUnique({
     where: { id },
+    omit: { incomeTaxBasis: false, taxWorking: false },
     include: {
       run: { select: { month: true, year: true, status: true, paidAt: true } },
       user: {

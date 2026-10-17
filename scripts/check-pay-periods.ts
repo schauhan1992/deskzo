@@ -29,18 +29,40 @@
  *     it or a record made after it — and for somebody who joined in its last month, with that month's
  *     share of it;
  *   · what a year grants follows the joining and leaving dates;
- *   · a balance made before carrying worked (opening 0) is put right the next time it is looked at.
+ *   · a balance made before carrying worked (opening 0) is put right the next time it is looked at;
+ *   · a salary revised inside a month is paid each part at its own rate by the run itself, a day off
+ *     docked at the rate of the part it fell in; a settlement pays at the salary they left on, not a
+ *     revision dated after;
+ *   · a balance brought from the old system stands in for the carry Deskzo can't work out, the next
+ *     year carries from it, and what was taken before Deskzo is counted as used — typed through the
+ *     opening balances sheet by HR only, for this year or last;
+ *   · TDS is worked out from a person's declaration and pay outside Deskzo, warns when earlier months
+ *     of the tax year are missing, and a figure typed on a payslip survives the run being recalculated.
  *
  *   npm run check:pay-periods
  */
 import "dotenv/config";
+import Module from "node:module";
 import { directClient } from "../src/lib/tenancy/direct-client";
+
+// The run is a server action: whoever runs it is the fixture's payroll clerk.
+let actorId = "";
+const internals = Module as unknown as { _load(r: string, p: unknown, m: boolean): unknown };
+const originalLoad = internals._load;
+internals._load = function (this: unknown, request: string, parent: unknown, isMain: boolean) {
+  if (request === "next/cache") return { revalidatePath() {}, revalidateTag() {}, unstable_cache: (fn: unknown) => fn };
+  if (request === "@/lib/session" || request.endsWith("lib/session")) {
+    const user = async () => ({ id: actorId, role: "ADMIN", name: "Zzprobe Clerk", email: `clerk${MAIL}` });
+    return { requireUser: user, currentUser: user, viewAsContext: async () => null, refuseWhileViewingAs: async () => null };
+  }
+  return originalLoad.call(this, request, parent, isMain);
+} as typeof originalLoad;
 
 const db = directClient();
 const TAG = "ZZPROBE_PAY";
 const ROLE = "ZZPROBE_PAY";
 const MAIL = "@zzprobe-pay.invalid";
-const CODES = ["ZZCF", "ZZCM", "ZZNC"];
+const CODES = ["ZZCF", "ZZCM", "ZZNC", "ZZUP"];
 
 let failures = 0;
 const ok = (label: string, pass: boolean, detail: unknown = "") => {
@@ -52,11 +74,12 @@ const d = (iso: string) => new Date(`${iso}T00:00:00Z`);
 const num = (v: unknown) => Number(v ?? 0);
 
 async function cleanup() {
-  const fixtureMonths = [{ month: 3, year: 2001 }, { month: 10, year: 2000 }, { month: 1, year: 2001 }];
+  const fixtureMonths = [{ month: 3, year: 2001 }, { month: 10, year: 2000 }, { month: 1, year: 2001 }, { month: 5, year: 2001 }];
   await db.payslip.deleteMany({ where: { run: { OR: fixtureMonths } } });
   await db.payrollRun.deleteMany({ where: { OR: fixtureMonths } });
   // Balances and settlements go with the people and types (onDelete: Cascade).
   await db.leaveType.deleteMany({ where: { code: { in: CODES } } });
+  await db.auditLog.deleteMany({ where: { user: { email: { endsWith: MAIL } } } });
   await db.user.deleteMany({ where: { email: { endsWith: MAIL } } });
   await db.role.deleteMany({ where: { key: ROLE } });
 }
@@ -305,6 +328,124 @@ async function main() {
     ok("joined 20 March 2001: FY 2000 is made with one month of the annual 12", num(lateLast?.credited) === 1, lateLast ? num(lateLast.credited) : "no row");
     ok("...so 1 is carried, not the 5 a whole year would", num(lateCarry?.opening) === 1, num(lateCarry?.opening));
     ok("...and this year's own grant is whole: they were here from its first day", num(late?.credited) === 10, num(late?.credited));
+
+    section("A salary revised inside the month, through the run");
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const { runPayroll } = require("../src/actions/payroll") as typeof import("../src/actions/payroll");
+    const { buildSettlement } = require("../src/actions/settlement") as typeof import("../src/actions/settlement");
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    const clerk = await person("Clerk", { joinedOn: "2000-01-10" });
+    await db.userPermission.create({ data: { userId: clerk.id, permission: "payroll.manage", allowed: true, reason: TAG } });
+    actorId = clerk.id;
+    const flat = (userId: string, from: string, gross: number) =>
+      db.salaryStructure.create({ data: { userId, effectiveFrom: d(from), basic: gross, pfApplicable: false, esiApplicable: false, ptApplicable: false } });
+    // May 2001, 31 days: ₹31,000 to the 15th, ₹46,500 from the 16th; a day absent on the 20th.
+    const raised = await person("Raised", { joinedOn: "2000-01-10" });
+    await flat(raised.id, "2000-01-10", 31000);
+    await flat(raised.id, "2001-05-16", 46500);
+    await db.attendanceDay.create({ data: { userId: raised.id, date: d("2001-05-20"), status: "ABSENT" } });
+    // Raised the same, absent on the 5th instead — before the raise.
+    const earlyOff = await person("EarlyOff", { joinedOn: "2000-01-10" });
+    await flat(earlyOff.id, "2000-01-10", 31000);
+    await flat(earlyOff.id, "2001-05-16", 46500);
+    await db.attendanceDay.create({ data: { userId: earlyOff.id, date: d("2001-05-05"), status: "ABSENT" } });
+    const mayRun = await runPayroll({ month: 5, year: 2001 });
+    ok("the run goes through", mayRun.ok, mayRun.ok ? "" : mayRun.error);
+    const slipOf = (userId: string) => db.payslip.findFirst({ where: { userId, run: { month: 5, year: 2001 } } });
+    const raisedSlip = await slipOf(raised.id);
+    ok("15 days at ₹31,000 and 15 at ₹46,500 (one off after the raise): ₹37,500", num(raisedSlip?.grossEarnings) === 37500, num(raisedSlip?.grossEarnings));
+    ok("...30 days paid, 1 loss of pay", num(raisedSlip?.paidDays) === 30 && num(raisedSlip?.lopDays) === 1);
+    ok("...and the payslip says when it changed", /Salary revised in the month/.test(raisedSlip?.note ?? ""), raisedSlip?.note);
+    const earlySlip = await slipOf(earlyOff.id);
+    ok("the day off before the raise is docked at the old rate: ₹38,000", num(earlySlip?.grossEarnings) === 38000, num(earlySlip?.grossEarnings));
+
+    // Leaving on 20 May with a raise saved for 1 June: the settlement pays at what they were on.
+    const leaving = await person("LeavesBeforeRaise", { joinedOn: "2000-01-10", exitedOn: "2001-05-20" });
+    await flat(leaving.id, "2000-01-10", 31000);
+    await flat(leaving.id, "2001-06-01", 62000);
+    const fnf = await buildSettlement(leaving.id);
+    const settledFnf = fnf.ok ? await db.finalSettlement.findUnique({ where: { userId: leaving.id } }) : null;
+    ok("a settlement pays the final month at the salary they left on, not a raise dated after", num(settledFnf?.salaryAmount) === 20000, fnf.ok ? num(settledFnf?.salaryAmount) : fnf.error);
+
+    section("Balances brought from the old system");
+    // FY 2000: the type was made in June, so Deskzo has no year before it to carry from.
+    const mover = await person("Mover", { joinedOn: "2000-01-10" });
+    const october2000 = d("2000-10-15");
+    await db.leaveBalance.create({ data: { userId: mover.id, typeId: capped.id, year: 2000, openingTyped: 7, usedBefore: 2, used: 2 } });
+    const typed = await ensureBalance(mover.id, capped.id, 2000, october2000);
+    ok("a typed opening stands in for the carry Deskzo can't work out", num(typed?.opening) === 7, num(typed?.opening));
+    const unTyped = await ensureBalance((await person("NotMoved", { joinedOn: "2000-01-10" })).id, capped.id, 2000, october2000);
+    ok("...without one, nothing is carried into the type's first year, as before", num(unTyped?.opening) === 0, num(unTyped?.opening));
+    const nextYear = await ensureBalance(mover.id, capped.id, 2001, june);
+    ok("the next year carries from it: 7 + 12 − 2 taken before Deskzo = 17, capped at 5", num(nextYear?.opening) === 5, num(nextYear?.opening));
+
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const { leaveOpeningSheet, saveLeaveOpenings } = require("../src/actions/leave-openings") as typeof import("../src/actions/leave-openings");
+    const { financialYearOf } = require("../src/lib/hr/calendar") as typeof import("../src/lib/hr/calendar");
+    const { workspaceClock } = require("../src/lib/time/workspace") as typeof import("../src/lib/time/workspace");
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    const thisYear = financialYearOf((await workspaceClock()).calendarDate(new Date()));
+    const unpaid = await db.leaveType.create({ data: { code: "ZZUP", name: `${TAG} unpaid`, active: false, paid: false, annualQuota: 0, accrual: "ANNUAL", carryForward: false } });
+    actorId = clerk.id;
+    ok("the sheet is HR's alone", (await leaveOpeningSheet()) === null);
+    const refused = await saveLeaveOpenings({ year: thisYear, rows: [{ userId: mover.id, typeId: lapses.id, opening: 4, usedBefore: 3 }] });
+    ok("...and so is saving it", !refused.ok, refused.ok ? "saved" : refused.error);
+    await db.userPermission.create({ data: { userId: clerk.id, permission: "hr.manage", allowed: true, reason: TAG } });
+    ok("with hr.manage, the sheet opens on this year", (await leaveOpeningSheet())?.year === thisYear);
+    const saved = await saveLeaveOpenings({ year: thisYear, rows: [{ userId: mover.id, typeId: lapses.id, opening: 4, usedBefore: 3 }], note: "greytHR, 30 Sep" });
+    const row = () => db.leaveBalance.findUnique({ where: { userId_typeId_year: { userId: mover.id, typeId: lapses.id, year: thisYear } } });
+    const afterSave = await row();
+    ok("saved: carried in 4, taken before 3, counted as used", saved.ok && num(afterSave?.opening) === 4 && num(afterSave?.openingTyped) === 4 && num(afterSave?.used) === 3 && num(afterSave?.usedBefore) === 3, saved.ok ? JSON.stringify({ opening: num(afterSave?.opening), used: num(afterSave?.used) }) : saved.error);
+    await saveLeaveOpenings({ year: thisYear, rows: [{ userId: mover.id, typeId: lapses.id, opening: 4, usedBefore: 1 }] });
+    ok("...taken before corrected to 1: used moves by the difference", num((await row())?.used) === 1, num((await row())?.used));
+    await saveLeaveOpenings({ year: thisYear, rows: [{ userId: mover.id, typeId: lapses.id, opening: null, usedBefore: 1 }] });
+    const cleared = await row();
+    ok("...carried in taken back out: worked out again — nothing, for a type that doesn't carry", cleared?.openingTyped === null && num(cleared?.opening) === 0, num(cleared?.opening));
+    const unpaidSave = await saveLeaveOpenings({ year: thisYear, rows: [{ userId: mover.id, typeId: unpaid.id, opening: 2, usedBefore: 0 }] });
+    ok("an unpaid type has no balance to bring", !unpaidSave.ok, unpaidSave.ok ? "saved" : unpaidSave.error);
+    const tooOld = await saveLeaveOpenings({ year: thisYear - 2, rows: [{ userId: mover.id, typeId: lapses.id, opening: 2, usedBefore: 0 }] });
+    ok("this year or last only", !tooOld.ok, tooOld.ok ? "saved" : tooOld.error);
+    const halfDay = await saveLeaveOpenings({ year: thisYear, rows: [{ userId: mover.id, typeId: lapses.id, opening: 2.25, usedBefore: 0 }] });
+    ok("whole or half days", !halfDay.ok, halfDay.ok ? "saved" : halfDay.error);
+
+    section("TDS worked out from the tax year");
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const { workOutTds } = require("../src/lib/hr/tds") as typeof import("../src/lib/hr/tds");
+    const { adjustPayslip, saveTaxDeclaration, taxDeclarations } = require("../src/actions/payroll") as typeof import("../src/actions/payroll");
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    const rateOf = (basic: number) => ({ basic, hra: 0, conveyance: 0, medical: 0, specialAllowance: 0, otherAllowance: 0 });
+    const noStatutory = { pfApplicable: false, esiApplicable: false, ptApplicable: false };
+    const october = (userId: string, monthly: number, exitedOn: Date | null = null) =>
+      workOutTds({ userId, year: 2026, month: 10, thisMonth: { gross: monthly, pf: 0, pt: 0 }, rate: { components: rateOf(monthly), flags: noStatutory, state: null, gender: null }, joinedOn: d("2000-01-10"), exitedOn, dateOfBirth: d("1990-05-05") });
+
+    const joiner = await person("TaxedJoiner", { joinedOn: "2000-01-10" });
+    const saved2 = await saveTaxDeclaration({ userId: joiner.id, taxYear: 2026, regime: "NEW", previousGross: 600000, previousTds: 30000 });
+    ok("payroll saves a declaration", saved2.ok, saved2.ok ? "" : saved2.error);
+    const fromPrevious = await october(joiner.id, 200000);
+    ok("October, 2 lakh a month, 6 lakh and 30,000 TDS from a previous employer: 20,133", fromPrevious?.amount === 20133, fromPrevious?.amount);
+    ok("...with nothing to warn about", fromPrevious?.warnings.length === 0, fromPrevious?.warnings.join(" | "));
+    const untaxed = await person("Untaxed", { joinedOn: "2000-01-10" });
+    const missing = await october(untaxed.id, 300000);
+    ok("no payslips April to September and nothing declared: worked out on what's known", missing?.amount === 25133, missing?.amount);
+    ok("...and says six months are missing", missing?.warnings.some((w) => w.startsWith("6 earlier month(s)")) === true, missing?.warnings.join(" | "));
+    const leavingDec = await october(untaxed.id, 300000, d("2026-12-31"));
+    ok("leaving in December: two months to come, not five", leavingDec?.monthsLeft === 3, leavingDec?.monthsLeft);
+    await saveTaxDeclaration({ userId: untaxed.id, taxYear: 2026, regime: "OLD", section80C: 150000 });
+    ok("the old regime when they've chosen it", (await october(untaxed.id, 300000))?.regime === "OLD");
+    ok("a tax year Deskzo has no rates for: nothing worked out", (await workOutTds({ userId: untaxed.id, year: 2001, month: 5, thisMonth: { gross: 1, pf: 0, pt: 0 }, rate: { components: rateOf(1), flags: noStatutory, state: null, gender: null }, joinedOn: null, exitedOn: null, dateOfBirth: null })) === null);
+    const view = await taxDeclarations(untaxed.id);
+    ok("the declarations read back for the record", view?.declarations.some((x) => x.taxYear === 2026 && x.regime === "OLD" && x.section80C === 150000) === true);
+
+    // The run keeps a typed figure: May 2001's payslip, typed 500.
+    const raisedMay = await db.payslip.findFirstOrThrow({ where: { userId: raised.id, run: { month: 5, year: 2001 } } });
+    ok("a payslip in a year without rates says to type TDS", /doesn't work out TDS for this tax year/.test(raisedMay.note ?? "") && raisedMay.incomeTaxBasis === null, raisedMay.note);
+    const typedSave = await adjustPayslip({ id: raisedMay.id, incomeTax: 500, otherDeduction: 0 });
+    ok("TDS typed on it", typedSave.ok && (await db.payslip.findUniqueOrThrow({ where: { id: raisedMay.id } })).incomeTaxBasis === "TYPED", typedSave.ok ? "" : typedSave.error);
+    await runPayroll({ month: 5, year: 2001 });
+    const afterRerun = await db.payslip.findFirstOrThrow({ where: { userId: raised.id, run: { month: 5, year: 2001 } } });
+    ok("...and kept when the month is recalculated", num(afterRerun.incomeTax) === 500 && afterRerun.incomeTaxBasis === "TYPED", num(afterRerun.incomeTax));
+    const workOut = await adjustPayslip({ id: afterRerun.id, incomeTax: 500, otherDeduction: 0, workOutTax: true });
+    ok("'work it out' in a year without rates is refused", !workOut.ok, workOut.ok ? "worked out" : workOut.error);
   } finally {
     await cleanup();
     const left =

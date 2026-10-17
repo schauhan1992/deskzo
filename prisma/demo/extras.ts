@@ -76,7 +76,8 @@ export async function seedExtras(
   const leaveTypes = new Map<string, string>();
   for (const [i, [code, name, annualQuota, paid]] of LEAVE_TYPES.entries()) {
     const row = await db.leaveType.create({
-      data: { code, name, annualQuota: new Prisma.Decimal(annualQuota), paid, sortOrder: i, accrual: code === "EL" ? "MONTHLY" : "ANNUAL" },
+      // Earned leave carries into the next year, up to 30 days; casual and sick leave lapse.
+      data: { code, name, annualQuota: new Prisma.Decimal(annualQuota), paid, sortOrder: i, accrual: code === "EL" ? "MONTHLY" : "ANNUAL", ...(code === "EL" ? { carryForward: true, maxCarryForward: new Prisma.Decimal(30) } : {}) },
       select: { id: true },
     });
     leaveTypes.set(code, row.id);
@@ -111,12 +112,17 @@ export async function seedExtras(
     for (const [code, id] of leaveTypes) {
       if (code === "LOP") continue;
       const quota = LEAVE_TYPES.find((t) => t[0] === code)![2];
+      // Earned leave brought from the company's old system — typed, so it stands in for a carry from a
+      // year Deskzo never saw. The types that lapse bring nothing.
+      const brought = code === "EL" && chance(0.6) ? int(1, 10) : 0;
       await db.leaveBalance.create({
         data: {
           userId: person.id,
           typeId: id,
           year,
-          opening: new Prisma.Decimal(chance(0.4) ? int(0, 5) : 0),
+          opening: new Prisma.Decimal(brought),
+          openingTyped: code === "EL" ? new Prisma.Decimal(brought) : null,
+          openingNote: code === "EL" ? "Brought from the old system" : null,
           credited: new Prisma.Decimal(quota),
           used: new Prisma.Decimal(int(0, Math.floor(quota * 0.7))),
         },
