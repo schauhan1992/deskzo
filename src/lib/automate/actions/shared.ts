@@ -14,7 +14,7 @@ import { ActionError, type ActionContext } from "@/lib/automate/action-types";
 export const recordIdField = (what: string) => z.string().trim().min(1, `Say which ${what}.`).max(60);
 
 /** "owner" (the workflow's owner), or a person's id. */
-export const personField = z.string().trim().min(1).max(40);
+export const personField = z.string().trim().min(1, "Choose who.").max(40);
 
 export function notReached(what: string): ActionError {
   return new ActionError(`The ${what} isn't there, or the workflow's owner can't reach it.`, "PERMANENT");

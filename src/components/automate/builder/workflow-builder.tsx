@@ -11,8 +11,10 @@ import { Menu, MenuItem, MenuLabel, MenuSeparator } from "@/components/ui/menu";
 import { StatusBadge } from "@/components/automate/status-badge";
 import {
   duplicateAutomationWorkflow,
+  exportAutomationWorkflow,
   publishAutomationWorkflow,
   restoreAutomationVersion,
+  saveAsCompanyTemplate,
   saveWorkflowDraft,
   setAutomationWorkflowStatus,
   testWorkflowDraft,
@@ -80,6 +82,19 @@ function describe(step: Step, catalog: Catalog): { title: string; detail: string
 }
 
 const ICONS = { action: Zap, condition: FilterIcon, branch: GitBranch, delay: Hourglass, stop: Octagon, transform: Zap } as const;
+
+/** Hands the browser a file to save. */
+function download(fileName: string, text: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** "Cleared for another workspace: …" — what an export or a company template left out. */
+const clearedText = (cleared: string[]) => (cleared.length ? ` Cleared, as they belong to this workspace: ${cleared.slice(0, 4).join("; ")}${cleared.length > 4 ? ` and ${cleared.length - 4} more` : ""}.` : "");
 
 /** A record field filled from what started it — a lead step on a lead trigger reads the lead. */
 function prefill(action: ActionSpec, draft: Draft, catalog: Catalog): Record<string, unknown> {
@@ -277,6 +292,7 @@ export function WorkflowBuilder({ workflow, demo = false }: { workflow: BuilderW
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-text">{s.name || describe(s, catalog).title}</p>
               <p className="truncate text-xs text-muted">{s.name ? [describe(s, catalog).title, describe(s, catalog).detail].filter(Boolean).join(" · ") : describe(s, catalog).detail}</p>
+              {s.note && <p className="mt-0.5 line-clamp-2 text-xs text-subtle">{s.note}</p>}
               {mine.length > 0 && <p className="mt-1 text-xs text-danger">{mine[0]!.message}{mine.length > 1 ? ` (+${mine.length - 1} more)` : ""}</p>}
               {result && (
                 <p className={`mt-1 text-xs ${result.status === "SUCCEEDED" ? "text-success" : "text-danger"}`}>
@@ -367,6 +383,7 @@ export function WorkflowBuilder({ workflow, demo = false }: { workflow: BuilderW
             {workflow.activeVersion !== null ? <span>Version {workflow.activeVersion} runs</span> : <span>Not published yet</span>}
             <span>· Runs as {workflow.ownerName}</span>
             {workflow.source === "MIGRATED" && <span>· Moved from a pipeline&apos;s automations</span>}
+            {workflow.source === "AI" && <span>· Drafted by AI — read each step before publishing</span>}
             <span>· {saveState === "saving" ? "Saving…" : saveState === "unsaved" ? "Unsaved" : saveState === "failed" ? `Not saved: ${saveError}` : "Saved"}</span>
           </p>
           {workflow.pausedReason && <p className="text-xs text-warning">{workflow.pausedReason}</p>}
@@ -397,6 +414,31 @@ export function WorkflowBuilder({ workflow, demo = false }: { workflow: BuilderW
                   }}
                 >
                   Duplicate
+                </MenuItem>
+                <MenuItem
+                  disabled={demo}
+                  onClick={async () => {
+                    close();
+                    if (!(await flush())) return;
+                    const file = await exportAutomationWorkflow(workflow.id);
+                    if (!file.ok) return setNotice({ kind: "error", text: file.error });
+                    download(file.data.fileName, file.data.text);
+                    setNotice({ kind: "ok", text: `Exported as ${file.data.fileName}.${clearedText(file.data.cleared)}` });
+                  }}
+                >
+                  Export as a file
+                </MenuItem>
+                <MenuItem
+                  disabled={demo}
+                  onClick={async () => {
+                    close();
+                    if (!(await flush())) return;
+                    const saved = await saveAsCompanyTemplate(workflow.id);
+                    if (!saved.ok) return setNotice({ kind: "error", text: saved.error });
+                    setNotice({ kind: "ok", text: `Saved as one of your company's templates, under Templates.${clearedText(saved.data.cleared)}` });
+                  }}
+                >
+                  Save as a company template
                 </MenuItem>
                 <MenuSeparator />
                 <MenuItem

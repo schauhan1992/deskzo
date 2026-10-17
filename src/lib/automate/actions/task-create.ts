@@ -27,7 +27,7 @@ const input = z
     title: z.string().trim().min(1, "A task needs a title.").max(200),
     description: z.string().max(4000).optional(),
     /** "owner" (the workflow's owner), "lead_owner" (the lead's owner now), or a person's id. */
-    assignTo: z.string().min(1).max(40).default("owner"),
+    assignTo: z.string().min(1, "Choose who it's for.").max(40).default("owner"),
     /** Days from today, on the workspace's clock: 0 is today. No due date when not given. */
     dueInDays: z.number().int().min(0).max(365).optional(),
     leadId: id,

@@ -21,6 +21,11 @@ import { PROVIDER_LABELS, deleteConnection, listConnections, saveConnection, con
 import { automateSigningSecret, outboundFetch, statusKind } from "@/lib/automate/outbound";
 import { grantsGoogleSheets } from "@/lib/mail/google";
 import { mailProviders } from "@/lib/workplace/settings";
+import { createFromCompanyTemplate, deleteCompanyTemplate, exportWorkflow, importWorkflow, listCompanyTemplates, readWorkflowFile, saveCompanyTemplate, type ImportPreview } from "@/lib/automate/transfer";
+import { draftWithAI, stepCount } from "@/lib/automate/ai/draft";
+import { DraftingRefusal, draftingProvider, draftingUnavailable } from "@/lib/automate/ai/model";
+import { copilotConfig } from "@/lib/copilot/settings";
+import { notMigratedYet } from "@/lib/not-migrated";
 import { randomUUID } from "node:crypto";
 import type { ActionResult } from "@/actions/company";
 
@@ -680,6 +685,139 @@ export async function testAutomationConnection(id: string): Promise<ActionResult
       await noteConnectionUse(id, message);
       return { ok: false, error: message };
     }
+  } catch (err) {
+    return refused(err);
+  }
+}
+
+// ─── AI drafting, workflow files and company templates (Phase 5) ────────────────────────────────
+
+export type DraftingAvailability = { available: boolean; reason: string | null; provider: string | null };
+
+/** Whether "Describe it" works for this person, why not, and which AI service the words go to. */
+export async function getDraftingAvailability(): Promise<DraftingAvailability> {
+  const user = await admin();
+  const reason = await draftingUnavailable(user.id);
+  return { available: !reason, reason, provider: (await copilotConfig()).enabled ? await draftingProvider() : null };
+}
+
+export type DraftResult = { path: string; name: string; steps: number; questions: string[]; blanks: string[]; others: number };
+
+/**
+ * A workflow drafted from a description, saved as a draft of this person's to finish and publish.
+ * The AI never publishes: what it made waits in the builder with its blanks and any mistakes marked.
+ */
+export async function draftWorkflowWithAI(description: string): Promise<ActionResult<DraftResult>> {
+  try {
+    const user = await changer();
+    let drafted;
+    try {
+      drafted = await draftWithAI({ userId: user.id, description: String(description ?? "") });
+    } catch (err) {
+      if (err instanceof DraftingRefusal) return { ok: false, error: err.message };
+      throw err;
+    }
+    const made = await createWorkflow({ name: drafted.name, description: drafted.description, ownerUserId: user.id, createdById: user.id, draft: drafted.definition, source: "AI" });
+    await recordAudit({ userId: user.id, action: "CREATE", entityType: "Workflow", entityId: made.id, entityLabel: `${drafted.name} — drafted by AI from a description` });
+    revalidateAutomate();
+    return {
+      ok: true,
+      data: { path: await pathOf(made.id), name: drafted.name, steps: stepCount(drafted.definition), questions: drafted.questions, blanks: drafted.blanks.map((b) => b.message), others: drafted.others.length },
+    };
+  } catch (err) {
+    return refused(err);
+  }
+}
+
+/** A workflow's draft as a file to download — people, connections and records cleared. */
+export async function exportAutomationWorkflow(id: string): Promise<ActionResult<{ fileName: string; text: string; cleared: string[] }>> {
+  try {
+    const user = await admin();
+    const exported = await exportWorkflow(id);
+    if (!exported.ok) return exported;
+    await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Workflow", entityId: id, entityLabel: `Exported as a file, ${exported.data.fileName} — nothing changed` });
+    return { ok: true, data: { fileName: exported.data.fileName, text: exported.data.text, cleared: exported.data.cleared.map((c) => c.label) } };
+  } catch (err) {
+    return refused(err);
+  }
+}
+
+/** What importing a file would make, before anything is made. */
+export async function previewWorkflowImport(text: string): Promise<ActionResult<ImportPreview>> {
+  try {
+    await changer();
+    const read = readWorkflowFile(String(text ?? ""));
+    return read.ok ? { ok: true, data: read.preview } : read;
+  } catch (err) {
+    return refused(err);
+  }
+}
+
+/** A file's workflow as a new draft of this person's. */
+export async function importAutomationWorkflow(text: string): Promise<ActionResult<{ path: string }>> {
+  try {
+    const user = await changer();
+    const imported = await importWorkflow(String(text ?? ""), user.id);
+    if (!imported.ok) return imported;
+    await recordAudit({ userId: user.id, action: "CREATE", entityType: "Workflow", entityId: imported.data.id, entityLabel: `${imported.data.preview.name} — imported from a file` });
+    revalidateAutomate();
+    return { ok: true, data: { path: await pathOf(imported.data.id) } };
+  } catch (err) {
+    return refused(err);
+  }
+}
+
+/** Saves a workflow's draft as one of the company's own templates. */
+export async function saveAsCompanyTemplate(workflowId: string): Promise<ActionResult<{ cleared: string[] }>> {
+  try {
+    const user = await changer();
+    const saved = await saveCompanyTemplate(workflowId, user.id);
+    if (!saved.ok) return saved;
+    await recordAudit({ userId: user.id, action: "CREATE", entityType: "AutomationTemplate", entityId: saved.data.id, entityLabel: "A company workflow template, saved from a workflow" });
+    revalidatePath("/automate/templates");
+    return { ok: true, data: { cleared: saved.data.cleared.map((c) => c.label) } };
+  } catch (err) {
+    if (notMigratedYet(err)) return { ok: false, error: "Company templates are being set up for this workspace. Try again in a few minutes." };
+    return refused(err);
+  }
+}
+
+export type CompanyTemplateCard = { id: string; name: string; description: string | null; trigger: string; steps: string[]; by: string; createdAt: string };
+
+/** The company's own templates, newest first — or null while the workspace isn't ready for them. */
+export async function listAutomationCompanyTemplates(): Promise<CompanyTemplateCard[] | null> {
+  await admin();
+  let rows;
+  try {
+    rows = await listCompanyTemplates();
+  } catch (err) {
+    if (notMigratedYet(err)) return null;
+    throw err;
+  }
+  const names = new Map((await db.user.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.createdById))] } }, select: { id: true, name: true } })).map((u) => [u.id, u.name]));
+  return rows.map((r) => ({ id: r.id, name: r.name, description: r.description, trigger: r.trigger, steps: r.steps, by: names.get(r.createdById) ?? "Someone who has left", createdAt: r.createdAt.toISOString() }));
+}
+
+export async function startFromCompanyTemplate(id: string): Promise<ActionResult<{ path: string }>> {
+  try {
+    const user = await changer();
+    const made = await createFromCompanyTemplate(id, user.id);
+    if (!made.ok) return made;
+    await recordAudit({ userId: user.id, action: "CREATE", entityType: "Workflow", entityId: made.data.id, entityLabel: "From a company template" });
+    revalidateAutomate();
+    return { ok: true, data: { path: await pathOf(made.data.id) } };
+  } catch (err) {
+    return refused(err);
+  }
+}
+
+export async function deleteAutomationCompanyTemplate(id: string): Promise<ActionResult<null>> {
+  try {
+    const user = await changer();
+    if (!(await deleteCompanyTemplate(id))) return { ok: false, error: "That template no longer exists." };
+    await recordAudit({ userId: user.id, action: "DELETE", entityType: "AutomationTemplate", entityId: id, entityLabel: "A company workflow template" });
+    revalidatePath("/automate/templates");
+    return { ok: true, data: null };
   } catch (err) {
     return refused(err);
   }

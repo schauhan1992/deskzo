@@ -18,7 +18,7 @@ import { notReached, reach } from "@/lib/automate/actions/shared";
 const input = z
   .object({
     /** "owner" (the workflow's owner), "lead_owner" (the lead's owner now), or a person's id. */
-    to: z.string().min(1).max(40).default("owner"),
+    to: z.string().min(1, "Choose who to tell.").max(40).default("owner"),
     title: z.string().trim().min(1, "Say what the notification is about.").max(120),
     message: z.string().max(300).optional(),
     /** A page in the app to open, such as "/tasks". The lead's or ticket's page when it is about one. */

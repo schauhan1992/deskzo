@@ -82,7 +82,8 @@ async function history(conversationId: string): Promise<Turn[]> {
   return turns;
 }
 
-function friendlyError(err: unknown): string {
+/** What to tell a person when the provider call fails — also used by Automate's AI drafting. */
+export function friendlyError(err: unknown): string {
   const status = typeof err === "object" && err !== null && "status" in err ? Number((err as { status: unknown }).status) : null;
   if (status === 401 || status === 403) return "The AI provider refused the API key. An admin should check it in Settings → AI copilot.";
   if (status === 404) return "The AI provider doesn't recognise the chosen model. An admin should pick another in Settings → AI copilot.";

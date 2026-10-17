@@ -20,7 +20,7 @@ import { reach } from "@/lib/automate/actions/shared";
  * carries the step's Idempotency-Key, the same on every try, for receivers that can use it.
  */
 
-const optionalId = z.string().trim().min(1).max(60).optional();
+const optionalId = z.string().trim().min(1, "Choose one, or leave it empty.").max(60).optional();
 const headerValue = z.string().max(2000).refine((v) => !/[\r\n]/.test(v), "A header's value is one line.");
 
 /** One call that changes something, at most once: its outcome as the outside-effect record wants it. */

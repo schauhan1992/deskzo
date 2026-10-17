@@ -14364,6 +14364,24 @@ model AutomationWebhook {
   @@map("automation_webhooks")
 }
 
+/**
+ * A company's own workflow template (Deskzo Automate, Phase 5): a workflow saved to start others
+ * from, with what belongs to one workflow cleared — people, connections, records, stages
+ * (src/lib/automate/blanks.ts). Kept apart from Deskzo's templates, which live in code.
+ */
+model AutomationTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  definition  Json
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([createdAt])
+  @@map("automation_templates")
+}
+
 /** The workspace's own switch: paused, no run starts or moves on until it is lifted. */
 model AutomationSettings {
   id          String    @id @default("global")

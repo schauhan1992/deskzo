@@ -3,6 +3,7 @@ import { definitionSchema, eachStep, LIMITS, type Definition, type Filter, type 
 import { isReference, isTemplate, referencesIn } from "@/lib/automate/references";
 import { actionByKey } from "@/lib/automate/registry";
 import { triggerByType } from "@/lib/automate/triggers";
+import { comparesWithNothing, NOTHING_CHOSEN } from "@/lib/automate/blanks";
 
 /**
  * Whether a definition may be published (Deskzo Automate). Pure but for the action and trigger
@@ -15,7 +16,9 @@ import { triggerByType } from "@/lib/automate/triggers";
  *   · a reference to a step that hasn't run by then — a later one, one inside a branch that may not
  *     have been taken — or to a trigger field the trigger doesn't have;
  *   · an unknown action, or input its schema refuses. A field holding a reference is checked when
- *     the step runs, once the reference has a value.
+ *     the step runs, once the reference has a value;
+ *   · a rule comparing an id with nothing — one cleared on import because it named another
+ *     workspace's record (src/lib/automate/blanks.ts).
  *
  * Who may publish, and whether the owner may take each action, is checked by the caller
  * (src/lib/automate/store.ts): that needs the database.
@@ -99,6 +102,11 @@ export function validateDefinition(raw: unknown): Validated {
     }
   };
   for (const ref of filterRefs(definition.trigger.filter)) checkRef(ref, null, new Set());
+  const unfinished = (filter: Filter | undefined, stepId: string | null, field: string) => {
+    const rules = !filter ? [] : "all" in filter ? filter.all : filter.any;
+    if (rules.some(comparesWithNothing)) problems.push({ stepId, field, message: NOTHING_CHOSEN });
+  };
+  unfinished(definition.trigger.filter, null, "trigger.filter");
 
   // Walked in running order: a step sees the steps before it on its own path, and its branches'.
   const walk = (steps: Step[], scope: Set<string>) => {
@@ -121,7 +129,9 @@ export function validateDefinition(raw: unknown): Validated {
           }
         }
       }
+      if (step.type === "condition") unfinished(step.if, step.id, "if");
       if (step.type === "branch") {
+        for (const path of step.paths) unfinished(path.if, step.id, "paths");
         for (const path of step.paths) walk(path.steps, inScope);
         if (step.else) walk(step.else, inScope);
       }

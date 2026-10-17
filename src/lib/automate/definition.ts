@@ -107,7 +107,8 @@ export type TransformFn = (typeof TRANSFORM_FNS)[number];
 const transformExprSchema = z.object({ fn: z.enum(TRANSFORM_FNS), args: z.array(z.unknown()).max(6) }).strict();
 export type TransformExpr = z.infer<typeof transformExprSchema>;
 
-type StepBase = { id: string; name?: string };
+/** `note`: one line saying what the step is for — written by an AI draft, or by a person. */
+type StepBase = { id: string; name?: string; note?: string };
 export type ActionStep = StepBase & { type: "action"; action: string; input: Record<string, unknown> };
 export type ConditionStep = StepBase & { type: "condition"; if: Filter };
 export type BranchPath = { name: string; if: Filter; steps: Step[] };
@@ -121,7 +122,7 @@ export type TransformStep = StepBase & { type: "transform"; set: Record<string, 
 export type StopStep = StepBase & { type: "stop"; outcome: "succeeded" | "failed"; message?: string };
 export type Step = ActionStep | ConditionStep | BranchStep | DelayStep | TransformStep | StopStep;
 
-const base = { id: z.string().regex(STEP_ID, "A step id is a letter, then letters, digits, - or _ (40 at most)."), name: z.string().max(80).optional() };
+const base = { id: z.string().regex(STEP_ID, "A step id is a letter, then letters, digits, - or _ (40 at most)."), name: z.string().max(80).optional(), note: z.string().max(300).optional() };
 
 export const stepSchema: z.ZodType<Step> = z.lazy(() =>
   z.discriminatedUnion("type", [

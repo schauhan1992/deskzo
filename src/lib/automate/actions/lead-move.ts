@@ -20,7 +20,7 @@ const input = z
   .object({
     leadId: recordIdField("lead"),
     /** The stage, by id — one of the lead's own pipeline. */
-    stageId: z.string().trim().min(1).max(60).optional(),
+    stageId: z.string().trim().min(1, "Choose a stage.").max(60).optional(),
     /** Or the first stage of its pipeline with this meaning: "WON", "LOST"… */
     status: z.enum(LeadStatus).optional(),
     /** Needed to mark a lead lost or disqualified. */

@@ -172,7 +172,7 @@ export function TriggerForm({
 
 function DelayFields({ step, onChange, data }: { step: DelayStep; onChange: (s: Step) => void; data: DataRef[] }) {
   const mode = step.on ? "on" : step.until ? "until" : "for";
-  const base = { id: step.id, ...(step.name ? { name: step.name } : {}), type: "delay" as const };
+  const base = { id: step.id, ...(step.name ? { name: step.name } : {}), ...(step.note ? { note: step.note } : {}), type: "delay" as const };
   return (
     <div className="space-y-3">
       <Select
@@ -241,6 +241,20 @@ export function StepForm({ step, onChange, catalog, data, problems }: { step: St
         <p className="text-xs text-subtle">
           Its id, for the steps after: <code>{step.id}</code>
         </p>
+      </div>
+      <div className="space-y-1">
+        <Label>What it is for</Label>
+        <Textarea
+          rows={2}
+          value={step.note ?? ""}
+          maxLength={300}
+          placeholder="One line, for whoever reads this workflow next."
+          onChange={(e) => {
+            const { note: _, ...rest } = step;
+            void _;
+            onChange((e.target.value ? { ...rest, note: e.target.value } : rest) as Step);
+          }}
+        />
       </div>
 
       {step.type === "action" &&

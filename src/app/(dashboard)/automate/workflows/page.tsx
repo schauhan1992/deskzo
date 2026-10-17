@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { isModuleEnabled } from "@/actions/module";
-import { automateSwitches, listAutomationWorkflows } from "@/actions/automate";
+import { automateSwitches, getDraftingAvailability, listAutomationWorkflows } from "@/actions/automate";
+import { DescribeWorkflowButton } from "@/components/automate/describe-workflow";
+import { ImportWorkflowButton } from "@/components/automate/import-workflow";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { Card } from "@/components/ui/card";
 import { StatusBadge } from "@/components/automate/status-badge";
@@ -20,12 +22,12 @@ export default async function AutomateWorkflowsPage() {
 
   let data;
   try {
-    data = await Promise.all([listAutomationWorkflows(), automateSwitches(), workspaceClock()]);
+    data = await Promise.all([listAutomationWorkflows(), automateSwitches(), workspaceClock(), getDraftingAvailability()]);
   } catch (err) {
     if (notMigratedYet(err)) return <NotReady />;
     throw err;
   }
-  const [workflows, switches, clock] = data;
+  const [workflows, switches, clock, drafting] = data;
 
   return (
     <div className="space-y-5">
@@ -40,6 +42,8 @@ export default async function AutomateWorkflowsPage() {
           <Link href="/automate/templates" className="inline-flex h-8 items-center rounded-base border border-line-strong bg-surface px-3 text-[13px] font-medium text-text shadow-sm hover:bg-surface-sunken">
             From a template
           </Link>
+          <DescribeWorkflowButton availability={drafting} />
+          <ImportWorkflowButton />
           <NewWorkflowButton />
           <WorkspacePauseSwitch paused={switches.workspacePaused} />
         </div>

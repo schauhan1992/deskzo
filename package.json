@@ -175,6 +175,8 @@
     "check:automate-actions": "tsx scripts/check-automate-actions.ts",
     "check:automate-builder": "tsx scripts/check-automate-builder.ts",
     "check:automate-connectors": "tsx scripts/check-automate-connectors.ts",
+    "check:automate-drafting": "tsx scripts/check-automate-drafting.ts",
+    "eval:automate-drafting": "tsx scripts/eval-automate-drafting.ts",
     "check:tenancy-isolation": "tsx scripts/check-tenancy-isolation.ts",
     "check:auth-tenancy": "tsx scripts/check-auth-tenancy.ts",
     "check:fanout": "tsx scripts/check-fanout.ts",

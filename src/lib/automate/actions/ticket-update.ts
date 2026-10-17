@@ -24,7 +24,7 @@ const input = z
     ticketId: recordIdField("ticket"),
     priority: z.enum(ticketPriorityValues).optional(),
     /** Somebody in support, by id. */
-    assignTo: z.string().trim().min(1).max(40).optional(),
+    assignTo: z.string().trim().min(1, "Choose who, or leave it empty.").max(40).optional(),
   })
   .strict()
   .refine((i) => !!i.priority || !!i.assignTo, { message: "Change the priority, the assignee, or both.", path: ["priority"] });
