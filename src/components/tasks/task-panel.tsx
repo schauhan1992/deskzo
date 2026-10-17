@@ -399,7 +399,7 @@ function AddLine({ placeholder, onAdd, pending }: { placeholder: string; onAdd: 
         setText("");
       }}
     >
-      <Input value={text} onChange={(e) => setText(e.target.value)} placeholder={placeholder} className="h-8 text-sm" disabled={pending} />
+      <Input aria-label={placeholder} value={text} onChange={(e) => setText(e.target.value)} placeholder={placeholder} className="h-8 text-sm" disabled={pending} />
       <Button type="submit" size="sm" variant="secondary" disabled={pending || !text.trim()}>
         Add
       </Button>
@@ -419,7 +419,7 @@ function AddComment({ onAdd, pending }: { onAdd: (text: string) => void; pending
         setText("");
       }}
     >
-      <Textarea rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder="Write a comment…" disabled={pending} />
+      <Textarea aria-label="Comment" rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder="Write a comment…" disabled={pending} />
       <Button type="submit" size="sm" disabled={pending || !text.trim()}>
         Comment
       </Button>

@@ -205,7 +205,7 @@ export function TaskDialog({
         {/* Who, when and how urgent; where it sits. */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           <Field label="Assigned to">
-            <Select value={assignee} onChange={(e) => setAssignee(e.target.value)} disabled={pending}>
+            <Select aria-label="Assigned to" value={assignee} onChange={(e) => setAssignee(e.target.value)} disabled={pending}>
               <option value="">Nobody yet</option>
               {people.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -216,10 +216,10 @@ export function TaskDialog({
             </Select>
           </Field>
           <Field label="Due date">
-            <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} disabled={pending} />
+            <Input aria-label="Due date" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} disabled={pending} />
           </Field>
           <Field label="Priority">
-            <Select value={priority} onChange={(e) => setPriority(e.target.value as TaskPriorityKey)} disabled={pending}>
+            <Select aria-label="Priority" value={priority} onChange={(e) => setPriority(e.target.value as TaskPriorityKey)} disabled={pending}>
               {TASK_PRIORITIES.map((p) => (
                 <option key={p} value={p}>
                   {PRIORITY_LABELS[p]}
@@ -228,7 +228,7 @@ export function TaskDialog({
             </Select>
           </Field>
           <Field label="Status">
-            <Select value={status} onChange={(e) => setStatus(e.target.value as TaskStatusKey)} disabled={pending}>
+            <Select aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value as TaskStatusKey)} disabled={pending}>
               {(task ? TASK_STATUSES : (["TODO", "IN_PROGRESS"] as const)).map((s) => (
                 <option key={s} value={s}>
                   {STATUS_LABELS[s]}
@@ -237,7 +237,7 @@ export function TaskDialog({
             </Select>
           </Field>
           <Field label="Team">
-            <Select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} disabled={pending}>
+            <Select aria-label="Team" value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} disabled={pending}>
               <option value="">Any team</option>
               {options.departments.map((d) => (
                 <option key={d.id} value={d.id}>
@@ -247,7 +247,7 @@ export function TaskDialog({
             </Select>
           </Field>
           <Field label="Challenge">
-            <Select value={challengeId} onChange={(e) => setChallengeId(e.target.value)} disabled={pending}>
+            <Select aria-label="Challenge" value={challengeId} onChange={(e) => setChallengeId(e.target.value)} disabled={pending}>
               <option value="">None</option>
               {challenges.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -279,27 +279,27 @@ export function TaskDialog({
             {isOpen("schedule") && (
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Start date" hint="Before it, the task shows as Upcoming.">
-                  <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} disabled={pending} />
+                  <Input aria-label="Start date" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} disabled={pending} />
                 </Field>
                 <Field label="Estimate (minutes)" hint={estimate && Number(estimate) >= 60 ? `${(Number(estimate) / 60).toFixed(1)} hours` : undefined}>
-                  <Input type="number" min={0} step={5} value={estimate} onChange={(e) => setEstimate(e.target.value)} placeholder="e.g. 90" disabled={pending} />
+                  <Input aria-label="Estimate, in minutes" type="number" min={0} step={5} value={estimate} onChange={(e) => setEstimate(e.target.value)} placeholder="e.g. 90" disabled={pending} />
                 </Field>
               </div>
             )}
             {isOpen("xp") && (
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Earned XP" hint="When it's done by its due date.">
-                  <Input type="number" min={0} max={XP_MAX} value={xp} onChange={(e) => setXp(e.target.value)} disabled={pending} />
+                  <Input aria-label="Earned XP" type="number" min={0} max={XP_MAX} value={xp} onChange={(e) => setXp(e.target.value)} disabled={pending} />
                 </Field>
                 <Field label="Badge">
-                  <Input value={badge} onChange={(e) => setBadge(e.target.value)} placeholder="e.g. Bug squasher" maxLength={40} disabled={pending} />
+                  <Input aria-label="Badge" value={badge} onChange={(e) => setBadge(e.target.value)} placeholder="e.g. Bug squasher" maxLength={40} disabled={pending} />
                 </Field>
               </div>
             )}
             {isOpen("repeat") && (
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Repeats">
-                  <Select value={repeat} onChange={(e) => setRepeat(e.target.value)} disabled={pending}>
+                  <Select aria-label="Repeats" value={repeat} onChange={(e) => setRepeat(e.target.value)} disabled={pending}>
                     <option value="">Doesn&apos;t repeat</option>
                     {TASK_REPEATS.map((r) => (
                       <option key={r} value={r}>
@@ -310,7 +310,7 @@ export function TaskDialog({
                 </Field>
                 {repeat && (
                   <Field label="Until (optional)">
-                    <Input type="date" value={repeatUntil} onChange={(e) => setRepeatUntil(e.target.value)} disabled={pending} />
+                    <Input aria-label="Repeats until" type="date" value={repeatUntil} onChange={(e) => setRepeatUntil(e.target.value)} disabled={pending} />
                   </Field>
                 )}
               </div>
@@ -340,7 +340,7 @@ export function TaskDialog({
             )}
             {isOpen("checklist") && (
               <Field label="Checklist — a step a line">
-                <Textarea rows={3} value={steps} onChange={(e) => setSteps(e.target.value)} placeholder={"Collect the documents\nPrepare the working\nSend it for review"} disabled={pending} />
+                <Textarea aria-label="Checklist — a step a line" rows={3} value={steps} onChange={(e) => setSteps(e.target.value)} placeholder={"Collect the documents\nPrepare the working\nSend it for review"} disabled={pending} />
               </Field>
             )}
           </div>

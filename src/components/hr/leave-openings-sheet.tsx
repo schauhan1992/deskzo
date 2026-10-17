@@ -104,7 +104,7 @@ export function LeaveOpeningsSheet({ sheet }: { sheet: LeaveOpeningSheet }) {
           One line a person and leave type: <span className="font-mono text-xs">email, leave code, carried in, taken</span> — copied from a spreadsheet works too.
           Codes here: {sheet.types.map((t) => t.code).join(", ")}.
         </p>
-        <Textarea rows={5} className="mt-2 font-mono text-xs" value={paste} onChange={(e) => setPaste(e.target.value)} placeholder={"asha@yourcompany.com, EL, 8, 3\nasha@yourcompany.com, CL, 0, 2"} disabled={pending} />
+        <Textarea aria-label="Paste from your old system" rows={5} className="mt-2 font-mono text-xs" value={paste} onChange={(e) => setPaste(e.target.value)} placeholder={"asha@yourcompany.com, EL, 8, 3\nasha@yourcompany.com, CL, 0, 2"} disabled={pending} />
         <div className="mt-2">
           <Button type="button" size="sm" variant="secondary" onClick={fillFromPaste} disabled={pending || !paste.trim()}>
             Fill the sheet

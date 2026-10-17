@@ -304,10 +304,10 @@ function Editor({ initial, company, brand, onDone }: { initial: SignatureTemplat
             <h3 className="text-sm font-semibold text-text">Logo</h3>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field id="st-logo" label="Logo address (https://)" note={d.logoUrl ? imageNote(d.logoUrl) : null}>
-                <Input id="st-logo" maxLength={500} value={d.logoUrl} onChange={(e) => set("logoUrl", e.target.value)} placeholder="Empty: the logo in Settings → Branding" />
+                <Input aria-label="Logo address" id="st-logo" maxLength={500} value={d.logoUrl} onChange={(e) => set("logoUrl", e.target.value)} placeholder="Empty: the logo in Settings → Branding" />
               </Field>
               <Field id="st-logo-link" label="Logo links to (https://)" note={linkNote(d.logoLink)}>
-                <Input id="st-logo-link" maxLength={500} value={d.logoLink} onChange={(e) => set("logoLink", e.target.value)} placeholder="Empty: the website" />
+                <Input aria-label="Logo links to" id="st-logo-link" maxLength={500} value={d.logoLink} onChange={(e) => set("logoLink", e.target.value)} placeholder="Empty: the website" />
               </Field>
             </div>
             {!d.logoUrl && brand.logoUnusable && (
@@ -322,21 +322,21 @@ function Editor({ initial, company, brand, onDone }: { initial: SignatureTemplat
             <p className="text-xs text-muted">Every link is https:// only — an http:// one is refused, so nothing in a signature travels unencrypted.</p>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field id="st-web" label="Website" note={linkNote(d.website)}>
-                <Input id="st-web" maxLength={300} value={d.website} onChange={(e) => set("website", e.target.value)} placeholder="yourcompany.com" />
+                <Input aria-label="Website" id="st-web" maxLength={300} value={d.website} onChange={(e) => set("website", e.target.value)} placeholder="yourcompany.com" />
               </Field>
               {SOCIAL_NETWORKS.map((n) => (
                 <Field key={n.key} id={`st-${n.key}`} label={n.label} note={linkNote(d.social[n.key] ?? "")}>
-                  <Input id={`st-${n.key}`} maxLength={300} value={d.social[n.key] ?? ""} onChange={(e) => set("social", { ...d.social, [n.key]: e.target.value })} placeholder={`The company's ${n.label}`} />
+                  <Input aria-label={n.label} id={`st-${n.key}`} maxLength={300} value={d.social[n.key] ?? ""} onChange={(e) => set("social", { ...d.social, [n.key]: e.target.value })} placeholder={`The company's ${n.label}`} />
                 </Field>
               ))}
               <Field id="st-cta" label="Button text">
-                <Input id="st-cta" maxLength={60} value={d.ctaLabel} onChange={(e) => set("ctaLabel", e.target.value)} placeholder="Book a demo" />
+                <Input aria-label="Button text" id="st-cta" maxLength={60} value={d.ctaLabel} onChange={(e) => set("ctaLabel", e.target.value)} placeholder="Book a demo" />
               </Field>
               <Field id="st-cta-url" label="Button link" note={linkNote(d.ctaUrl)}>
-                <Input id="st-cta-url" maxLength={500} value={d.ctaUrl} onChange={(e) => set("ctaUrl", e.target.value)} placeholder="yourcompany.com/demo" />
+                <Input aria-label="Button link" id="st-cta-url" maxLength={500} value={d.ctaUrl} onChange={(e) => set("ctaUrl", e.target.value)} placeholder="yourcompany.com/demo" />
               </Field>
               <Field id="st-signoff" label="Sign-off">
-                <Input id="st-signoff" maxLength={60} value={d.signOff} onChange={(e) => set("signOff", e.target.value)} placeholder="Best regards," />
+                <Input aria-label="Sign-off" id="st-signoff" maxLength={60} value={d.signOff} onChange={(e) => set("signOff", e.target.value)} placeholder="Best regards," />
               </Field>
             </div>
             <div className="space-y-1.5">
