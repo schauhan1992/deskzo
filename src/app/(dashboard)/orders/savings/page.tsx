@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 import { purchaseSavingsReport } from "@/actions/order";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
@@ -37,6 +39,8 @@ export default async function PurchaseSavingsPage({ searchParams }: { searchPara
     (t, r) => ({ savings: t.savings + r.savings, increases: t.increases + r.increases }),
     { savings: 0, increases: 0 },
   );
+  // The workspace's own words (Settings → Wording).
+  const wording = await getWording();
 
   return (
     <div>
@@ -67,7 +71,7 @@ export default async function PurchaseSavingsPage({ searchParams }: { searchPara
               <th className="px-4 py-2.5 text-right">Savings</th>
               <th className="px-4 py-2.5 text-right">Accepted increases</th>
               <th className="px-4 py-2.5 text-right">Net</th>
-              <th className="px-4 py-2.5 text-right">Order lines</th>
+              <th className="px-4 py-2.5 text-right">{slot(wording, "Order lines", "order", "{one} lines")}</th>
             </tr>
           </thead>
           <tbody>
@@ -108,15 +112,15 @@ export default async function PurchaseSavingsPage({ searchParams }: { searchPara
 
       {report.lines.length > 0 && (
         <>
-          <h2 className="mt-8 text-sm font-medium text-text">Order lines</h2>
+          <h2 className="mt-8 text-sm font-medium text-text">{slot(wording, "Order lines", "order", "{one} lines")}</h2>
           <Card className="mt-3 overflow-x-auto p-0">
             <table className="w-full text-sm">
-              <caption className="sr-only">Each order line behind the figures</caption>
+              <caption className="sr-only">{slot(wording, "Each order line behind the figures", "order", "Each {one:lower} line behind the figures")}</caption>
               <thead className="border-b border-line bg-surface-sunken text-left text-xs uppercase tracking-wide text-muted">
                 <tr>
                   <th className="px-4 py-2.5">Recorded</th>
-                  <th className="px-4 py-2.5">Order</th>
-                  <th className="px-4 py-2.5">Customer · product</th>
+                  <th className="px-4 py-2.5">{slot(wording, "Order", "order", "{one}")}</th>
+                  <th className="px-4 py-2.5">{slot(wording, "Customer · product", "customer", "{one} · product")}</th>
                   <th className="px-4 py-2.5">Purchaser</th>
                   <th className="px-4 py-2.5">Salesperson</th>
                   <th className="px-4 py-2.5 text-right">Distributor price</th>

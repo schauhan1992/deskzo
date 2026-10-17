@@ -61,12 +61,13 @@ export default async function TicketsPage({
   ]);
 
   const selected = viewMode === "split" ? resolveSelected(result.rows, params.sel) : null;
+  const w = await getWording();
 
   return (
     <SplitListPage active={viewMode === "split"}>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-text">{slot(await getWording(), "Tickets", "ticket")}</h1>
+          <h1 className="text-xl font-semibold text-text">{slot(w, "Tickets", "ticket")}</h1>
           <p className="mt-1 text-sm text-muted">
             {result.total} total · {openCount} open
           </p>
@@ -75,14 +76,14 @@ export default async function TicketsPage({
           <ViewModeToggle viewKey="tickets" mode={viewMode} />
           {canCreate && (
             <Link href="/tickets/new">
-              <Button>{slot(await getWording(), "New ticket", "ticket", "New {one:lower}")}</Button>
+              <Button>{slot(w, "New ticket", "ticket", "New {one:lower}")}</Button>
             </Link>
           )}
         </div>
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <SearchParamInput paramName="q" placeholder="Search title or company…" />
+        <SearchParamInput paramName="q" placeholder={slot(w, "Search title or company…", "company", "Search title or {one:lower}…")} />
         <SelectParamFilter
           paramName="status"
           label="Status"
@@ -111,10 +112,10 @@ export default async function TicketsPage({
 
       {viewMode === "split" ? (
         <SplitListShell
-          countLabel={`${result.total} ticket${result.total === 1 ? "" : "s"}`}
+          countLabel={`${result.total} ${result.total === 1 ? slot(w, "ticket", "ticket", "{one:lower}") : slot(w, "tickets", "ticket", "{many:lower}")}`}
           listPane={<TicketSplitList tickets={result.rows} selectedId={selected} />}
         >
-          {selected ? <TicketDetail id={selected} /> : <SplitListEmpty message="No tickets match these filters." />}
+          {selected ? <TicketDetail id={selected} /> : <SplitListEmpty message={slot(w, "No tickets match these filters.", "ticket", "No {many:lower} match these filters.")} />}
         </SplitListShell>
       ) : (
         <>

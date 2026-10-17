@@ -17,6 +17,8 @@ import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select"
 import type { BrandOption } from "@/components/items/item-fields";
 import { OptionCombobox } from "@/components/ui/option-combobox";
 import { HsnCombobox } from "@/components/items/hsn-combobox";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 const TYPE_TONE: Record<ItemType, "default" | "blue" | "green" | "amber"> = {
   GOOD: "default",
@@ -62,6 +64,8 @@ export function ItemsTable({
   customColumns?: { columns: CustomColumn[]; texts: Record<string, Record<string, string>> };
 }) {
   const router = useRouter();
+  // The workspace's own word for an item (Settings → Wording).
+  const wording = useWording();
   const selection = useRowSelection(items);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -191,11 +195,11 @@ export function ItemsTable({
                   <Checkbox
                     checked={selection.allSelected}
                     onChange={selection.toggleAll}
-                    aria-label="Select all items on this page"
+                    aria-label={slot(wording, "Select all items on this page", "item", "Select all {many:lower} on this page")}
                   />
                 </th>
-                <th className="px-4 py-2.5">Item ID</th>
-                <th className="px-4 py-2.5">Item</th>
+                <th className="px-4 py-2.5">{slot(wording, "Item ID", "item", "{one} ID")}</th>
+                <th className="px-4 py-2.5">{slot(wording, "Item", "item", "{one}")}</th>
                 <th className="px-4 py-2.5">Type</th>
                 <th className="px-4 py-2.5">SKU</th>
                 <th className="px-4 py-2.5">HSN/SAC</th>
@@ -273,7 +277,7 @@ export function ItemsTable({
               {items.length === 0 && (
                 <tr>
                   <td colSpan={11 + customColumns.columns.length} className="px-4 py-8 text-center text-subtle">
-                    No items found.
+                    {slot(wording, "No items found.", "item", "No {many:lower} found.")}
                   </td>
                 </tr>
               )}

@@ -5,6 +5,8 @@ import { cn, formatCurrency } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import type { ItemComboOption } from "@/components/items/item-combobox";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 import { SummaryRow } from "./parts";
 import { useOrderFigures, usePriceFigures } from "./use-figures";
 import type { PunchForm } from "./types";
@@ -46,11 +48,13 @@ export function OrderSummary({
 }) {
   const figures = useOrderFigures(form.control, selectedItem);
   const belowList = figures.belowListPercent;
+  // The workspace's own word for an order (Settings → Wording).
+  const wording = useWording();
 
   return (
     <Card>
       <CardHeader>
-        <h2 className="text-sm font-medium text-text">Order summary</h2>
+        <h2 className="text-sm font-medium text-text">{slot(wording, "Order summary", "order", "{one} summary")}</h2>
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
         <div className="space-y-2">
@@ -143,7 +147,7 @@ export function OrderSummary({
 
         <div className="space-y-2">
           <Button type="submit" className="w-full" disabled={busy}>
-            {submitting ? "Punching…" : "Punch order"}
+            {submitting ? "Punching…" : slot(wording, "Punch order", "order", "Punch {one:lower}")}
           </Button>
           {/* The form reads which button sent it (`data-then`), so Enter still means the plain punch above. */}
           <Button type="submit" variant="secondary" className="w-full" data-then="another" disabled={busy}>
@@ -183,6 +187,7 @@ export function PunchBar({
   failed: boolean;
 }) {
   const { total } = usePriceFigures(form.control, selectedItem);
+  const wording = useWording();
   return (
     <div
       className={cn(
@@ -199,7 +204,7 @@ export function PunchBar({
         <p className="font-semibold text-text tabular-nums">{formatCurrency(total)}</p>
       </div>
       <Button type="submit" disabled={busy}>
-        {submitting ? "Punching…" : "Punch order"}
+        {submitting ? "Punching…" : slot(wording, "Punch order", "order", "Punch {one:lower}")}
       </Button>
     </div>
   );

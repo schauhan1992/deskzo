@@ -18,9 +18,11 @@ export function LeadScoreBadge({ score }: { score: number | null | undefined }) 
  * The score with every point it is made of.
  *
  * The breakdown is the point of it: a salesperson who can see "Gone quiet: 34 days −10" knows what
- * to do next, where "41" alone tells them nothing.
+ * to do next, where "41" alone tells them nothing. `title` is the card's name in the workspace's own
+ * word for a lead (Settings → Wording) — the page that shows it has the words; this file is shared with
+ * the client tables, so it doesn't read them itself.
  */
-export function LeadScoreCard({ result }: { result: LeadScore }) {
+export function LeadScoreCard({ result, title = "Lead score" }: { result: LeadScore; title?: string }) {
   if (result.score === null) return null;
   const gains = result.factors.filter((f) => f.points > 0);
   const losses = result.factors.filter((f) => f.points < 0);
@@ -28,7 +30,7 @@ export function LeadScoreCard({ result }: { result: LeadScore }) {
   return (
     <Card>
       <CardHeader className="flex items-center justify-between text-sm font-medium text-text">
-        <span>Lead score</span>
+        <span>{title}</span>
         <LeadScoreBadge score={result.score} />
       </CardHeader>
       <CardContent className="space-y-3 text-sm">

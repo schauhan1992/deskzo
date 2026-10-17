@@ -62,6 +62,9 @@ export default async function ItemsPage({
     customFilterSetup("ITEM", user.id, customFilters),
   ]);
 
+  // The workspace's own word for an item (Settings → Wording).
+  const wording = await getWording();
+
   const typeFilters: { label: string; value?: ItemType }[] = [
     { label: "All" },
     { label: "Goods", value: "GOOD" },
@@ -89,8 +92,10 @@ export default async function ItemsPage({
     <div>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-text">{slot(await getWording(), "Items & Inventory", "item", "{many} & Inventory")}</h1>
-          <p className="mt-1 text-sm text-muted">{result.total} item(s) in the catalog</p>
+          <h1 className="text-xl font-semibold text-text">{slot(wording, "Items & Inventory", "item", "{many} & Inventory")}</h1>
+          <p className="mt-1 text-sm text-muted">
+            {result.total} {slot(wording, "item(s) in the catalog", "item", "{one:lower}(s) in the catalog")}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <Link href="/items/brands">
@@ -102,7 +107,7 @@ export default async function ItemsPage({
           <ImportItemsDialog />
           <ExportItemsButton />
           <Link href="/items/new">
-            <Button>{slot(await getWording(), "New item", "item", "New {one:lower}")}</Button>
+            <Button>{slot(wording, "New item", "item", "New {one:lower}")}</Button>
           </Link>
         </div>
       </div>
@@ -113,7 +118,7 @@ export default async function ItemsPage({
           type="search"
           name="q"
           defaultValue={params.q}
-          aria-label="Search items"
+          aria-label={slot(wording, "Search items", "item", "Search {many:lower}")}
           placeholder="Search name, SKU, or ITM-000123…"
           autoComplete="off"
           data-1p-ignore
@@ -178,7 +183,7 @@ export default async function ItemsPage({
             href={{ pathname: "/items", query: filterQuery({ hsn: params.hsn === "fix" ? undefined : "fix", page: undefined }) }}
             className="font-medium text-brand hover:underline"
           >
-            {params.hsn === "fix" ? "Show every item" : "Show them"}
+            {params.hsn === "fix" ? slot(wording, "Show every item", "item", "Show every {one:lower}") : "Show them"}
           </Link>
         </div>
       )}

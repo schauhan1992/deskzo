@@ -13,6 +13,8 @@ import {
 } from "@/lib/visits";
 import { workspaceClock } from "@/lib/time/workspace";
 import { visitPath } from "@/lib/record-links";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 
 type Visit = Awaited<ReturnType<typeof listCompanyVisits>>[number];
 
@@ -27,18 +29,18 @@ export async function CompanyVisits({
   expenseTotal: number;
 }) {
   const completed = visits.filter((v) => v.status === "COMPLETED").length;
-  const clock = await workspaceClock();
+  const [clock, w] = await Promise.all([workspaceClock(), getWording()]);
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted">
           {visits.length === 0
-            ? "Nobody has visited this company yet."
+            ? slot(w, "Nobody has visited this company yet.", "company", "Nobody has visited this {one:lower} yet.")
             : `${visits.length} visit(s) · ${completed} completed · ${formatCurrency(expenseTotal)} claimed`}
         </p>
         <Link href={`/visits/new?companyId=${companyId}`}>
-          <Button size="sm">Plan visit</Button>
+          <Button size="sm">{slot(w, "Plan visit", "visit", "Plan {one:lower}")}</Button>
         </Link>
       </div>
 
@@ -47,7 +49,7 @@ export async function CompanyVisits({
           <table className="w-full text-sm">
             <thead className="border-b border-line bg-surface-sunken text-left text-xs uppercase tracking-wide text-muted">
               <tr>
-                <th className="px-3 py-2">Visit</th>
+                <th className="px-3 py-2">{slot(w, "Visit", "visit", "{one}")}</th>
                 <th className="px-3 py-2">Status</th>
                 <th className="px-3 py-2">Purpose</th>
                 <th className="px-3 py-2">When</th>

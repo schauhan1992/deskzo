@@ -22,6 +22,8 @@ import {
 } from "@/lib/rebates/rules";
 import type { RebateSummary } from "@/lib/rebates/server";
 import { formatCurrency } from "@/lib/utils";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 /**
  * The order page's backend-rebate islands (src/components/orders/order-detail.tsx decides who sees
@@ -308,13 +310,16 @@ export function OrderRebatesPanel({
   canManage: boolean;
 }) {
   const { isPending, error, run } = useAction();
+  const wording = useWording();
   const [editing, setEditing] = useState<RebateRow | "new" | null>(null);
   const [writingOff, setWritingOff] = useState<string | null>(null);
 
   return (
     <div className="space-y-3 text-sm">
       {error && <p className="text-sm text-danger">{error}</p>}
-      {summary.rebates.length === 0 && <p className="text-muted">No backend rebate expected on this order.</p>}
+      {summary.rebates.length === 0 && (
+        <p className="text-muted">{slot(wording, "No backend rebate expected on this order.", "order", "No backend rebate expected on this {one:lower}.")}</p>
+      )}
       {summary.rebates.map((r) => (
         <div key={r.id} className="space-y-1 rounded-md border border-line p-3">
           <div className="flex flex-wrap items-baseline justify-between gap-x-3">

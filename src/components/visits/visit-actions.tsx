@@ -7,6 +7,8 @@ import { checkInVisit, completeVisit, setVisitStatus, deleteVisit } from "@/acti
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Textarea } from "@/components/ui/input";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 export function VisitActions({
   id,
@@ -21,6 +23,7 @@ export function VisitActions({
   canEdit: boolean;
 }) {
   const router = useRouter();
+  const w = useWording();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [writeUpOpen, setWriteUpOpen] = useState(false);
@@ -57,7 +60,7 @@ export function VisitActions({
         )}
         {open && (
           <Button variant={status === "CHECKED_IN" ? "primary" : "secondary"} onClick={() => setWriteUpOpen(true)} disabled={pending}>
-            Complete visit
+            {slot(w, "Complete visit", "visit", "Complete {one:lower}")}
           </Button>
         )}
         {open && (
@@ -79,7 +82,7 @@ export function VisitActions({
             className="text-danger hover:bg-danger-bg hover:text-danger"
             disabled={pending}
             onClick={() => {
-              if (confirm("Delete this planned visit?")) run(() => deleteVisit(id), () => router.push("/visits"));
+              if (confirm(slot(w, "Delete this planned visit?", "visit", "Delete this planned {one:lower}?"))) run(() => deleteVisit(id), () => router.push("/visits"));
             }}
           >
             Delete
@@ -89,11 +92,10 @@ export function VisitActions({
 
       {error && <p className="text-sm text-danger">{error}</p>}
 
-      <Dialog open={writeUpOpen} onClose={() => setWriteUpOpen(false)} title="Complete visit">
+      <Dialog open={writeUpOpen} onClose={() => setWriteUpOpen(false)} title={slot(w, "Complete visit", "visit", "Complete {one:lower}")}>
         <div className="space-y-4">
           <p className="text-sm text-muted">
-            The write-up is what makes the visit worth logging — what was discussed, what was agreed, what happens
-            next.
+            {slot(w, "The write-up is what makes the visit worth logging — what was discussed, what was agreed, what happens next.", "visit", "The write-up is what makes the {one:lower} worth logging — what was discussed, what was agreed, what happens next.")}
           </p>
           <div className="space-y-1.5">
             <Label htmlFor="outcome">Outcome</Label>
@@ -129,7 +131,7 @@ export function VisitActions({
         </div>
       </Dialog>
 
-      <Dialog open={cancelOpen} onClose={() => setCancelOpen(false)} title="Cancel this visit">
+      <Dialog open={cancelOpen} onClose={() => setCancelOpen(false)} title={slot(w, "Cancel this visit", "visit", "Cancel this {one:lower}")}>
         <div className="space-y-4">
           <div className="flex gap-2">
             <Button

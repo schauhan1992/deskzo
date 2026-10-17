@@ -6,6 +6,8 @@ import { replyToTicketByEmail } from "@/actions/support-mail";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { ActionNotice } from "@/components/ui/action-notice";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 /**
  * Answering the customer from the ticket: an email to whoever wrote last (else the ticket's contact),
@@ -14,6 +16,7 @@ import { ActionNotice } from "@/components/ui/action-notice";
  */
 export function TicketEmailReply({ ticketId, to, canReply }: { ticketId: string; to: string | null; canReply: boolean }) {
   const router = useRouter();
+  const w = useWording();
   const [body, setBody] = useState("");
   const [cc, setCc] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -21,7 +24,12 @@ export function TicketEmailReply({ ticketId, to, canReply }: { ticketId: string;
   const [pending, startTransition] = useTransition();
 
   if (!canReply) return <p className="text-xs text-subtle">Replying by email becomes available once support email is switched on for this platform.</p>;
-  if (!to) return <p className="text-xs text-subtle">Add an email address to the ticket&apos;s contact to reply by email.</p>;
+  if (!to)
+    return (
+      <p className="text-xs text-subtle">
+        Add an email address to the {slot(w, "ticket's", "ticket", "{one:lower}'s")} {slot(w, "contact", "contact", "{one:lower}")} to reply by email.
+      </p>
+    );
 
   function send() {
     setError(null);
@@ -54,7 +62,7 @@ export function TicketEmailReply({ ticketId, to, canReply }: { ticketId: string;
         rows={5}
         value={body}
         onChange={(e) => setBody(e.target.value)}
-        placeholder="This goes to the customer by email. For a note only your team sees, use Comments."
+        placeholder={slot(w, "This goes to the customer by email. For a note only your team sees, use Comments.", "customer", "This goes to the {one:lower} by email. For a note only your team sees, use Comments.")}
       />
       <Input aria-label="Cc" placeholder="Cc (optional) — separate addresses with commas" value={cc} onChange={(e) => setCc(e.target.value)} />
       <div aria-live="polite">

@@ -7,6 +7,8 @@ import { assignTicket } from "@/actions/ticket";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { Dialog } from "@/components/ui/dialog";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 type Assignee = { id: string; name: string } | null;
 type AssignableUser = { id: string; name: string; role: string };
@@ -21,6 +23,7 @@ export function AssignTicketButton({
   users: AssignableUser[];
 }) {
   const router = useRouter();
+  const w = useWording();
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState(assignedTo?.id ?? "");
   const [isPending, startTransition] = useTransition();
@@ -56,7 +59,7 @@ export function AssignTicketButton({
         {assignedTo ? `Assigned: ${assignedTo.name}` : "Unassigned"}
       </button>
 
-      <Dialog open={open} onClose={() => setOpen(false)} title="Assign ticket">
+      <Dialog open={open} onClose={() => setOpen(false)} title={slot(w, "Assign ticket", "ticket", "Assign {one:lower}")}>
         <div className="space-y-3">
           {error && <p className="text-xs text-danger">{error}</p>}
           <Select aria-label="Assign to" value={selected} onChange={(e) => setSelected(e.target.value)}>

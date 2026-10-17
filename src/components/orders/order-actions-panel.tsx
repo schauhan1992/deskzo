@@ -19,6 +19,8 @@ import { MIN_OVERRIDE_REASON, type CreditRating, type TermsKey } from "@/lib/cre
 import { formatCurrency } from "@/lib/utils";
 import { MIN_INCREASE_REASON, needsSalesApproval, savingAmount, shortDay, type ReleaseState } from "@/lib/orders/handoff-rules";
 import { useClock } from "@/components/time/clock-provider";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 type VendorOption = { id: string; name: string; paymentTerms: PaymentTerms };
 
@@ -91,6 +93,8 @@ export function OrderActionsPanel({
 }) {
   const router = useRouter();
   const clock = useClock();
+  // The workspace's own words (Settings → Wording).
+  const wording = useWording();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [approveNotes, setApproveNotes] = useState("");
@@ -297,7 +301,7 @@ export function OrderActionsPanel({
           <p className="text-sm font-medium text-text">Purchasing</p>
           <p className="text-sm text-muted">
             {purchase.purchaseRelease === "HELD"
-              ? "Sales is holding this order — it hasn't been sent to purchase yet."
+              ? slot(wording, "Sales is holding this order — it hasn't been sent to purchase yet.", "order", "Sales is holding this {one:lower} — it hasn't been sent to purchase yet.")
               : `This order comes to purchase on ${purchase.releaseOn ? shortDay(purchase.releaseOn, clock) : "its scheduled day"}.`}
           </p>
         </div>
@@ -316,7 +320,7 @@ export function OrderActionsPanel({
             </p>
           )}
           <div className="min-w-0 space-y-1">
-            <Label className="text-xs">Vendor</Label>
+            <Label className="text-xs">{slot(wording, "Vendor", "vendor", "{one}")}</Label>
             <CompanyCombobox
               companies={vendorOptions.map((v) => ({
                 id: v.id,
@@ -325,7 +329,7 @@ export function OrderActionsPanel({
               }))}
               value={vendorId}
               onSelect={(vendor) => setVendorId(vendor?.id ?? "")}
-              placeholder="Type to search vendors…"
+              placeholder={slot(wording, "Type to search vendors…", "vendor", "Type to search {many:lower}…")}
               // Held while saving: a change typed now would be neither in this save nor kept after it.
               disabled={isPending}
             />
@@ -345,7 +349,7 @@ export function OrderActionsPanel({
               />
             </div>
             <div className="min-w-0 space-y-1">
-              <Label htmlFor="order-our-po" className="text-xs">Our PO to vendor</Label>
+              <Label htmlFor="order-our-po" className="text-xs">{slot(wording, "Our PO to vendor", "vendor", "Our PO to {one:lower}")}</Label>
               <Input id="order-our-po" value={ourPoNumber} onChange={(e) => setOurPoNumber(e.target.value)} disabled={isPending} />
             </div>
           </div>
@@ -452,19 +456,21 @@ export function OrderActionsPanel({
         <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
           {(canRecordPayments || canDeletePayments) && (
             <Button type="button" variant="secondary" size="sm" onClick={() => setShowPayments(true)}>
-              Customer payments
+              {slot(wording, "Customer payments", "customer", "{one} payments")}
             </Button>
           )}
           {canCancel && (
             <Button type="button" variant="ghost" size="sm" className="ml-auto text-danger" onClick={() => setShowCancel(true)}>
-              Cancel order
+              {slot(wording, "Cancel order", "order", "Cancel {one:lower}")}
             </Button>
           )}
         </div>
       )}
 
-      <Dialog open={showReject} onClose={() => setShowReject(false)} title="Reject order">
-        <p className="text-sm text-muted">This tells the sales person the order needs rework before it can proceed.</p>
+      <Dialog open={showReject} onClose={() => setShowReject(false)} title={slot(wording, "Reject order", "order", "Reject {one:lower}")}>
+        <p className="text-sm text-muted">
+          {slot(wording, "This tells the sales person the order needs rework before it can proceed.", "order", "This tells the sales person the {one:lower} needs rework before it can proceed.")}
+        </p>
         <Textarea
           aria-label="Reason for rejecting"
           className="mt-2"
@@ -482,7 +488,7 @@ export function OrderActionsPanel({
         </div>
       </Dialog>
 
-      <Dialog open={showCancel} onClose={() => setShowCancel(false)} title="Cancel order">
+      <Dialog open={showCancel} onClose={() => setShowCancel(false)} title={slot(wording, "Cancel order", "order", "Cancel {one:lower}")}>
         <p className="text-sm text-muted">This can&apos;t be undone.</p>
         <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-muted">
           {!released && <li>It hasn&apos;t gone to purchase, so nobody there is affected{purchase.purchaseRelease === "SCHEDULED" ? " — its scheduled day is dropped" : ""}.</li>}
@@ -517,7 +523,7 @@ export function OrderActionsPanel({
         />
         <div className="mt-4 flex justify-end gap-2">
           <Button type="button" variant="ghost" size="sm" onClick={() => setShowCancel(false)} disabled={isPending}>
-            Keep order
+            {slot(wording, "Keep order", "order", "Keep {one:lower}")}
           </Button>
           <Button
             type="button"
@@ -526,7 +532,7 @@ export function OrderActionsPanel({
             disabled={isPending || (cancelNeedsReason && cancelReason.trim().length < 3)}
             onClick={handleCancel}
           >
-            {isPending ? "Cancelling…" : "Cancel order"}
+            {isPending ? "Cancelling…" : slot(wording, "Cancel order", "order", "Cancel {one:lower}")}
           </Button>
         </div>
       </Dialog>

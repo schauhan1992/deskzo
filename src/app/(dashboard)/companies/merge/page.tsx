@@ -11,8 +11,13 @@ import { MergePartnerPicker, MergeWizard } from "@/components/companies/merge-wi
 import { ActionNotice } from "@/components/ui/action-notice";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
+import type { Metadata } from "next";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 
-export const metadata = { title: "Merge companies" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: slot(await getWording(), "Merge companies", "company", "Merge {many:lower}") };
+}
 
 /**
  * `?keep=COM-…&drop=COM-…` — the company that stays, and the duplicate folded into it. With only
@@ -22,10 +27,11 @@ export default async function MergeCompaniesPage({ searchParams }: { searchParam
   if (!(await isModuleEnabled("companies"))) return <ModuleDisabledNotice moduleKey="companies" />;
   const [{ keep, drop }, user] = await Promise.all([searchParams, requireUser()]);
   if (!(await viewerHas("companies.merge"))) notFound();
+  const w = await getWording();
 
   const header = (
     <div>
-      <h1 className="text-xl font-semibold text-text">Merge companies</h1>
+      <h1 className="text-xl font-semibold text-text">{slot(w, "Merge companies", "company", "Merge {many:lower}")}</h1>
       <p className="mt-1 max-w-3xl text-sm text-muted">
         Fold a duplicate into the company that stays. Its contacts, leads, orders, invoices, payments, tickets and everything else move across, people in
         both are combined, and the duplicate is removed.
@@ -58,7 +64,7 @@ export default async function MergeCompaniesPage({ searchParams }: { searchParam
       return (
         <div className="space-y-4">
           {header}
-          <ActionNotice tone="error">Company not found.</ActionNotice>
+          <ActionNotice tone="error">{slot(w, "Company not found.", "company", "{one} not found.")}</ActionNotice>
         </div>
       );
     }

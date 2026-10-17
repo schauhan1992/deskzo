@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 import { isModuleEnabled } from "@/actions/module";
 import { listItemCategoriesWithCounts } from "@/actions/item-category";
 import { viewerHas } from "@/actions/permission";
@@ -14,15 +16,15 @@ import { Card, CardContent } from "@/components/ui/card";
  */
 export default async function ItemCategoriesPage() {
   if (!(await isModuleEnabled("items"))) return <ModuleDisabledNotice moduleKey="items" />;
-  const [categories, canManage] = await Promise.all([listItemCategoriesWithCounts(), viewerHas("catalog.manage")]);
+  const [categories, canManage, wording] = await Promise.all([listItemCategoriesWithCounts(), viewerHas("catalog.manage"), getWording()]);
 
   return (
     <div>
       <Link href="/items" className="text-sm text-muted hover:text-text">
-        ← Items &amp; Inventory
+        {slot(wording, "← Items & Inventory", "item", "← {many} & Inventory")}
       </Link>
       <div className="mt-1">
-        <h1 className="text-xl font-semibold text-text">Item categories</h1>
+        <h1 className="text-xl font-semibold text-text">{slot(wording, "Item categories", "item", "{one} categories")}</h1>
         <p className="mt-1 text-sm text-muted">{categories.length} categor{categories.length === 1 ? "y" : "ies"}</p>
       </div>
       <p className="mt-3 max-w-3xl text-sm text-muted">

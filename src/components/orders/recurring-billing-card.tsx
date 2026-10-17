@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { ActionNotice } from "@/components/ui/action-notice";
 import { setRecurringBilling, type RecurringBillingView } from "@/actions/recurring-billing";
 import { documentPath } from "@/lib/trade-documents";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 type Choice = "OFF" | "AUTO_RENEW" | "INSTALMENTS";
 
@@ -18,6 +20,7 @@ type Choice = "OFF" | "AUTO_RENEW" | "INSTALMENTS";
  */
 export function RecurringBillingCard({ view }: { view: RecurringBillingView }) {
   const router = useRouter();
+  const wording = useWording();
   const current: Choice = view.setting?.mode ?? "OFF";
   const [choice, setChoice] = useState<Choice>(current);
   const [cycle, setCycle] = useState<"MONTHLY" | "QUARTERLY" | "ANNUAL">(
@@ -137,7 +140,7 @@ export function RecurringBillingCard({ view }: { view: RecurringBillingView }) {
                       {" "}
                       · renewed as{" "}
                       <Link href={p.renewal.path} className="text-brand hover:underline">
-                        the new order
+                        {slot(wording, "the new order", "order", "the new {one:lower}")}
                       </Link>
                     </>
                   )}

@@ -20,6 +20,8 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Badge } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 const STATUS_TONE: Record<ResellerOnboardingStatus, "default" | "green" | "blue" | "red" | "amber"> = {
   ONBOARDING: "amber",
@@ -70,6 +72,7 @@ export function ResellerOnboardingPanel({
   // Prefix rather than literal ids: a company page can render this panel beside another copy of the
   // same form, and two controls sharing an id send every label to the first one.
   const fieldId = useId();
+  const w = useWording();
   const [editing, setEditing] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
@@ -136,8 +139,8 @@ export function ResellerOnboardingPanel({
         </Select>
         <span className="text-xs text-muted">
           {profile.status === "ACTIVE"
-            ? "Orders can be punched for this reseller."
-            : "Orders are blocked until this reseller is Active."}
+            ? slot(w, "Orders can be punched for this reseller.", "order", "{many} can be punched for this reseller.")
+            : slot(w, "Orders are blocked until this reseller is Active.", "order", "{many} are blocked until this reseller is Active.")}
         </span>
       </div>
       {statusError && <p className="text-xs text-danger">{statusError}</p>}

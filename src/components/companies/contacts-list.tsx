@@ -41,6 +41,8 @@ import { DesignationInput } from "@/components/contacts/designation-input";
 import { Input, Label } from "@/components/ui/input";
 import { Badge } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 export type Contact = VerifiableContact & {
   name: string;
@@ -103,6 +105,7 @@ function ContactFields({
   // Per-instance ids rather than per-field: an edit form and the add form can be on screen together,
   // and a repeated id would point both forms' labels at the first one's fields.
   const id = useId();
+  const w = useWording();
   return (
     <div className="grid grid-cols-2 gap-2">
       <div className="col-span-2 space-y-1">
@@ -143,13 +146,13 @@ function ContactFields({
       {detailsHidden && (
         <p className="col-span-2 flex items-center gap-1.5 text-xs text-warning">
           <Lock className="h-3 w-3 shrink-0" />
-          Email and phone are hidden on a reseller&apos;s customer — saving keeps them as they are.
+          {slot(w, "Email and phone are hidden on a reseller's customer — saving keeps them as they are.", "customer", "Email and phone are hidden on a reseller's {one:lower} — saving keeps them as they are.")}
         </p>
       )}
       <div className="col-span-2">
         <label className="flex items-center gap-2 text-sm text-muted">
           <input type="checkbox" {...register("isPrimary")} />
-          Primary contact
+          {slot(w, "Primary contact", "contact", "Primary {one:lower}")}
         </label>
         <label className="mt-1.5 flex items-center gap-2 text-sm text-muted">
           <input type="checkbox" {...register("receivesDocuments")} />
@@ -257,6 +260,7 @@ export function ContactsList({
   canMeet?: boolean;
 }) {
   const router = useRouter();
+  const w = useWording();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
@@ -290,7 +294,7 @@ export function ContactsList({
   }
 
   function recordMove(contactId: string) {
-    if (!joinCompany) return setLeaveError("Pick the company they've joined.");
+    if (!joinCompany) return setLeaveError(slot(w, "Pick the company they've joined.", "company", "Pick the {one:lower} they've joined."));
     setLeaveError(null);
     setLeavePending(true);
     moveContact(contactId, { companyId: joinCompany.id, ...join }).then((result) => {
@@ -451,7 +455,7 @@ export function ContactsList({
                   <LinkedInMark />
                 </OutboundLink>
               )}
-              <IconButton icon={Pencil} label="Edit contact" onClick={() => setEditingId(c.id)} />
+              <IconButton icon={Pencil} label={slot(w, "Edit contact", "contact", "Edit {one:lower}")} onClick={() => setEditingId(c.id)} />
               <IconButton
                 icon={UserX}
                 label={`${c.name} has left ${companyName}`}
@@ -459,7 +463,7 @@ export function ContactsList({
               />
               <IconButton
                 icon={Trash2}
-                label="Delete contact"
+                label={slot(w, "Delete contact", "contact", "Delete {one:lower}")}
                 tone="danger"
                 onClick={() => {
                   setDeleteError(null);
@@ -471,7 +475,7 @@ export function ContactsList({
         ),
       )}
       {current.length === 0 && (
-        <p className="text-sm text-subtle">{former.length > 0 ? "Nobody here now — everybody listed has left." : "No contacts added."}</p>
+        <p className="text-sm text-subtle">{former.length > 0 ? "Nobody here now — everybody listed has left." : slot(w, "No contacts added.", "contact", "No {many:lower} added.")}</p>
       )}
 
       {/* Kept with their history, out of the way: nobody new is offered them (src/lib/contacts/left.ts). */}
@@ -479,7 +483,7 @@ export function ContactsList({
         <details className="group rounded-base border border-line">
           <summary className="flex cursor-pointer list-none items-center gap-1 px-3 py-2 text-sm text-muted marker:hidden hover:text-text">
             <ChevronRight className="h-3.5 w-3.5 shrink-0 transition-transform group-open:rotate-90" aria-hidden />
-            Left the company ({former.length})
+            {slot(w, "Left the company", "company", "Left the {one:lower}")} ({former.length})
           </summary>
           <div className="space-y-2 border-t border-line p-3">
             {former.map((c) => (
@@ -504,7 +508,7 @@ export function ContactsList({
                   />
                   <IconButton
                     icon={Trash2}
-                    label="Delete contact"
+                    label={slot(w, "Delete contact", "contact", "Delete {one:lower}")}
                     tone="danger"
                     onClick={() => {
                       setDeleteError(null);
@@ -527,7 +531,7 @@ export function ContactsList({
         {!addOpen ? (
           <>
             <Button type="button" variant="secondary" size="sm" onClick={() => setAddOpen(true)}>
-              + Add contact
+              {slot(w, "+ Add contact", "contact", "+ Add {one:lower}")}
             </Button>
             {uncheckedCount > 0 && (
               <Button type="button" variant="ghost" size="sm" disabled={checking} onClick={checkAll}>
@@ -562,7 +566,7 @@ export function ContactsList({
                 Cancel
               </Button>
               <Button type="submit" size="sm" disabled={isSubmitting}>
-                {isSubmitting ? "Saving…" : "Save contact"}
+                {isSubmitting ? "Saving…" : slot(w, "Save contact", "contact", "Save {one:lower}")}
               </Button>
             </div>
           </form>
@@ -576,11 +580,11 @@ export function ContactsList({
           forms, and any customer-portal link of theirs stops working.
         </p>
         {leaving?.isPrimary && (
-          <p className="mt-2 text-sm text-warning">They&apos;re the primary contact — make somebody else primary afterwards.</p>
+          <p className="mt-2 text-sm text-warning">{slot(w, "They're the primary contact — make somebody else primary afterwards.", "contact", "They're the primary {one:lower} — make somebody else primary afterwards.")}</p>
         )}
         <label className="mt-3 flex items-center gap-2 text-sm text-text">
           <input type="checkbox" checked={joined} onChange={(e) => setJoined(e.target.checked)} className="h-4 w-4" />
-          They&apos;ve joined another company
+          {slot(w, "They've joined another company", "company", "They've joined another {one:lower}")}
         </label>
         {joined && (
           <div className="mt-2 space-y-2 rounded-md border border-line bg-surface-sunken p-3">
@@ -590,7 +594,7 @@ export function ContactsList({
             </p>
             <div className="space-y-1">
               <Label className="text-xs" htmlFor={`${addId}-join-company`}>
-                Company they&apos;ve joined
+                {slot(w, "Company they've joined", "company", "{one} they've joined")}
               </Label>
               <CompanyCombobox
                 id={`${addId}-join-company`}
@@ -647,7 +651,7 @@ export function ContactsList({
         </div>
       </Dialog>
 
-      <Dialog open={!!deleteTarget} onClose={() => setDeleteTargetId(null)} title="Delete contact">
+      <Dialog open={!!deleteTarget} onClose={() => setDeleteTargetId(null)} title={slot(w, "Delete contact", "contact", "Delete {one:lower}")}>
         <p className="text-sm text-muted">
           Delete <span className="font-medium text-text">{deleteTarget?.name}</span>? This can&apos;t be undone.
         </p>

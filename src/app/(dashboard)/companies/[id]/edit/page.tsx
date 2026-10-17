@@ -10,6 +10,8 @@ import { isCustomerRelationshipType } from "@/lib/validation/company";
 import { isModuleEntitled } from "@/lib/modules-access";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 
 export default async function EditCompanyPage({ params }: { params: Promise<{ id: string }> }) {
   if (!(await isModuleEnabled("companies"))) return <ModuleDisabledNotice moduleKey="companies" />;
@@ -23,10 +25,11 @@ export default async function EditCompanyPage({ params }: { params: Promise<{ id
   if (!(await canSeeCompany(user.id, company))) notFound();
   // Null for a vendor, whose terms are ours to pay — see `customerTermsAdvice`.
   const termsAdvice = (await isModuleEntitled("receivables")) ? await customerTermsAdvice(company.id) : null;
+  const w = await getWording();
 
   return (
     <div>
-      <h1 className="text-xl font-semibold text-text">Edit company</h1>
+      <h1 className="text-xl font-semibold text-text">{slot(w, "Edit company", "company", "Edit {one:lower}")}</h1>
       <p className="mt-1 text-sm text-muted">Enrich the profile as you find more information.</p>
 
       <div className="mt-6">

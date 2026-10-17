@@ -13,6 +13,8 @@ import {
 } from "@/lib/visits";
 import { workspaceClock } from "@/lib/time/workspace";
 import { visitPath } from "@/lib/record-links";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 
 type Visit = Awaited<ReturnType<typeof listLeadVisits>>[number];
 
@@ -35,18 +37,20 @@ export async function LeadVisits({
 }) {
   const planHref = `/visits/new?companyId=${companyId}&leadId=${leadId}`;
   const clock = await workspaceClock();
+  // The workspace's own words (Settings → Wording, src/lib/terms).
+  const w = await getWording();
 
   return (
     <Card>
       <CardHeader className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-sm font-medium text-text">
-          Field visits
+          {slot(w, "Field visits", "visit", "{many}")}
           {visits.length > 0 && <span className="ml-1.5 text-xs font-normal text-subtle">{visits.length}</span>}
         </span>
         {visits.length > 0 && (
           <Link href={planHref}>
             <Button size="sm" variant="secondary">
-              + Visit
+              {slot(w, "+ Visit", "visit", "+ {one}")}
             </Button>
           </Link>
         )}
@@ -56,9 +60,9 @@ export async function LeadVisits({
         {visits.length === 0 ? (
           <div className="py-6 text-center">
             <MapPin className="mx-auto h-6 w-6 text-subtle" />
-            <p className="mt-2 text-sm text-muted">No visits planned for this deal.</p>
+            <p className="mt-2 text-sm text-muted">{slot(w, "No visits planned for this deal.", "visit", "No {many:lower} planned for this deal.")}</p>
             <Link href={planHref} className="mt-3 inline-block">
-              <Button size="sm">Plan a visit</Button>
+              <Button size="sm">{slot(w, "Plan a visit", "visit", "Plan {a}")}</Button>
             </Link>
           </div>
         ) : (

@@ -6,6 +6,8 @@ import { moveLeadToPipeline, updateLeadDetails } from "@/actions/lead";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Dialog } from "@/components/ui/dialog";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 export type LeadDetailsValues = { title: string; description: string; estimatedValue: string; expectedCloseDate: string; contactId: string };
 export type MoveTarget = { id: string; name: string; stages: { id: string; label: string }[] };
@@ -34,6 +36,7 @@ export function LeadPipelineControls({
   moveTargets: MoveTarget[];
 }) {
   const router = useRouter();
+  const w = useWording();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<LeadDetailsValues | null>(null);
@@ -79,7 +82,7 @@ export function LeadPipelineControls({
       )}
 
       {editing && (
-        <Dialog open onClose={() => setEditing(null)} title="Edit the lead">
+        <Dialog open onClose={() => setEditing(null)} title={slot(w, "Edit the lead", "lead", "Edit the {one:lower}")}>
           {error && (
             <p role="alert" className="mb-3 rounded-md bg-danger-bg px-3 py-2 text-sm text-danger">
               {error}
@@ -120,10 +123,10 @@ export function LeadPipelineControls({
             </div>
             <div className="space-y-1">
               <Label htmlFor="lead-edit-contact" className="text-xs">
-                Contact
+                {slot(w, "Contact", "contact", "{one}")}
               </Label>
               <Select id="lead-edit-contact" value={editing.contactId} disabled={locked.includes("contactName")} onChange={(e) => setEditing({ ...editing, contactId: e.target.value })}>
-                <option value="">No specific contact</option>
+                <option value="">{slot(w, "No specific contact", "contact", "No specific {one:lower}")}</option>
                 {contacts.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
@@ -147,7 +150,7 @@ export function LeadPipelineControls({
             </div>
             {locked.length > 0 && (
               <p id="lead-edit-locked" className="text-xs text-subtle">
-                Masked fields can&apos;t be changed until you unmask this lead. They keep what they hold.
+                {slot(w, "Masked fields can't be changed until you unmask this lead. They keep what they hold.", "lead", "Masked fields can't be changed until you unmask this {one:lower}. They keep what they hold.")}
               </p>
             )}
           </div>
@@ -203,7 +206,9 @@ export function LeadPipelineControls({
                 ))}
               </Select>
             </div>
-            <p className="text-xs text-subtle">Its history stays with it, and the move is noted on its timeline. The new pipeline&apos;s automations run as for a lead arriving.</p>
+            <p className="text-xs text-subtle">
+              {slot(w, "Its history stays with it, and the move is noted on its timeline. The new pipeline's automations run as for a lead arriving.", "lead", "Its history stays with it, and the move is noted on its timeline. The new pipeline's automations run as for {a} arriving.")}
+            </p>
           </div>
           <div className="mt-4 flex justify-end gap-2">
             <Button type="button" variant="ghost" size="sm" onClick={() => setMoving(null)} disabled={isPending}>

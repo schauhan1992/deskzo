@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { EyeOff, ShieldCheck } from "lucide-react";
 import { unmaskLead, type UnmaskOutcome } from "@/actions/lead-unmask";
 import type { UnmaskUsageStatus } from "@/lib/authz/unmask";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 /**
  * Opening a lead unmasks it — the strip at the top of its page that does it and says what happened.
@@ -35,6 +37,7 @@ export function LeadUnmask({
   usage: UnmaskUsageStatus | null;
 }) {
   const router = useRouter();
+  const w = useWording();
   // One request per lead per visit. An effect that runs again for the same lead (React does this on
   // purpose in development, and on a refresh) listens to the request already made instead of asking
   // twice — or, worse, not listening at all.
@@ -73,8 +76,8 @@ export function LeadUnmask({
       <div className="flex flex-wrap items-start gap-x-3 gap-y-1 rounded-base border border-success/30 bg-success-bg px-3 py-2.5 text-sm">
         <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-hidden />
         <span className="min-w-0 flex-1 text-text">
-          This lead has been unmasked. It will remain visible for the rest of today.{" "}
-          <span className="text-muted">You cannot unmask this lead again today — opening it again uses nothing.</span>
+          {slot(w, "This lead has been unmasked. It will remain visible for the rest of today.", "lead", "This {one:lower} has been unmasked. It will remain visible for the rest of today.")}{" "}
+          <span className="text-muted">{slot(w, "You cannot unmask this lead again today — opening it again uses nothing.", "lead", "You cannot unmask this {one:lower} again today — opening it again uses nothing.")}</span>
         </span>
         {counter && <span className="shrink-0 rounded-full bg-success/10 px-2 py-0.5 text-xs font-medium text-success">{counter}</span>}
       </div>
@@ -91,7 +94,9 @@ export function LeadUnmask({
         {pending
           ? "Unmasking…"
           : outcome?.message ??
-            (concealed === 1 ? "One field on this lead is masked for you." : `${concealed} fields on this lead are masked for you.`)}
+            (concealed === 1
+              ? slot(w, "One field on this lead is masked for you.", "lead", "One field on this {one:lower} is masked for you.")
+              : `${concealed} ${slot(w, "fields on this lead are masked for you.", "lead", "fields on this {one:lower} are masked for you.")}`)}
       </span>
       {counter && <span className="ml-auto rounded-full bg-surface px-2 py-0.5 text-xs font-medium text-muted">{counter}</span>}
     </div>

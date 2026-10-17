@@ -28,6 +28,8 @@ import { TicketEmails } from "@/components/tickets/ticket-emails";
 import { DeleteTicketButton } from "@/components/tickets/delete-ticket-button";
 import { TaskList } from "@/components/tasks/task-list";
 import { CategoryChip } from "@/components/customers/category-chip";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 
 /**
  * A ticket's full detail — SLA state, assignment, and the comment thread. Rendered on its own
@@ -38,13 +40,14 @@ export async function TicketDetail({ id }: { id: string }) {
   const userId = sessionUser!.id;
   const calendarEnabled = await isModuleEnabled("calendar");
   const canScheduleMeetings = calendarEnabled && (await hasEffectivePermission(userId, "meetings.schedule"));
-  const [ticket, users, canDelete, tasksEnabled, canDeleteAnyTask, clock] = await Promise.all([
+  const [ticket, users, canDelete, tasksEnabled, canDeleteAnyTask, clock, w] = await Promise.all([
     getTicket(id),
     listSupportAgents(),
     hasEffectivePermission(userId, "tickets.delete"),
     isModuleEnabled("tasks"),
     hasEffectivePermission(userId, "tasks.delete"),
     workspaceClock(),
+    getWording(),
   ]);
   if (!ticket) notFound();
 
@@ -149,13 +152,13 @@ export async function TicketDetail({ id }: { id: string }) {
             <CardHeader className="text-sm font-medium text-text">Details</CardHeader>
             <CardContent className="space-y-2 text-sm">
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                <span className="text-muted">Company</span>
+                <span className="text-muted">{slot(w, "Company", "company", "{one}")}</span>
                 <Link href={companyPath(ticket.company.companySeq)} className="text-text hover:underline">
                   {ticket.company.name}
                 </Link>
               </div>
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                <span className="text-muted">Contact</span>
+                <span className="text-muted">{slot(w, "Contact", "contact", "{one}")}</span>
                 <span className="text-text">{ticket.contact?.name ?? "—"}</span>
               </div>
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
@@ -163,7 +166,7 @@ export async function TicketDetail({ id }: { id: string }) {
                 <span className="text-text">{ticketTypeLabels[ticket.ticketType]}</span>
               </div>
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                <span className="text-muted">Order</span>
+                <span className="text-muted">{slot(w, "Order", "order", "{one}")}</span>
                 {ticket.companyProduct ? (
                   <Link href={`${companyPath(ticket.company.companySeq)}?tab=products`} className="text-text hover:underline">
                     {formatOrderId(ticket.companyProduct.orderSeq)} · {ticket.companyProduct.item.name}

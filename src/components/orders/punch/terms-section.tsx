@@ -8,6 +8,8 @@ import { handoffLabels } from "@/lib/orders/handoff-rules";
 import { useClock } from "@/components/time/clock-provider";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import type { ItemComboOption } from "@/components/items/item-combobox";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 import { FieldError, Section } from "./parts";
 import { usePriceFigures } from "./use-figures";
 import { invalidProps, type CreditSnapshot, type PunchErrors, type PunchForm } from "./types";
@@ -34,6 +36,7 @@ export function TermsSection({
   const { total } = usePriceFigures(control, selectedItem);
   const [paymentTerms, handoff] = useWatch({ control, name: ["paymentTerms", "handoff"] });
   const clock = useClock();
+  const wording = useWording();
 
   const chosenTerms = (paymentTerms || "") as TermsKey | "";
   const effectiveTerms = (chosenTerms || credit?.defaultTerms) as TermsKey | undefined;
@@ -52,7 +55,8 @@ export function TermsSection({
         <Label htmlFor="paymentTerms">Payment terms</Label>
         <Select id="paymentTerms" {...register("paymentTerms")}>
           <option value="">
-            Use customer&apos;s default{credit ? ` (${paymentTermsLabels[credit.defaultTerms]})` : ""}
+            {slot(wording, "Use customer's default", "customer", "Use {one:lower}'s default")}
+            {credit ? ` (${paymentTermsLabels[credit.defaultTerms]})` : ""}
           </option>
           {paymentTermsValues.map((t) => (
             <option key={t} value={t}>

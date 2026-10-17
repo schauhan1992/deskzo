@@ -19,6 +19,8 @@ import { EmailAddress, type VerifiableContact } from "@/components/contacts/emai
 import { OutboundLink, externalHref, whatsappHref } from "@/components/ui/outbound-link";
 import { CustomFieldBodyCells, CustomFieldHeaderCells, type CustomColumn } from "@/components/custom-fields/custom-field-cells";
 import { companyPath } from "@/lib/record-links";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 type ContactRow = VerifiableContact & {
   name: string;
@@ -51,6 +53,7 @@ export function ContactsTable({
   customColumns?: { columns: CustomColumn[]; texts: Record<string, Record<string, string>> };
 }) {
   const router = useRouter();
+  const w = useWording();
   const selection = useRowSelection(contacts);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -145,12 +148,12 @@ export function ContactsTable({
                   <Checkbox
                     checked={selection.allSelected}
                     onChange={selection.toggleAll}
-                    aria-label="Select all contacts on this page"
+                    aria-label={slot(w, "Select all contacts on this page", "contact", "Select all {many:lower} on this page")}
                   />
                 </th>
                 <th className="px-4 py-2.5">Name</th>
                 <th className="px-4 py-2.5">Designation</th>
-                <th className="px-4 py-2.5">Company</th>
+                <th className="px-4 py-2.5">{slot(w, "Company", "company", "{one}")}</th>
                 <th className="px-4 py-2.5">Relationship</th>
                 <th className="px-4 py-2.5">Email</th>
                 <th className="px-4 py-2.5">Phone</th>
@@ -229,7 +232,7 @@ export function ContactsTable({
               {contacts.length === 0 && (
                 <tr>
                   <td colSpan={8 + customColumns.columns.length} className="px-4 py-8 text-center text-subtle">
-                    No contacts match this filter.
+                    {slot(w, "No contacts match this filter.", "contact", "No {many:lower} match this filter.")}
                   </td>
                 </tr>
               )}

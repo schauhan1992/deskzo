@@ -52,24 +52,25 @@ export default async function VisitsPage({
     }),
     listVisitAssignees(),
   ]);
+  const w = await getWording();
 
   return (
     <div className="animate-fade-rise">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-text">{slot(await getWording(), "Field visits", "visit")}</h1>
+          <h1 className="text-xl font-semibold text-text">{slot(w, "Field visits", "visit")}</h1>
           <p className="mt-1 text-sm text-muted">
-            {result.total} visit(s)
+            {result.total} {slot(w, "visit(s)", "visit", "{one:lower}(s)")}
             {result.openCount > 0 && ` · ${result.openCount} still open`}
           </p>
         </div>
         <Link href="/visits/new">
-          <Button>{slot(await getWording(), "Plan visit", "visit", "Plan {one:lower}")}</Button>
+          <Button>{slot(w, "Plan visit", "visit", "Plan {one:lower}")}</Button>
         </Link>
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <SearchParamInput paramName="q" placeholder="Search company, agenda or outcome…" />
+        <SearchParamInput paramName="q" placeholder={slot(w, "Search company, agenda or outcome…", "company", "Search {one:lower}, agenda or outcome…")} />
         <SelectParamFilter
           paramName="status"
           label="Status"

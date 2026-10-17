@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { importItems, type ImportItemsResult } from "@/actions/item";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 /** The first twenty names and a count of the rest — a first import can add hundreds. */
 function listSome(names: string[]) {
@@ -13,6 +15,7 @@ function listSome(names: string[]) {
 
 export function ImportItemsDialog() {
   const router = useRouter();
+  const wording = useWording();
   const [open, setOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [isImporting, setIsImporting] = useState(false);
@@ -55,7 +58,7 @@ export function ImportItemsDialog() {
         Import CSV
       </Button>
 
-      <Dialog open={open} onClose={handleClose} title="Import items">
+      <Dialog open={open} onClose={handleClose} title={slot(wording, "Import items", "item", "Import {many:lower}")}>
         <div className="space-y-3">
           <p className="text-sm text-muted">
             Upload a CSV of goods, services, or subscriptions. Rows with a SKU that already

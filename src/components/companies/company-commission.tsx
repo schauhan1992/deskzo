@@ -6,6 +6,8 @@ import { formatCurrency } from "@/lib/utils";
 import { formatOrderId } from "@/lib/order-id";
 import { companyPath, orderPath } from "@/lib/record-links";
 import { workspaceClock } from "@/lib/time/workspace";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 
 type CommissionParty = Awaited<ReturnType<typeof listCompanyCommissionParties>>[number];
 type Commission = Awaited<ReturnType<typeof listCompanyCommissions>>[number];
@@ -26,7 +28,7 @@ export async function CompanyCommission({
   commissions: Commission[];
   partyOptions: { id: string; name: string }[];
 }) {
-  const clock = await workspaceClock();
+  const [clock, w] = await Promise.all([workspaceClock(), getWording()]);
   const totalPaid = commissions.reduce((sum, c) => sum + c.amount, 0);
 
   // A payout is recorded against an order, but what matters here is who it went to, so the same
@@ -54,7 +56,7 @@ export async function CompanyCommission({
             side="company"
             links={commissionParties.map((p) => ({ linkId: p.linkId, id: p.id, companySeq: p.companySeq, name: p.name }))}
             companyOptions={partyOptions}
-            emptyText="No commission party linked to this customer yet."
+            emptyText={slot(w, "No commission party linked to this customer yet.", "customer", "No commission party linked to this {one:lower} yet.")}
             searchPlaceholder="Type to search commission parties…"
           />
         </CardContent>
@@ -83,7 +85,7 @@ export async function CompanyCommission({
               <table className="w-full text-sm">
                 <thead className="border-y border-line bg-surface-sunken text-left text-xs uppercase tracking-wide text-muted">
                   <tr>
-                    <th className="px-5 py-2">Order</th>
+                    <th className="px-5 py-2">{slot(w, "Order", "order", "{one}")}</th>
                     <th className="px-3 py-2">Paid to</th>
                     <th className="px-3 py-2">Account</th>
                     <th className="px-3 py-2 text-right">Amount</th>

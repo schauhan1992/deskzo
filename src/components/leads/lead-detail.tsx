@@ -46,6 +46,8 @@ import { detailLeadMasker, redactorForLead } from "@/lib/leads/masking";
 import { customFieldKey } from "@/lib/authz/field-policy";
 import { unmaskUsageToday } from "@/lib/authz/unmask";
 import { LeadUnmask } from "@/components/leads/lead-unmask";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 
 /**
  * A lead's full detail — the requirement, its timeline, and the controls that move it along.
@@ -141,6 +143,8 @@ export async function LeadDetail({ id }: { id: string }) {
   // rather than collapsed into one "sales rep" that would be wrong half the time.
   const accountManager = company.assignedTo ?? company.owner ?? null;
   const clock = await workspaceClock();
+  // The workspace's own words (Settings → Wording, src/lib/terms).
+  const w = await getWording();
 
   return (
     <div className="@container space-y-6">
@@ -220,7 +224,7 @@ export async function LeadDetail({ id }: { id: string }) {
             <Link href={`/visits/new?companyId=${company.id}&leadId=${lead.id}`}>
               <Button variant="secondary">
                 <MapPin className="mr-1.5 h-3.5 w-3.5" />
-                Plan visit
+                {slot(w, "Plan visit", "visit", "Plan {one:lower}")}
               </Button>
             </Link>
           )}
@@ -317,10 +321,10 @@ export async function LeadDetail({ id }: { id: string }) {
 
           {domainBriefing && <DomainPanel companyId={company.id} briefing={domainBriefing} />}
 
-          {score && <LeadScoreCard result={score} />}
+          {score && <LeadScoreCard result={score} title={slot(w, "Lead score", "lead", "{one} score")} />}
 
           <Card>
-            <CardHeader className="text-sm font-medium text-text">Lead Details</CardHeader>
+            <CardHeader className="text-sm font-medium text-text">{slot(w, "Lead Details", "lead", "{one} Details")}</CardHeader>
             <CardContent className="space-y-2 text-sm">
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                 <span className="text-muted">Stage</span>
@@ -350,7 +354,7 @@ export async function LeadDetail({ id }: { id: string }) {
                 <span className="text-text">{accountManager?.name ?? "—"}</span>
               </div>
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                <span className="text-muted">Contact</span>
+                <span className="text-muted">{slot(w, "Contact", "contact", "{one}")}</span>
                 <span className="text-right text-text">{lead.contact?.name ?? "—"}</span>
               </div>
               {lead.contact && (

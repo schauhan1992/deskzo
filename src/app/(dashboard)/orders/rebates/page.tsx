@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 import { rebatesReport } from "@/actions/rebate";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
@@ -41,6 +43,8 @@ export default async function RebatesPage({ searchParams }: { searchParams: Prom
     );
   }
 
+  // The workspace's own words (Settings → Wording).
+  const wording = await getWording();
   const groups = [
     { title: "By who pays", rows: report.byPayer },
     { title: "By OEM", rows: report.byBrand },
@@ -67,7 +71,9 @@ export default async function RebatesPage({ searchParams }: { searchParams: Prom
         <Card className="px-4 py-3">
           <div className="text-xs uppercase tracking-wide text-subtle">Expected</div>
           <div className="mt-1 text-lg font-semibold text-text">{formatCurrency(report.totals.expected)}</div>
-          <div className="mt-0.5 text-xs text-muted">{report.rows.length} order(s)</div>
+          <div className="mt-0.5 text-xs text-muted">
+            {report.rows.length} {slot(wording, "order(s)", "order", "{one:lower}(s)")}
+          </div>
         </Card>
         <Card className="px-4 py-3">
           <div className="text-xs uppercase tracking-wide text-subtle">Received</div>
@@ -113,11 +119,11 @@ export default async function RebatesPage({ searchParams }: { searchParams: Prom
 
       <Card className="mt-6 overflow-x-auto p-0">
         <table className="w-full text-sm">
-          <caption className="sr-only">Orders with backend rebates</caption>
+          <caption className="sr-only">{slot(wording, "Orders with backend rebates", "order", "{many} with backend rebates")}</caption>
           <thead className="border-b border-line bg-surface-sunken text-left text-xs uppercase tracking-wide text-muted">
             <tr>
-              <th className="px-4 py-2.5">Order</th>
-              <th className="px-4 py-2.5">Customer · product</th>
+              <th className="px-4 py-2.5">{slot(wording, "Order", "order", "{one}")}</th>
+              <th className="px-4 py-2.5">{slot(wording, "Customer · product", "customer", "{one} · product")}</th>
               <th className="px-4 py-2.5 text-right">Front margin</th>
               <th className="px-4 py-2.5 text-right">Expected</th>
               <th className="px-4 py-2.5 text-right">Received</th>
@@ -129,7 +135,7 @@ export default async function RebatesPage({ searchParams }: { searchParams: Prom
             {report.rows.length === 0 && (
               <tr>
                 <td colSpan={7} className="px-4 py-8 text-center text-muted">
-                  No backend rebates on orders booked in this range.
+                  {slot(wording, "No backend rebates on orders booked in this range.", "order", "No backend rebates on {many:lower} booked in this range.")}
                 </td>
               </tr>
             )}

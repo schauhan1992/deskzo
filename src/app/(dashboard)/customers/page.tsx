@@ -86,11 +86,12 @@ export default async function CustomersPage({
     listColumns("COMPANY", user.id, viewMode === "split" ? [] : rows.map((c) => c.id)),
     customFilterSetup("COMPANY", user.id, customFilters),
   ]);
+  const w = await getWording();
 
   return (
     <SplitListPage active={viewMode === "split"}>
       <div>
-        <h1 className="text-xl font-semibold text-text">{slot(await getWording(), "Customer", "customer")}</h1>
+        <h1 className="text-xl font-semibold text-text">{slot(w, "Customer", "customer")}</h1>
         <p className="mt-1 text-sm text-muted">
           {result.total} {result.total === 1 ? "company has" : "companies have"} actually purchased from us — at least one order
           on file, active or expired.
@@ -99,7 +100,7 @@ export default async function CustomersPage({
       <ViewModeToggle viewKey="customers" mode={viewMode} />
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <SearchParamInput paramName="q" placeholder="Search company name…" />
+        <SearchParamInput paramName="q" placeholder={slot(w, "Search company name…", "company", "Search {one:lower} name…")} />
         <SelectParamFilter paramName="source" label="Source" options={companySourceValues.map((s) => ({ value: s, label: s }))} />
         <SelectParamFilter
           paramName="industryId"
@@ -123,13 +124,13 @@ export default async function CustomersPage({
 
       {viewMode === "split" ? (
         <SplitListShell
-          countLabel={`${result.total} customer${result.total === 1 ? "" : "s"}`}
+          countLabel={`${result.total} ${result.total === 1 ? slot(w, "customer", "customer", "{one:lower}") : slot(w, "customers", "customer", "{many:lower}")}`}
           listPane={<CompanySplitList companies={rows} selectedId={selected} isVendor={false} />}
         >
           {selected ? (
             <CompanyDetail id={selected} tab={params.tab} basePath="/customers" linkParams={splitLinkParams(params, selected)} />
           ) : (
-            <SplitListEmpty message="No customers match these filters." />
+            <SplitListEmpty message={slot(w, "No customers match these filters.", "customer", "No {many:lower} match these filters.")} />
           )}
         </SplitListShell>
       ) : (

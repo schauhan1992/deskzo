@@ -19,6 +19,8 @@ import {
 import type { CustomFieldDef } from "@/lib/custom-fields/rules";
 import { itemPath } from "@/lib/record-links";
 import { HSN_REQUIRED_MESSAGE } from "@/lib/hsn";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 type FormValues = z.input<typeof createItemSchema>;
 
@@ -42,6 +44,7 @@ export function NewItemForm({
   subscriptions?: boolean;
 }) {
   const router = useRouter();
+  const wording = useWording();
   const [serverError, setServerError] = useState<string | null>(null);
   const [custom, setCustom] = useState<CustomFieldFormValues>(customFields.values);
   const [customErrors, setCustomErrors] = useState<Record<string, string>>({});
@@ -136,7 +139,7 @@ export function NewItemForm({
           Cancel
         </Button>
         <Button type="submit" disabled={isSubmitting}>
-          {isSubmitting ? "Saving…" : "Save item"}
+          {isSubmitting ? "Saving…" : slot(wording, "Save item", "item", "Save {one:lower}")}
         </Button>
       </div>
     </form>

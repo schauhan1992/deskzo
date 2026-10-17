@@ -14,6 +14,8 @@ import type { WorkbookFilters } from "@/lib/workspace/filters";
 import { countActiveFilters, describeFilters } from "@/lib/workspace/filters";
 import { DimensionFilters, GroupedOptions } from "@/components/reports/dimension-filters";
 import { ActionNoticeRegion } from "@/components/ui/action-notice";
+import { useWording } from "@/components/terms/wording-provider";
+import { wordedSources } from "@/components/reports/report-wording";
 import { formatCurrency, cn } from "@/lib/utils";
 
 /**
@@ -50,7 +52,7 @@ const CHART_TYPES: { key: ChartType | "table"; label: string; icon: typeof Table
 ];
 
 export function ReportExplorer({
-  sources,
+  sources: given,
   grains,
   today,
   monthStart,
@@ -64,6 +66,11 @@ export function ReportExplorer({
   today: string;
   monthStart: string;
 }) {
+  // Every label below in the workspace's own words (Settings → Wording) — the picker, the breakdowns,
+  // the filter panel and its chips, the table's headings and the report's name. Only the labels: the
+  // keys a request carries are the source's own.
+  const w = useWording();
+  const sources = useMemo(() => wordedSources(w, given), [w, given]);
   const [sourceKey, setSourceKey] = useState(sources[0]?.key ?? "");
   const source = sources.find((s) => s.key === sourceKey) ?? sources[0];
 

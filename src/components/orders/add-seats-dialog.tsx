@@ -12,6 +12,8 @@ import { Input, Label, Textarea } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { useClock } from "@/components/time/clock-provider";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 type Quote = NonNullable<Awaited<ReturnType<typeof quoteAddon>>>;
 
@@ -31,6 +33,7 @@ export function AddSeatsDialog({
 }) {
   const router = useRouter();
   const clock = useClock();
+  const wording = useWording();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -156,8 +159,7 @@ export function AddSeatsDialog({
           {error && <p className="text-sm text-danger">{error}</p>}
 
           <p className="text-xs text-subtle">
-            This is raised as its own order and goes through the usual approval — extra seats are a sale, and the
-            margin on them matters as much as on the original.
+            {slot(wording, "This is raised as its own order and goes through the usual approval — extra seats are a sale, and the margin on them matters as much as on the original.", "order", "This is raised as its own {one:lower} and goes through the usual approval — extra seats are a sale, and the margin on them matters as much as on the original.")}
           </p>
 
           <div className="flex gap-2">

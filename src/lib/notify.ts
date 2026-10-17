@@ -1,5 +1,7 @@
 import type { NotificationType } from "@prisma/client";
 import { db } from "@/lib/db";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 import { getTicketSlaStatus, formatTicketId } from "@/lib/tickets";
 import { addDays } from "@/lib/date-range-presets";
 import {
@@ -196,13 +198,14 @@ export async function syncSystemNotifications(userId: string) {
     }
   }
 
+  const wording = await getWording();
   for (const ticket of tickets) {
     const sla = getTicketSlaStatus(ticket.priority, ticket.status, ticket.createdAt, clock, now);
     if (sla.key === "overdue") {
       candidates.push({
         userId,
         type: "TICKET_SLA_OVERDUE",
-        title: "Ticket past its SLA",
+        title: slot(wording, "Ticket past its SLA", "ticket", "{one} past its SLA"),
         message: `${formatTicketId(ticket.ticketSeq)} — ${ticket.title}`,
         link: ticketPath(ticket.ticketSeq),
         dedupeKey: `ticket-sla:${ticket.id}`,

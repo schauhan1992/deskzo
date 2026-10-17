@@ -112,13 +112,15 @@ export default async function LeadsPage({
     listColumns("LEAD", user.id, view === "list" && viewMode !== "split" ? leads.map((l) => l.id) : []),
     customFilterSetup("LEAD", user.id, filters.customFilters),
   ]);
+  // The workspace's own words (Settings → Wording, src/lib/terms).
+  const w = await getWording();
 
   return (
     <SplitListPage active={view === "list" && viewMode === "split"}>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-text">{slot(await getWording(), "Lead pipeline", "lead", "{one} pipeline")}</h1>
-          <p className="mt-1 text-sm text-muted">{inUse.length > 1 ? `${result.total} in ${shown.name}` : `${result.total} total leads`}</p>
+          <h1 className="text-xl font-semibold text-text">{slot(w, "Lead pipeline", "lead", "{one} pipeline")}</h1>
+          <p className="mt-1 text-sm text-muted">{inUse.length > 1 ? `${result.total} in ${shown.name}` : `${result.total} ${slot(w, "total leads", "lead", "total {many:lower}")}`}</p>
         </div>
         <div className="flex items-center gap-2">
           <ViewToggle
@@ -140,7 +142,7 @@ export default async function LeadsPage({
           />
           <ExportLeadsButton />
           <Link href={inUse.length > 1 ? `/leads/new?pipeline=${encodeURIComponent(shown.key)}` : "/leads/new"}>
-            <Button>{slot(await getWording(), "New lead", "lead", "New {one:lower}")}</Button>
+            <Button>{slot(w, "New lead", "lead", "New {one:lower}")}</Button>
           </Link>
         </div>
       </div>
@@ -161,7 +163,7 @@ export default async function LeadsPage({
       )}
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <SearchParamInput paramName="q" placeholder="Search title or company…" />
+        <SearchParamInput paramName="q" placeholder={slot(w, "Search title or company…", "company", "Search title or {one:lower}…")} />
         <SelectParamFilter paramName="stage" label="Stage" options={activeStages.map((s) => ({ value: s.key, label: s.label }))} />
         <SelectParamFilter
           paramName="owner"
@@ -197,10 +199,10 @@ export default async function LeadsPage({
 
       {view === "list" && viewMode === "split" ? (
         <SplitListShell
-          countLabel={`${result.total} lead${result.total === 1 ? "" : "s"}`}
+          countLabel={`${result.total} ${result.total === 1 ? slot(w, "lead", "lead", "{one:lower}") : slot(w, "leads", "lead", "{many:lower}")}`}
           listPane={<LeadSplitList leads={leads} selectedId={selected} />}
         >
-          {selected ? <LeadDetail id={selected} /> : <SplitListEmpty message="No leads match these filters." />}
+          {selected ? <LeadDetail id={selected} /> : <SplitListEmpty message={slot(w, "No leads match these filters.", "lead", "No {many:lower} match these filters.")} />}
         </SplitListShell>
       ) : (
         <div className="mt-6">

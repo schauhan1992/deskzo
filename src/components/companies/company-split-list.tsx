@@ -8,6 +8,8 @@ import { SELECTED_PARAM } from "@/lib/view-mode";
 import { vendorStatusLabels } from "@/lib/validation/company";
 import { CategoryIcon } from "@/components/customers/category-chip";
 import type { CategoryWithParent } from "@/lib/customers/categories";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 const STAGE_TONE: Record<CompanyStage, "default" | "green" | "blue" | "red" | "amber"> = {
   PROSPECT: "default",
@@ -50,6 +52,7 @@ export function CompanySplitList({
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const w = useWording();
 
   function hrefFor(id: string) {
     const params = new URLSearchParams(searchParams.toString());
@@ -79,12 +82,12 @@ export function CompanySplitList({
                   </Badge>
                 ) : (
                   <Badge tone={awaitingOrder ? "amber" : STAGE_TONE[company.stage]}>
-                    {awaitingOrder ? "Awaiting Order" : company.stage}
+                    {awaitingOrder ? slot(w, "Awaiting Order", "order", "Awaiting {one}") : company.stage}
                   </Badge>
                 )}
                 {company.relationshipType === "RESELLER" && <Badge tone="blue">Reseller</Badge>}
                 <span className="text-xs text-subtle">
-                  {company._count.contacts} contact{company._count.contacts === 1 ? "" : "s"}
+                  {company._count.contacts} {company._count.contacts === 1 ? slot(w, "contact", "contact", "{one:lower}") : slot(w, "contacts", "contact", "{many:lower}")}
                 </span>
               </>
             }

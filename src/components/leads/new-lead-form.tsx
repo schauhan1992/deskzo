@@ -24,6 +24,8 @@ import { ItemCombobox } from "@/components/items/item-combobox";
 import { PersonCombobox, type PersonOption } from "@/components/ui/person-combobox";
 import { LEAD_SOURCE_LABELS, LEAD_SOURCE_VALUES } from "@/lib/leads/source";
 import { leadPath } from "@/lib/record-links";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 type ItemOption = {
   id: string;
@@ -70,6 +72,7 @@ export function NewLeadForm({
   initialPipelineId?: string;
 }) {
   const router = useRouter();
+  const w = useWording();
   const [serverError, setServerError] = useState<string | null>(null);
   const [custom, setCustom] = useState<CustomFieldFormValues>(customFields.values);
   const [customErrors, setCustomErrors] = useState<Record<string, string>>({});
@@ -154,7 +157,7 @@ export function NewLeadForm({
           )}
 
           <div className="space-y-1.5">
-            <Label htmlFor="companyId">Company *</Label>
+            <Label htmlFor="companyId">{slot(w, "Company *", "company", "{one} *")}</Label>
             <Controller
               name="companyId"
               control={control}
@@ -174,10 +177,10 @@ export function NewLeadForm({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="contactId">Contact</Label>
+            <Label htmlFor="contactId">{slot(w, "Contact", "contact", "{one}")}</Label>
             <div className="flex gap-2">
               <Select id="contactId" className="flex-1" {...register("contactId")} disabled={!selectedCompany}>
-                <option value="">No specific contact</option>
+                <option value="">{slot(w, "No specific contact", "contact", "No specific {one:lower}")}</option>
                 {selectedCompany?.contacts?.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name} ({c.designation.replaceAll("_", " ")})
@@ -190,9 +193,9 @@ export function NewLeadForm({
                   variant="secondary"
                   disabled={!selectedCompany}
                   onClick={() => setContactDialog(true)}
-                  title={selectedCompany ? undefined : "Choose the company first"}
+                  title={selectedCompany ? undefined : slot(w, "Choose the company first", "company", "Choose the {one:lower} first")}
                 >
-                  + New contact
+                  {slot(w, "+ New contact", "contact", "+ New {one:lower}")}
                 </Button>
               )}
             </div>
@@ -266,7 +269,7 @@ export function NewLeadForm({
             ) : (
               // Without `leads.assign` there is no choice to offer — say where it will go instead.
               <p id="ownerUserId" className="text-sm text-muted">
-                {currentUser.role === "SALES" ? "This lead will be yours." : "Assigned automatically by the lead assignment rules."}
+                {currentUser.role === "SALES" ? slot(w, "This lead will be yours.", "lead", "This {one:lower} will be yours.") : "Assigned automatically by the lead assignment rules."}
               </p>
             )}
           </div>
@@ -286,7 +289,7 @@ export function NewLeadForm({
                 </Button>
               </div>
               {items.length === 0 && (
-                <p className="text-xs text-subtle">No active items in the catalog yet.</p>
+                <p className="text-xs text-subtle">{slot(w, "No active items in the catalog yet.", "item", "No active {many:lower} in the catalog yet.")}</p>
               )}
               {fields.map((field, index) => {
                 const selectedItemId = watch(`requirements.${index}.itemId`);
@@ -332,7 +335,7 @@ export function NewLeadForm({
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-[11rem_1fr]">
                       <div className="space-y-1">
                         <Label htmlFor={`${rowId}-${index}-renewal`} className="text-xs">
-                          Renewal date
+                          {slot(w, "Renewal date", "renewal", "{one} date")}
                         </Label>
                         <Input
                           id={`${rowId}-${index}-renewal`}
@@ -381,7 +384,7 @@ export function NewLeadForm({
               Cancel
             </Button>
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? "Saving…" : "Create lead"}
+              {isSubmitting ? "Saving…" : slot(w, "Create lead", "lead", "Create {one:lower}")}
             </Button>
           </div>
         </form>

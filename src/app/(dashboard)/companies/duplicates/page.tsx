@@ -6,8 +6,13 @@ import { DuplicatesList } from "@/components/companies/duplicates-list";
 import { ActionNotice } from "@/components/ui/action-notice";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
+import type { Metadata } from "next";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 
-export const metadata = { title: "Duplicate companies" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: slot(await getWording(), "Duplicate companies", "company", "Duplicate {many:lower}") };
+}
 
 /**
  * Companies that are probably one company entered twice — the same GSTIN or PAN, the same name once
@@ -18,11 +23,13 @@ export default async function DuplicateCompaniesPage() {
   if (!(await isModuleEnabled("companies"))) return <ModuleDisabledNotice moduleKey="companies" />;
   if (!(await viewerHas("companies.merge"))) notFound();
   const result = await listDuplicates();
+  const w = await getWording();
+  const companies = slot(w, "companies", "company", "{many:lower}");
 
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold text-text">Duplicate companies</h1>
+        <h1 className="text-xl font-semibold text-text">{slot(w, "Duplicate companies", "company", "Duplicate {many:lower}")}</h1>
         <p className="mt-1 max-w-3xl text-sm text-muted">
           Companies that look like one company entered twice. Review a pair to merge it — everything under the duplicate moves to the one you keep,
           and its old links open it — or mark it as not a duplicate and it won&apos;t be offered again.
@@ -34,11 +41,11 @@ export default async function DuplicateCompaniesPage() {
         <>
           <p className="text-xs text-subtle">
             {result.data.rows.length === 0
-              ? `Checked ${result.data.scanned} companies.`
-              : `${result.data.rows.length}${result.data.rows.length === 300 ? "+" : ""} pair${result.data.rows.length === 1 ? "" : "s"} among ${result.data.scanned} companies, the likeliest first.`}{" "}
-            Only companies of the same kind are compared.{" "}
+              ? `Checked ${result.data.scanned} ${companies}.`
+              : `${result.data.rows.length}${result.data.rows.length === 300 ? "+" : ""} pair${result.data.rows.length === 1 ? "" : "s"} among ${result.data.scanned} ${companies}, the likeliest first.`}{" "}
+            {slot(w, "Only companies of the same kind are compared.", "company", "Only {many:lower} of the same kind are compared.")}{" "}
             <Link href="/companies/merge" className="underline underline-offset-2">
-              Merge two companies by hand
+              {slot(w, "Merge two companies by hand", "company", "Merge two {many:lower} by hand")}
             </Link>
           </p>
           <DuplicatesList rows={result.data.rows} />

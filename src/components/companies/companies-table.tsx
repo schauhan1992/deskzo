@@ -17,6 +17,8 @@ import { PORTAL_STATE_LABEL, type PortalState } from "@/lib/portal/state-labels"
 import { CategoryIcon } from "@/components/customers/category-chip";
 import type { CategoryWithParent } from "@/lib/customers/categories";
 import { CustomFieldBodyCells, CustomFieldHeaderCells, type CustomColumn } from "@/components/custom-fields/custom-field-cells";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot, type Wording } from "@/lib/terms/dictionary";
 
 const STAGE_TONE: Record<CompanyStage, "default" | "green" | "blue" | "red" | "amber"> = {
   PROSPECT: "default",
@@ -58,9 +60,9 @@ type CompanyRow = {
 };
 
 /** A won deal (`stage: "CUSTOMER"`) only counts as a real Customer once it has at least one order on file — otherwise it's a closed deal still awaiting its first order to be punched in. */
-function stageDisplay(c: CompanyRow): { label: string; tone: "default" | "green" | "blue" | "red" | "amber" } {
+function stageDisplay(c: CompanyRow, w: Wording): { label: string; tone: "default" | "green" | "blue" | "red" | "amber" } {
   if (c.stage === "CUSTOMER" && (c._count.products ?? 0) === 0) {
-    return { label: "Awaiting Order", tone: "amber" };
+    return { label: slot(w, "Awaiting Order", "order", "Awaiting {one}"), tone: "amber" };
   }
   return { label: c.stage, tone: STAGE_TONE[c.stage] };
 }
@@ -92,6 +94,7 @@ export function CompaniesTable({
   canSeeLeads?: boolean;
 }) {
   const router = useRouter();
+  const w = useWording();
   const selection = useRowSelection(companies);
   const [assignTo, setAssignTo] = useState("");
   const [vendorStatus, setVendorStatus] = useState("");
@@ -124,12 +127,12 @@ export function CompaniesTable({
   const fieldColumns = customColumns.columns.filter((c) => cols.showCustom(c.key, c.default));
   const emptyText =
     mode === "vendors"
-      ? "No vendors yet."
+      ? slot(w, "No vendors yet.", "vendor", "No {many:lower} yet.")
       : mode === "commission-parties"
         ? "No commission parties yet."
         : mode === "customers"
-          ? "No customers yet."
-          : "No companies yet.";
+          ? slot(w, "No customers yet.", "customer", "No {many:lower} yet.")
+          : slot(w, "No companies yet.", "company", "No {many:lower} yet.");
   // "Caller" (lead generation) only makes sense for Companies/Customer — Vendors/Commission Parties
   // keep the generic "Assigned to" wording, since that assignment isn't about calling to generate a sales lead.
   const assignedColumnLabel = hasOnboardingStatusColumn ? "Assigned to" : "Caller";
@@ -175,7 +178,7 @@ export function CompaniesTable({
           <Select
             value={assignTo}
             onChange={(e) => setAssignTo(e.target.value)}
-            aria-label="Assign selected companies to"
+            aria-label={slot(w, "Assign selected companies to", "company", "Assign selected {many:lower} to")}
             className="h-9 w-56"
           >
             <option value="">{assignActionLabel}</option>
@@ -229,19 +232,19 @@ export function CompaniesTable({
                   </th>
                 )}
                 {cols.show("id") && <th className="px-4 py-2.5">ID</th>}
-                {cols.show("company") && <th className="px-4 py-2.5">Company</th>}
+                {cols.show("company") && <th className="px-4 py-2.5">{slot(w, "Company", "company", "{one}")}</th>}
                 {cols.show("status") && statusAllowed &&
                   (hasOnboardingStatusColumn ? (
                     <th className="px-4 py-2.5">Onboarding status</th>
                   ) : mode === "customers" ? (
-                    <th className="px-4 py-2.5">Orders</th>
+                    <th className="px-4 py-2.5">{slot(w, "Orders", "order")}</th>
                   ) : (
                     <th className="px-4 py-2.5">Stage</th>
                   ))}
                 {cols.show("relationship") && <th className="px-4 py-2.5">Relationship</th>}
                 {cols.show("source") && <th className="px-4 py-2.5">Source</th>}
-                {cols.show("contacts") && <th className="px-4 py-2.5">Contacts</th>}
-                {cols.show("leads") && canSeeLeads && <th className="px-4 py-2.5">Leads</th>}
+                {cols.show("contacts") && <th className="px-4 py-2.5">{slot(w, "Contacts", "contact")}</th>}
+                {cols.show("leads") && canSeeLeads && <th className="px-4 py-2.5">{slot(w, "Leads", "lead")}</th>}
                 {cols.show("assigned") && <th className="px-4 py-2.5">{assignedColumnLabel}</th>}
                 {cols.show("portal") && hasPortalData && <th className="px-4 py-2.5">Portal</th>}
                 {cols.show("addedBy") && <th className="px-4 py-2.5">Added by</th>}
@@ -289,7 +292,7 @@ export function CompaniesTable({
                       <td className="px-4 py-2.5 text-muted">{c._count.products ?? 0}</td>
                     ) : (
                       <td className="px-4 py-2.5">
-                        <Badge tone={stageDisplay(c).tone}>{stageDisplay(c).label}</Badge>
+                        <Badge tone={stageDisplay(c, w).tone}>{stageDisplay(c, w).label}</Badge>
                       </td>
                     ))}
                   {cols.show("relationship") && (

@@ -65,12 +65,13 @@ export default async function ContactsLibraryPage({
     contactColumns(user.id, result.rows),
     customFilterSetup("CONTACT", user.id, customFilters),
   ]);
+  const w = await getWording();
 
   return (
     <div>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-text">{slot(await getWording(), "Contacts", "contact")}</h1>
+          <h1 className="text-xl font-semibold text-text">{slot(w, "Contacts", "contact")}</h1>
           <p className="mt-1 text-sm text-muted">
             {result.total} contact(s) across every company
             {status === "current" ? " — not counting those who have left" : status === "left" ? " who have left their company" : ""}
@@ -79,7 +80,7 @@ export default async function ContactsLibraryPage({
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <SearchParamInput paramName="q" placeholder="Search name, email, phone, or company…" />
+        <SearchParamInput paramName="q" placeholder={slot(w, "Search name, email, phone, or company…", "company", "Search name, email, phone, or {one:lower}…")} />
         <SelectParamFilter
           paramName="relationshipType"
           label="Relationship"
@@ -101,14 +102,14 @@ export default async function ContactsLibraryPage({
           label="Status"
           allLabel="Still there"
           options={[
-            { value: "left", label: "Left the company" },
+            { value: "left", label: slot(w, "Left the company", "company", "Left the {one:lower}") },
             { value: "all", label: "Everybody" },
           ]}
         />
         <SelectParamFilter
           paramName="primaryOnly"
           label="Primary only"
-          allLabel="All contacts"
+          allLabel={slot(w, "All contacts", "contact", "All {many:lower}")}
           options={[{ value: "yes", label: "Primary only" }]}
         />
         <CustomFieldFilters setup={fieldFilters} />

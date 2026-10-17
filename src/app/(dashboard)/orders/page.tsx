@@ -126,7 +126,7 @@ export default async function OrdersPage({
     <SplitListPage active={viewMode === "split"}>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-text">{slot(await getWording(), "Orders", "order")}</h1>
+          <h1 className="text-xl font-semibold text-text">{slot(wording, "Orders", "order")}</h1>
           <p className="mt-1 text-sm text-muted">
             {result.total} total{pendingCount > 0 && ` · ${pendingCount} awaiting accounts approval`}
           </p>
@@ -134,13 +134,13 @@ export default async function OrdersPage({
         <div className="flex items-center gap-2">
           <ViewModeToggle viewKey="orders" mode={viewMode} />
           <Link href="/orders/new">
-            <Button>{slot(await getWording(), "Punch order", "order", "Punch {one:lower}")}</Button>
+            <Button>{slot(wording, "Punch order", "order", "Punch {one:lower}")}</Button>
           </Link>
         </div>
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <SearchParamInput paramName="q" placeholder="Search customer name…" />
+        <SearchParamInput paramName="q" placeholder={slot(wording, "Search customer name…", "customer", "Search {one:lower} name…")} />
         <SelectParamFilter
           paramName="businessType"
           label="Type"
@@ -209,10 +209,10 @@ export default async function OrdersPage({
         />
       ) : viewMode === "split" ? (
         <SplitListShell
-          countLabel={`${result.total} order${result.total === 1 ? "" : "s"}`}
+          countLabel={`${result.total} ${result.total === 1 ? slot(wording, "order", "order", "{one:lower}") : slot(wording, "orders", "order", "{many:lower}")}`}
           listPane={<OrderSplitList orders={result.rows} selectedId={selected} />}
         >
-          {selected ? <OrderDetail id={selected} /> : <SplitListEmpty message="No orders match these filters." />}
+          {selected ? <OrderDetail id={selected} /> : <SplitListEmpty message={slot(wording, "No orders match these filters.", "order", "No {many:lower} match these filters.")} />}
         </SplitListShell>
       ) : (
         <>

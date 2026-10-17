@@ -7,6 +7,8 @@ import { setCompanyCaller } from "@/actions/company";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { Dialog } from "@/components/ui/dialog";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 type Caller = { id: string; name: string } | null;
 type AssignableUser = { id: string; name: string; role: string };
@@ -28,6 +30,7 @@ export function CallerButton({
   canUnassign: boolean;
 }) {
   const router = useRouter();
+  const w = useWording();
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState(caller?.id ?? "");
   const [isPending, startTransition] = useTransition();
@@ -76,7 +79,7 @@ export function CallerButton({
 
       <Dialog open={open} onClose={() => setOpen(false)} title="Caller">
         <div className="space-y-3">
-          <p className="text-xs text-muted">Who&apos;s working this company for lead generation.</p>
+          <p className="text-xs text-muted">{slot(w, "Who's working this company for lead generation.", "company", "Who's working this {one:lower} for lead generation.")}</p>
           {error && <p className="text-xs text-danger">{error}</p>}
           {/* aria-label rather than a visible label: the dialog heading is the only caption this
               control has, and a heading is not a label — it names the dialog, not the select. */}

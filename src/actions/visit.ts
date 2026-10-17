@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { Prisma, type VisitStatus, type VisitPurpose } from "@prisma/client";
 import { db } from "@/lib/db";
+import { getWording } from "@/lib/terms/server";
+import { slot, upperFirst } from "@/lib/terms/dictionary";
 import { leadsInPlan, leadsSeenBy } from "@/lib/leads/shown";
 import { listLeadMasker, maskLeadTitle } from "@/lib/leads/masking";
 import { requireModuleUser } from "@/lib/modules-access";
@@ -219,7 +221,7 @@ export async function createVisit(input: unknown): Promise<ActionResult<{ id: st
     await notifyUser({
       userId: ownerId,
       type: "VISIT_SCHEDULED",
-      title: "A visit was scheduled for you",
+      title: upperFirst(slot(await getWording(), "A visit was scheduled for you", "visit", "{a} was scheduled for you")),
       message: `${visitPurposeLabels[data.purpose]} at ${company.name}`,
       link: visitPath(visit.visitSeq),
     });

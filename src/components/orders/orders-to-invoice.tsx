@@ -11,6 +11,8 @@ import { companyPath, orderPath } from "@/lib/record-links";
 import { documentPath } from "@/lib/trade-documents";
 import { formatCurrency } from "@/lib/utils";
 import { billingStatusLabels, billingStatusTones, quantityLabel } from "@/lib/orders/billing-rules";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 /**
  * Orders to invoice (owner, 15 Oct 2026): sold and not yet billed in full, grouped by the customer's PO
@@ -19,11 +21,16 @@ import { billingStatusLabels, billingStatusTones, quantityLabel } from "@/lib/or
  */
 export function OrdersToInvoice({ groups, canInvoice }: { groups: ToInvoiceGroup[]; canInvoice: boolean }) {
   const router = useRouter();
+  const wording = useWording();
   const [pending, start] = useTransition();
   const [result, setResult] = useState<{ key: string; ids?: string[]; error?: string } | null>(null);
 
   if (groups.length === 0) {
-    return <Card className="mt-6 px-4 py-10 text-center text-sm text-muted">Nothing waiting to be invoiced — every sold order is billed.</Card>;
+    return (
+      <Card className="mt-6 px-4 py-10 text-center text-sm text-muted">
+        {slot(wording, "Nothing waiting to be invoiced — every sold order is billed.", "order", "Nothing waiting to be invoiced — every sold {one:lower} is billed.")}
+      </Card>
+    );
   }
 
   return (
@@ -38,7 +45,7 @@ export function OrdersToInvoice({ groups, canInvoice }: { groups: ToInvoiceGroup
                 <Link href={companyPath(g.company.companySeq)} className="text-sm font-medium text-text hover:underline">
                   {g.company.name}
                 </Link>
-                <span className="ml-2 text-xs text-muted">{g.po ? `Customer PO ${g.po}` : "No customer PO"}</span>
+                <span className="ml-2 text-xs text-muted">{g.po ? `${slot(wording, "Customer PO", "customer", "{one} PO")} ${g.po}` : slot(wording, "No customer PO", "customer", "No {one:lower} PO")}</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted">{formatCurrency(total)} to bill, before GST</span>

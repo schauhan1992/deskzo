@@ -1,7 +1,7 @@
 "use client";
 
 import { useWording } from "@/components/terms/wording-provider";
-import { statusSlot } from "@/lib/terms/dictionary";
+import { slot, statusSlot } from "@/lib/terms/dictionary";
 import Link from "next/link";
 import type { OrderStatus, OrderBusinessType, CompanyRelationshipType } from "@prisma/client";
 import { orderBusinessTypeLabels } from "@/lib/validation/order";
@@ -108,16 +108,16 @@ export function OrdersTable({
       <table className="w-full text-sm">
         <thead className="border-b border-line bg-surface-sunken text-left text-xs uppercase tracking-wide text-muted">
           <tr>
-            {cols.show("order") && <th className="px-4 py-2.5">Order</th>}
+            {cols.show("order") && <th className="px-4 py-2.5">{slot(wording, "Order", "order", "{one}")}</th>}
             {cols.show("status") && <th className="px-4 py-2.5">Status</th>}
             {stepsOn && cols.show("step") && <th className="px-4 py-2.5">Step</th>}
             {cols.show("type") && <th className="px-4 py-2.5">Type</th>}
-            {cols.show("customer") && <th className="px-4 py-2.5">Customer</th>}
+            {cols.show("customer") && <th className="px-4 py-2.5">{slot(wording, "Customer", "customer", "{one}")}</th>}
             {cols.show("product") && <th className="px-4 py-2.5">Product</th>}
             {cols.show("qty") && <th className="px-4 py-2.5">Qty</th>}
             {cols.show("total") && <th className="px-4 py-2.5">Total</th>}
             {cols.show("invoice") && <th className="px-4 py-2.5">Invoice</th>}
-            {cols.show("vendor") && <th className="px-4 py-2.5">Vendor</th>}
+            {cols.show("vendor") && <th className="px-4 py-2.5">{slot(wording, "Vendor", "vendor", "{one}")}</th>}
             {cols.show("addedBy") && <th className="px-4 py-2.5">Added by</th>}
             {cols.show("actions") && <th className="px-4 py-2.5 text-right">Tell them</th>}
             <CustomFieldHeaderCells columns={fieldColumns} className="px-4 py-2.5" />
@@ -220,7 +220,7 @@ export function OrdersTable({
           {orders.length === 0 && (
             <tr>
               <td colSpan={span} className="px-4 py-8 text-center text-subtle">
-                No orders found.
+                {slot(wording, "No orders found.", "order", "No {many:lower} found.")}
               </td>
             </tr>
           )}

@@ -115,6 +115,8 @@ import { isModuleEntitled } from "@/lib/modules-access";
 import { customerRevenue } from "@/actions/revenue";
 import { CustomerRevenueCard } from "@/components/revenue/customer-revenue-card";
 import { documentWriteKey } from "@/lib/documents/write-permission";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 
 const CLOSED_STATUSES = ["WON", "LOST", "DISQUALIFIED"];
 
@@ -335,6 +337,8 @@ export async function CompanyDetail({
   // Only said to someone who can see the orders — without `orders.view` the list is empty because it
   // was left out, not because there are none.
   const isAwaitingOrder = canSeeOrders && company.stage === "CUSTOMER" && productRows.length === 0;
+  // The workspace's own words (Settings → Wording) for the tabs, headings and buttons below.
+  const w = await getWording();
 
   const tabs = [
     { key: "details", label: "Details" },
@@ -344,18 +348,18 @@ export async function CompanyDetail({
     ...(creditProfile ? [{ key: "credit", label: "Credit" }] : []),
     ...(showStatement ? [{ key: "statement", label: "Statement" }] : []),
     ...(showCommissionTab ? [{ key: "commission", label: "Commission" }] : []),
-    ...(visitsEnabled ? [{ key: "visits", label: "Visits" }] : []),
+    ...(visitsEnabled ? [{ key: "visits", label: slot(w, "Visits", "visit") }] : []),
     ...(calendarEnabled && !isVendor ? [{ key: "meetings", label: "Meetings" }] : []),
     ...(callsEnabled ? [{ key: "calls", label: "Calls" }] : []),
-    ...(!isVendor && canSeeLeads ? [{ key: "leads", label: "Leads" }] : []),
+    ...(!isVendor && canSeeLeads ? [{ key: "leads", label: slot(w, "Leads", "lead") }] : []),
     ...(!isVendor && projectsEnabled ? [{ key: "projects", label: "Projects" }] : []),
-    ...(!isVendor && itemsEnabled && renewalsEnabled ? [{ key: "renewals", label: "Renewals" }] : []),
+    ...(!isVendor && itemsEnabled && renewalsEnabled ? [{ key: "renewals", label: slot(w, "Renewals", "renewal") }] : []),
     { key: "locations", label: "Locations" },
-    ...(canSeeContacts ? [{ key: "contacts", label: "Contacts" }] : []),
+    ...(canSeeContacts ? [{ key: "contacts", label: slot(w, "Contacts", "contact") }] : []),
     ...(showEstateTab ? [{ key: "assets", label: "IT Assets" }] : []),
     ...(feedbackEnabled && !isVendor ? [{ key: "feedback", label: "Feedback" }] : []),
     ...(marketingEnabled && canViewMarketing && !isVendor ? [{ key: "marketing", label: "Marketing" }] : []),
-    ...(helpdeskEnabled ? [{ key: "tickets", label: "Tickets" }] : []),
+    ...(helpdeskEnabled ? [{ key: "tickets", label: slot(w, "Tickets", "ticket") }] : []),
     ...(mailSummary ? [{ key: "emails", label: "Emails" }] : []),
     ...(showFormsTab ? [{ key: "forms", label: "Forms" }] : []),
     ...(tasksEnabled ? [{ key: "tasks", label: "Tasks" }] : []),
@@ -434,7 +438,7 @@ export async function CompanyDetail({
         <div className="rounded-md border border-warning bg-warning-bg px-4 py-3">
           <div className="flex items-center gap-2 text-sm font-medium text-warning">
             <Lock className="h-4 w-4" />
-            Reseller-managed customer — do not contact directly
+            {slot(w, "Reseller-managed customer — do not contact directly", "customer", "Reseller-managed {one:lower} — do not contact directly")}
           </div>
           <p className="mt-1 text-sm text-warning">
             {company.name} is a customer of{" "}
@@ -515,8 +519,8 @@ export async function CompanyDetail({
           {canMerge && (
             <Link
               href={`/companies/merge?keep=${company.id}`}
-              title="Merge a duplicate into this company — this one stays, the duplicate folds into it"
-              aria-label="Merge a duplicate into this company"
+              title={slot(w, "Merge a duplicate into this company — this one stays, the duplicate folds into it", "company", "Merge a duplicate into this {one:lower} — this one stays, the duplicate folds into it")}
+              aria-label={slot(w, "Merge a duplicate into this company", "company", "Merge a duplicate into this {one:lower}")}
               className="inline-grid h-9 w-9 shrink-0 place-items-center rounded-base border border-line-strong bg-surface text-muted shadow-sm transition-colors hover:bg-surface-sunken hover:text-text"
             >
               <Merge className="h-4 w-4" aria-hidden />
@@ -524,7 +528,7 @@ export async function CompanyDetail({
           )}
           {!isVendor && canSeeLeads && (
             <Link href={`/leads/new?companyId=${company.id}`}>
-              <Button>New lead</Button>
+              <Button>{slot(w, "New lead", "lead", "New {one:lower}")}</Button>
             </Link>
           )}
         </div>
@@ -545,7 +549,7 @@ export async function CompanyDetail({
           </Card>
           {canSeeContacts && (
             <Card className="p-4">
-              <div className="text-xs uppercase tracking-wide text-subtle">Contacts</div>
+              <div className="text-xs uppercase tracking-wide text-subtle">{slot(w, "Contacts", "contact")}</div>
               <div className="mt-1 text-xl font-semibold text-text">{company.contacts.length}</div>
             </Card>
           )}
@@ -563,7 +567,7 @@ export async function CompanyDetail({
           {canSeeLeads && (
             <>
               <Card className="p-4">
-                <div className="text-xs uppercase tracking-wide text-subtle">Leads</div>
+                <div className="text-xs uppercase tracking-wide text-subtle">{slot(w, "Leads", "lead")}</div>
                 <div className="mt-1 text-lg font-semibold text-text">{company.leads.length}</div>
                 <div className="mt-0.5 text-xs text-muted">
                   {openLeads.length} open · {wonLeads.length} won · {lostLeads.length} lost
@@ -724,10 +728,10 @@ export async function CompanyDetail({
             {isReseller && (
               <Card>
                 <CardHeader className="flex items-center justify-between text-sm font-medium text-text">
-                  <span>End customers</span>
+                  <span>{slot(w, "End customers", "customer", "End {many:lower}")}</span>
                   <Link href={`/resellers/${company.id}/end-customers/new`}>
                     <Button variant="secondary" size="sm">
-                      + Add end customer
+                      {slot(w, "+ Add end customer", "customer", "+ Add end {one:lower}")}
                     </Button>
                   </Link>
                 </CardHeader>
@@ -737,7 +741,7 @@ export async function CompanyDetail({
                     Companies and Customer lists and excluded from marketing.
                   </p>
                   {endCustomers.length === 0 && (
-                    <p className="text-subtle">No end customers recorded yet.</p>
+                    <p className="text-subtle">{slot(w, "No end customers recorded yet.", "customer", "No end {many:lower} recorded yet.")}</p>
                   )}
                   {endCustomers.map((ec) => (
                     <div key={ec.id} className="flex items-center justify-between border-t border-line pt-2">
@@ -756,7 +760,7 @@ export async function CompanyDetail({
             {isVendor && (
               <Card>
                 <CardHeader className="text-sm font-medium text-text">
-                  {isCommissionParty ? "Commission party details" : "Vendor details"}
+                  {isCommissionParty ? "Commission party details" : slot(w, "Vendor details", "vendor", "{one} details")}
                 </CardHeader>
                 <CardContent className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
                   <div className="flex flex-wrap items-baseline justify-between gap-x-3">
@@ -770,7 +774,7 @@ export async function CompanyDetail({
                     </span>
                   </div>
                   <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                    <span className="text-muted">{isCommissionParty ? "Reference code" : "Vendor code"}</span>
+                    <span className="text-muted">{isCommissionParty ? "Reference code" : slot(w, "Vendor code", "vendor", "{one} code")}</span>
                     <span className="text-text">{company.vendorCode ?? "—"}</span>
                   </div>
                   <div className="flex flex-wrap items-baseline justify-between gap-x-3">
@@ -797,7 +801,7 @@ export async function CompanyDetail({
                     canManage={payouts.canManage}
                     emptyText={
                       payouts.canManage
-                        ? "No bank account yet — add the one this company is paid into."
+                        ? slot(w, "No bank account yet — add the one this company is paid into.", "company", "No bank account yet — add the one this {one:lower} is paid into.")
                         : "No bank account yet. Whoever manages finance records can add one."
                     }
                   />
@@ -807,7 +811,7 @@ export async function CompanyDetail({
 
             {isCommissionParty && commissionsInPlan && (
               <Card>
-                <CardHeader className="text-sm font-medium text-text">Linked companies</CardHeader>
+                <CardHeader className="text-sm font-medium text-text">{slot(w, "Linked companies", "company", "Linked {many:lower}")}</CardHeader>
                 <CardContent>
                   <p className="mb-3 text-xs text-muted">
                     The customer companies this commission party refers business from — commission on their orders gets
@@ -850,14 +854,14 @@ export async function CompanyDetail({
             )}
 
             <Card>
-              <CardHeader className="text-sm font-medium text-text">Company profile</CardHeader>
+              <CardHeader className="text-sm font-medium text-text">{slot(w, "Company profile", "company", "{one} profile")}</CardHeader>
               <CardContent className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                   <span className="text-muted">Industry</span>
                   <span className="text-text">{company.industry?.name ?? "—"}</span>
                 </div>
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                  <span className="text-muted">Company type</span>
+                  <span className="text-muted">{slot(w, "Company type", "company", "{one} type")}</span>
                   <span className="text-text">{company.companyType?.replaceAll("_", " ") ?? "—"}</span>
                 </div>
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3">
@@ -949,7 +953,7 @@ export async function CompanyDetail({
           {activeTab === "products" && itemsEnabled && canSeeOrders && (
             <Card>
               <CardHeader className="text-sm font-medium text-text">
-                {isReseller ? "Orders placed (billed to this reseller)" : "Products & Subscriptions"}
+                {isReseller ? slot(w, "Orders placed (billed to this reseller)", "order", "{many} placed (billed to this reseller)") : "Products & Subscriptions"}
               </CardHeader>
               <CardContent>
                 {managedByReseller && (
@@ -1027,7 +1031,7 @@ export async function CompanyDetail({
                 <CallList
                   calls={companyCalls}
                   showCompany={false}
-                  emptyMessage="Nobody has logged a call to this company yet."
+                  emptyMessage={slot(w, "Nobody has logged a call to this company yet.", "company", "Nobody has logged a call to this {one:lower} yet.")}
                 />
               </CardContent>
             </Card>
@@ -1035,7 +1039,7 @@ export async function CompanyDetail({
 
           {activeTab === "visits" && visitsEnabled && (
             <Card>
-              <CardHeader className="text-sm font-medium text-text">Field visits</CardHeader>
+              <CardHeader className="text-sm font-medium text-text">{slot(w, "Field visits", "visit")}</CardHeader>
               <CardContent>
                 <CompanyVisits companyId={company.id} visits={visits} expenseTotal={visitExpenses?.total ?? 0} />
               </CardContent>
@@ -1061,7 +1065,7 @@ export async function CompanyDetail({
 
           {activeTab === "leads" && canSeeLeads && (
             <Card>
-              <CardHeader className="text-sm font-medium text-text">Leads</CardHeader>
+              <CardHeader className="text-sm font-medium text-text">{slot(w, "Leads", "lead")}</CardHeader>
               <CardContent className="p-0">
                 <table className="w-full text-sm">
                   <thead className="border-b border-line bg-surface-sunken text-left text-xs uppercase tracking-wide text-muted">
@@ -1090,7 +1094,7 @@ export async function CompanyDetail({
                     {company.leads.length === 0 && (
                       <tr>
                         <td colSpan={4} className="px-4 py-6 text-center text-subtle">
-                          No leads yet for this company.
+                          {slot(w, "No leads yet for this company.", "lead", "No {many:lower} yet for this company.")}
                         </td>
                       </tr>
                     )}
@@ -1111,12 +1115,12 @@ export async function CompanyDetail({
 
           {activeTab === "renewals" && itemsEnabled && renewalsEnabled && (
             <Card>
-              <CardHeader className="text-sm font-medium text-text">Renewals</CardHeader>
+              <CardHeader className="text-sm font-medium text-text">{slot(w, "Renewals", "renewal")}</CardHeader>
               <CardContent className="p-0">
                 <table className="w-full text-sm">
                   <thead className="border-b border-line bg-surface-sunken text-left text-xs uppercase tracking-wide text-muted">
                     <tr>
-                      <th className="px-4 py-2.5">Order ID</th>
+                      <th className="px-4 py-2.5">{slot(w, "Order ID", "order", "{one} ID")}</th>
                       <th className="px-4 py-2.5">Subscription</th>
                       <th className="px-4 py-2.5">Qty</th>
                       <th className="px-4 py-2.5">PO / Invoice #</th>
@@ -1201,7 +1205,7 @@ export async function CompanyDetail({
 
           {activeTab === "contacts" && canSeeContacts && (
             <Card>
-              <CardHeader className="text-sm font-medium text-text">Contacts</CardHeader>
+              <CardHeader className="text-sm font-medium text-text">{slot(w, "Contacts", "contact")}</CardHeader>
               <CardContent>
                 <ContactsList
                   companyId={company.id}
@@ -1237,10 +1241,10 @@ export async function CompanyDetail({
           {activeTab === "tickets" && helpdeskEnabled && (
             <Card className="overflow-x-auto p-0">
               <div className="flex items-center justify-between border-b border-line px-5 py-4">
-                <span className="text-sm font-medium text-text">Tickets</span>
+                <span className="text-sm font-medium text-text">{slot(w, "Tickets", "ticket")}</span>
                 {canCreateTickets && (
                   <Link href={`/tickets/new?companyId=${company.id}`}>
-                    <Button size="sm">+ New ticket</Button>
+                    <Button size="sm">{slot(w, "+ New ticket", "ticket", "+ New {one:lower}")}</Button>
                   </Link>
                 )}
               </div>

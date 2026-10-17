@@ -15,6 +15,8 @@ import { AvatarStack } from "@/components/ui/avatar";
 import { useClock } from "@/components/time/clock-provider";
 import { formatCalendarDay } from "@/lib/time/zone";
 import type { LeadBoardExtras } from "@/lib/leads/board-extras";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 const NEEDS_REASON: LeadStatus[] = ["LOST", "DISQUALIFIED"];
 
@@ -70,6 +72,7 @@ export function LeadsBoard({
 }) {
   const router = useRouter();
   const clock = useClock();
+  const w = useWording();
   const today = clock.today();
   const [items, setItems] = useState(leads);
   const [syncedLeads, setSyncedLeads] = useState(leads);
@@ -97,7 +100,7 @@ export function LeadsBoard({
 
     let lostReason: string | undefined;
     if (NEEDS_REASON.includes(target.status)) {
-      const input = window.prompt(`Reason for moving this lead to "${target.label}":`);
+      const input = window.prompt(`${slot(w, "Reason for moving this lead to", "lead", "Reason for moving this {one:lower} to")} "${target.label}":`);
       if (!input) return;
       lostReason = input;
     }
@@ -163,7 +166,7 @@ export function LeadsBoard({
                   </div>
                 ))}
                 {columnLeads.length === 0 && (
-                  <div className="rounded-lg border border-dashed border-line-strong/60 p-3 text-center text-xs text-subtle">Drop a lead here</div>
+                  <div className="rounded-lg border border-dashed border-line-strong/60 p-3 text-center text-xs text-subtle">{slot(w, "Drop a lead here", "lead", "Drop {a} here")}</div>
                 )}
               </div>
             </section>

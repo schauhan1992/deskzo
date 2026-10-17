@@ -18,6 +18,8 @@ import { RenewalProposalButton } from "@/components/renewals/renewal-proposal-bu
 import { RenewalStageCell, type RenewalStageCellData } from "@/components/renewals/renewal-stage-cell";
 import { CallButton } from "@/components/calls/call-button";
 import { useColumns } from "@/components/ui/table-columns";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 type RenewalRow = {
   id: string;
@@ -58,6 +60,8 @@ export function RenewalsTable({
   canSetStage?: boolean;
 }) {
   const cols = useColumns("renewals");
+  // The workspace's own words (Settings → Wording).
+  const wording = useWording();
   const router = useRouter();
   const selection = useRowSelection(renewals);
   const [isPending, startTransition] = useTransition();
@@ -109,7 +113,7 @@ export function RenewalsTable({
           title="Leave blank to use each subscription's own expiry date"
         />
         <Button size="sm" disabled={isPending} onClick={createTasks}>
-          {isPending ? "Creating…" : "Create renewal tasks"}
+          {isPending ? "Creating…" : slot(wording, "Create renewal tasks", "renewal", "Create {one:lower} tasks")}
         </Button>
       </BulkBar>
 
@@ -127,8 +131,8 @@ export function RenewalsTable({
                     />
                   </th>
                 )}
-                {cols.show("orderId") && <th className="px-4 py-2.5">Order ID</th>}
-                {cols.show("company") && <th className="px-4 py-2.5">Company</th>}
+                {cols.show("orderId") && <th className="px-4 py-2.5">{slot(wording, "Order ID", "order", "{one} ID")}</th>}
+                {cols.show("company") && <th className="px-4 py-2.5">{slot(wording, "Company", "company", "{one}")}</th>}
                 {cols.show("subscription") && <th className="px-4 py-2.5">Subscription</th>}
                 {cols.show("qty") && <th className="px-4 py-2.5">Qty</th>}
                 {cols.show("po") && <th className="px-4 py-2.5">PO / Invoice #</th>}

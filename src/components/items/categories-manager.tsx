@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { IconButton, RowActions } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/card";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 export type CategoryRow = { id: string; name: string; items: number };
 
@@ -21,6 +23,8 @@ export type CategoryRow = { id: string; name: string; items: number };
  */
 export function CategoriesManager({ categories, canManage = true }: { categories: CategoryRow[]; canManage?: boolean }) {
   const router = useRouter();
+  // The workspace's own word for an item (Settings → Wording), in the counts.
+  const wording = useWording();
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -98,11 +102,12 @@ export function CategoriesManager({ categories, canManage = true }: { categories
                   {category.items > 0 ? (
                     <Link href={`/items?category=${encodeURIComponent(category.name)}`} className="hover:underline">
                       <Badge>
-                        {category.items} item{category.items === 1 ? "" : "s"}
+                        {category.items}{" "}
+                        {category.items === 1 ? slot(wording, "item", "item", "{one:lower}") : slot(wording, "items", "item", "{many:lower}")}
                       </Badge>
                     </Link>
                   ) : (
-                    <Badge>No items</Badge>
+                    <Badge>{slot(wording, "No items", "item", "No {many:lower}")}</Badge>
                   )}
                 </div>
                 {canManage && (

@@ -18,6 +18,8 @@ import { formatAddress } from "@/lib/document-draft";
 import { approvalDocumentFor, approvalPolicyFor } from "@/lib/documents/approval-policy";
 import { approvalRequirement } from "@/lib/documents/approval";
 import { descriptionStatesPeriod, formatServicePeriod, showsServicePeriod } from "@/lib/documents/service-period";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 
 /**
  * The page that becomes the PDF. It deliberately ignores the app's dark mode and semantic tokens —
@@ -149,6 +151,13 @@ export default async function PrintDocumentPage({
   const showShipping = !document.shippingSameAsBilling && shippingLines.length > 0;
 
   /**
+   * Whom the counterparty box names. "Bill to" and a vendor bill's "Vendor" are a tax document's words
+   * and stay the app's; a purchase order is our own paper, not a tax document, so its vendor is called
+   * what the workspace calls one (Settings → Wording) — "Supplier" for a workspace that says so.
+   */
+  const partyTitle = isSales ? "Bill to" : document.docType === "PURCHASE_ORDER" ? slot(await getWording(), "Vendor", "vendor", "{one}") : "Vendor";
+
+  /**
    * The watermark, where this document has not been signed off.
    *
    * Only for types that actually require approval — a watermark on every draft would be noise, and
@@ -251,7 +260,7 @@ export default async function PrintDocumentPage({
             carry the counterparty, where it ships, and the document's own details. */}
         <div className={`grid border-b border-neutral-300 ${showShipping ? "grid-cols-3" : "grid-cols-2"}`}>
           <Party
-            title={isSales ? "Bill to" : "Vendor"}
+            title={partyTitle}
             party={counterparty}
             className="border-r border-neutral-300"
           />

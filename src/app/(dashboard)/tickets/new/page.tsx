@@ -6,6 +6,8 @@ import { hasEffectivePermission } from "@/actions/permission";
 import { currentUser } from "@/lib/session";
 import { NewTicketForm } from "@/components/tickets/new-ticket-form";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 
 export default async function NewTicketPage({
   searchParams,
@@ -25,11 +27,12 @@ export default async function NewTicketPage({
     listSupportAgents(),
   ]);
   const initialOrders = companyId && itemsEnabled ? await listCompanyOrderOptions(companyId) : [];
+  const w = await getWording();
 
   return (
     <div>
-      <h1 className="text-xl font-semibold text-text">New ticket</h1>
-      <p className="mt-1 text-sm text-muted">Log a support request against a company.</p>
+      <h1 className="text-xl font-semibold text-text">{slot(w, "New ticket", "ticket", "New {one:lower}")}</h1>
+      <p className="mt-1 text-sm text-muted">{slot(w, "Log a support request against a company.", "company", "Log a support request against {a}.")}</p>
       <div className="mt-6">
         <NewTicketForm
           companies={companies}

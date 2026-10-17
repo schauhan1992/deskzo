@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { Prisma, type TicketStatus, type TicketPriority, type TicketType } from "@prisma/client";
 import { db } from "@/lib/db";
+import { getWording } from "@/lib/terms/server";
+import { slot, upperFirst } from "@/lib/terms/dictionary";
 import { CATEGORY_SELECT } from "@/lib/customers/categories";
 import { requireModuleUser } from "@/lib/modules-access";
 import { isModuleEnabled } from "@/actions/module";
@@ -254,7 +256,7 @@ export async function updateTicketStatus(input: unknown): Promise<ActionResult<{
     await notifyUser({
       userId: ticket.assignedToUserId,
       type: "TICKET_STATUS_CHANGED",
-      title: "Your ticket's status changed",
+      title: slot(await getWording(), "Your ticket's status changed", "ticket", "Your {one:lower}'s status changed"),
       message: `${formatTicketId(ticket.ticketSeq)} — now ${status.replaceAll("_", " ")}`,
       link: ticketPath(ticket.ticketSeq),
     });
@@ -316,7 +318,7 @@ export async function assignTicket(input: unknown): Promise<ActionResult<{ id: s
     await notifyUser({
       userId,
       type: "TICKET_ASSIGNED",
-      title: "A ticket was assigned to you",
+      title: upperFirst(slot(await getWording(), "A ticket was assigned to you", "ticket", "{a} was assigned to you")),
       message: `${formatTicketId(ticket.ticketSeq)} — ${ticket.title}`,
       link: ticketPath(ticket.ticketSeq),
     });
@@ -351,7 +353,7 @@ export async function addTicketComment(input: unknown): Promise<ActionResult<{ i
     await notifyUser({
       userId: ticket.assignedToUserId,
       type: "TICKET_COMMENT",
-      title: "New comment on your ticket",
+      title: slot(await getWording(), "New comment on your ticket", "ticket", "New comment on your {one:lower}"),
       message: `${formatTicketId(ticket.ticketSeq)} — ${body}`,
       link: ticketPath(ticket.ticketSeq),
     });

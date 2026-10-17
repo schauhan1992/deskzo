@@ -20,6 +20,8 @@ import { useColumns } from "@/components/ui/table-columns";
 import { LeadScoreBadge } from "@/components/leads/lead-score";
 import { leadSourceLabel } from "@/lib/leads/source";
 import { CustomFieldBodyCells, CustomFieldHeaderCells, type CustomColumn } from "@/components/custom-fields/custom-field-cells";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 type LeadRow = {
   id: string;
@@ -77,6 +79,7 @@ export function LeadsListTable({
   const emptySpan = cols.count + fieldColumns.length + VIEW_COLUMN;
   const router = useRouter();
   const clock = useClock();
+  const w = useWording();
   const selection = useRowSelection(leads);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -155,12 +158,12 @@ export function LeadsListTable({
               <tr>
                 {cols.show("select") && (
                   <th className="w-10 px-4 py-2.5">
-                    <Checkbox checked={selection.allSelected} onChange={selection.toggleAll} aria-label="Select all leads" />
+                    <Checkbox checked={selection.allSelected} onChange={selection.toggleAll} aria-label={slot(w, "Select all leads", "lead", "Select all {many:lower}")} />
                   </th>
                 )}
                 {cols.show("id") && <th className="px-4 py-2.5">ID</th>}
                 {cols.show("title") && <th className="px-4 py-2.5">Title</th>}
-                {cols.show("company") && <th className="px-4 py-2.5">Company</th>}
+                {cols.show("company") && <th className="px-4 py-2.5">{slot(w, "Company", "company", "{one}")}</th>}
                 {cols.show("email") && contactDetails && <th className="px-4 py-2.5">Email</th>}
                 {cols.show("phone") && contactDetails && <th className="px-4 py-2.5">Phone</th>}
                 {cols.show("status") && <th className="px-4 py-2.5">Status</th>}
@@ -258,7 +261,7 @@ export function LeadsListTable({
               {leads.length === 0 && (
                 <tr>
                   <td colSpan={emptySpan} className="px-4 py-8 text-center text-subtle">
-                    No leads yet.
+                    {slot(w, "No leads yet.", "lead", "No {many:lower} yet.")}
                   </td>
                 </tr>
               )}

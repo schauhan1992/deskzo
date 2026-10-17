@@ -9,6 +9,8 @@ import { ActionNotice } from "@/components/ui/action-notice";
 import { CategoryChip, CategoryGlyph } from "@/components/customers/category-chip";
 import type { CategoryTree, CategoryWithParent, FlatCategory } from "@/lib/customers/categories";
 import { cn } from "@/lib/utils";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 /**
  * The customer's category chip, and — for whoever can edit the customer — the way to change it: a
@@ -26,6 +28,7 @@ export function CategoryPicker({
   canEdit: boolean;
 }) {
   const router = useRouter();
+  const w = useWording();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +64,7 @@ export function CategoryPicker({
         </button>
       )}
 
-      <Dialog open={open} onClose={() => setOpen(false)} title="Customer category">
+      <Dialog open={open} onClose={() => setOpen(false)} title={slot(w, "Customer category", "customer", "{one} category")}>
         {categories.length === 0 ? (
           <p className="text-sm text-muted">No categories have been set up yet — somebody who manages them can add some in Settings.</p>
         ) : (

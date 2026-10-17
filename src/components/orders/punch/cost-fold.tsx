@@ -8,6 +8,8 @@ import { formatCurrency } from "@/lib/utils";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { CompanyCombobox } from "@/components/ui/company-combobox";
 import type { ItemComboOption } from "@/components/items/item-combobox";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 import { FieldError, Fold } from "./parts";
 import { usePriceFigures } from "./use-figures";
 import { invalidProps, type PunchErrors, type PunchForm, type VendorOption } from "./types";
@@ -67,6 +69,7 @@ export function CostFold({
   // Today on the workspace's calendar — the same today the server checks "not in the future" against.
   const clock = useClock();
   const today = clock.today();
+  const wording = useWording();
 
   const vendorName = quoteVendorId ? vendors.find((v) => v.id === quoteVendorId)?.name : quoteVendorName?.trim();
   const summary = [
@@ -124,7 +127,7 @@ export function CostFold({
                     field.onChange(vendor?.id ?? "");
                     if (vendor) setValue("quoteVendorName", "");
                   }}
-                  placeholder="Search vendors…"
+                  placeholder={slot(wording, "Search vendors…", "vendor", "Search {many:lower}…")}
                 />
               )}
             />

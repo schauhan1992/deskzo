@@ -12,6 +12,8 @@ import { Input, Label, Textarea } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { formatOrderId } from "@/lib/order-id";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 type Loaded = NonNullable<Awaited<ReturnType<typeof renewalDraft>>>;
 
@@ -24,6 +26,11 @@ type Loaded = NonNullable<Awaited<ReturnType<typeof renewalDraft>>>;
  */
 export function RenewButton({ companyProductId }: { companyProductId: string }) {
   const router = useRouter();
+  // The workspace's own words (Settings → Wording).
+  const wording = useWording();
+  const punchLabel = slot(wording, "Punch the renewal order", "order", "Punch the renewal {one:lower}");
+  const openOrders = slot(wording, "Open orders", "order", "Open {many:lower}");
+  const punchRenewal = slot(wording, "Punch renewal", "renewal", "Punch {one:lower}");
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [loaded, setLoaded] = useState<{ id: string; data: Loaded } | null>(null);
@@ -70,8 +77,8 @@ export function RenewButton({ companyProductId }: { companyProductId: string }) 
       <button
         type="button"
         onClick={() => setOpen(true)}
-        title="Punch the renewal order"
-        aria-label="Punch the renewal order"
+        title={punchLabel}
+        aria-label={punchLabel}
         className="rounded p-1 text-subtle hover:bg-surface-sunken hover:text-brand"
       >
         <RefreshCw className="h-4 w-4" />
@@ -89,14 +96,14 @@ export function RenewButton({ companyProductId }: { companyProductId: string }) 
               much as on a new one.
             </p>
             <div className="flex gap-2">
-              <Button onClick={() => router.push("/orders")}>Open orders</Button>
+              <Button onClick={() => router.push("/orders")}>{openOrders}</Button>
               <Button variant="secondary" onClick={close}>
                 Done
               </Button>
             </div>
           </div>
         ) : !data ? (
-          <p className="py-6 text-sm text-subtle">Working out the renewal…</p>
+          <p className="py-6 text-sm text-subtle">{slot(wording, "Working out the renewal…", "renewal", "Working out the {one:lower}…")}</p>
         ) : data.alreadyRenewed ? (
           <div className="space-y-4">
             <p className="text-sm text-text">
@@ -109,7 +116,7 @@ export function RenewButton({ companyProductId }: { companyProductId: string }) 
               was wrong.
             </p>
             <div className="flex gap-2">
-              <Button onClick={() => router.push("/orders")}>Open orders</Button>
+              <Button onClick={() => router.push("/orders")}>{openOrders}</Button>
               <Button variant="secondary" onClick={close}>
                 Close
               </Button>
@@ -175,7 +182,7 @@ export function RenewButton({ companyProductId }: { companyProductId: string }) 
             {value > 0 && (
               <Card className="px-3 py-2.5">
                 <div className="flex items-baseline justify-between gap-3">
-                  <span className="text-sm text-muted">Order value</span>
+                  <span className="text-sm text-muted">{slot(wording, "Order value", "order", "{one} value")}</span>
                   <span className="text-lg font-semibold tabular-nums text-text">{formatCurrency(value)}</span>
                 </div>
               </Card>
@@ -224,7 +231,7 @@ export function RenewButton({ companyProductId }: { companyProductId: string }) 
                   });
                 }}
               >
-                {pending ? "Punching…" : value > 0 ? `Punch renewal — ${formatCurrency(value)}` : "Punch renewal"}
+                {pending ? "Punching…" : value > 0 ? `${punchRenewal} — ${formatCurrency(value)}` : punchRenewal}
               </Button>
               <Button variant="secondary" onClick={close}>
                 Cancel

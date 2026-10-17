@@ -1,5 +1,7 @@
 import type { SupportEmailState } from "@prisma/client";
 import { db } from "@/lib/db";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 import { STILL_THERE } from "@/lib/contacts/left";
 import { recordAudit } from "@/lib/audit";
 import { automationUserId } from "@/lib/automation-user";
@@ -142,7 +144,7 @@ export async function receiveEmail(mail: IncomingEmail, now = new Date()): Promi
       data: reopens ? { status: "OPEN", resolvedAt: null, closedAt: null } : { updatedAt: now },
     });
     const who = ticket.assignedToUserId ? [ticket.assignedToUserId] : await supportTeam();
-    await tell(who, `${base.fromName ?? sender} replied on ${ref}`, reopens ? `${base.subject} — the ticket is open again` : base.subject, ticketPath(ticket.ticketSeq));
+    await tell(who, `${base.fromName ?? sender} replied on ${ref}`, reopens ? `${base.subject} — ${slot(await getWording(), "the ticket is open again", "ticket", "the {one:lower} is open again")}` : base.subject, ticketPath(ticket.ticketSeq));
     return { state: "REPLY", emailId, ticketSeq: ticket.ticketSeq };
   }
 
@@ -220,7 +222,7 @@ export async function receiveEmail(mail: IncomingEmail, now = new Date()): Promi
   }
   await tell(
     agent ? [agent.id] : await supportTeam(),
-    `New ticket by email: ${ref}`,
+    `${slot(await getWording(), "New ticket by email", "ticket", "New {one:lower} by email")}: ${ref}`,
     `${base.fromName ?? sender}: ${made.title}${place.companyName ? ` — filed under ${place.companyName} by their email's domain` : ""}`,
     ticketPath(made.ticketSeq),
   );

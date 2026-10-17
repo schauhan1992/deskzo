@@ -51,12 +51,14 @@ export default async function RenewalsPage({
   const expiredCount = result.expired;
 
   const selectedRenewal = selected ? renewals.find((r) => r.id === selected) ?? null : null;
+  // The workspace's own words (Settings → Wording).
+  const wording = await getWording();
 
   return (
     <SplitListPage active={viewMode === "split"}>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-text">{slot(await getWording(), "Renewals", "renewal")}</h1>
+          <h1 className="text-xl font-semibold text-text">{slot(wording, "Renewals", "renewal")}</h1>
           <p className="mt-1 text-sm text-muted">
             {result.total} subscription(s) with an expiry date{expiredCount > 0 && ` · ${expiredCount} expired`}
           </p>
@@ -65,7 +67,7 @@ export default async function RenewalsPage({
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <SearchParamInput paramName="q" placeholder="Search company name…" />
+        <SearchParamInput paramName="q" placeholder={slot(wording, "Search company name…", "company", "Search {one:lower} name…")} />
         <SelectParamFilter
           paramName="window"
           label="Window"
@@ -93,7 +95,7 @@ export default async function RenewalsPage({
                   <span className="text-xs text-subtle">
                     {selectedRenewal.company.owner?.name
                       ? `Account manager: ${selectedRenewal.company.owner.name}`
-                      : "No account manager on this company"}
+                      : slot(wording, "No account manager on this company", "company", "No account manager on this {one:lower}")}
                   </span>
                   <div className="flex items-center gap-1">
                     <CallButton

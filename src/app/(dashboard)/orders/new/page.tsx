@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 import { listCompanyOptions, listAssignableUsers, listCommissionPartyOptions, listVendorOptions } from "@/actions/company";
 import { listItemOptions } from "@/actions/item";
 import { punchCustomerContext } from "@/actions/order-punch";
@@ -102,16 +104,18 @@ export default async function NewOrderPage({
   const companies =
     prefill && !sentCustomers.some((c) => c.id === prefill.option.id) ? [prefill.option, ...sentCustomers] : sentCustomers;
   const itemSearch = itemRows.length > ITEMS_SENT;
+  // The workspace's own word for an order (Settings → Wording).
+  const wording = await getWording();
 
   return (
     <div>
       <div className="mb-5">
         <Link href="/orders" className="text-sm text-muted hover:text-text">
-          ← Orders
+          {slot(wording, "← Orders", "order", "← {many}")}
         </Link>
-        <h1 className="mt-1 text-xl font-semibold text-text">Punch order</h1>
+        <h1 className="mt-1 text-xl font-semibold text-text">{slot(wording, "Punch order", "order", "Punch {one:lower}")}</h1>
         <p className="mt-1 text-sm text-muted">
-          Log an order you received — Accounts approves its payment terms, then it goes to Purchasing.
+          {slot(wording, "Log an order you received — Accounts approves its payment terms, then it goes to Purchasing.", "order", "Log {a} you received — Accounts approves its payment terms, then it goes to Purchasing.")}
         </p>
       </div>
       <NewOrderForm

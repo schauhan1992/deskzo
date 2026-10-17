@@ -21,6 +21,8 @@ import { Dialog } from "@/components/ui/dialog";
 import { ItemCombobox } from "@/components/items/item-combobox";
 import { formatCurrency } from "@/lib/utils";
 import { formatCalendarDay } from "@/lib/time/zone";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 type ItemOption = { id: string; name: string; sku: string; type: string; unit: string | null; sellingPrice: unknown };
 
@@ -47,6 +49,7 @@ type EditFormValues = z.input<typeof updateLeadRequirementSchema>;
 
 function EditRequirementForm({ requirement, onClose }: { requirement: Requirement; onClose: () => void }) {
   const router = useRouter();
+  const w = useWording();
   const [serverError, setServerError] = useState<string | null>(null);
   const {
     register,
@@ -91,7 +94,7 @@ function EditRequirementForm({ requirement, onClose }: { requirement: Requiremen
           {...register("quantity")}
         />
         <Input
-          aria-label={`Renewal date for ${requirement.item.name}`}
+          aria-label={`${slot(w, "Renewal date", "renewal", "{one} date")} for ${requirement.item.name}`}
           type="date"
           className="w-44"
           {...register("renewalDate")}
@@ -126,6 +129,7 @@ export function RequirementsList({
   canDelete: boolean;
 }) {
   const router = useRouter();
+  const w = useWording();
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Requirement | null>(null);
@@ -230,7 +234,7 @@ export function RequirementsList({
           {errors.itemId && <p className="text-xs text-danger">{errors.itemId.message}</p>}
           <div className="flex gap-2">
             <Input aria-label="Quantity" type="number" min={1} placeholder="Qty" className="w-24" {...register("quantity")} />
-            <Input aria-label="Renewal date" type="date" className="w-44" {...register("renewalDate")} />
+            <Input aria-label={slot(w, "Renewal date", "renewal", "{one} date")} type="date" className="w-44" {...register("renewalDate")} />
           </div>
           <Input aria-label="Remarks" placeholder={REMARKS_HINT} {...register("notes")} />
           {errors.renewalDate && <p className="text-xs text-danger">{errors.renewalDate.message}</p>}
@@ -247,8 +251,8 @@ export function RequirementsList({
 
       <Dialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="Remove product">
         <p className="text-sm text-muted">
-          Remove <span className="font-medium text-text">{deleteTarget?.item.name}</span> from this lead&apos;s
-          requirements? This can&apos;t be undone.
+          Remove <span className="font-medium text-text">{deleteTarget?.item.name}</span>{" "}
+          {slot(w, "from this lead's requirements?", "lead", "from this {one:lower}'s requirements?")} This can&apos;t be undone.
         </p>
         <div className="mt-4 flex justify-end gap-2">
           <Button type="button" variant="ghost" size="sm" onClick={() => setDeleteTarget(null)} disabled={isPending}>

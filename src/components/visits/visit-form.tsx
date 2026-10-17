@@ -9,6 +9,8 @@ import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { visitPurposeValues, visitPurposeLabels } from "@/lib/visits";
 import { visitPath } from "@/lib/record-links";
 import { CompanyCombobox } from "@/components/ui/company-combobox";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 type Company = { id: string; name: string };
 type Options = Awaited<ReturnType<typeof visitFormOptions>>;
@@ -43,6 +45,7 @@ export function VisitForm({
   defaults: VisitFormDefaults;
 }) {
   const router = useRouter();
+  const w = useWording();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -119,7 +122,7 @@ export function VisitForm({
         <CardHeader className="text-sm font-medium text-text">Who and where</CardHeader>
         <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <div className="space-y-1.5">
-            <Label htmlFor="companyId">Company</Label>
+            <Label htmlFor="companyId">{slot(w, "Company", "company", "{one}")}</Label>
             <CompanyCombobox
               id="companyId"
               companies={companies}
@@ -210,7 +213,7 @@ export function VisitForm({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="leadId">Against lead</Label>
+            <Label htmlFor="leadId">{slot(w, "Against lead", "lead", "Against {one:lower}")}</Label>
             <Select id="leadId" value={leadId} onChange={(e) => setLeadId(e.target.value)}>
               <option value="">Not deal-specific</option>
               {options.leads.map((l) => (
@@ -232,7 +235,7 @@ export function VisitForm({
               onChange={(e) => setDistanceKm(e.target.value)}
               placeholder="Round trip"
             />
-            <p className="text-xs text-subtle">For the mileage claim — raise it as an expense after the visit.</p>
+            <p className="text-xs text-subtle">{slot(w, "For the mileage claim — raise it as an expense after the visit.", "visit", "For the mileage claim — raise it as an expense after the {one:lower}.")}</p>
           </div>
 
           <div className="space-y-1.5 sm:col-span-2 lg:col-span-3">
@@ -254,7 +257,7 @@ export function VisitForm({
 
       <div className="flex items-center gap-3">
         <Button type="submit" disabled={pending || !companyId}>
-          {pending ? "Saving…" : defaults.id ? "Save changes" : "Plan visit"}
+          {pending ? "Saving…" : defaults.id ? "Save changes" : slot(w, "Plan visit", "visit", "Plan {one:lower}")}
         </Button>
         <Button type="button" variant="secondary" onClick={() => router.push(defaults.visitSeq ? visitPath(defaults.visitSeq) : "/visits")}>
           Cancel

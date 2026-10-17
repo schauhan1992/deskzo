@@ -25,6 +25,8 @@ import { workspaceClock } from "@/lib/time/workspace";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { companyPath, expensePath, leadPath } from "@/lib/record-links";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 
 export default async function VisitDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   if (!(await isModuleEnabled("visits"))) return <ModuleDisabledNotice moduleKey="visits" />;
@@ -42,7 +44,7 @@ export default async function VisitDetailPage({ params, searchParams }: { params
       ? ((await db.visit.findUnique({ where: { visitSeq: ref.seq }, select: { id: true } }))?.id ?? id)
       : ref.id;
 
-  const [visit, session, clock] = await Promise.all([getVisit(resolved), auth(), workspaceClock()]);
+  const [visit, session, clock, w] = await Promise.all([getVisit(resolved), auth(), workspaceClock(), getWording()]);
   if (!visit) notFound();
   /** When it was planned, arrived and left — on the workspace's clock, whatever zone the server renders in. */
   const stamp = (value: Date | string | null) => clock.dateTime(value);
@@ -63,7 +65,7 @@ export default async function VisitDetailPage({ params, searchParams }: { params
   return (
     <div className="animate-fade-rise">
       <Link href="/visits" className="text-sm text-muted hover:text-text">
-        ← Field visits
+        ← {slot(w, "Field visits", "visit")}
       </Link>
 
       <div className="mt-2 flex flex-wrap items-start justify-between gap-4">
@@ -95,14 +97,14 @@ export default async function VisitDetailPage({ params, searchParams }: { params
             distanceKm={visit.distanceKm !== null ? String(visit.distanceKm) : ""}
             canEdit={canEdit}
           />
-          {!canEdit && <p className="text-sm text-subtle">You can see this visit but it isn&apos;t yours to change.</p>}
+          {!canEdit && <p className="text-sm text-subtle">{slot(w, "You can see this visit but it isn't yours to change.", "visit", "You can see this {one:lower} but it isn't yours to change.")}</p>}
         </CardContent>
       </Card>
 
       <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-3">
         <div className="space-y-5 lg:col-span-2">
           <Card>
-            <CardHeader className="text-sm font-medium text-text">Visit</CardHeader>
+            <CardHeader className="text-sm font-medium text-text">{slot(w, "Visit", "visit", "{one}")}</CardHeader>
             <CardContent className="space-y-3 text-sm">
               <Field label="Agenda" value={visit.agenda} />
               <Field label="Outcome" value={visit.outcome} placeholder="Not written up yet." />
@@ -117,7 +119,7 @@ export default async function VisitDetailPage({ params, searchParams }: { params
             <CardContent className={visit.expenses.length === 0 ? undefined : "p-0"}>
               {visit.expenses.length === 0 ? (
                 <p className="text-sm text-subtle">
-                  Nothing claimed against this visit yet. Travel, fuel, tolls and client meals all belong here.
+                  {slot(w, "Nothing claimed against this visit yet.", "visit", "Nothing claimed against this {one:lower} yet.")} Travel, fuel, tolls and client meals all belong here.
                 </p>
               ) : (
                 <table className="w-full text-sm">
@@ -184,7 +186,7 @@ export default async function VisitDetailPage({ params, searchParams }: { params
 
           {visit.contact && (
             <Card>
-              <CardHeader className="text-sm font-medium text-text">Contact</CardHeader>
+              <CardHeader className="text-sm font-medium text-text">{slot(w, "Contact", "contact", "{one}")}</CardHeader>
               <CardContent className="space-y-2 text-sm">
                 <Row label="Name" value={visit.contact.name} />
                 <div className="flex items-start justify-between gap-3 text-muted">
@@ -198,7 +200,7 @@ export default async function VisitDetailPage({ params, searchParams }: { params
 
           {visit.lead && (
             <Card>
-              <CardHeader className="text-sm font-medium text-text">Against lead</CardHeader>
+              <CardHeader className="text-sm font-medium text-text">{slot(w, "Against lead", "lead", "Against {one:lower}")}</CardHeader>
               <CardContent className="text-sm">
                 <Link href={leadPath(visit.lead.leadSeq)} className="text-text hover:underline">
                   {visit.lead.title}

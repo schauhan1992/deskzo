@@ -7,6 +7,8 @@ import { ModuleDisabledNotice } from "@/components/settings/module-disabled-noti
 import { VisitForm } from "@/components/visits/visit-form";
 import { workspaceClock } from "@/lib/time/workspace";
 import type { Clock } from "@/lib/time/zone";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 
 /**
  * "now, rounded to the next half hour" on the workspace's clock — a sensible default for a visit you're
@@ -27,21 +29,22 @@ export default async function NewVisitPage({
   const enabled = await isModuleEnabled("visits");
   if (!enabled) return <ModuleDisabledNotice moduleKey="visits" />;
 
-  const [params, session, companies, assignees, clock] = await Promise.all([
+  const [params, session, companies, assignees, clock, w] = await Promise.all([
     searchParams,
     auth(),
     listCompanyOptions(),
     listVisitAssignees(),
     workspaceClock(),
+    getWording(),
   ]);
 
   return (
     <div>
       <div className="mb-5">
         <Link href="/visits" className="text-sm text-muted hover:text-text">
-          ← Field visits
+          ← {slot(w, "Field visits", "visit")}
         </Link>
-        <h1 className="mt-1 text-xl font-semibold text-text">Plan a visit</h1>
+        <h1 className="mt-1 text-xl font-semibold text-text">{slot(w, "Plan a visit", "visit", "Plan {a}")}</h1>
         <p className="mt-1 text-sm text-muted">
           Check in when you arrive, write up the outcome afterwards, and claim the travel against it.
         </p>

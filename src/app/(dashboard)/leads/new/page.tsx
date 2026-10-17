@@ -9,6 +9,8 @@ import { NewLeadForm } from "@/components/leads/new-lead-form";
 import { formSetup } from "@/lib/custom-fields/server";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { activePipelines } from "@/lib/pipeline/server";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 
 export default async function NewLeadPage({
   searchParams,
@@ -38,12 +40,14 @@ export default async function NewLeadPage({
     activePipelines(),
   ]);
   const startIn = pipelines.find((p) => p.key === pipeline) ?? pipelines[0];
+  // The workspace's own words (Settings → Wording, src/lib/terms).
+  const w = await getWording();
 
   return (
     <div>
-      <h1 className="text-xl font-semibold text-text">New lead</h1>
+      <h1 className="text-xl font-semibold text-text">{slot(w, "New lead", "lead", "New {one:lower}")}</h1>
       <p className="mt-1 text-sm text-muted">
-        Log a confirmed requirement against a company — this starts the sales pipeline.
+        {slot(w, "Log a confirmed requirement against a company — this starts the sales pipeline.", "company", "Log a confirmed requirement against {a} — this starts the sales pipeline.")}
       </p>
       <div className="mt-6">
         <NewLeadForm

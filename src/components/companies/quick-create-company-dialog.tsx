@@ -25,6 +25,8 @@ import {
 } from "@/components/custom-fields/custom-field-inputs";
 import type { CustomFieldDef } from "@/lib/custom-fields/rules";
 import { DesignationInput } from "@/components/contacts/designation-input";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 /** The workspace's required company fields — the only ones a quick create asks for. */
 type RequiredFields = { fields: CustomFieldDef[]; values: CustomFieldFormValues; people: CustomFieldPerson[] };
@@ -57,6 +59,7 @@ export function QuickCreateCompanyDialog({
   onClose: () => void;
   onCreated: (company: QuickCreatedCompany) => void;
 }) {
+  const w = useWording();
   const [serverError, setServerError] = useState<string | null>(null);
   const [wasOpen, setWasOpen] = useState(open);
   /**
@@ -133,7 +136,7 @@ export function QuickCreateCompanyDialog({
     // An email or phone with nobody to attach it to is a contact half-entered, not a choice to skip
     // one — dropping it silently would lose exactly what somebody just typed.
     if (!named && (contact.email.trim() || contact.phone.trim())) {
-      setServerError("Add the contact's name, or clear their email and phone.");
+      setServerError(slot(w, "Add the contact's name, or clear their email and phone.", "contact", "Add the {one:lower}'s name, or clear their email and phone."));
       return;
     }
     const result = await createCompany({
@@ -152,12 +155,12 @@ export function QuickCreateCompanyDialog({
   }
 
   return (
-    <Dialog open={open} onClose={onClose} title="Create new company">
+    <Dialog open={open} onClose={onClose} title={slot(w, "Create new company", "company", "Create new {one:lower}")}>
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
         {serverError && <p className="rounded-md bg-danger-bg px-3 py-2 text-sm text-danger">{serverError}</p>}
 
         <div className="space-y-1.5">
-          <Label htmlFor="qc-name">Company name *</Label>
+          <Label htmlFor="qc-name">{slot(w, "Company name *", "company", "{one} name *")}</Label>
           <Input id="qc-name" {...register("name")} />
           {errors.name && <p className="text-xs text-danger">{errors.name.message}</p>}
           {/* The picker that opened this only knows this person's accounts. The same name held by
@@ -260,7 +263,7 @@ export function QuickCreateCompanyDialog({
             Cancel
           </Button>
           <Button type="submit" size="sm" disabled={isSubmitting}>
-            {isSubmitting ? "Creating…" : "Create company"}
+            {isSubmitting ? "Creating…" : slot(w, "Create company", "company", "Create {one:lower}")}
           </Button>
         </div>
       </form>

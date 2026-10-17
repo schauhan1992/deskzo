@@ -12,6 +12,8 @@ import { CategoryChip, CategoryGlyph } from "@/components/customers/category-chi
 import { CATEGORY_COLORS, CATEGORY_ICONS } from "@/lib/customers/category-icons";
 import { MAX_CATEGORY_GUIDANCE, MAX_CATEGORY_NAME, type CategoryTree } from "@/lib/customers/categories";
 import { cn } from "@/lib/utils";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 type Draft = { id?: string; parentId: string | null; name: string; icon: string | null; color: string | null; guidance: string };
 type Notice = { tone: "success" | "error"; text: string } | null;
@@ -135,6 +137,7 @@ function Row({
   onMove: (direction: "up" | "down") => void;
   onDelete: () => void;
 }) {
+  const w = useWording();
   const color = node.color ?? parent?.color ?? "#64748b";
   return (
     <div className={cn("flex items-start gap-3", parent ? "rounded-lg px-2 py-2 hover:bg-surface" : "px-3 py-3")}>
@@ -145,7 +148,7 @@ function Row({
         <div className="flex flex-wrap items-baseline gap-x-2">
           <span className={cn("text-text", parent ? "text-sm" : "text-sm font-semibold")}>{node.name}</span>
           <span className="text-xs text-subtle">
-            {count} customer{count === 1 ? "" : "s"}
+            {count} {count === 1 ? slot(w, "customer", "customer", "{one:lower}") : slot(w, "customers", "customer", "{many:lower}")}
           </span>
         </div>
         {node.guidance ? <p className="mt-0.5 text-xs text-muted">{node.guidance}</p> : <p className="mt-0.5 text-xs italic text-subtle">No handling note.</p>}
@@ -196,6 +199,7 @@ function Editor({
   onClose: () => void;
   onSave: (d: Draft) => void;
 }) {
+  const w = useWording();
   const [d, setD] = useState(draft);
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setD((v) => ({ ...v, [key]: value }));
   const isSub = !!d.parentId;
@@ -218,7 +222,7 @@ function Editor({
         }}
       >
         <div className="flex items-center gap-2 rounded-lg bg-surface-sunken px-3 py-2">
-          <span className="text-xs text-muted">Beside a customer&apos;s name:</span>
+          <span className="text-xs text-muted">{slot(w, "Beside a customer's name:", "customer", "Beside {a}'s name:")}</span>
           <CategoryChip category={preview} size="md" />
         </div>
 
@@ -294,7 +298,7 @@ function Editor({
             onChange={(e) => set("guidance", e.target.value)}
             placeholder={isSub ? "What is true of these on top of the category's note — e.g. reply within four hours." : "e.g. Our most important accounts. Every quote is checked before it goes."}
           />
-          <p className="text-xs text-subtle">Shown under the customer&apos;s name on their page{isSub ? `, after ${parent?.name ?? "the category"}'s note` : ""}.</p>
+          <p className="text-xs text-subtle">{slot(w, "Shown under the customer's name on their page", "customer", "Shown under the {one:lower}'s name on their page")}{isSub ? `, after ${parent?.name ?? "the category"}'s note` : ""}.</p>
         </div>
 
         <div className="flex justify-end gap-2">

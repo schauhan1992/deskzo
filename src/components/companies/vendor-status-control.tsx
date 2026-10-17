@@ -6,9 +6,12 @@ import type { VendorStatus } from "@prisma/client";
 import { setVendorStatus } from "@/actions/company";
 import { vendorStatusValues, vendorStatusLabels } from "@/lib/validation/company";
 import { Select } from "@/components/ui/input";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 export function VendorStatusControl({ companyId, status }: { companyId: string; status: VendorStatus }) {
   const router = useRouter();
+  const w = useWording();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -27,7 +30,7 @@ export function VendorStatusControl({ companyId, status }: { companyId: string; 
   return (
     <div>
       <Select
-        aria-label="Vendor status"
+        aria-label={slot(w, "Vendor status", "vendor", "{one} status")}
         value={status}
         disabled={isPending}
         onChange={(e) => handleChange(e.target.value as VendorStatus)}

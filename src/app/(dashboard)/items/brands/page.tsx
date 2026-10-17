@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 import { isModuleEnabled } from "@/actions/module";
 import { listBrandsPaged } from "@/actions/brand";
 import { viewerHas } from "@/actions/permission";
@@ -29,12 +31,12 @@ export default async function BrandsPage({
   const page = resolvePage(params.page);
   const pageSize = resolvePageSize(params.pageSize);
   const q = params.q?.trim() || undefined;
-  const [result, canManage] = await Promise.all([listBrandsPaged({ q, page, pageSize }), viewerHas("catalog.manage")]);
+  const [result, canManage, wording] = await Promise.all([listBrandsPaged({ q, page, pageSize }), viewerHas("catalog.manage"), getWording()]);
 
   return (
     <div>
       <Link href="/items" className="text-sm text-muted hover:text-text">
-        ← Items &amp; Inventory
+        {slot(wording, "← Items & Inventory", "item", "← {many} & Inventory")}
       </Link>
       <div className="mt-1">
         <h1 className="text-xl font-semibold text-text">Brands &amp; product families</h1>

@@ -1,5 +1,5 @@
 import { getWording } from "@/lib/terms/server";
-import { statusSlot } from "@/lib/terms/dictionary";
+import { slot, statusSlot } from "@/lib/terms/dictionary";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getOrder, updateOrderCustomFields } from "@/actions/order";
@@ -176,6 +176,8 @@ export async function OrderDetail({
   // ── The hand-off to purchase, the distributor price, and any price waiting for sales ──────────────
   const now = new Date();
   const clock = await workspaceClock();
+  // The workspace's own words and status names (Settings → Wording).
+  const wording = await getWording();
   const closed = order.orderStatus === "CANCELLED" || order.orderStatus === "REJECTED" || order.orderStatus === "FULFILLED";
   const handoffNote = closed ? null : handoffBadge(order, clock, now);
   /** The salesperson who punched it, or an approver: who decides when it goes and what it may cost. */
@@ -253,7 +255,7 @@ export async function OrderDetail({
     <div className="@container space-y-6">
       {viaReseller && (
         <div className="rounded-md border border-info bg-info-bg px-4 py-3 text-sm text-info">
-          <span className="font-medium">Reseller order.</span> Placed by{" "}
+          <span className="font-medium">{slot(wording, "Reseller order.", "order", "Reseller {one:lower}.")}</span> Placed by{" "}
           <Link href={companyPath(order.company.companySeq)} className="font-medium underline">
             {order.company.name}
           </Link>
@@ -278,7 +280,7 @@ export async function OrderDetail({
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
             <h1 className="text-xl font-semibold text-text">{formatOrderId(order.orderSeq)}</h1>
             {viaReseller && <Badge tone="blue">Via reseller</Badge>}
-            <Badge tone={ORDER_STATUS_TONE[order.orderStatus]}>{statusSlot(await getWording(), order.orderStatus, order.orderStatus.replaceAll("_", " "))}</Badge>
+            <Badge tone={ORDER_STATUS_TONE[order.orderStatus]}>{statusSlot(wording, order.orderStatus, order.orderStatus.replaceAll("_", " "))}</Badge>
             <Badge tone={BUSINESS_TYPE_TONE[order.businessType]}>{orderBusinessTypeLabels[order.businessType]}</Badge>
             {handoffNote && <Badge tone="amber">{handoffNote}</Badge>}
             {pending && <Badge tone="amber">Waiting for sales approval</Badge>}
@@ -301,19 +303,19 @@ export async function OrderDetail({
             row of buttons that can't shrink would widen the column past the page. */}
         <div className="min-w-0 space-y-6 @3xl:col-span-2">
           <Card>
-            <CardHeader className="text-sm font-medium text-text">Order details</CardHeader>
+            <CardHeader className="text-sm font-medium text-text">{slot(wording, "Order details", "order", "{one} details")}</CardHeader>
             <CardContent className="grid grid-cols-1 gap-x-6 gap-y-2 @lg:grid-cols-2 text-sm">
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                 <span className="text-muted">Location</span>
                 <span className="text-text">{order.location.label}</span>
               </div>
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                <span className="text-muted">Customer PO / invoice #</span>
+                <span className="text-muted">{slot(wording, "Customer PO / invoice #", "customer", "{one} PO / invoice #")}</span>
                 <span className="text-text">{order.poNumber ?? "—"}</span>
               </div>
               {viaReseller && (
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                  <span className="text-muted">End customer</span>
+                  <span className="text-muted">{slot(wording, "End customer", "customer", "End {one:lower}")}</span>
                   <span className="text-text">
                     {order.endCustomer ? (
                       <Link href={companyPath(order.endCustomer.companySeq)} className="hover:underline">
@@ -385,10 +387,10 @@ export async function OrderDetail({
           />
 
           <Card>
-            <CardHeader className="text-sm font-medium text-text">Vendor & purchasing</CardHeader>
+            <CardHeader className="text-sm font-medium text-text">{slot(wording, "Vendor & purchasing", "vendor", "{one} & purchasing")}</CardHeader>
             <CardContent className="grid grid-cols-1 gap-x-6 gap-y-2 @lg:grid-cols-2 text-sm">
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                <span className="text-muted">Vendor</span>
+                <span className="text-muted">{slot(wording, "Vendor", "vendor", "{one}")}</span>
                 <span className="text-text">
                   {order.vendor ? (
                     <Link href={companyPath(order.vendor.companySeq)} className="hover:underline">
@@ -400,7 +402,7 @@ export async function OrderDetail({
                 </span>
               </div>
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                <span className="text-muted">Our PO to vendor</span>
+                <span className="text-muted">{slot(wording, "Our PO to vendor", "vendor", "Our PO to {one:lower}")}</span>
                 <span className="text-text">{order.ourPoNumber ?? "—"}</span>
               </div>
               <div className="flex flex-wrap items-baseline justify-between gap-x-3">
@@ -445,7 +447,7 @@ export async function OrderDetail({
             <CardContent className="space-y-2 text-sm">
               {quotePrice === null ? (
                 <p className="text-subtle">
-                  No price from sales. Purchase buys as usual, and no saving is recorded against this order.
+                  {slot(wording, "No price from sales. Purchase buys as usual, and no saving is recorded against this order.", "order", "No price from sales. Purchase buys as usual, and no saving is recorded against this {one:lower}.")}
                 </p>
               ) : (
                 <>
@@ -501,7 +503,7 @@ export async function OrderDetail({
                   </span>
                 </div>
               )}
-              {saving?.cancelledAt && <p className="text-xs text-subtle">The order was cancelled, so this doesn&apos;t count.</p>}
+              {saving?.cancelledAt && <p className="text-xs text-subtle">{slot(wording, "The order was cancelled, so this doesn't count.", "order", "The {one:lower} was cancelled, so this doesn't count.")}</p>}
             </CardContent>
           </Card>
 

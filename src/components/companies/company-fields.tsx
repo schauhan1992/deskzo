@@ -1,3 +1,5 @@
+"use client";
+
 import type { FieldErrors, FieldValues, UseFormRegister } from "react-hook-form";
 import type { CompanyRelationshipType } from "@prisma/client";
 import { companySourceValues, companyTypeValues, relationshipTypeValues, relationshipTypeLabels } from "@/lib/validation/company";
@@ -8,6 +10,8 @@ import { EMPLOYEE_BANDS } from "@/lib/company-size";
 import { CreditBadge } from "@/components/credit/credit-badge";
 import { termsExceed, type CreditRating, type TermsKey } from "@/lib/credit/engine";
 import type { CategoryTree, FlatCategory } from "@/lib/customers/categories";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 /** What the credit engine says about a customer's terms — see src/lib/credit/engine.ts. */
 export type TermsAdvice = {
@@ -44,6 +48,8 @@ export function CompanyDetailFields({
   /** The terms currently chosen in the form, so the advice can react to them. */
   selectedTerms?: string;
 }) {
+  // Rendered only inside the client forms (new-company-form, edit-company-form), so the hook is theirs.
+  const w = useWording();
   const chosen = (selectedTerms || null) as TermsKey | null;
   const changed = !!termsAdvice && !!chosen && chosen !== termsAdvice.currentTerms;
   const overriding = changed && !!chosen && termsExceed(chosen, termsAdvice!.recommendedTerms);
@@ -52,10 +58,10 @@ export function CompanyDetailFields({
   return (
     <div className="space-y-6">
       <Card>
-        <CardHeader className="text-sm font-medium text-text">Company details</CardHeader>
+        <CardHeader className="text-sm font-medium text-text">{slot(w, "Company details", "company", "{one} details")}</CardHeader>
         <CardContent className="grid grid-cols-2 gap-4">
           <div className="col-span-2 space-y-1.5">
-            <Label htmlFor="name">Company name *</Label>
+            <Label htmlFor="name">{slot(w, "Company name *", "company", "{one} name *")}</Label>
             <Input id="name" {...register("name")} />
             {errors.name && <p className="text-xs text-danger">{String(errors.name.message)}</p>}
             {nameAddon}
@@ -78,7 +84,7 @@ export function CompanyDetailFields({
           </div>
           {categories && (
             <div className="space-y-1.5">
-              <Label htmlFor="customerCategoryId">Customer category</Label>
+              <Label htmlFor="customerCategoryId">{slot(w, "Customer category", "customer", "{one} category")}</Label>
               <Select id="customerCategoryId" {...register("customerCategoryId")}>
                 <option value="">None</option>
                 {categories.map((top) => (
@@ -96,7 +102,7 @@ export function CompanyDetailFields({
             </div>
           )}
           <div className="space-y-1.5">
-            <Label htmlFor="companyType">Company type</Label>
+            <Label htmlFor="companyType">{slot(w, "Company type", "company", "{one} type")}</Label>
             <Select id="companyType" {...register("companyType")}>
               <option value="">Unknown</option>
               {companyTypeValues.map((t) => (
@@ -133,7 +139,7 @@ export function CompanyDetailFields({
             <Input id="website" {...register("website")} />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="linkedinUrl">Company LinkedIn URL</Label>
+            <Label htmlFor="linkedinUrl">{slot(w, "Company LinkedIn URL", "company", "{one} LinkedIn URL")}</Label>
             <Input id="linkedinUrl" {...register("linkedinUrl")} />
           </div>
           <div className="space-y-1.5">

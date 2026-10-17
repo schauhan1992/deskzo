@@ -1,5 +1,9 @@
+"use client";
+
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 const CARD = "rounded-xl border border-line bg-surface shadow-sm";
 
@@ -33,23 +37,25 @@ function Section({ title, fields }: { title: string; fields: number }) {
  *
  * The page waits on the customer and product lists before it can send anything, so without this a
  * click on "Punch order" showed nothing at all until the whole form was ready. The titles are the
- * form's own, so nothing moves when it replaces this.
+ * form's own, so nothing moves when it replaces this — in the workspace's own words too (Settings →
+ * Wording), which is why this is a client component: the words come from the layout's provider.
  */
 export default function NewOrderLoading() {
+  const wording = useWording();
   return (
     <div>
       <div className="mb-5">
         <Link href="/orders" className="text-sm text-muted hover:text-text">
-          ← Orders
+          {slot(wording, "← Orders", "order", "← {many}")}
         </Link>
-        <h1 className="mt-1 text-xl font-semibold text-text">Punch order</h1>
+        <h1 className="mt-1 text-xl font-semibold text-text">{slot(wording, "Punch order", "order", "Punch {one:lower}")}</h1>
         <Bar className="mt-1.5 h-4 w-[28rem] max-w-full" />
       </div>
       <div role="status" aria-live="polite">
-        <span className="sr-only">Loading the order form…</span>
+        <span className="sr-only">{slot(wording, "Loading the order form…", "order", "Loading the {one:lower} form…")}</span>
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
           <div className="space-y-6">
-            <Section title="Customer" fields={4} />
+            <Section title={slot(wording, "Customer", "customer", "{one}")} fields={4} />
             <Section title="Product and price" fields={4} />
             <Section title="Terms and hand-off" fields={2} />
             <div className={cn(CARD, "divide-y divide-line")}>
@@ -63,7 +69,7 @@ export default function NewOrderLoading() {
           <div className="lg:sticky lg:top-20 lg:self-start">
             <div className={CARD}>
               <div className="border-b border-line px-5 py-3.5">
-                <h2 className="text-sm font-medium text-text">Order summary</h2>
+                <h2 className="text-sm font-medium text-text">{slot(wording, "Order summary", "order", "{one} summary")}</h2>
               </div>
               <div className="space-y-3 px-5 py-4">
                 {Array.from({ length: 5 }, (_, i) => (

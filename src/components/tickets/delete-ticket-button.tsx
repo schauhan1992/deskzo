@@ -6,6 +6,8 @@ import { deleteTicket } from "@/actions/ticket";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { formatTicketId } from "@/lib/tickets";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 export function DeleteTicketButton({
   ticketId,
@@ -17,6 +19,7 @@ export function DeleteTicketButton({
   redirectTo?: string;
 }) {
   const router = useRouter();
+  const w = useWording();
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -49,7 +52,7 @@ export function DeleteTicketButton({
       >
         Delete
       </Button>
-      <Dialog open={open} onClose={() => setOpen(false)} title="Delete ticket">
+      <Dialog open={open} onClose={() => setOpen(false)} title={slot(w, "Delete ticket", "ticket", "Delete {one:lower}")}>
         <p className="text-sm text-muted">
           Delete <span className="font-medium text-text">{formatTicketId(ticketSeq)}</span> and its entire
           comment thread? This can&apos;t be undone.

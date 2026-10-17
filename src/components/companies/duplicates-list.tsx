@@ -7,6 +7,8 @@ import { dismissDuplicate, type DuplicateRow } from "@/actions/company-merge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ActionNotice } from "@/components/ui/action-notice";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 /**
  * Likely duplicates, a pair to a row. The first company in each is the one suggested to keep — the
@@ -17,6 +19,7 @@ export function DuplicatesList({ rows }: { rows: DuplicateRow[] }) {
   const [pending, startTransition] = useTransition();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const w = useWording();
 
   function dismiss(row: DuplicateRow) {
     const [a, b] = row.companies;
@@ -34,7 +37,7 @@ export function DuplicatesList({ rows }: { rows: DuplicateRow[] }) {
   if (rows.length === 0) {
     return (
       <Card className="px-4 py-6 text-center text-sm text-muted">
-        No likely duplicates among the companies you can see.
+        {slot(w, "No likely duplicates among the companies you can see.", "company", "No likely duplicates among the {many:lower} you can see.")}
       </Card>
     );
   }

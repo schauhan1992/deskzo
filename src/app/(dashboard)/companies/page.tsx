@@ -86,11 +86,12 @@ export default async function CompaniesPage({
     customFilterSetup("COMPANY", user.id, customFilters),
   ]);
 
+  const w = await getWording();
   const stageFilters: { label: string; value?: CompanyStage }[] = [
     { label: "All" },
     { label: "Prospects", value: "PROSPECT" },
     { label: "Leads", value: "LEAD" },
-    { label: "Awaiting Order", value: "CUSTOMER" },
+    { label: slot(w, "Awaiting Order", "order", "Awaiting {one}"), value: "CUSTOMER" },
     { label: "Disqualified", value: "DISQUALIFIED" },
   ];
 
@@ -114,17 +115,17 @@ export default async function CompaniesPage({
   return (
     <SplitListPage active={viewMode === "split"}>
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-text">{slot(await getWording(), "Companies", "company")}</h1>
+        <h1 className="text-xl font-semibold text-text">{slot(w, "Companies", "company")}</h1>
         <div className="flex items-center gap-2">
           <ViewModeToggle viewKey="companies" mode={viewMode} />
           <Link href="/companies/new">
-            <Button>{slot(await getWording(), "New company", "company", "New {one:lower}")}</Button>
+            <Button>{slot(w, "New company", "company", "New {one:lower}")}</Button>
           </Link>
       </div>
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <SearchParamInput paramName="q" placeholder="Search company name…" />
+        <SearchParamInput paramName="q" placeholder={slot(w, "Search company name…", "company", "Search {one:lower} name…")} />
         <SelectParamFilter
           paramName="source"
           label="Source"
@@ -165,7 +166,7 @@ export default async function CompaniesPage({
 
       {viewMode === "split" ? (
         <SplitListShell
-          countLabel={`${result.total} compan${result.total === 1 ? "y" : "ies"}`}
+          countLabel={`${result.total} ${result.total === 1 ? slot(w, "company", "company", "{one:lower}") : slot(w, "companies", "company", "{many:lower}")}`}
           listPane={<CompanySplitList companies={result.rows} selectedId={selected} />}
         >
           {selected ? (
@@ -176,7 +177,7 @@ export default async function CompaniesPage({
               linkParams={splitLinkParams(params, selected)}
             />
           ) : (
-            <SplitListEmpty message="No companies match these filters." />
+            <SplitListEmpty message={slot(w, "No companies match these filters.", "company", "No {many:lower} match these filters.")} />
           )}
         </SplitListShell>
       ) : (

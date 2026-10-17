@@ -4,6 +4,8 @@ import { formatCurrency } from "@/lib/utils";
 import { formatOrderId } from "@/lib/order-id";
 import { companyPath, orderPath } from "@/lib/record-links";
 import { workspaceClock } from "@/lib/time/workspace";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 
 type Earning = Awaited<ReturnType<typeof listCommissionPartyEarnings>>[number];
 
@@ -19,7 +21,7 @@ export async function CommissionPartyEarnings({ earnings }: { earnings: Earning[
     );
   }
 
-  const clock = await workspaceClock();
+  const [clock, w] = await Promise.all([workspaceClock(), getWording()]);
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted">
@@ -29,8 +31,8 @@ export async function CommissionPartyEarnings({ earnings }: { earnings: Earning[
         <table className="w-full text-sm">
           <thead className="border-b border-line bg-surface-sunken text-left text-xs uppercase tracking-wide text-muted">
             <tr>
-              <th className="px-3 py-2">Customer</th>
-              <th className="px-3 py-2">Order</th>
+              <th className="px-3 py-2">{slot(w, "Customer", "customer", "{one}")}</th>
+              <th className="px-3 py-2">{slot(w, "Order", "order", "{one}")}</th>
               <th className="px-3 py-2">Into account</th>
               <th className="px-3 py-2 text-right">Amount</th>
               <th className="px-3 py-2">Recorded</th>

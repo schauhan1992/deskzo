@@ -15,6 +15,8 @@ import { Button } from "@/components/ui/button";
 import { IconButton, RowActions } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/card";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 export type BrandRow = {
   id: string;
@@ -35,6 +37,9 @@ export type BrandRow = {
  */
 export function BrandsManager({ brands, canManage = true }: { brands: BrandRow[]; canManage?: boolean }) {
   const router = useRouter();
+  // The workspace's own word for an item (Settings → Wording), in the counts.
+  const wording = useWording();
+  const itemsWord = slot(wording, "item(s)", "item", "{one:lower}(s)");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [newBrand, setNewBrand] = useState("");
@@ -124,7 +129,9 @@ export function BrandsManager({ brands, canManage = true }: { brands: BrandRow[]
               <>
                 <div className="flex items-center gap-2 text-sm">
                   <span className="font-medium text-text">{brand.name}</span>
-                  <Badge>{brand._count.items} item(s)</Badge>
+                  <Badge>
+                    {brand._count.items} {itemsWord}
+                  </Badge>
                 </div>
                 {canManage && (
                   <RowActions>
@@ -184,7 +191,10 @@ export function BrandsManager({ brands, canManage = true }: { brands: BrandRow[]
               ) : (
                 <div key={family.id} className="flex items-center justify-between text-sm">
                   <span className="text-text">
-                    {family.name} <span className="text-subtle">· {family._count.items} item(s)</span>
+                    {family.name}{" "}
+                    <span className="text-subtle">
+                      · {family._count.items} {itemsWord}
+                    </span>
                   </span>
                   {canManage && (
                     <RowActions>

@@ -8,6 +8,8 @@ import { Card } from "@/components/ui/card";
 import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagination";
 import { formatCurrency } from "@/lib/utils";
 import { companyPath } from "@/lib/record-links";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 
 const PERIODS = [3, 6, 12, 24];
 const SORTS: { key: SupportSort; label: string }[] = [
@@ -35,7 +37,9 @@ export default async function SupportLoadPage({
   const sort = SORTS.find((s) => s.key === params.sort)?.key ?? "tickets";
   const page = resolvePage(params.page);
   const pageSize = resolvePageSize(params.pageSize);
-  const result = await listSupportLoad({ months, sort, page, pageSize });
+  const [result, w] = await Promise.all([listSupportLoad({ months, sort, page, pageSize }), getWording()]);
+  // The sort's own name for "tickets" is the workspace's word; the key in the address stays the app's.
+  const sortLabel = (s: (typeof SORTS)[number]) => (s.key === "tickets" ? slot(w, "Most tickets", "ticket", "Most {many:lower}") : s.label);
 
   const href = (overrides: Record<string, string>) => {
     const query = new URLSearchParams({ months: String(months), sort, ...(params.pageSize ? { pageSize: params.pageSize } : {}), ...overrides });
@@ -47,7 +51,7 @@ export default async function SupportLoadPage({
   return (
     <div>
       <Link href="/tickets" className="text-sm text-muted hover:text-text">
-        ← Tickets
+        ← {slot(w, "Tickets", "ticket")}
       </Link>
       <h1 className="mt-1 text-xl font-semibold text-text">Support load</h1>
       <p className="mt-1 max-w-3xl text-sm text-muted">
@@ -64,7 +68,7 @@ export default async function SupportLoadPage({
         <span className="mx-1 h-5 w-px bg-line" aria-hidden />
         {SORTS.map((s) => (
           <Link key={s.key} href={href({ sort: s.key })} className={chip(s.key === sort)}>
-            {s.label}
+            {sortLabel(s)}
           </Link>
         ))}
       </div>
@@ -73,14 +77,14 @@ export default async function SupportLoadPage({
         <table className="w-full text-sm">
           <thead className="border-b border-line bg-surface-sunken text-left text-xs uppercase tracking-wide text-muted">
             <tr>
-              <th className="px-4 py-2.5">Customer</th>
+              <th className="px-4 py-2.5">{slot(w, "Customer", "customer", "{one}")}</th>
               <th className="px-4 py-2.5">Load</th>
-              <th className="px-4 py-2.5 text-right">Tickets</th>
+              <th className="px-4 py-2.5 text-right">{slot(w, "Tickets", "ticket")}</th>
               <th className="px-4 py-2.5 text-right">Open</th>
-              <th className="px-4 py-2.5 text-right">Calls / visits</th>
+              <th className="px-4 py-2.5 text-right">{slot(w, "Calls / visits", "visit", "Calls / {many:lower}")}</th>
               <th className="px-4 py-2.5 text-right">Recorded time</th>
               {result.canSeeMoney && <th className="px-4 py-2.5 text-right">Billed</th>}
-              {result.canSeeMoney && <th className="px-4 py-2.5 text-right">Tickets per ₹1L</th>}
+              {result.canSeeMoney && <th className="px-4 py-2.5 text-right">{slot(w, "Tickets per ₹1L", "ticket", "{many} per ₹1L")}</th>}
             </tr>
           </thead>
           <tbody>
@@ -118,7 +122,7 @@ export default async function SupportLoadPage({
             {result.rows.length === 0 && (
               <tr>
                 <td colSpan={8} className="px-4 py-8 text-center text-subtle">
-                  No customer of yours took support in the last {months} months.
+                  {slot(w, "No customer of yours took support in the last", "customer", "No {one:lower} of yours took support in the last")} {months} months.
                 </td>
               </tr>
             )}
@@ -126,7 +130,7 @@ export default async function SupportLoadPage({
         </table>
       </Card>
 
-      <Pagination page={page} pageSize={pageSize} total={result.total} totalPages={totalPages(result.total, pageSize)} pageSizes={PAGE_SIZES} label="customers" />
+      <Pagination page={page} pageSize={pageSize} total={result.total} totalPages={totalPages(result.total, pageSize)} pageSizes={PAGE_SIZES} label={slot(w, "customers", "customer", "{many:lower}")} />
     </div>
   );
 }

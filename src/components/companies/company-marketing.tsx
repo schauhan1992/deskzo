@@ -5,6 +5,8 @@ import { Badge, Card, CardContent } from "@/components/ui/card";
 import { TOPICS } from "@/lib/marketing/topics";
 import { NO_DIRECT_CONTACT_NOTICE } from "@/lib/reseller";
 import { workspaceClock } from "@/lib/time/workspace";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 
 const STATUS_TONE: Record<string, "default" | "green" | "blue" | "red" | "amber"> = {
   QUEUED: "default",
@@ -53,7 +55,7 @@ export async function CompanyMarketing({ companyId, companyName }: { companyId: 
   }
 
   const { messages, consents, enrolments, company } = data;
-  const clock = await workspaceClock();
+  const [clock, w] = await Promise.all([workspaceClock(), getWording()]);
   const managed = company.managedByResellerId !== null;
   const byContact = new Map<string, typeof consents>();
   for (const consent of consents) {
@@ -97,7 +99,7 @@ export async function CompanyMarketing({ companyId, companyName }: { companyId: 
             <table className="w-full text-sm">
               <thead className="border-b border-line bg-surface-sunken text-left text-xs uppercase tracking-wide text-muted">
                 <tr>
-                  <th className="px-4 py-2.5">Contact</th>
+                  <th className="px-4 py-2.5">{slot(w, "Contact", "contact", "{one}")}</th>
                   <th className="px-4 py-2.5">Subscribed to</th>
                   <th className="px-4 py-2.5">How we know</th>
                 </tr>

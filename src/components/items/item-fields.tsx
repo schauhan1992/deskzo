@@ -5,6 +5,8 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import Link from "next/link";
 import { OptionCombobox } from "@/components/ui/option-combobox";
 import { HsnCombobox } from "@/components/items/hsn-combobox";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 export type BrandOption = { id: string; name: string; families: { id: string; name: string }[] };
 
@@ -59,13 +61,16 @@ export function ItemDetailFields({
   subscriptions?: boolean;
 }) {
   const selectedBrand = brands.find((b) => b.id === brandId);
+  // The workspace's own word for an item (Settings → Wording). Only ever rendered inside the item
+  // forms, which are client components.
+  const wording = useWording();
   return (
     <div className="space-y-6">
       <Card>
-        <CardHeader className="text-sm font-medium text-text">Item details</CardHeader>
+        <CardHeader className="text-sm font-medium text-text">{slot(wording, "Item details", "item", "{one} details")}</CardHeader>
         <CardContent className="grid grid-cols-2 gap-4">
           <div className="col-span-2 space-y-1.5">
-            <Label htmlFor="name">Item name *</Label>
+            <Label htmlFor="name">{slot(wording, "Item name *", "item", "{one} name *")}</Label>
             <Input id="name" {...register("name")} />
             {errors.name && <p className="text-xs text-danger">{String(errors.name.message)}</p>}
           </div>
@@ -202,7 +207,7 @@ export function ItemDetailFields({
             <div className="space-y-1.5">
               <Label htmlFor="revenuePattern">Revenue is recognised</Label>
               <Select id="revenuePattern" {...register("revenuePattern")}>
-                <option value="">Automatic (from the item type)</option>
+                <option value="">{slot(wording, "Automatic (from the item type)", "item", "Automatic (from the {one:lower} type)")}</option>
                 {revenuePatternValues.map((p) => (
                   <option key={p} value={p}>
                     {revenuePatternLabels[p]}
@@ -245,7 +250,7 @@ export function ItemDetailFields({
           <CardContent className="grid grid-cols-2 gap-4">
             <label className="col-span-2 flex items-center gap-2 text-sm text-text">
               <input type="checkbox" {...register("trackInventory")} />
-              Track inventory for this item
+              {slot(wording, "Track inventory for this item", "item", "Track inventory for this {one:lower}")}
             </label>
             {trackInventory && (
               <>

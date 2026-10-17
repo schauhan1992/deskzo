@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { findCompanyMatches, type CompanyMatch, type CompanyMatches } from "@/actions/company";
 import { relationshipTypeLabels } from "@/lib/validation/company";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 /**
  * What is already in the CRM under the name being typed — under the name field, as it is typed.
@@ -19,6 +21,7 @@ import { relationshipTypeLabels } from "@/lib/validation/company";
 export function ExistingCompanyMatches({ name }: { name: string }) {
   const typed = name.trim();
   const [result, setResult] = useState<{ key: string; data: CompanyMatches } | null>(null);
+  const w = useWording();
 
   useEffect(() => {
     if (!typed) return;
@@ -63,7 +66,7 @@ export function ExistingCompanyMatches({ name }: { name: string }) {
       {matches.length > 0 ? (
         <div className="overflow-hidden rounded-md border border-line">
           <p className="bg-surface-sunken px-3 py-1.5 text-xs text-subtle">
-            Similar names already in the CRM — open one if it&apos;s the same company
+            {slot(w, "Similar names already in the CRM — open one if it's the same company", "company", "Similar names already in the CRM — open one if it's the same {one:lower}")}
           </p>
           <ul className="divide-y divide-line">
             {matches.map((m) => (
@@ -74,7 +77,7 @@ export function ExistingCompanyMatches({ name }: { name: string }) {
           </ul>
         </div>
       ) : (
-        current && !duplicate && <p className="text-xs text-subtle">No matching companies — this will be a new one.</p>
+        current && !duplicate && <p className="text-xs text-subtle">{slot(w, "No matching companies — this will be a new one.", "company", "No matching {many:lower} — this will be a new one.")}</p>
       )}
     </div>
   );

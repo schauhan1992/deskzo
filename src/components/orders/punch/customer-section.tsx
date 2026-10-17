@@ -7,6 +7,8 @@ import { formatCurrency } from "@/lib/utils";
 import { Input, Label, Select } from "@/components/ui/input";
 import { CompanyCombobox, type CompanyComboOption } from "@/components/ui/company-combobox";
 import { CreditBadge } from "@/components/credit/credit-badge";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 import { FieldError, Section } from "./parts";
 import { invalidProps, type CreditSnapshot, type CustomerContext, type PunchErrors, type PunchForm } from "./types";
 
@@ -47,15 +49,17 @@ export function CustomerSection({
   onRetryContext: () => void;
 }) {
   const { control, register } = form;
+  // The workspace's own words (Settings → Wording).
+  const wording = useWording();
   const isReseller = selectedCompany?.relationshipType === "RESELLER";
   const locations = context?.locations ?? [];
   const endCustomers = context?.endCustomers ?? [];
 
   return (
-    <Section title="Customer">
+    <Section title={slot(wording, "Customer", "customer", "{one}")}>
       {/* `data-search` says whether the picker searches the server, which nothing else in the markup shows until it is typed in. */}
       <div className="space-y-1.5 sm:col-span-2" data-search={customerSearch ? "server" : "list"}>
-        <Label htmlFor="companyId">Customer *</Label>
+        <Label htmlFor="companyId">{slot(wording, "Customer *", "customer", "{one} *")}</Label>
         <Controller
           name="companyId"
           control={control}
@@ -73,7 +77,7 @@ export function CustomerSection({
                 field.onChange(company?.id ?? "");
                 onCustomerChange(company);
               }}
-              placeholder="Type to search customers…"
+              placeholder={slot(wording, "Type to search customers…", "customer", "Type to search {many:lower}…")}
             />
           )}
         />
@@ -87,7 +91,7 @@ export function CustomerSection({
         )}
         {contextFailed && (
           <p className="flex flex-wrap items-center gap-x-2 text-xs text-danger">
-            Couldn&apos;t load this customer&apos;s details.
+            {slot(wording, "Couldn't load this customer's details.", "customer", "Couldn't load this {one:lower}'s details.")}
             <button type="button" onClick={onRetryContext} className="font-medium underline underline-offset-2 hover:no-underline">
               Try again
             </button>
@@ -97,7 +101,7 @@ export function CustomerSection({
 
       {isReseller && (
         <div className="space-y-1.5 rounded-md border border-info bg-info-bg p-3 sm:col-span-2">
-          <Label htmlFor="endCustomerId">Reseller order — which of their customers is it for?</Label>
+          <Label htmlFor="endCustomerId">{slot(wording, "Reseller order — which of their customers is it for?", "order", "Reseller {one:lower} — which of their customers is it for?")}</Label>
           <Controller
             name="endCustomerId"
             control={control}
@@ -143,7 +147,9 @@ export function CustomerSection({
               className="aria-[invalid=true]:border-danger"
               {...invalidProps("locationId", errors.locationId?.message)}
             >
-              <option value="">{contextLoading ? "Loading…" : companyId ? "Select a location…" : "Choose the customer first"}</option>
+              <option value="">
+                {contextLoading ? "Loading…" : companyId ? "Select a location…" : slot(wording, "Choose the customer first", "customer", "Choose the {one:lower} first")}
+              </option>
               {locations.map((loc) => (
                 <option key={loc.id} value={loc.id}>
                   {loc.label}
@@ -157,7 +163,7 @@ export function CustomerSection({
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="poNumber">Customer PO / invoice number</Label>
+        <Label htmlFor="poNumber">{slot(wording, "Customer PO / invoice number", "customer", "{one} PO / invoice number")}</Label>
         <Input id="poNumber" {...register("poNumber")} />
       </div>
     </Section>

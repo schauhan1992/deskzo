@@ -33,6 +33,8 @@ import { AddressFields } from "@/components/ui/address-fields";
 import { Badge } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { gstTreatmentValues, gstTreatmentLabels } from "@/lib/gst";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 export type Location = {
   id: string;
@@ -201,6 +203,7 @@ function EditLocationForm({ location, onClose }: { location: Location; onClose: 
 
 export function LocationsManager({ companyId, locations }: { companyId: string; locations: Location[] }) {
   const router = useRouter();
+  const w = useWording();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
@@ -330,8 +333,8 @@ export function LocationsManager({ companyId, locations }: { companyId: string; 
 
       <Dialog open={!!deleteTarget} onClose={() => setDeleteTargetId(null)} title="Delete location">
         <p className="text-sm text-muted">
-          Delete <span className="font-medium text-text">{deleteTarget?.label}</span>? This can&apos;t be undone.
-          Locations with orders already attached to them can&apos;t be deleted.
+          Delete <span className="font-medium text-text">{deleteTarget?.label}</span>? This can&apos;t be undone.{" "}
+          {slot(w, "Locations with orders already attached to them can't be deleted.", "order", "Locations with {many:lower} already attached to them can't be deleted.")}
         </p>
         {deleteError && <p className="mt-2 text-xs text-danger">{deleteError}</p>}
         <div className="mt-4 flex justify-end gap-2">

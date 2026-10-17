@@ -30,6 +30,8 @@ import {
 } from "@/components/custom-fields/custom-field-inputs";
 import type { CustomFieldDef } from "@/lib/custom-fields/rules";
 import { DesignationInput } from "@/components/contacts/designation-input";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 type FormValues = z.input<typeof createCompanySchema>;
 type IndustryOption = { id: string; name: string };
@@ -58,6 +60,7 @@ export function NewCompanyForm({
   customFields?: { fields: CustomFieldDef[]; values: CustomFieldFormValues; people: CustomFieldPerson[] };
 }) {
   const router = useRouter();
+  const w = useWording();
   const [serverError, setServerError] = useState<string | null>(null);
   const [custom, setCustom] = useState<CustomFieldFormValues>(customFields.values);
   const [customErrors, setCustomErrors] = useState<Record<string, string>>({});
@@ -201,7 +204,7 @@ export function NewCompanyForm({
       {canAddContacts && (
         <Card>
           <CardHeader className="flex items-center justify-between text-sm font-medium text-text">
-            <span>Contacts</span>
+            <span>{slot(w, "Contacts", "contact")}</span>
             <Button
               type="button"
               variant="secondary"
@@ -210,7 +213,7 @@ export function NewCompanyForm({
                 append({ name: "", designation: "OTHER", email: "", phone: "", linkedinUrl: "", isPrimary: false })
               }
             >
-              + Add contact
+              {slot(w, "+ Add contact", "contact", "+ Add {one:lower}")}
             </Button>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -245,7 +248,7 @@ export function NewCompanyForm({
                 <div className="col-span-2 flex items-center justify-between pt-1">
                   <label className="flex items-center gap-2 text-sm text-muted">
                     <input type="checkbox" {...register(`contacts.${index}.isPrimary` as const)} />
-                    Primary contact
+                    {slot(w, "Primary contact", "contact", "Primary {one:lower}")}
                   </label>
                   {fields.length > 1 && (
                     <Button type="button" variant="ghost" size="sm" onClick={() => remove(index)}>
@@ -264,7 +267,7 @@ export function NewCompanyForm({
           Cancel
         </Button>
         <Button type="submit" disabled={isSubmitting}>
-          {isSubmitting ? "Saving…" : "Save company"}
+          {isSubmitting ? "Saving…" : slot(w, "Save company", "company", "Save {one:lower}")}
         </Button>
       </div>
     </form>

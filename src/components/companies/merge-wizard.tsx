@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
 import { ActionNotice } from "@/components/ui/action-notice";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 type Plan = MergeScreen["plan"];
 type Side = Plan["keep"];
@@ -26,6 +28,7 @@ const NEEDS_REASSIGN = new Set(["ownerUserId", "assignedToUserId"]);
 export function MergeWizard({ screen }: { screen: MergeScreen }) {
   const { plan, may } = screen;
   const router = useRouter();
+  const w = useWording();
   const [choices, setChoices] = useState<Record<string, "keep" | "drop">>(() =>
     Object.fromEntries(plan.fields.map((f) => [f.key, allowed(f.key) ? f.suggested : "keep"])),
   );
@@ -146,7 +149,7 @@ export function MergeWizard({ screen }: { screen: MergeScreen }) {
             <CardContent className="space-y-2">
               {plan.contactPairs.length === 0 ? (
                 <p className="text-sm text-muted">
-                  Nobody appears under both. All {plan.drop.contacts.length} of {plan.drop.ref}&apos;s contacts move across as they are.
+                  Nobody appears under both. All {plan.drop.contacts.length} of {plan.drop.ref}&apos;s {slot(w, "contacts move across as they are.", "contact", "{many:lower} move across as they are.")}
                 </p>
               ) : (
                 <>
@@ -197,7 +200,7 @@ export function MergeWizard({ screen }: { screen: MergeScreen }) {
             <CardHeader className="text-sm font-semibold text-text">What moves to {plan.keep.ref}</CardHeader>
             <CardContent className="space-y-3">
               {plan.moves.length === 0 ? (
-                <p className="text-sm text-muted">Nothing is recorded under {plan.drop.ref} — only the company itself is removed.</p>
+                <p className="text-sm text-muted">Nothing is recorded under {plan.drop.ref} — {slot(w, "only the company itself is removed.", "company", "only the {one:lower} itself is removed.")}</p>
               ) : (
                 <ul className="flex flex-wrap gap-1.5">
                   {plan.moves.map((m) => (
@@ -257,6 +260,7 @@ export function MergeWizard({ screen }: { screen: MergeScreen }) {
 }
 
 function SideCard({ side, role }: { side: Side; role: string }) {
+  const w = useWording();
   const stays = role === "Stays";
   return (
     <Card className={stays ? "border-success/40" : "border-danger/30"}>
@@ -270,8 +274,8 @@ function SideCard({ side, role }: { side: Side; role: string }) {
           {side.place ? ` · ${side.place}` : ""}
         </p>
         <p className="text-xs text-muted">
-          {side.accountManager ? `Account manager ${side.accountManager}` : "No account manager"} · {side.contacts.length} contact
-          {side.contacts.length === 1 ? "" : "s"}
+          {side.accountManager ? `Account manager ${side.accountManager}` : "No account manager"} · {side.contacts.length}{" "}
+          {side.contacts.length === 1 ? slot(w, "contact", "contact", "{one:lower}") : slot(w, "contacts", "contact", "{many:lower}")}
         </p>
         {side.gstins.length > 0 && <p className="font-mono text-xs text-subtle">GSTIN {side.gstins.join(", ")}</p>}
       </CardContent>
@@ -281,6 +285,7 @@ function SideCard({ side, role }: { side: Side; role: string }) {
 
 /** Picking the other company, when the merge was started from one company's page. */
 export function MergePartnerPicker({ keepRef, keepName, keepId }: { keepRef: string; keepName: string; keepId: string }) {
+  const w = useWording();
   const [typed, setTyped] = useState("");
   const [matches, setMatches] = useState<{ key: string; list: CompanyMatch[] } | null>(null);
   const query = typed.trim();
@@ -306,13 +311,13 @@ export function MergePartnerPicker({ keepRef, keepName, keepId }: { keepRef: str
     <Card>
       <CardContent className="space-y-3 pt-4">
         <p className="text-sm text-text">
-          Which company is a duplicate of <span className="font-semibold">{keepName}</span>? It will be merged into {keepRef} and removed — you&apos;ll see
+          {slot(w, "Which company is a duplicate of", "company", "Which {one:lower} is a duplicate of")} <span className="font-semibold">{keepName}</span>? It will be merged into {keepRef} and removed — you&apos;ll see
           everything that moves before anything does.
         </p>
         <Input
           value={typed}
           onChange={(e) => setTyped(e.target.value)}
-          aria-label="The duplicate company's name"
+          aria-label={slot(w, "The duplicate company's name", "company", "The duplicate {one:lower}'s name")}
           placeholder="Type part of the duplicate's name…"
           autoFocus
         />
@@ -333,7 +338,7 @@ export function MergePartnerPicker({ keepRef, keepName, keepId }: { keepRef: str
             ))}
           </ul>
         )}
-        {query && matches?.key === query && list.length === 0 && <p className="text-xs text-subtle">No other company you can see has a name like that.</p>}
+        {query && matches?.key === query && list.length === 0 && <p className="text-xs text-subtle">{slot(w, "No other company you can see has a name like that.", "company", "No other {one:lower} you can see has a name like that.")}</p>}
       </CardContent>
     </Card>
   );

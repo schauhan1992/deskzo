@@ -13,6 +13,8 @@ import {
 } from "@/components/custom-fields/custom-field-inputs";
 import type { CustomFieldDef } from "@/lib/custom-fields/rules";
 import { DesignationInput } from "@/components/contacts/designation-input";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 const EMPTY = { name: "", designationName: "", email: "", phone: "" };
 
@@ -44,6 +46,7 @@ export function NewContactDialog({
   onClose: () => void;
   onCreated: (contact: CreatedContact) => void;
 }) {
+  const w = useWording();
   const [form, setForm] = useState(EMPTY);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -119,7 +122,7 @@ export function NewContactDialog({
   }
 
   return (
-    <Dialog open={open} onClose={onClose} title={`New contact at ${companyName}`}>
+    <Dialog open={open} onClose={onClose} title={`${slot(w, "New contact", "contact", "New {one:lower}")} at ${companyName}`}>
       <form onSubmit={save} className="space-y-3">
         {error && <p className="rounded-md bg-danger-bg px-3 py-2 text-sm text-danger">{error}</p>}
         <div className="grid grid-cols-2 gap-3">
@@ -166,7 +169,7 @@ export function NewContactDialog({
           </Button>
           {/* Not before the workspace's own fields are known: a required one would only be refused. */}
           <Button type="submit" size="sm" disabled={saving || !setup}>
-            {saving ? "Adding…" : "Add contact"}
+            {saving ? "Adding…" : slot(w, "Add contact", "contact", "Add {one:lower}")}
           </Button>
         </div>
       </form>

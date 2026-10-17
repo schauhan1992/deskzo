@@ -13,6 +13,8 @@ import { BulkBar, Checkbox, useRowSelection } from "@/components/ui/bulk-select"
 import { useClock } from "@/components/time/clock-provider";
 import { formatOrderId } from "@/lib/order-id";
 import { companyPath, ticketPath } from "@/lib/record-links";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 import {
   formatTicketId,
   getTicketSlaStatus,
@@ -47,6 +49,7 @@ export function TicketsTable({
 }) {
   const router = useRouter();
   const clock = useClock();
+  const w = useWording();
   const selection = useRowSelection(tickets);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -73,7 +76,7 @@ export function TicketsTable({
         setError(result.error);
         return;
       }
-      setNotice(`Updated ${result.data.count} ticket(s).`);
+      setNotice(`Updated ${result.data.count} ${slot(w, "ticket(s)", "ticket", "{one:lower}(s)")}.`);
       setAssignedToUserId("");
       setStatus("");
       setPriority("");
@@ -136,13 +139,13 @@ export function TicketsTable({
                 <Checkbox
                   checked={selection.allSelected}
                   onChange={selection.toggleAll}
-                  aria-label="Select all tickets on this page"
+                  aria-label={slot(w, "Select all tickets on this page", "ticket", "Select all {many:lower} on this page")}
                 />
               </th>
             )}
-            <th className="px-4 py-2.5">Ticket</th>
-            {showCompany && <th className="px-4 py-2.5">Company</th>}
-            <th className="px-4 py-2.5">Order</th>
+            <th className="px-4 py-2.5">{slot(w, "Ticket", "ticket", "{one}")}</th>
+            {showCompany && <th className="px-4 py-2.5">{slot(w, "Company", "company", "{one}")}</th>}
+            <th className="px-4 py-2.5">{slot(w, "Order", "order", "{one}")}</th>
             <th className="px-4 py-2.5">Type</th>
             <th className="px-4 py-2.5">Priority</th>
             <th className="px-4 py-2.5">Status</th>
@@ -199,7 +202,7 @@ export function TicketsTable({
           {tickets.length === 0 && (
             <tr>
               <td colSpan={columnCount} className="px-4 py-6 text-center text-subtle">
-                No tickets found.
+                {slot(w, "No tickets found.", "ticket", "No {many:lower} found.")}
               </td>
             </tr>
           )}

@@ -5,6 +5,8 @@ import { listCompanyOptions } from "@/actions/company";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { SupportInbox } from "@/components/tickets/support-inbox";
 import { Card, CardContent } from "@/components/ui/card";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 
 /**
  * Helpdesk → Support inbox: emails to the helpdesk address waiting for somebody to decide where they
@@ -12,12 +14,12 @@ import { Card, CardContent } from "@/components/ui/card";
  */
 export default async function SupportInboxPage() {
   if (!(await isModuleEnabled("helpdesk"))) return <ModuleDisabledNotice moduleKey="helpdesk" />;
-  const emails = await listSupportInbox();
+  const [emails, w] = await Promise.all([listSupportInbox(), getWording()]);
 
   return (
     <div>
       <Link href="/tickets" className="text-sm text-muted hover:text-text">
-        ← Tickets
+        ← {slot(w, "Tickets", "ticket")}
       </Link>
       <h1 className="mt-1 text-xl font-semibold text-text">Support inbox</h1>
       <p className="mt-1 max-w-3xl text-sm text-muted">
@@ -28,7 +30,7 @@ export default async function SupportInboxPage() {
       <div className="mt-5">
         {emails === null ? (
           <Card>
-            <CardContent className="py-10 text-center text-sm text-muted">Only people who can open tickets can sort the Support inbox.</CardContent>
+            <CardContent className="py-10 text-center text-sm text-muted">{slot(w, "Only people who can open tickets can sort the Support inbox.", "ticket", "Only people who can open {many:lower} can sort the Support inbox.")}</CardContent>
           </Card>
         ) : (
           <SupportInbox emails={emails} companies={await listCompanyOptions({ withContacts: false })} />

@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { addTicketSenderAsContact } from "@/actions/support-mail";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 /**
  * "Add as contact" for whoever wrote to the ticket without being one of its company's contacts — a
@@ -31,16 +33,22 @@ export function TicketSenderContact({
 
 function SenderRow({ ticketId, companyName, person }: { ticketId: string; companyName: string; person: { address: string; name: string | null } }) {
   const router = useRouter();
+  const w = useWording();
   const [name, setName] = useState(person.name ?? "");
   const [error, setError] = useState<string | null>(null);
   const [added, setAdded] = useState(false);
   const [pending, startTransition] = useTransition();
 
-  if (added) return <p className="text-sm text-success">Added {person.address} as a contact at {companyName}.</p>;
+  if (added)
+    return (
+      <p className="text-sm text-success">
+        Added {person.address} {slot(w, "as a contact at", "contact", "as {a} at")} {companyName}.
+      </p>
+    );
   return (
     <div className="space-y-1.5">
       <p className="text-sm text-text">
-        {person.address} isn&apos;t a contact at {companyName} yet.
+        {person.address} {slot(w, "isn't a contact at", "contact", "isn't {a} at")} {companyName} yet.
       </p>
       <div className="flex flex-wrap items-center gap-2">
         <Input
@@ -69,7 +77,7 @@ function SenderRow({ ticketId, companyName, person }: { ticketId: string; compan
             });
           }}
         >
-          {pending ? "Adding…" : "Add as contact"}
+          {pending ? "Adding…" : slot(w, "Add as contact", "contact", "Add as {one:lower}")}
         </Button>
       </div>
       {error && (

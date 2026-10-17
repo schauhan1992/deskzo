@@ -22,6 +22,8 @@ import { shortDay, type ReleaseState } from "@/lib/orders/handoff-rules";
 import { formatCurrency } from "@/lib/utils";
 import { useClock } from "@/components/time/clock-provider";
 import type { Clock } from "@/lib/time/zone";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 /**
  * The controls for an order's hand-off to purchase and its distributor price, each a small client
@@ -136,6 +138,7 @@ export function OrderPriceReview({
   canDecide: boolean;
 }) {
   const { isPending, error, run } = useAction();
+  const wording = useWording();
   const [showSendBack, setShowSendBack] = useState(false);
   const [note, setNote] = useState("");
   const over = pending.ceiling !== null ? Math.round((pending.price - pending.ceiling) * 100) / 100 : null;
@@ -161,7 +164,11 @@ export function OrderPriceReview({
           </Button>
         </div>
       )}
-      {canDecide && <p className="text-xs text-subtle">Or cancel the order below, if it no longer makes sense at this price.</p>}
+      {canDecide && (
+        <p className="text-xs text-subtle">
+          {slot(wording, "Or cancel the order below, if it no longer makes sense at this price.", "order", "Or cancel the {one:lower} below, if it no longer makes sense at this price.")}
+        </p>
+      )}
 
       <Dialog open={showSendBack} onClose={() => setShowSendBack(false)} title="Send the price back to purchase">
         <p className="text-sm text-muted">Purchase is told, and looks again. Say what you&apos;d like them to try.</p>
@@ -210,6 +217,7 @@ export function OrderQuoteEditor({
 }) {
   const { isPending, error, run } = useAction();
   const clock = useClock();
+  const wording = useWording();
   const [open, setOpen] = useState(false);
   const [price, setPrice] = useState(quote.price !== null ? String(quote.price) : "");
   const [vendorId, setVendorId] = useState(quote.vendorId ?? "");
@@ -263,7 +271,7 @@ export function OrderQuoteEditor({
                 setVendorId(v?.id ?? "");
                 if (v) setVendorName("");
               }}
-              placeholder="Search vendors…"
+              placeholder={slot(wording, "Search vendors…", "vendor", "Search {many:lower}…")}
             />
             {!vendorId && (
               <Input

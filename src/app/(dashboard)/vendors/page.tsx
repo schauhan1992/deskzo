@@ -100,12 +100,13 @@ export default async function VendorsPage({
     listColumns("VENDOR", user.id, viewMode === "split" ? [] : result.rows.map((c) => c.id)),
     customFilterSetup("VENDOR", user.id, vendorFilters.customFilters),
   ]);
+  const w = await getWording();
 
   return (
     <SplitListPage active={viewMode === "split"}>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-text">{slot(await getWording(), "Vendors", "vendor")}</h1>
+          <h1 className="text-xl font-semibold text-text">{slot(w, "Vendors", "vendor")}</h1>
           <p className="mt-1 text-sm text-muted">
             {result.total} vendor, OEM, distributor, and partner companies
             {onboardingCount > 0 && ` · ${onboardingCount} still onboarding`}
@@ -114,13 +115,13 @@ export default async function VendorsPage({
         <div className="flex items-center gap-2">
           <ViewModeToggle viewKey="vendors" mode={viewMode} />
           <Link href="/vendors/new">
-            <Button>{slot(await getWording(), "New vendor", "vendor", "New {one:lower}")}</Button>
+            <Button>{slot(w, "New vendor", "vendor", "New {one:lower}")}</Button>
           </Link>
         </div>
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <SearchParamInput paramName="q" placeholder="Search company name…" />
+        <SearchParamInput paramName="q" placeholder={slot(w, "Search company name…", "company", "Search {one:lower} name…")} />
         <SelectParamFilter
           paramName="relationshipType"
           label="Type"
@@ -159,13 +160,13 @@ export default async function VendorsPage({
 
       {viewMode === "split" ? (
         <SplitListShell
-          countLabel={`${result.total} vendor${result.total === 1 ? "" : "s"}`}
+          countLabel={`${result.total} ${result.total === 1 ? slot(w, "vendor", "vendor", "{one:lower}") : slot(w, "vendors", "vendor", "{many:lower}")}`}
           listPane={<CompanySplitList companies={result.rows} selectedId={selected} isVendor={true} />}
         >
           {selected ? (
             <CompanyDetail id={selected} tab={params.tab} basePath="/vendors" linkParams={splitLinkParams(params, selected)} />
           ) : (
-            <SplitListEmpty message="No vendors match these filters." />
+            <SplitListEmpty message={slot(w, "No vendors match these filters.", "vendor", "No {many:lower} match these filters.")} />
           )}
         </SplitListShell>
       ) : (

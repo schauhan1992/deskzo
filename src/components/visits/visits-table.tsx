@@ -6,6 +6,8 @@ import { Badge, Card } from "@/components/ui/card";
 import { useClock } from "@/components/time/clock-provider";
 import { formatVisitId, visitPurposeLabels, visitStatusLabels, visitStatusTone, visitDuration, formatDuration } from "@/lib/visits";
 import { companyPath, visitPath } from "@/lib/record-links";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 type VisitRow = {
   id: string;
@@ -29,14 +31,15 @@ type VisitRow = {
  */
 export function VisitsTable({ visits }: { visits: VisitRow[] }) {
   const clock = useClock();
+  const w = useWording();
   return (
     <Card className="overflow-x-auto p-0">
       <table className="w-full text-sm">
         <thead className="border-b border-line bg-surface-sunken text-left text-xs uppercase tracking-wide text-muted">
           <tr>
-            <th className="px-4 py-2.5">Visit</th>
+            <th className="px-4 py-2.5">{slot(w, "Visit", "visit", "{one}")}</th>
             <th className="px-4 py-2.5">Status</th>
-            <th className="px-4 py-2.5">Company</th>
+            <th className="px-4 py-2.5">{slot(w, "Company", "company", "{one}")}</th>
             <th className="px-4 py-2.5">Purpose</th>
             <th className="px-4 py-2.5">Scheduled</th>
             <th className="px-4 py-2.5">On site</th>
@@ -79,7 +82,7 @@ export function VisitsTable({ visits }: { visits: VisitRow[] }) {
           {visits.length === 0 && (
             <tr>
               <td colSpan={8} className="px-4 py-10 text-center text-subtle">
-                No visits match this filter.
+                {slot(w, "No visits match this filter.", "visit", "No {many:lower} match this filter.")}
               </td>
             </tr>
           )}

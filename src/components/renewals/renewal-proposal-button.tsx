@@ -7,6 +7,8 @@ import { createProposalFromRenewal } from "@/actions/renewal-proposal";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/utils";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 /**
  * The renewal quote, in one click.
@@ -30,20 +32,23 @@ export function RenewalProposalButton({
   alreadyRenewed?: boolean;
 }) {
   const router = useRouter();
+  // The workspace's own word for a renewal (Settings → Wording).
+  const wording = useWording();
   const [pending, startTransition] = useTransition();
   const [result, setResult] = useState<
     { ok: true; id: string; docNumber: string | null; total: number } | { ok: false; error: string } | null
   >(null);
 
   if (alreadyRenewed) return null;
+  const draftLabel = `${slot(wording, "Draft a renewal proposal for", "renewal", "Draft {a} proposal for")} ${companyName}`;
 
   return (
     <>
       <button
         type="button"
         disabled={pending}
-        title={`Draft a renewal proposal for ${companyName}`}
-        aria-label={`Draft a renewal proposal for ${companyName}`}
+        title={draftLabel}
+        aria-label={draftLabel}
         onClick={() =>
           startTransition(async () => {
             const created = await createProposalFromRenewal({ companyProductId });

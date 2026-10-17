@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { CompanyCombobox, type CompanyComboOption } from "@/components/ui/company-combobox";
 import { PersonCombobox } from "@/components/ui/person-combobox";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 import { FieldError, Fold } from "./parts";
 import { invalidProps, type CommissionPartyOption, type PersonOption, type PunchErrors, type PunchForm } from "./types";
 
@@ -49,12 +51,14 @@ export function ExtrasFold({
   const [expenses, watcherUserIds] = useWatch({ control, name: ["expenses", "watcherUserIds"] });
   const rows = expenses ?? [];
   const watching = watcherUserIds ?? [];
+  const wording = useWording();
 
   const linked = new Set(linkedPartyIds);
+  const linkedHint = slot(wording, "(linked to this customer)", "customer", "(linked to this {one:lower})");
   // Linked parties first, the rest in the order they came (by name); `sort` keeps ties where they were.
   const partyOptions: CompanyComboOption[] = [...commissionParties]
     .sort((a, b) => Number(linked.has(b.id)) - Number(linked.has(a.id)))
-    .map((p) => ({ id: p.id, name: p.name, hint: linked.has(p.id) ? "(linked to this customer)" : undefined }));
+    .map((p) => ({ id: p.id, name: p.name, hint: linked.has(p.id) ? linkedHint : undefined }));
 
   // Once a Commission expense row has a payee, fetch that commission party's payee accounts so the
   // row can offer "which account" — their labels only: the PAN and bank details stay on the server.

@@ -19,6 +19,8 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { CompanyCombobox, type CompanyComboOption } from "@/components/ui/company-combobox";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 type AssignableUser = { id: string; name: string; role: string };
 type OrderOption = Awaited<ReturnType<typeof listCompanyOrderOptions>>[number];
@@ -39,6 +41,7 @@ export function NewTicketForm({
   users: AssignableUser[];
 }) {
   const router = useRouter();
+  const w = useWording();
   const [serverError, setServerError] = useState<string | null>(null);
   const [orders, setOrders] = useState<OrderOption[]>(initialOrders);
   const [ordersPending, startOrdersTransition] = useTransition();
@@ -82,7 +85,7 @@ export function NewTicketForm({
           {serverError && <div className="rounded-md bg-danger-bg px-3 py-2 text-sm text-danger">{serverError}</div>}
 
           <div className="space-y-1.5">
-            <Label htmlFor="companyId">Company *</Label>
+            <Label htmlFor="companyId">{slot(w, "Company *", "company", "{one} *")}</Label>
             <Controller
               name="companyId"
               control={control}
@@ -103,9 +106,9 @@ export function NewTicketForm({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="contactId">Contact</Label>
+            <Label htmlFor="contactId">{slot(w, "Contact", "contact", "{one}")}</Label>
             <Select id="contactId" {...register("contactId")} disabled={!selectedCompany}>
-              <option value="">No specific contact</option>
+              <option value="">{slot(w, "No specific contact", "contact", "No specific {one:lower}")}</option>
               {selectedCompany?.contacts?.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name} ({c.designation.replaceAll("_", " ")})
@@ -116,9 +119,9 @@ export function NewTicketForm({
 
           {itemsEnabled && (
             <div className="space-y-1.5">
-              <Label htmlFor="companyProductId">Order this is about</Label>
+              <Label htmlFor="companyProductId">{slot(w, "Order this is about", "order", "{one} this is about")}</Label>
               <Select id="companyProductId" {...register("companyProductId")} disabled={!selectedCompany || ordersPending}>
-                <option value="">Free Support (no specific order)</option>
+                <option value="">{slot(w, "Free Support (no specific order)", "order", "Free Support (no specific {one:lower})")}</option>
                 {orders.map((o) => (
                   <option key={o.id} value={o.id}>
                     {formatOrderId(o.orderSeq)} — {o.item.name}
@@ -127,7 +130,7 @@ export function NewTicketForm({
               </Select>
               {selectedCompany && !ordersPending && orders.length === 0 && (
                 <p className="text-xs text-subtle">
-                  No orders on file for this company — this will be logged as Free Support.
+                  {slot(w, "No orders on file for this", "order", "No {many:lower} on file for this")} {slot(w, "company", "company", "{one:lower}")} — this will be logged as Free Support.
                 </p>
               )}
             </div>
@@ -179,8 +182,7 @@ export function NewTicketForm({
             </Select>
             {users.length === 0 && (
               <p className="text-xs text-subtle">
-                No one is in the Tech Support department yet — mark a department for ticket assignment under
-                Settings.
+                {slot(w, "No one is in the Tech Support department yet — mark a department for ticket assignment under Settings.", "ticket", "No one is in the Tech Support department yet — mark a department for {one:lower} assignment under Settings.")}
               </p>
             )}
           </div>
@@ -190,7 +192,7 @@ export function NewTicketForm({
               Cancel
             </Button>
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? "Saving…" : "Create ticket"}
+              {isSubmitting ? "Saving…" : slot(w, "Create ticket", "ticket", "Create {one:lower}")}
             </Button>
           </div>
         </form>

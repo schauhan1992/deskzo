@@ -10,6 +10,8 @@ import { CompanyDetail } from "@/components/companies/company-detail";
 import { ActionNotice } from "@/components/ui/action-notice";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 
 export default async function CompanyDetailPage({
   params,
@@ -58,12 +60,13 @@ export default async function CompanyDetailPage({
 
   const merged = await mergedNotice(company.id, typeof query.merged === "string" ? query.merged : undefined);
   const clock = await workspaceClock();
+  const w = await getWording();
 
   return (
     <>
       {merged && (
         <ActionNotice tone="info" className="mb-3">
-          {merged.ref} {merged.name} was merged into this company on {clock.dateTime(merged.mergedAt)}
+          {merged.ref} {merged.name} {slot(w, "was merged into this company on", "company", "was merged into this {one:lower} on")} {clock.dateTime(merged.mergedAt)}
           {merged.by ? ` by ${merged.by}` : ""} — the link you followed now opens it here.
         </ActionNotice>
       )}

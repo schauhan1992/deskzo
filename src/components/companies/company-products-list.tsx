@@ -1,7 +1,7 @@
 "use client";
 
 import { useWording } from "@/components/terms/wording-provider";
-import { statusSlot } from "@/lib/terms/dictionary";
+import { slot, statusSlot } from "@/lib/terms/dictionary";
 import { useId, useState, useTransition } from "react";
 import type { z } from "zod";
 import type { PaymentTerms, OrderStatus, OrderBusinessType } from "@prisma/client";
@@ -218,7 +218,7 @@ export function CompanyProductsList({
   canDeletePayments: boolean;
 }) {
   const router = useRouter();
-  // The workspace's own names for the statuses (Settings → Wording).
+  // The workspace's own words and names for the statuses (Settings → Wording).
   const wording = useWording();
   const clock = useClock();
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -245,15 +245,15 @@ export function CompanyProductsList({
         <table className="w-full text-sm">
           <thead className="border-b border-line bg-surface-sunken text-left text-xs uppercase tracking-wide text-muted">
             <tr>
-              <th className="px-3 py-2.5">Order ID</th>
+              <th className="px-3 py-2.5">{slot(wording, "Order ID", "order", "{one} ID")}</th>
               <th className="px-3 py-2.5">Status</th>
               <th className="px-3 py-2.5">Product</th>
-              <th className="px-3 py-2.5">Vendor</th>
+              <th className="px-3 py-2.5">{slot(wording, "Vendor", "vendor", "{one}")}</th>
               <th className="px-3 py-2.5">Qty</th>
               <th className="px-3 py-2.5">PO / Invoice #</th>
               <th className="px-3 py-2.5">Total (incl. GST)</th>
               <th className="px-3 py-2.5">Payment</th>
-              <th className="px-3 py-2.5">Renewal</th>
+              <th className="px-3 py-2.5">{slot(wording, "Renewal", "renewal", "{one}")}</th>
               <th className="px-3 py-2.5">Added by</th>
               {showActionsColumn && <th className="px-3 py-2.5 text-right">Actions</th>}
             </tr>
@@ -306,7 +306,7 @@ export function CompanyProductsList({
                     </div>
                     {p.endCustomer && (
                       <div className="mt-0.5 text-xs text-info">
-                        For end customer:{" "}
+                        {slot(wording, "For end customer:", "customer", "For end {one:lower}:")}{" "}
                         <Link href={companyPath(p.endCustomer.companySeq)} className="hover:underline">
                           {p.endCustomer.name}
                         </Link>
@@ -330,7 +330,7 @@ export function CompanyProductsList({
                         <div className="text-xs text-subtle">{paymentTermsLabels[p.vendor.paymentTerms]}</div>
                       </>
                     ) : (
-                      <Badge tone="amber">No vendor set</Badge>
+                      <Badge tone="amber">{slot(wording, "No vendor set", "vendor", "No {one:lower} set")}</Badge>
                     )}
                   </td>
                   <td className="px-3 py-2.5 text-muted">
@@ -413,7 +413,7 @@ export function CompanyProductsList({
             {products.length === 0 && (
               <tr>
                 <td colSpan={columnCount} className="px-3 py-6 text-center text-subtle">
-                  No orders added directly yet.
+                  {slot(wording, "No orders added directly yet.", "order", "No {many:lower} added directly yet.")}
                 </td>
               </tr>
             )}
@@ -426,7 +426,7 @@ export function CompanyProductsList({
       ) : (
         <Link href={`/orders/new?companyId=${companyId}`}>
           <Button type="button" variant="secondary" size="sm">
-            + Punch order
+            {slot(wording, "+ Punch order", "order", "+ Punch {one:lower}")}
           </Button>
         </Link>
       )}
@@ -437,7 +437,7 @@ export function CompanyProductsList({
           <span className="font-medium text-text">
             {deleteTarget && formatOrderId(deleteTarget.orderSeq)} · {deleteTarget?.item.name}
           </span>{" "}
-          from this company? This can&apos;t be undone.
+          {slot(wording, "from this company? This can't be undone.", "company", "from this {one:lower}? This can't be undone.")}
         </p>
         <div className="mt-4 flex justify-end gap-2">
           <Button type="button" variant="ghost" size="sm" onClick={() => setDeleteTarget(null)} disabled={isPending}>

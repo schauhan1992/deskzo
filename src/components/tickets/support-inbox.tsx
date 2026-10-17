@@ -13,6 +13,8 @@ import { CompanyCombobox, type CompanyComboOption } from "@/components/ui/compan
 import { useClock } from "@/components/time/clock-provider";
 import { fileSize } from "@/lib/support-mail/rules";
 import { ticketPath } from "@/lib/record-links";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 export type InboxEmail = {
   id: string;
@@ -39,10 +41,11 @@ export type InboxEmail = {
  * name, or left out.
  */
 export function SupportInbox({ emails, companies }: { emails: InboxEmail[]; companies: CompanyComboOption[] }) {
+  const w = useWording();
   if (emails.length === 0) {
     return (
       <Card>
-        <CardContent className="py-10 text-center text-sm text-muted">Nothing waiting. Every email has found its ticket.</CardContent>
+        <CardContent className="py-10 text-center text-sm text-muted">{slot(w, "Nothing waiting. Every email has found its ticket.", "ticket", "Nothing waiting. Every email has found its {one:lower}.")}</CardContent>
       </Card>
     );
   }
@@ -58,6 +61,7 @@ export function SupportInbox({ emails, companies }: { emails: InboxEmail[]; comp
 function InboxCard({ email, companies }: { email: InboxEmail; companies: CompanyComboOption[] }) {
   const router = useRouter();
   const clock = useClock();
+  const w = useWording();
   // The one company it plainly belongs to, chosen already: the sender's own, else their domain's.
   const suggested = email.companies.length === 1 ? email.companies[0]! : email.companies.length === 0 && email.domainCompanies.length === 1 ? email.domainCompanies[0]! : null;
   const [companyId, setCompanyId] = useState(suggested?.id ?? "");
@@ -70,8 +74,8 @@ function InboxCard({ email, companies }: { email: InboxEmail; companies: Company
   const [pending, startTransition] = useTransition();
   const long = email.body.split("\n").length > 12 || email.body.length > 1200;
   const choices = [
-    ...email.companies.map((c) => ({ id: c.id, name: c.name, hint: "(a contact there)" })),
-    ...email.domainCompanies.map((c) => ({ id: c.id, name: c.name, hint: `(contacts at ${email.domain})` })),
+    ...email.companies.map((c) => ({ id: c.id, name: c.name, hint: slot(w, "(a contact there)", "contact", "({a} there)") })),
+    ...email.domainCompanies.map((c) => ({ id: c.id, name: c.name, hint: `(${slot(w, "contacts", "contact", "{many:lower}")} at ${email.domain})` })),
     ...companies.filter((c) => !email.companies.some((k) => k.id === c.id) && !email.domainCompanies.some((k) => k.id === c.id)),
   ];
 
@@ -142,17 +146,17 @@ function InboxCard({ email, companies }: { email: InboxEmail; companies: Company
 
         <div className="grid gap-4 border-t border-line pt-3 md:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor={`company-${email.id}`}>Open a ticket at</Label>
+            <Label htmlFor={`company-${email.id}`}>{slot(w, "Open a ticket at", "ticket", "Open {a} at")}</Label>
             <CompanyCombobox id={`company-${email.id}`} companies={choices} value={companyId} onSelect={(c) => setCompanyId(c?.id ?? "")} />
             <label className="flex items-start gap-2 text-sm text-text">
               <input type="checkbox" checked={saveContact} onChange={(e) => setSaveContact(e.target.checked)} className="mt-0.5 h-4 w-4" />
               <span>
-                Save {email.fromAddress} as a contact there
-                <span className="block text-xs text-subtle">Their next email then opens its own ticket.</span>
+                Save {email.fromAddress} {slot(w, "as a contact there", "contact", "as {a} there")}
+                <span className="block text-xs text-subtle">{slot(w, "Their next email then opens its own ticket.", "ticket", "Their next email then opens its own {one:lower}.")}</span>
               </span>
             </label>
             {saveContact && (
-              <Input aria-label="Contact name" placeholder="Their name" value={contactName} onChange={(e) => setContactName(e.target.value)} />
+              <Input aria-label={slot(w, "Contact name", "contact", "{one} name")} placeholder="Their name" value={contactName} onChange={(e) => setContactName(e.target.value)} />
             )}
             <Button
               type="button"
@@ -161,15 +165,15 @@ function InboxCard({ email, companies }: { email: InboxEmail; companies: Company
               onClick={() =>
                 run(
                   () => createTicketFromEmail({ emailId: email.id, companyId, saveContact, contactName }),
-                  (seq) => `Ticket TCK-${String(seq ?? 0).padStart(6, "0")} opened.`,
+                  (seq) => `${slot(w, "Ticket", "ticket", "{one}")} TCK-${String(seq ?? 0).padStart(6, "0")} opened.`,
                 )
               }
             >
-              {pending ? "Working…" : "Open ticket"}
+              {pending ? "Working…" : slot(w, "Open ticket", "ticket", "Open {one:lower}")}
             </Button>
           </div>
           <div className="space-y-2">
-            <Label htmlFor={`ticket-${email.id}`}>Or add it to a ticket</Label>
+            <Label htmlFor={`ticket-${email.id}`}>{slot(w, "Or add it to a ticket", "ticket", "Or add it to {a}")}</Label>
             <Input id={`ticket-${email.id}`} placeholder="TCK-001234" value={ticketRef} onChange={(e) => setTicketRef(e.target.value)} />
             <div className="flex flex-wrap gap-2">
               <Button
@@ -179,7 +183,7 @@ function InboxCard({ email, companies }: { email: InboxEmail; companies: Company
                 disabled={!ticketRef.trim() || pending}
                 onClick={() => run(() => addEmailToTicket({ emailId: email.id, ticket: ticketRef }), (seq) => `Added to TCK-${String(seq ?? 0).padStart(6, "0")}.`)}
               >
-                Add to ticket
+                {slot(w, "Add to ticket", "ticket", "Add to {one:lower}")}
               </Button>
               <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={() => run(() => ignoreSupportEmail(email.id), () => "Left out.")}>
                 Leave out

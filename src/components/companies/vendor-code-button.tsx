@@ -7,9 +7,13 @@ import { setVendorCode } from "@/actions/company";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog } from "@/components/ui/dialog";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 export function VendorCodeButton({ companyId, vendorCode }: { companyId: string; vendorCode: string | null }) {
   const router = useRouter();
+  const w = useWording();
+  const label = slot(w, "Vendor code", "vendor", "{one} code");
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState(vendorCode ?? "");
   const [isPending, startTransition] = useTransition();
@@ -42,19 +46,19 @@ export function VendorCodeButton({ companyId, vendorCode }: { companyId: string;
         className="inline-flex items-center gap-1.5 rounded-full bg-surface-sunken px-2.5 py-0.5 text-xs font-medium text-text transition-colors hover:bg-line"
       >
         <Hash className="h-3 w-3" />
-        {vendorCode ? `Vendor code: ${vendorCode}` : "Set vendor code"}
+        {vendorCode ? `${label}: ${vendorCode}` : slot(w, "Set vendor code", "vendor", "Set {one:lower} code")}
       </button>
 
-      <Dialog open={open} onClose={() => setOpen(false)} title="Vendor code">
+      <Dialog open={open} onClose={() => setOpen(false)} title={label}>
         <div className="space-y-3">
           {error && <p className="text-xs text-danger">{error}</p>}
           {/* aria-label rather than a visible label: the dialog heading captions this field but does
               not name it, and the placeholder disappears the moment somebody types. */}
           <Input
-            aria-label="Vendor code"
+            aria-label={label}
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            placeholder="Your internal reference for this vendor"
+            placeholder={slot(w, "Your internal reference for this vendor", "vendor", "Your internal reference for this {one:lower}")}
           />
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={isPending}>

@@ -9,22 +9,24 @@ import { workspaceClock } from "@/lib/time/workspace";
 import { visitPath } from "@/lib/record-links";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
+import { getWording } from "@/lib/terms/server";
+import { slot } from "@/lib/terms/dictionary";
 
 export default async function EditVisitPage({ params }: { params: Promise<{ id: string }> }) {
   if (!(await isModuleEnabled("visits"))) return <ModuleDisabledNotice moduleKey="visits" />;
   const { id } = await params;
-  const [visit, session] = await Promise.all([getVisit(id), auth()]);
+  const [visit, session, w] = await Promise.all([getVisit(id), auth(), getWording()]);
   if (!visit) notFound();
 
   if (!isVisitOpen(visit.status)) {
     return (
       <div className="max-w-md">
-        <h1 className="text-xl font-semibold text-text">This visit is closed</h1>
+        <h1 className="text-xl font-semibold text-text">{slot(w, "This visit is closed", "visit", "This {one:lower} is closed")}</h1>
         <p className="mt-2 text-sm text-muted">
-          A completed or cancelled visit is a record of what happened, so it can&apos;t be rescheduled.
+          {slot(w, "A completed or cancelled visit is a record of what happened, so it can't be rescheduled.", "visit", "A completed or cancelled {one:lower} is a record of what happened, so it can't be rescheduled.")}
         </p>
         <Link href={visitPath(visit.visitSeq)} className="mt-3 inline-block text-sm text-brand hover:underline">
-          ← Back to the visit
+          ← {slot(w, "Back to the visit", "visit", "Back to the {one:lower}")}
         </Link>
       </div>
     );
@@ -36,9 +38,9 @@ export default async function EditVisitPage({ params }: { params: Promise<{ id: 
     <div>
       <div className="mb-5">
         <Link href={visitPath(visit.visitSeq)} className="text-sm text-muted hover:text-text">
-          ← Back to the visit
+          ← {slot(w, "Back to the visit", "visit", "Back to the {one:lower}")}
         </Link>
-        <h1 className="mt-1 text-xl font-semibold text-text">Edit visit</h1>
+        <h1 className="mt-1 text-xl font-semibold text-text">{slot(w, "Edit visit", "visit", "Edit {one:lower}")}</h1>
       </div>
 
       <VisitForm

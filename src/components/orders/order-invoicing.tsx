@@ -11,6 +11,8 @@ import { formatOrderId } from "@/lib/order-id";
 import { orderPath } from "@/lib/record-links";
 import { documentPath } from "@/lib/trade-documents";
 import { formatCurrency } from "@/lib/utils";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 import {
   billingStatusLabels,
   billingStatusTones,
@@ -48,6 +50,7 @@ export function OrderInvoicingCard({
   siblings: PoSibling[];
 }) {
   const router = useRouter();
+  const wording = useWording();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [made, setMade] = useState<string[] | null>(null);
@@ -110,7 +113,7 @@ export function OrderInvoicingCard({
                       }
                     }}
                     className="ml-auto grid h-6 w-6 place-items-center rounded-base text-subtle hover:bg-surface-sunken hover:text-danger"
-                    title="Unlink this invoice from the order"
+                    title={slot(wording, "Unlink this invoice from the order", "order", "Unlink this invoice from the {one:lower}")}
                     aria-label={`Unlink ${d.docNumber}`}
                   >
                     <Unlink className="h-3.5 w-3.5" />
@@ -182,7 +185,9 @@ export function OrderInvoicingCard({
 
         {po && siblings.length > 0 && (
           <div className="border-t border-line pt-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-subtle">Customer PO {po}</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-subtle">
+              {slot(wording, "Customer PO", "customer", "{one} PO")} {po}
+            </p>
             <ul role="list" className="mt-1.5 space-y-1">
               {siblings.map((s) => (
                 <li key={s.id} className="flex items-center justify-between gap-2 text-xs">

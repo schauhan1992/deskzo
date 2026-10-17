@@ -14,6 +14,8 @@ import { currentUser } from "@/lib/session";
 import { PrintButton } from "@/components/reports/print-button";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
+import { getWording } from "@/lib/terms/server";
+import { reportLabel } from "@/components/reports/report-wording";
 
 /**
  * The report as a sheet of paper.
@@ -43,7 +45,7 @@ export default async function ReportPrintPage({
     notFound();
   }
 
-  const [result, viewer, clock] = await Promise.all([runAnalyticsReport(request!), currentUser(), workspaceClock()]);
+  const [result, viewer, clock, w] = await Promise.all([runAnalyticsReport(request!), currentUser(), workspaceClock(), getWording()]);
   if (!result.ok) {
     return <p className="p-8 text-sm text-danger">{result.error}</p>;
   }
@@ -54,9 +56,14 @@ export default async function ReportPrintPage({
   const source = base && viewer ? await effectiveSource(base, viewer.id) : base;
   const data = result.data;
   const crossTab = data.columns.length > 1 || data.columns[0]?.key !== "__all__";
-  const dimensionLabel =
-    request!.dimension === "time" ? "Period" : source?.dimensions.find((d) => d.key === request!.dimension)?.label ?? "Group";
-  const measureLabel = source?.measures.find((m) => m.key === request!.measure)?.label ?? request!.measure;
+  // And in the workspace's own words, as the screen names them (src/components/reports/report-wording.ts).
+  const dimensionNamed = (key: string | undefined) => {
+    const found = source?.dimensions.find((d) => d.key === key);
+    return found ? reportLabel(w, found) : undefined;
+  };
+  const dimensionLabel = request!.dimension === "time" ? "Period" : dimensionNamed(request!.dimension) ?? "Group";
+  const measure = source?.measures.find((m) => m.key === request!.measure);
+  const measureLabel = measure ? reportLabel(w, measure) : request!.measure;
 
   const fmt = (n: number) =>
     data.unit === "currency" ? formatCurrency(n) : data.unit === "days" ? `${n.toFixed(1)} d` : n.toLocaleString("en-IN");
@@ -72,7 +79,7 @@ export default async function ReportPrintPage({
   const appliedDimensions = Object.entries(request!.filters ?? {})
     .filter(([, values]) => values.length > 0)
     .map(([key, values]) => {
-      const label = source?.dimensions.find((d) => d.key === key)?.label ?? key;
+      const label = dimensionNamed(key) ?? key;
       return `${label}: ${values.join(", ")}`;
     });
 
@@ -101,8 +108,8 @@ export default async function ReportPrintPage({
           {measureLabel} by {dimensionLabel.toLowerCase()}
         </h1>
         <p className="mt-0.5 text-sm text-muted">
-          {source?.label} · {request!.from} to {request!.to}
-          {crossTab && ` · across ${source?.dimensions.find((d) => d.key === request!.column)?.label ?? "time"}`}
+          {source && reportLabel(w, source)} · {request!.from} to {request!.to}
+          {crossTab && ` · across ${dimensionNamed(request!.column) ?? "time"}`}
         </p>
 
         <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-1 border-y border-line py-3 text-xs sm:grid-cols-3">

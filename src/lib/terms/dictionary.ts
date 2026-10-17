@@ -183,3 +183,6 @@ export function orderStatusLabel(w: Wording, status: OrderStatus): string {
 export function statusSlot(w: Wording, status: OrderStatus, canonical: string): string {
   return w.statusRenamed.includes(status) ? w.orderStatus[status] : canonical;
 }
+
+/** A sentence's first letter capitalised — for a slot whose template starts with {a} ("A ticket was…" → "An enquiry was…"). */
+export const upperFirst = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);

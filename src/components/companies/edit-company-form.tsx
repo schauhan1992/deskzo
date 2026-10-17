@@ -19,6 +19,8 @@ import { CompanyDetailFields, type TermsAdvice } from "@/components/companies/co
 import type { Company, CompanyRelationshipType } from "@prisma/client";
 import { bandForCount } from "@/lib/company-size";
 import { companyPath } from "@/lib/record-links";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 
 type FormValues = z.input<typeof updateCompanySchema>;
 type IndustryOption = { id: string; name: string };
@@ -49,6 +51,7 @@ export function EditCompanyForm({
   categories?: CategoryTree<FlatCategory>[];
 }) {
   const router = useRouter();
+  const w = useWording();
   const [serverError, setServerError] = useState<string | null>(null);
   const {
     register,
@@ -99,7 +102,7 @@ export function EditCompanyForm({
         selectedTerms={String(watch("paymentTerms") ?? "")}
       />
       <p className="text-xs text-subtle">
-        Addresses and GST numbers are now managed per location — see the Locations tab on the company page.
+        {slot(w, "Addresses and GST numbers are now managed per location — see the Locations tab on the company page.", "company", "Addresses and GST numbers are now managed per location — see the Locations tab on the {one:lower} page.")}
       </p>
 
       <div className="flex justify-end gap-3">
