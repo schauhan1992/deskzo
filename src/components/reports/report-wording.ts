@@ -1,4 +1,3 @@
-import type { SourceOption } from "@/actions/analytics";
 import { slot, type Wording } from "@/lib/terms/dictionary";
 
 /**
@@ -52,13 +51,21 @@ export function reportLabel(w: Wording, item: { label: string; custom?: boolean 
   return WORDED.get(item.label)?.(w) ?? item.label;
 }
 
-/** Every label the explorer shows of its sources, in the workspace's words — keys untouched. */
-export function wordedSources(w: Wording, sources: SourceOption[]): SourceOption[] {
+/**
+ * Every label the explorer shows of its sources, in the workspace's words — keys untouched. Typed by the
+ * labels it rewords rather than by the analytics actions' SourceOption, so this plain module borrows no
+ * module's actions (check:module-guards).
+ */
+type Labelled = { label: string; custom?: boolean };
+export function wordedSources<S extends Labelled & { measures: Labelled[]; dimensions: Labelled[] }>(w: Wording, sources: S[]): S[] {
   if (w.renamed.length === 0) return sources;
-  return sources.map((s) => ({
-    ...s,
-    label: reportLabel(w, s),
-    measures: s.measures.map((m) => ({ ...m, label: reportLabel(w, m) })),
-    dimensions: s.dimensions.map((d) => ({ ...d, label: reportLabel(w, d) })),
-  }));
+  return sources.map(
+    (s) =>
+      ({
+        ...s,
+        label: reportLabel(w, s),
+        measures: s.measures.map((m) => ({ ...m, label: reportLabel(w, m) })),
+        dimensions: s.dimensions.map((d) => ({ ...d, label: reportLabel(w, d) })),
+      }) as S,
+  );
 }
