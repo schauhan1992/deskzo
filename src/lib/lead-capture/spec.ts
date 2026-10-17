@@ -309,3 +309,117 @@ export function renderMarkdown(baseUrl: string, ownFields: OwnFieldGroup[] = [])
     "",
   ].join("\n");
 }
+
+// ─── The same, as a Postman collection ───────────────────────────────────────────────────────────
+
+/** A value one of the workspace's own fields takes, for the example request; null for one a website can't fill. */
+function exampleValue(f: OwnFieldDoc): unknown {
+  switch (f.type) {
+    case "TEXT":
+    case "LONG_TEXT":
+      return f.label;
+    case "NUMBER":
+      return 1;
+    case "MONEY":
+      return 10000;
+    case "DATE":
+      return "2026-11-01";
+    case "SELECT":
+      return f.options[0]?.value ?? null;
+    case "MULTI_SELECT":
+      return f.options[0] ? [f.options[0].value] : null;
+    case "CHECKBOX":
+      return true;
+    case "EMAIL":
+      return "name@example.com";
+    case "PHONE":
+      return "+91 98765 43210";
+    case "URL":
+      return "https://www.example.com";
+    default:
+      return null;
+  }
+}
+
+/** The workspace's own fields in the example: each group's, with a value each can take. */
+function ownExample(groups: OwnFieldGroup[]): Record<string, Record<string, unknown>> {
+  const out: Record<string, Record<string, unknown>> = {};
+  for (const group of groups) {
+    const values = Object.fromEntries(group.fields.map((f) => [f.key, exampleValue(f)]).filter(([, v]) => v !== null));
+    if (Object.keys(values).length) out[group.name] = values;
+  }
+  return out;
+}
+
+/** The example as a plain HTML form would post it: products comma-separated, own fields as `custom_fields[key]`. */
+function formExample(body: Record<string, unknown>): { key: string; value: string; type: "text" }[] {
+  const rows: { key: string; value: string; type: "text" }[] = [];
+  for (const [key, value] of Object.entries(body)) {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      for (const [field, v] of Object.entries(value)) {
+        if (Array.isArray(v)) for (const item of v) rows.push({ key: `${key}[${field}][]`, value: String(item), type: "text" });
+        else rows.push({ key: `${key}[${field}]`, value: String(v), type: "text" });
+      }
+    } else rows.push({ key, value: Array.isArray(value) ? value.join(",") : String(value), type: "text" });
+  }
+  return rows;
+}
+
+/**
+ * The documentation as a Postman collection (v2.1) — imported into Postman, Insomnia or Bruno it is
+ * ready to try: the address as a variable, HTTP Basic with the key ID and secret as variables left
+ * empty to fill in (a secret never goes into a file that gets passed around), and three requests —
+ * check a key, send a lead as JSON, send one as a form — with the answers to expect. Made from the
+ * same fields and examples as the Markdown, so the two can't disagree.
+ */
+export function postmanCollection(baseUrl: string, ownFields: OwnFieldGroup[] = []): string {
+  const url = { raw: "{{baseUrl}}" + API_PATH, host: ["{{baseUrl}}"], path: API_PATH.split("/").filter(Boolean) };
+  const body = { ...EXAMPLE_BODY, products: ["M365-BS"], quantity: 25, ...ownExample(ownFields) };
+  const json = [{ key: "Content-Type", value: "application/json" }];
+  const answer = (name: string, code: number, status: string, value: unknown) => ({ name, status, code, header: json, _postman_previewlanguage: "json", body: JSON.stringify(value, null, 2) });
+  const fieldTable = ["| Field | Type | Required | What it does |", "|---|---|---|---|", ...LEAD_FIELDS.map((f) => `| \`${f.name}\` | ${f.type} | ${f.required === true ? "Yes" : f.required === false ? "No" : f.required} | ${f.description} |`)].join("\n");
+  const sendJson = { method: "POST", header: json, body: { mode: "raw", raw: JSON.stringify(body, null, 2), options: { raw: { language: "json" } } }, url, description: fieldTable };
+  const created = { ok: true, lead: { id: "cm…", reference: "LEAD-000481" }, duplicate: false, assigned: true, not_saved: [] };
+  const collection = {
+    info: {
+      name: "Deskzo One — Lead capture API",
+      description: [
+        "Send enquiries from your websites into the CRM as leads.",
+        "",
+        "Set the collection's variables first: `keyId` and `secret` from Settings → Lead capture API (the secret is shown once, when the key is created). Never put the secret in a website's browser code — call the API from your server.",
+        "",
+        `${RATE_LIMIT_PER_MINUTE} leads a minute per key; bodies up to ${MAX_BODY_BYTES / 1024} KB. Send \`external_id\` so a retry never makes a second lead.`,
+      ].join("\n"),
+      schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    },
+    auth: { type: "basic", basic: [{ key: "username", value: "{{keyId}}", type: "string" }, { key: "password", value: "{{secret}}", type: "string" }] },
+    variable: [
+      { key: "baseUrl", value: baseUrl, type: "string" },
+      { key: "keyId", value: "", type: "string" },
+      { key: "secret", value: "", type: "string" },
+    ],
+    item: [
+      {
+        name: "Check a key",
+        request: { method: "GET", url, description: "Answers with the key's name, and creates nothing." },
+        response: [answer("The key works", 200, "OK", { ok: true, key: "acme.com contact form" }), answer("Wrong, unknown or revoked", 401, "Unauthorized", { ok: false, error: "Unauthorized" })],
+      },
+      {
+        name: "Send a lead (JSON)",
+        request: sendJson,
+        response: [
+          answer("Created", 201, "Created", created),
+          answer("Sent before (same external_id)", 200, "OK", { ...created, duplicate: true }),
+          answer("Something missing", 400, "Bad Request", { ok: false, error: "email or phone is required", fields: { email: "email or phone is required" } }),
+          answer("Too many", 429, "Too Many Requests", { ok: false, error: `More than ${RATE_LIMIT_PER_MINUTE} leads a minute from this key. Try again shortly.` }),
+        ],
+      },
+      {
+        name: "Send a lead (form)",
+        request: { method: "POST", body: { mode: "urlencoded", urlencoded: formExample(body) }, url, description: "As a plain HTML form posts it, from your server: `products` comma-separated, your own fields as `custom_fields[key]`." },
+        response: [answer("Created", 201, "Created", created)],
+      },
+    ],
+  };
+  return JSON.stringify(collection, null, 2);
+}

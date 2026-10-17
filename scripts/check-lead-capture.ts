@@ -22,7 +22,15 @@ import "dotenv/config";
 import Module from "node:module";
 import { directClient } from "../src/lib/tenancy/direct-client";
 import { formatLeadId } from "../src/lib/order-id";
-import { LEAD_FIELDS, RATE_LIMIT_PER_MINUTE, renderMarkdown } from "../src/lib/lead-capture/spec";
+import { LEAD_FIELDS, RATE_LIMIT_PER_MINUTE, postmanCollection, renderMarkdown } from "../src/lib/lead-capture/spec";
+
+/** The parts of a Postman collection (v2.1) the checks read. */
+type Collection = {
+  info: { schema: string };
+  auth: { type: string; basic: { key: string; value: string }[] };
+  variable: { key: string; value: string }[];
+  item: { name: string; request: { method: string; url: { raw: string }; body?: { mode: string; raw?: string; urlencoded?: { key: string; value: string }[] } } }[];
+};
 
 let actorId = "";
 const internals = Module as unknown as { _load(r: string, p: unknown, m: boolean): unknown };
@@ -82,6 +90,32 @@ async function main() {
   );
   const md = renderMarkdown("https://crm.example.com");
   ok("the downloadable docs name the endpoint and warn against browser use", md.includes("POST https://crm.example.com/api/v1/leads") && /never from browser JavaScript/.test(md));
+  const tower = { name: "custom_fields" as const, record: "the lead", fields: [{ key: "tower", label: "Tower", type: "SELECT" as const, required: false, options: [{ value: "b", label: "Tower B" }], help: null }] };
+  const collection = JSON.parse(postmanCollection("https://crm.example.com", [tower])) as Collection;
+  const variable = (key: string) => collection.variable.find((v) => v.key === key)?.value;
+  ok(
+    "the Postman collection: v2.1, the address a variable, HTTP Basic from the key ID and secret — left empty to fill in",
+    collection.info.schema.includes("v2.1.0") &&
+      variable("baseUrl") === "https://crm.example.com" &&
+      variable("keyId") === "" &&
+      variable("secret") === "" &&
+      collection.auth.type === "basic" &&
+      collection.auth.basic.map((b) => `${b.key}=${b.value}`).sort().join() === "password={{secret}},username={{keyId}}",
+  );
+  const acceptedSet = new Set<string>(ACCEPTED_FIELDS);
+  const jsonItem = collection.item.find((i) => i.name === "Send a lead (JSON)")!;
+  const formItem = collection.item.find((i) => i.name === "Send a lead (form)")!;
+  const jsonExample = JSON.parse(jsonItem.request.body!.raw!) as Record<string, unknown>;
+  const formKeys = formItem.request.body!.urlencoded!.map((r) => r.key);
+  ok(
+    "  check a key, send one as JSON, send one as a form — all to the endpoint",
+    collection.item.map((i) => `${i.request.method} ${i.name}`).join(" | ") === "GET Check a key | POST Send a lead (JSON) | POST Send a lead (form)" && collection.item.every((i) => i.request.url.raw === "{{baseUrl}}/api/v1/leads"),
+  );
+  ok(
+    "  its examples send only fields the endpoint accepts — the workspace's own ones by key",
+    Object.keys(jsonExample).every((k) => acceptedSet.has(k)) && formKeys.every((k) => acceptedSet.has(k.replace(/\[.*$/, ""))) && (jsonExample.custom_fields as Record<string, unknown>)?.tower === "b" && formKeys.includes("custom_fields[tower]"),
+    Object.keys(jsonExample).filter((k) => !acceptedSet.has(k)).join(", "),
+  );
 
   section("Reading what a website sends");
 
@@ -207,6 +241,16 @@ async function main() {
       "application/x-www-form-urlencoded",
     );
     ok("a plain HTML form post works too", form.status === 201, form.status);
+
+    // The Postman collection's two examples, as a developer would first send them — to a company of this run's.
+    const fromPostman = JSON.parse(postmanCollection("http://localhost:3000")) as Collection;
+    const ours = { company: `${TAG} Acme`, email: "postman@zzprobe-acme.example" };
+    const postmanJson = JSON.parse(fromPostman.item.find((i) => i.name === "Send a lead (JSON)")!.request.body!.raw!) as Record<string, unknown>;
+    const viaJson = await post(auth, JSON.stringify({ ...postmanJson, ...ours, external_id: "zz-postman-json" }));
+    const formRows = fromPostman.item.find((i) => i.name === "Send a lead (form)")!.request.body!.urlencoded!;
+    const formBody = new URLSearchParams(formRows.map((r) => [r.key, r.key in ours ? ours[r.key as keyof typeof ours] : r.key === "external_id" ? "zz-postman-form" : r.value]));
+    const viaForm = await post(auth, formBody.toString(), "application/x-www-form-urlencoded");
+    ok("the Postman collection's examples, sent as they are, each create a lead", viaJson.status === 201 && viaForm.status === 201, `${viaJson.status} ${viaForm.status}`);
 
     // ── a reseller's customer ──
     const reseller = await db.company.create({

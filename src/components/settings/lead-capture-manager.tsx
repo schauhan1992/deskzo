@@ -17,6 +17,7 @@ import {
   curlExample,
   nodeExample,
   phpExample,
+  postmanCollection,
   renderMarkdown,
   type OwnFieldGroup,
 } from "@/lib/lead-capture/spec";
@@ -175,12 +176,16 @@ export function LeadCaptureManager({ keys, baseUrl, ownFields }: { keys: Key[]; 
     });
   }
 
-  function download() {
-    const blob = new Blob([renderMarkdown(baseUrl, ownFields)], { type: "text/markdown;charset=utf-8" });
+  /** The documentation as a file — Markdown to read, or a Postman collection to try it in (src/lib/lead-capture/spec.ts). */
+  function download(kind: "md" | "postman") {
+    const blob =
+      kind === "md"
+        ? new Blob([renderMarkdown(baseUrl, ownFields)], { type: "text/markdown;charset=utf-8" })
+        : new Blob([postmanCollection(baseUrl, ownFields)], { type: "application/json;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "lead-capture-api.md";
+    a.download = kind === "md" ? "lead-capture-api.md" : "lead-capture-api.postman_collection.json";
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -257,9 +262,14 @@ export function LeadCaptureManager({ keys, baseUrl, ownFields }: { keys: Key[]; 
       <Card>
         <CardHeader className="flex items-center justify-between text-sm font-medium text-text">
           <span>Documentation for your website developers</span>
-          <Button type="button" variant="secondary" size="sm" onClick={download}>
-            <Download className="h-3.5 w-3.5" /> Download (.md)
-          </Button>
+          <span className="flex flex-wrap gap-2">
+            <Button type="button" variant="secondary" size="sm" onClick={() => download("md")}>
+              <Download className="h-3.5 w-3.5" /> Download (.md)
+            </Button>
+            <Button type="button" variant="secondary" size="sm" onClick={() => download("postman")} title="Import into Postman, Insomnia or Bruno, then fill in the key ID and secret">
+              <Download className="h-3.5 w-3.5" /> Postman collection
+            </Button>
+          </span>
         </CardHeader>
         <CardContent className="space-y-5 text-sm">
           <div className="space-y-1.5">
