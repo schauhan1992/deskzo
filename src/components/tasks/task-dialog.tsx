@@ -6,6 +6,7 @@ import { createTask, updateTask } from "@/actions/task";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Select, Textarea } from "@/components/ui/input";
+import { TaskAboutPicker, aboutIds, type About } from "@/components/tasks/task-about-picker";
 import {
   PRIORITY_LABELS,
   REPEAT_LABELS,
@@ -42,14 +43,26 @@ export type TaskFormTask = {
   badge: string | null;
   repeat: string | null;
   repeatUntil: Date | string | null;
+  /** What it's about, where the list knows (the Tasks page does). */
+  company?: { id: string; name: string } | null;
+  lead?: { id: string; title: string } | null;
+  ticket?: { id: string; title: string } | null;
 };
+
+/** The record a task is about, as the picker shows it — the most specific of ticket, lead and company. */
+function aboutOf(task: TaskFormTask | null): About | null {
+  if (task?.ticket) return { kind: "ticket", id: task.ticket.id, label: task.ticket.title };
+  if (task?.lead) return { kind: "lead", id: task.lead.id, label: task.lead.title };
+  if (task?.company) return { kind: "company", id: task.company.id, label: task.company.name };
+  return null;
+}
 
 const dayInput = (value: Date | string | null | undefined) => (value ? dayKeyOf(value) : "");
 
 /**
  * Making or changing a task (owner, 16 Oct 2026): its status, team and the person in it, the challenge
  * it counts towards, its dates, estimate, XP and badge, whether it repeats, and what it's about. XP is
- * for somebody else to set: the field says so when the task is the viewer's own.
+ * for somebody else to set: on a task assigned to the viewer, the XP and badge aren't offered at all.
  */
 export function TaskDialog({
   open,
@@ -84,6 +97,10 @@ export function TaskDialog({
   const [repeat, setRepeat] = useState(task?.repeat ?? "");
   const [repeatUntil, setRepeatUntil] = useState(dayInput(task?.repeatUntil));
   const [description, setDescription] = useState(task?.description ?? "");
+  const [about, setAbout] = useState<About | null>(() => aboutOf(task));
+  const [steps, setSteps] = useState("");
+  // Made on a record's page, the task is about that record — no picker.
+  const madeOnRecord = !!(link.companyId || link.leadId || link.ticketId);
 
   // A team narrows the people and the challenges to its own; with none, everybody and every one.
   const people = useMemo(
@@ -94,8 +111,9 @@ export function TaskDialog({
     () => (departmentId ? options.challenges.filter((c) => !c.departmentId || c.departmentId === departmentId || c.id === challengeId) : options.challenges),
     [options.challenges, departmentId, challengeId],
   );
+  // Nobody sets the XP on their own task, so on one assigned to the viewer the XP and badge aren't offered
+  // — what the task already carries goes back unchanged (src/actions/task.ts, OWN_XP).
   const ownTask = assignee === viewerId;
-  const xpLocked = ownTask && Number(xp) === (task?.xp ?? 0);
 
   function save() {
     setError(null);
@@ -110,13 +128,19 @@ export function TaskDialog({
       estimateMinutes: estimate ? Number(estimate) : null,
       departmentId,
       challengeId,
-      xp: Number(xp) || 0,
-      badge,
+      xp: ownTask ? (task?.xp ?? 0) : Number(xp) || 0,
+      badge: ownTask ? (task?.badge ?? "") : badge,
       repeat,
       repeatUntil: repeat ? repeatUntil : "",
     };
     start(async () => {
-      const result = task ? await updateTask({ id: task.id, ...fields }) : await createTask({ ...fields, ...link });
+      // The link goes only where the form decides it: a new task's, or one changed on an edit — an edit
+      // that leaves it alone sends none, so a task stays on a record its editor can't open.
+      const aboutChanged = JSON.stringify(aboutIds(about)) !== JSON.stringify(aboutIds(aboutOf(task)));
+      const checklist = steps.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+      const result = task
+        ? await updateTask({ id: task.id, ...fields, ...(aboutChanged ? { about: aboutIds(about) } : {}) })
+        : await createTask({ ...fields, ...(madeOnRecord ? link : aboutIds(about)), steps: checklist });
       if (!result.ok) {
         setError(result.error);
         return;
@@ -197,15 +221,20 @@ export function TaskDialog({
           <Field label="Estimate (minutes)" hint={estimate && Number(estimate) >= 60 ? `${(Number(estimate) / 60).toFixed(1)} hours` : undefined}>
             <Input type="number" min={0} step={5} value={estimate} onChange={(e) => setEstimate(e.target.value)} placeholder="e.g. 90" disabled={pending} />
           </Field>
-          <Field
-            label="Earned XP"
-            hint={ownTask ? "It's your task, so somebody else sets what it's worth." : "Earned by whoever it's assigned to, when it's done by its due date."}
-          >
-            <Input type="number" min={0} max={XP_MAX} value={xp} onChange={(e) => setXp(e.target.value)} disabled={pending || xpLocked} />
-          </Field>
-          <Field label="Badge" hint="Earned with the XP — say, “Bug squasher”.">
-            <Input value={badge} onChange={(e) => setBadge(e.target.value)} placeholder="Optional" maxLength={40} disabled={pending} />
-          </Field>
+          {ownTask ? (
+            <p className="self-end rounded-base bg-surface-sunken px-3 py-2 text-xs text-muted">
+              It&apos;s your task, so its XP and badge are for somebody else to set.
+            </p>
+          ) : (
+            <>
+              <Field label="Earned XP" hint="Earned by whoever it's assigned to, when it's done by its due date.">
+                <Input type="number" min={0} max={XP_MAX} value={xp} onChange={(e) => setXp(e.target.value)} disabled={pending} />
+              </Field>
+              <Field label="Badge" hint="Earned with the XP — say, “Bug squasher”.">
+                <Input value={badge} onChange={(e) => setBadge(e.target.value)} placeholder="Optional" maxLength={40} disabled={pending} />
+              </Field>
+            </>
+          )}
           <Field label="Repeats">
             <div className="flex gap-2">
               <Select value={repeat} onChange={(e) => setRepeat(e.target.value)} disabled={pending}>
@@ -222,9 +251,22 @@ export function TaskDialog({
             </div>
           </Field>
         </div>
+        {!madeOnRecord && (
+          // Not a <label>: the picker holds a choice, a search and its results.
+          <div className="space-y-1.5">
+            <span className="block text-sm font-medium text-text">About</span>
+            <TaskAboutPicker value={about} onChange={setAbout} disabled={pending} />
+            <span className="block text-xs text-subtle">A company, lead or ticket — the task shows on it, and it on the task.</span>
+          </div>
+        )}
         <Field label="Description">
           <Textarea rows={4} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What it's about, and what done looks like" disabled={pending} />
         </Field>
+        {!task && (
+          <Field label="Checklist" hint="A step a line — ticked off in the task. More can be added there later.">
+            <Textarea rows={3} value={steps} onChange={(e) => setSteps(e.target.value)} placeholder={"Collect the documents\nPrepare the working\nSend it for review"} disabled={pending} />
+          </Field>
+        )}
         {error && <p className="text-sm text-danger">{error}</p>}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="secondary" onClick={onClose} disabled={pending}>

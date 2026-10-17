@@ -5,7 +5,7 @@ import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { leadsSeenBy } from "@/lib/leads/shown";
 import { requireModuleUser } from "@/lib/modules-access";
-import { taskAccess, type AccessAction } from "@/lib/authz/access";
+import { companyAccess, leadAccess, taskAccess, ticketAccess, type AccessAction } from "@/lib/authz/access";
 import { pageSlice } from "@/lib/pagination";
 import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
@@ -30,6 +30,29 @@ function revalidateTaskPaths(task: { companyId: string | null; leadId: string | 
  */
 async function reachableTask(userId: string, id: string, action: AccessAction) {
   return db.task.findFirst({ where: { AND: [{ id }, await taskAccess(userId, action)] }, omit: ADVANCED });
+}
+
+/**
+ * What a task is about — one company, lead or ticket — when this person can see it (owner, 17 Oct 2026:
+ * the form picks it now, so it's checked rather than taken on trust from the record page that used to
+ * be the only way in). A lead or ticket brings its company with it, as a task made on its page has.
+ */
+async function aboutLink(userId: string, about: { companyId?: string; leadId?: string; ticketId?: string }): Promise<{ ok: true; link: { companyId: string | null; leadId: string | null; ticketId: string | null } } | { ok: false; error: string }> {
+  const none = { companyId: null, leadId: null, ticketId: null };
+  const refused = { ok: false as const, error: "That record isn't one you can see." };
+  if (about.ticketId) {
+    const ticket = await db.ticket.findFirst({ where: { AND: [{ id: about.ticketId }, await ticketAccess(userId, "view")] }, select: { id: true, companyId: true } });
+    return ticket ? { ok: true, link: { ...none, ticketId: ticket.id, companyId: ticket.companyId } } : refused;
+  }
+  if (about.leadId) {
+    const lead = await db.lead.findFirst({ where: { AND: [{ id: about.leadId }, await leadAccess(userId, "view")] }, select: { id: true, companyId: true } });
+    return lead ? { ok: true, link: { ...none, leadId: lead.id, companyId: lead.companyId } } : refused;
+  }
+  if (about.companyId) {
+    const company = await db.company.findFirst({ where: { AND: [{ id: about.companyId }, await companyAccess(userId, "view")] }, select: { id: true } });
+    return company ? { ok: true, link: { ...none, companyId: company.id } } : refused;
+  }
+  return { ok: true, link: none };
 }
 
 async function assertValidAssignee(userId: string) {
@@ -127,6 +150,8 @@ export async function createTask(input: unknown): Promise<ActionResult<{ id: str
   if ((fields.xp ?? 0) > 0 && data.assignedToUserId === user.id) return { ok: false, error: OWN_XP };
   // A new task is to do or already under way; it's closed by moving it, which is what earns and repeats.
   const status = data.status === "IN_PROGRESS" ? "IN_PROGRESS" : "TODO";
+  const about = await aboutLink(user.id, { companyId: data.companyId || undefined, leadId: data.leadId || undefined, ticketId: data.ticketId || undefined });
+  if (!about.ok) return about;
 
   const task = await db.task.create({
     data: {
@@ -135,15 +160,16 @@ export async function createTask(input: unknown): Promise<ActionResult<{ id: str
       dueDate,
       assignedToUserId: data.assignedToUserId || null,
       createdByUserId: user.id,
-      companyId: data.companyId || null,
-      leadId: data.leadId || null,
-      ticketId: data.ticketId || null,
+      ...about.link,
       status,
       ...fields,
       ...((fields.xp ?? 0) > 0 ? { xpSetById: user.id } : {}),
     },
     select: { id: true, companyId: true, leadId: true, ticketId: true },
   });
+  // Its checklist, typed with it — in the order typed.
+  const steps = (data.steps ?? []).filter(Boolean);
+  if (steps.length) await db.taskChecklistItem.createMany({ data: steps.map((title, sortOrder) => ({ taskId: task.id, title, sortOrder })) });
 
   if (data.assignedToUserId && data.assignedToUserId !== user.id) {
     await notifyUser({
@@ -194,6 +220,9 @@ export async function updateTask(input: unknown): Promise<ActionResult<{ id: str
   // Changing what it's worth is setting its XP — never by whoever it's for.
   const xpChanges = fields.xp !== undefined && fields.xp !== existing.xp;
   if (xpChanges && newAssignee === user.id && (fields.xp ?? 0) > 0) return { ok: false, error: OWN_XP };
+  // What it's about, where the form sent it: checked like a new task's; left out, left as it was.
+  const about = data.about ? await aboutLink(user.id, { companyId: data.about.companyId || undefined, leadId: data.about.leadId || undefined, ticketId: data.about.ticketId || undefined }) : null;
+  if (about && !about.ok) return about;
 
   const task = await db.task.update({
     where: { id: data.id },
@@ -202,6 +231,7 @@ export async function updateTask(input: unknown): Promise<ActionResult<{ id: str
       description: data.description || null,
       dueDate,
       assignedToUserId: newAssignee,
+      ...(about?.ok ? about.link : {}),
       ...fields,
       ...(xpChanges ? { xpSetById: (fields.xp ?? 0) > 0 ? user.id : null } : {}),
     },
@@ -223,6 +253,8 @@ export async function updateTask(input: unknown): Promise<ActionResult<{ id: str
   await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Task", entityId: task.id, entityLabel: data.title });
 
   revalidateTaskPaths(task);
+  // Linked somewhere else now: the record it left shows it no more.
+  if (about?.ok) revalidateTaskPaths(existing);
   return { ok: true, data: { id: task.id } };
 }
 

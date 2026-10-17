@@ -49,6 +49,9 @@ type GivenShape = { assignedToUserId: string | null; createdByUserId: string };
 export async function givenToWorkAll(userId: string, tasks: readonly GivenShape[]): Promise<(task: GivenShape) => boolean> {
   const givers = [...new Set(tasks.filter((t) => t.assignedToUserId === userId && t.createdByUserId !== userId).map((t) => t.createdByUserId))];
   if (givers.length === 0) return () => false;
+  // The workspace's owner changes any task, given to them or not (owner, 17 Oct 2026) — the org chart
+  // needn't run up to them for that.
+  if ((await db.user.findUnique({ where: { id: userId }, select: { isSuperAdmin: true } }))?.isSuperAdmin) return () => false;
   const [downline, active] = await Promise.all([
     getDownlineUserIds(userId),
     db.user.findMany({ where: { id: { in: givers }, active: true }, select: { id: true } }).then((rows) => new Set(rows.map((r) => r.id))),

@@ -92,7 +92,8 @@ export type TaskSort = (typeof TASK_SORTS)[number];
  * report to them. They work it: move it through its stages, tick its steps, comment, attach files and
  * log time. Its details, its steps and deleting it are whoever set it's. A task given by somebody in
  * their own downline (`downline`, src/lib/org-chart.ts) they still change, and one whose giver has left
- * (`giverActive` false) — nobody else would.
+ * (`giverActive` false) — nobody else would. The workspace's super admin changes any task
+ * (src/lib/tasks/server.ts, givenToWorkAll).
  */
 export function onlyWorks(task: { assignedToUserId: string | null; createdByUserId: string }, userId: string, downline: readonly string[], giverActive = true): boolean {
   return task.assignedToUserId === userId && task.createdByUserId !== userId && giverActive && !downline.includes(task.createdByUserId);

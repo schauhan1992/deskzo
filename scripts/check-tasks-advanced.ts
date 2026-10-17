@@ -75,6 +75,9 @@ async function cleanup() {
   const ids = users.map((u) => u.id);
   if (ids.length) {
     await db.task.deleteMany({ where: { OR: [{ createdByUserId: { in: ids } }, { assignedToUserId: { in: ids } }] } });
+    // The fixture's account and deal name a fixture person as their maker, so they go before the people.
+    await db.lead.deleteMany({ where: { title: { startsWith: TAG } } });
+    await db.company.deleteMany({ where: { name: { startsWith: TAG } } });
     await db.taskChallenge.deleteMany({ where: { createdById: { in: ids } } });
     await db.notification.deleteMany({ where: { userId: { in: ids } } });
     await db.auditLog.deleteMany({ where: { userId: { in: ids } } });
@@ -82,6 +85,8 @@ async function cleanup() {
     await db.user.deleteMany({ where: { id: { in: ids } } });
   }
   await db.department.deleteMany({ where: { name: { startsWith: TAG } } });
+  await db.lead.deleteMany({ where: { title: { startsWith: TAG } } });
+  await db.company.deleteMany({ where: { name: { startsWith: TAG } } });
   await db.role.deleteMany({ where: { key: SEE_ONLY } });
 }
 
@@ -161,6 +166,25 @@ async function main() {
     ok("an archived challenge can't take new tasks", !(await tasks.createTask({ title: `${TAG} Late joiner`, challengeId })).ok);
     await db.taskChallenge.update({ where: { id: challengeId }, data: { archivedAt: null } });
 
+    section("Made with its steps, about a record");
+
+    const account = await db.company.create({ data: { name: `${TAG} Falcon Retail`, normalizedName: `${TAG} falcon retail`.toLowerCase(), createdById: manager.id, ownerUserId: manager.id } });
+    const deal = await db.lead.create({ data: { companyId: account.id, title: `${TAG} Falcon renewal`, ownerUserId: manager.id } });
+    const stepped = await tasks.createTask({ title: `${TAG} Call the director`, assignedToUserId: worker.id, steps: ["Read the escalation", "Call", "Write it up"], leadId: deal.id });
+    const madeWith = stepped.ok ? await db.task.findUniqueOrThrow({ where: { id: stepped.data.id }, include: { checklist: { orderBy: { sortOrder: "asc" } } } }) : null;
+    ok("a task made with its steps has them, in order", madeWith?.checklist.map((c) => c.title).join(" / ") === "Read the escalation / Call / Write it up", madeWith?.checklist.map((c) => c.title).join(" / "));
+    ok("  about a lead, it's on the lead and the lead's company", madeWith?.leadId === deal.id && madeWith.companyId === account.id);
+    ok("a record that isn't there can't be linked", !(await tasks.createTask({ title: `${TAG} Nowhere`, companyId: "not-a-company" })).ok);
+    if (stepped.ok) {
+      await tasks.updateTask({ id: stepped.data.id, title: `${TAG} Call the director today`, assignedToUserId: worker.id });
+      ok("an edit that doesn't send the link leaves it", (await db.task.findUniqueOrThrow({ where: { id: stepped.data.id } })).leadId === deal.id);
+      await tasks.updateTask({ id: stepped.data.id, title: `${TAG} Call the director today`, assignedToUserId: worker.id, about: { companyId: account.id, leadId: "", ticketId: "" } });
+      const moved = await db.task.findUniqueOrThrow({ where: { id: stepped.data.id } });
+      ok("  one that does moves it — to the company alone", moved.companyId === account.id && moved.leadId === null);
+      await tasks.updateTask({ id: stepped.data.id, title: `${TAG} Call the director today`, assignedToUserId: worker.id, about: { companyId: "", leadId: "", ticketId: "" } });
+      ok("  or takes it off", (await db.task.findUniqueOrThrow({ where: { id: stepped.data.id } })).companyId === null);
+    }
+
     section("The list");
 
     const future = await tasks.createTask({ title: `${TAG} Plan the offsite`, startDate: tomorrow, dueDate: nextWeek, priority: "URGENT", assignedToUserId: worker.id });
@@ -170,8 +194,8 @@ async function main() {
     ok("  To do leaves them out", (await listed({ status: "todo" })).includes(taskId) && !(await listed({ status: "todo" })).includes(futureId));
     ok("by priority, team and challenge", (await listed({ priority: "URGENT" })).join() === futureId && (await listed({ departmentId: team.id })).join() === taskId && (await listed({ challengeId })).join() === taskId);
     ok("sorted by priority, urgent first", (await listed({ sort: "priority" }))[0] === futureId);
-    ok("assigned to somebody: theirs only", (await listed({ assignedToUserId: worker.id })).length === 2 && (await listed({ assignedToUserId: manager.id })).length === 0);
-    ok("set by somebody: the tasks they set, whoever has them", (await listed({ createdByUserId: manager.id })).length === 2 && (await listed({ createdByUserId: worker.id })).length === 0);
+    ok("assigned to somebody: theirs only", (await listed({ assignedToUserId: worker.id })).length === 3 && (await listed({ assignedToUserId: manager.id })).length === 0);
+    ok("set by somebody: the tasks they set, whoever has them", (await listed({ createdByUserId: manager.id })).length === 3 && (await listed({ createdByUserId: worker.id })).length === 0);
     const star = await tasks.toggleTaskStar(taskId);
     ok("a star is the viewer's", star.ok && star.data.starred && (await listed({ starred: true })).join() === taskId);
     actorId = worker.id;
@@ -320,6 +344,12 @@ async function main() {
     const managerRow = (await tasks.listTasks({ search: TAG })).find((t) => t.id === theirs);
     ok("whoever set it can still change and delete it", managerRow?.canChange === true && managerRow.canDelete === true);
 
+    // The owner changes any task — the org chart needn't run up to them.
+    const { givenToWork } = require("../src/lib/tasks/server") as typeof import("../src/lib/tasks/server");
+    const owner = await db.user.findFirst({ where: { isSuperAdmin: true }, select: { id: true } });
+    ok("the super admin isn't held to a task somebody gave them", !owner || !(await givenToWork(owner.id, { assignedToUserId: owner.id, createdByUserId: worker.id })));
+    ok("  while anybody else is", await givenToWork(worker.id, { assignedToUserId: worker.id, createdByUserId: manager.id }));
+
     section("Challenges and the leaderboard");
 
     const challenge = (await extras.listTaskChallenges()).find((c) => c.id === challengeId);
@@ -334,7 +364,10 @@ async function main() {
     const options = await extras.taskFormOptions();
     const { TaskDialog } = require("../src/components/tasks/task-dialog") as typeof import("../src/components/tasks/task-dialog");
     const dialog = renderToStaticMarkup(createElement(TaskDialog, { open: true, onClose: () => {}, options, viewerId: worker.id, task: null }));
-    ok("the form has every field", ["Task name", "Status", "Team", "Challenge", "Assigned to", "Priority", "Start date", "Due date", "Estimate (minutes)", "Earned XP", "Badge", "Repeats", "Description"].every((l) => dialog.includes(l)));
+    ok("the form has every field", ["Task name", "Status", "Team", "Challenge", "Assigned to", "Priority", "Start date", "Due date", "Estimate (minutes)", "Earned XP", "Badge", "Repeats", "About", "Description", "Checklist"].every((l) => dialog.includes(l)));
+    const ownRow = (await tasks.listTasks({ search: TAG })).find((t) => t.assignedToUserId === worker.id);
+    const ownDialog = ownRow ? renderToStaticMarkup(createElement(TaskDialog, { open: true, onClose: () => {}, options, viewerId: worker.id, task: { ...ownRow, status: "TODO" } })) : "";
+    ok("  on a task assigned to the viewer, no XP or badge — somebody else sets them", !!ownRow && !ownDialog.includes("Earned XP") && !ownDialog.includes(">Badge<") && ownDialog.includes("its XP and badge are for somebody else to set"));
     const { TasksWorkspace } = require("../src/components/tasks/tasks-workspace") as typeof import("../src/components/tasks/tasks-workspace");
     const rows = await tasks.listTasks({ search: TAG });
     const challenges = await extras.listTaskChallenges();

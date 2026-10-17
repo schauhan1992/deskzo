@@ -26,6 +26,8 @@ export const createTaskSchema = z.object({
   companyId: z.string().optional().or(z.literal("")),
   leadId: z.string().optional().or(z.literal("")),
   ticketId: z.string().optional().or(z.literal("")),
+  /** Its checklist, typed with it (owner, 17 Oct 2026) — a step a line on the form. */
+  steps: z.array(z.string().trim().min(1).max(200, "A step is at most 200 characters")).max(30, "At most 30 steps — add more in the task").optional(),
   ...advancedFields,
 });
 
@@ -37,6 +39,11 @@ export const updateTaskSchema = z.object({
   description: z.string().trim().optional().or(z.literal("")),
   dueDate: z.string().optional().or(z.literal("")),
   assignedToUserId: z.string().optional().or(z.literal("")),
+  /**
+   * What it's about — a company, a lead or a ticket. Sent only by a form that offers it: left out, the
+   * link stays as it was; sent empty, it's taken off.
+   */
+  about: z.object({ companyId: z.string().optional().or(z.literal("")), leadId: z.string().optional().or(z.literal("")), ticketId: z.string().optional().or(z.literal("")) }).optional(),
   ...advancedFields,
 });
 
