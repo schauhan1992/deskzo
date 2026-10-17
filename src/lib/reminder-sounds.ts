@@ -7,7 +7,7 @@
 
 export const SOUND_KINDS = [
   { key: "meetings", label: "A meeting is about to start", hint: "Ten minutes before, from your connected calendar." },
-  { key: "tasks", label: "A task is due or overdue", hint: "On the day it falls due." },
+  { key: "tasks", label: "A task is due or overdue", hint: "On the day it falls due, and when a reminder you set on one comes round." },
   { key: "notes", label: "A note or to-do reminder", hint: "When a sticky note's reminder comes round." },
   { key: "callbacks", label: "A callback is due", hint: "At the time you promised to ring back." },
   { key: "chat", label: "A new chat message", hint: "When a chat you aren't looking at gets a message. Muted chats stay quiet unless you're @mentioned." },
@@ -23,6 +23,7 @@ export const SOUND_FOR_TYPE: Record<string, SoundKind> = {
   MEETING_SOON: "meetings",
   TASK_DUE: "tasks",
   TASK_OVERDUE: "tasks",
+  TASK_REMINDER: "tasks",
   NOTE_REMINDER: "notes",
   CALLBACK_DUE: "callbacks",
 };

@@ -3,10 +3,12 @@
 import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CalendarDays, Clock, Paperclip, Pencil, Star, Trash2, Trophy, X } from "lucide-react";
+import { Bell, CalendarDays, Clock, Paperclip, Pencil, Star, Trash2, Trophy, X } from "lucide-react";
 import {
   addChecklistItem,
   addTaskComment,
+  clearTaskReminder,
+  setTaskReminder,
   deleteChecklistItem,
   deleteTaskComment,
   deleteTaskFile,
@@ -38,7 +40,10 @@ import {
   TASK_STATUSES,
   effectiveStatus,
   minutesWords,
+  REMINDER_REPEAT_LABELS,
   shownStatus,
+  TASK_REMINDER_REPEATS,
+  type TaskReminderRepeatKey,
   type TaskRepeatKey,
   type TaskStatusKey,
 } from "@/lib/tasks/rules";
@@ -225,6 +230,17 @@ export function TaskPanel({ taskId, onClose, options }: { taskId: string; onClos
 
         {panel.description && <p className="whitespace-pre-wrap rounded-base bg-surface-sunken px-3 py-2 text-sm text-text">{panel.description}</p>}
 
+        {!panel.done && (
+          <Section title="Reminder">
+            <Reminder
+              reminder={panel.myReminder}
+              pending={pending}
+              onSet={(at, repeat) => run(() => setTaskReminder({ taskId: panel.id, at, repeat }))}
+              onClear={() => run(() => clearTaskReminder(panel.id))}
+            />
+          </Section>
+        )}
+
         <Section title={`Checklist${panel.checklist.length ? ` · ${doneSteps}/${panel.checklist.length}` : ""}`}>
           {panel.checklist.length > 0 && (
             <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-surface-sunken">
@@ -407,6 +423,72 @@ function AddComment({ onAdd, pending }: { onAdd: (text: string) => void; pending
       <Button type="submit" size="sm" disabled={pending || !text.trim()}>
         Comment
       </Button>
+    </form>
+  );
+}
+
+/**
+ * Your own reminder on the task (owner, 17 Oct 2026): when, and how often until it's done. It comes as a
+ * notification and chimes like a task falling due; nobody else who can see the task is reminded.
+ */
+function Reminder({
+  reminder,
+  pending,
+  onSet,
+  onClear,
+}: {
+  reminder: { nextAt: Date | string; repeat: TaskReminderRepeatKey } | null;
+  pending: boolean;
+  onSet: (at: string, repeat: TaskReminderRepeatKey) => void;
+  onClear: () => void;
+}) {
+  const clock = useClock();
+  const [changing, setChanging] = useState(false);
+  const [at, setAt] = useState(() => (reminder ? clock.input(reminder.nextAt) : ""));
+  const [repeat, setRepeat] = useState<TaskReminderRepeatKey>(reminder?.repeat ?? "ONCE");
+  if (reminder && !changing) {
+    return (
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <Bell className="h-4 w-4 text-warning" />
+        <span className="text-text">{clock.dateTimeShort(reminder.nextAt)}</span>
+        <span className="text-muted">{REMINDER_REPEAT_LABELS[reminder.repeat]}</span>
+        <span className="ml-auto flex gap-3">
+          <button type="button" className="font-medium text-brand hover:underline" onClick={() => setChanging(true)} disabled={pending}>
+            Change
+          </button>
+          <button type="button" className="font-medium text-muted hover:text-danger" onClick={onClear} disabled={pending}>
+            Remove
+          </button>
+        </span>
+      </div>
+    );
+  }
+  return (
+    <form
+      className="flex flex-wrap items-center gap-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (at) onSet(at, repeat);
+        setChanging(false);
+      }}
+    >
+      <Input type="datetime-local" aria-label="Remind me at" value={at} onChange={(e) => setAt(e.target.value)} className="w-56" disabled={pending} />
+      <Select aria-label="How often" value={repeat} onChange={(e) => setRepeat(e.target.value as TaskReminderRepeatKey)} className="w-60" disabled={pending}>
+        {TASK_REMINDER_REPEATS.map((r) => (
+          <option key={r} value={r}>
+            {REMINDER_REPEAT_LABELS[r]}
+          </option>
+        ))}
+      </Select>
+      <Button type="submit" size="sm" disabled={pending || !at}>
+        {reminder ? "Save" : "Remind me"}
+      </Button>
+      {reminder && (
+        <Button type="button" size="sm" variant="ghost" onClick={() => setChanging(false)} disabled={pending}>
+          Cancel
+        </Button>
+      )}
+      <span className="basis-full text-xs text-subtle">Yours alone — it comes as a notification, and stops once the task is done.</span>
     </form>
   );
 }

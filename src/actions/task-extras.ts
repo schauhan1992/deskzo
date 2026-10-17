@@ -13,7 +13,7 @@ import { PEOPLE_ONLY } from "@/lib/people";
 import { workspaceClock } from "@/lib/time/workspace";
 import { chatFileType } from "@/lib/chat/rules";
 import { ADVANCED, givenToWork, storedDay, workableTask } from "@/lib/tasks/server";
-import { COMMENT_MAX, ONLY_WORKS, TASK_FILE_MAX_BYTES } from "@/lib/tasks/rules";
+import { COMMENT_MAX, ONLY_WORKS, TASK_FILE_MAX_BYTES, TASK_REMINDER_REPEATS, type TaskReminderRepeatKey } from "@/lib/tasks/rules";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -65,6 +65,7 @@ export async function getTaskPanel(id: string) {
           select: { id: true, minutes: true, note: true, spentOn: true, user: { select: { id: true, name: true } } },
         },
         stars: { where: { userId: user.id }, select: { userId: true } },
+        reminders: { where: { userId: user.id }, select: { nextAt: true, repeat: true } },
       },
     }),
     taskFor(user.id, id, "edit").then(Boolean),
@@ -74,10 +75,12 @@ export async function getTaskPanel(id: string) {
   // Given to them by somebody else: they work it, they don't change it (src/lib/tasks/rules.ts).
   const workOnly = await givenToWork(user.id, task);
   const [shown] = await leadsSeenBy(user.id, [task]);
-  const { stars, ...rest } = shown!;
+  const { stars, reminders, ...rest } = shown!;
   return {
     ...rest,
     starred: stars.length > 0,
+    /** The viewer's own reminder on it, if they've set one. */
+    myReminder: reminders[0] ?? null,
     loggedMinutes: task.timeLogs.reduce((sum, t) => sum + t.minutes, 0),
     viewerId: user.id,
     /** Move it along, tick its steps, attach and log time: whoever it's assigned to, or whose role may change it. */
@@ -129,6 +132,40 @@ export async function deleteChecklistItem(itemId: string): Promise<ActionResult<
   const task = await db.task.findUniqueOrThrow({ where: { id: item.taskId }, select: { assignedToUserId: true, createdByUserId: true } });
   if (await givenToWork(user.id, task)) return { ok: false, error: ONLY_WORKS };
   await db.taskChecklistItem.delete({ where: { id: item.id } });
+  touched();
+  return { ok: true, data: null };
+}
+
+// ─── Reminders ───────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A reminder on a task for yourself (owner, 17 Oct 2026): at a time you type (in the workspace's time),
+ * once or every hour, day or week until the task is closed — a notification that chimes like a task
+ * falling due (src/lib/notify.ts). Anybody who can see the task sets their own; one each, set again to
+ * change it.
+ */
+export async function setTaskReminder(input: { taskId: string; at: string; repeat: string }): Promise<ActionResult<{ nextAt: string }>> {
+  const user = await requireModuleUser("tasks");
+  const task = await taskFor(user.id, String(input?.taskId ?? ""), "view");
+  if (!task) return { ok: false, error: "Task not found." };
+  if (task.done) return { ok: false, error: "That task is closed — there's nothing to be reminded of." };
+  const repeat = String(input?.repeat ?? "ONCE") as TaskReminderRepeatKey;
+  if (!(TASK_REMINDER_REPEATS as readonly string[]).includes(repeat)) return { ok: false, error: "Choose how often." };
+  const at = (await workspaceClock()).parseTyped(String(input?.at ?? ""));
+  if (!at) return { ok: false, error: "Choose when." };
+  if (at.getTime() <= Date.now()) return { ok: false, error: "Choose a time still to come." };
+  await db.taskReminder.upsert({
+    where: { taskId_userId: { taskId: task.id, userId: user.id } },
+    create: { taskId: task.id, userId: user.id, nextAt: at, repeat },
+    update: { nextAt: at, repeat },
+  });
+  touched();
+  return { ok: true, data: { nextAt: at.toISOString() } };
+}
+
+export async function clearTaskReminder(taskId: string): Promise<ActionResult<null>> {
+  const user = await requireModuleUser("tasks");
+  await db.taskReminder.deleteMany({ where: { taskId: String(taskId ?? ""), userId: user.id } });
   touched();
   return { ok: true, data: null };
 }

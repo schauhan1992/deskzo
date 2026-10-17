@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { BADGE_MAX, ESTIMATE_MAX_MINUTES, TASK_PRIORITIES, TASK_REPEATS, TASK_STATUSES, XP_MAX } from "@/lib/tasks/rules";
+import { BADGE_MAX, ESTIMATE_MAX_MINUTES, TASK_PRIORITIES, TASK_REMINDER_REPEATS, TASK_REPEATS, TASK_STATUSES, XP_MAX } from "@/lib/tasks/rules";
 
 /**
  * Advanced tasks' fields (owner, 16 Oct 2026 — src/lib/tasks/rules.ts). Each optional: a form that
@@ -28,6 +28,9 @@ export const createTaskSchema = z.object({
   ticketId: z.string().optional().or(z.literal("")),
   /** Its checklist, typed with it (owner, 17 Oct 2026) — a step a line on the form. */
   steps: z.array(z.string().trim().min(1).max(200, "A step is at most 200 characters")).max(30, "At most 30 steps — add more in the task").optional(),
+  /** A reminder for whoever makes it, as the task panel sets one: when (typed, the workspace's time) and how often. */
+  remindAt: z.string().optional().or(z.literal("")),
+  remindRepeat: z.enum(TASK_REMINDER_REPEATS).optional(),
   ...advancedFields,
 });
 

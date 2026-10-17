@@ -81,7 +81,8 @@ export function TasksWorkspace({
   const params = useSearchParams();
   const clock = useClock();
   const today = clock.today();
-  const [openId, setOpenId] = useState<string | null>(null);
+  // A link straight to a task (a reminder's, ?task=…) opens it over the list.
+  const [openId, setOpenId] = useState<string | null>(() => params.get("task"));
   const [editing, setEditing] = useState<WorkspaceTask | "new" | null>(null);
   const [showChallenges, setShowChallenges] = useState(false);
   const [error, setError] = useState<string | null>(null);

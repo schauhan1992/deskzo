@@ -152,6 +152,10 @@ export async function createTask(input: unknown): Promise<ActionResult<{ id: str
   const status = data.status === "IN_PROGRESS" ? "IN_PROGRESS" : "TODO";
   const about = await aboutLink(user.id, { companyId: data.companyId || undefined, leadId: data.leadId || undefined, ticketId: data.ticketId || undefined });
   if (!about.ok) return about;
+  // A reminder for whoever makes it — read in the workspace's time, and still to come.
+  const remindAt = data.remindAt ? (await workspaceClock()).parseTyped(data.remindAt) : null;
+  if (data.remindAt && !remindAt) return { ok: false, error: "That reminder time isn't a time." };
+  if (remindAt && remindAt.getTime() <= Date.now()) return { ok: false, error: "Set the reminder for a time still to come." };
 
   const task = await db.task.create({
     data: {
@@ -170,6 +174,7 @@ export async function createTask(input: unknown): Promise<ActionResult<{ id: str
   // Its checklist, typed with it — in the order typed.
   const steps = (data.steps ?? []).filter(Boolean);
   if (steps.length) await db.taskChecklistItem.createMany({ data: steps.map((title, sortOrder) => ({ taskId: task.id, title, sortOrder })) });
+  if (remindAt) await db.taskReminder.create({ data: { taskId: task.id, userId: user.id, nextAt: remindAt, repeat: data.remindRepeat ?? "ONCE" } });
 
   if (data.assignedToUserId && data.assignedToUserId !== user.id) {
     await notifyUser({

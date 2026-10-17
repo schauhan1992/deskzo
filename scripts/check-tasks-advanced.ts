@@ -20,7 +20,7 @@ import Module from "node:module";
 import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { directClient } from "../src/lib/tenancy/direct-client";
-import { earnsXp, effectiveStatus, minutesWords, nextOccurrence, shownStatus } from "../src/lib/tasks/rules";
+import { earnsXp, effectiveStatus, minutesWords, nextOccurrence, nextReminder, shownStatus } from "../src/lib/tasks/rules";
 
 /** The Dialog primitive portals into document.body; here it renders where it stands, so the markup can be read. */
 function InlineDialog({ open, title, children }: { open: boolean; onClose: () => void; title: string; children?: ReactNode }) {
@@ -100,6 +100,10 @@ async function main() {
   ok("  not with nobody assigned, or nothing to earn", !earnsXp({ xp: 10, assignedToUserId: null, dueDate: null }, "2026-10-16") && !earnsXp({ xp: 0, assignedToUserId: "u", dueDate: null }, "2026-10-16"));
   ok("repeats: a day, a week, the same date next month", nextOccurrence("2026-10-16", "DAILY") === "2026-10-17" && nextOccurrence("2026-10-16", "WEEKLY") === "2026-10-23" && nextOccurrence("2026-10-16", "MONTHLY") === "2026-11-16");
   ok("  the 31st to the month's last day, across the year", nextOccurrence("2026-01-31", "MONTHLY") === "2026-02-28" && nextOccurrence("2026-12-31", "MONTHLY") === "2027-01-31");
+  const at = new Date("2026-10-14T04:30:00Z");
+  ok("a one-off reminder doesn't come round again", nextReminder(at, "ONCE", new Date("2026-10-14T05:00:00Z")) === null);
+  ok("  a daily one, the first day after now — not once for every day it missed", nextReminder(at, "DAILY", new Date("2026-10-17T06:00:00Z"))?.toISOString() === "2026-10-18T04:30:00.000Z");
+  ok("  an hourly one, the next hour; a weekly one, a week on", nextReminder(at, "HOURLY", new Date("2026-10-14T04:30:00Z"))?.toISOString() === "2026-10-14T05:30:00.000Z" && nextReminder(at, "WEEKLY", new Date("2026-10-14T04:31:00Z"))?.toISOString() === "2026-10-21T04:30:00.000Z");
   ok("minutes in words", minutesWords(45) === "45 m" && minutesWords(120) === "2 h" && minutesWords(90) === "1 h 30 m");
 
   /* eslint-disable @typescript-eslint/no-require-imports */
@@ -349,6 +353,43 @@ async function main() {
     const owner = await db.user.findFirst({ where: { isSuperAdmin: true }, select: { id: true } });
     ok("the super admin isn't held to a task somebody gave them", !owner || !(await givenToWork(owner.id, { assignedToUserId: owner.id, createdByUserId: worker.id })));
     ok("  while anybody else is", await givenToWork(worker.id, { assignedToUserId: worker.id, createdByUserId: manager.id }));
+
+    section("Reminders");
+
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const { syncSystemNotifications } = require("../src/lib/notify") as typeof import("../src/lib/notify");
+    const { workspaceClock: clockOf } = require("../src/lib/time/workspace") as typeof import("../src/lib/time/workspace");
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    const clock = await clockOf();
+    actorId = worker.id;
+    const remindMe = await tasks.createTask({ title: `${TAG} Chase the PO`, assignedToUserId: worker.id, remindAt: clock.input(new Date(Date.now() + 2 * 3_600_000)), remindRepeat: "DAILY" });
+    const reminderOf = async (taskId: string) => db.taskReminder.findUnique({ where: { taskId_userId: { taskId, userId: worker.id } } });
+    ok("a task made with a reminder has it, for whoever made it", remindMe.ok && (await reminderOf(remindMe.data.id))?.repeat === "DAILY");
+    const remindId = remindMe.ok ? remindMe.data.id : "";
+    ok("a reminder for a time gone is refused", !(await extras.setTaskReminder({ taskId: remindId, at: clock.input(new Date(Date.now() - 60_000)), repeat: "ONCE" })).ok);
+    ok("  one to come is set, and the panel shows it", (await extras.setTaskReminder({ taskId: remindId, at: clock.input(new Date(Date.now() + 3_600_000)), repeat: "ONCE" })).ok && (await extras.getTaskPanel(remindId))?.myReminder?.repeat === "ONCE");
+    const reminded = () => db.notification.count({ where: { userId: worker.id, type: "TASK_REMINDER" } });
+    // Come round: a daily one, three days late.
+    await db.taskReminder.update({ where: { taskId_userId: { taskId: remindId, userId: worker.id } }, data: { repeat: "DAILY", nextAt: new Date(Date.now() - 3 * 86_400_000 - 60_000) } });
+    await syncSystemNotifications(worker.id);
+    const firstNote = await db.notification.findFirst({ where: { userId: worker.id, type: "TASK_REMINDER" } });
+    ok("when it comes round it's a notification, once, that opens the task", (await reminded()) === 1 && firstNote?.link === `/tasks?task=${remindId}` && firstNote.message === `${TAG} Chase the PO`);
+    const movedOn = await reminderOf(remindId);
+    ok("  a daily one moves to its next day after now", !!movedOn && movedOn.nextAt > new Date() && movedOn.nextAt.getTime() - Date.now() <= 86_400_000);
+    await syncSystemNotifications(worker.id);
+    ok("  a second sweep raises nothing more", (await reminded()) === 1);
+    await db.taskReminder.update({ where: { taskId_userId: { taskId: remindId, userId: worker.id } }, data: { repeat: "ONCE", nextAt: new Date(Date.now() - 60_000) } });
+    await syncSystemNotifications(worker.id);
+    ok("a one-off fires and is gone", (await reminded()) === 2 && (await reminderOf(remindId)) === null);
+    await extras.setTaskReminder({ taskId: remindId, at: clock.input(new Date(Date.now() + 3_600_000)), repeat: "HOURLY" });
+    await tasks.setTaskStatus(remindId, "DONE");
+    await db.taskReminder.update({ where: { taskId_userId: { taskId: remindId, userId: worker.id } }, data: { nextAt: new Date(Date.now() - 60_000) } });
+    await syncSystemNotifications(worker.id);
+    ok("a done task's reminder is taken off, not fired", (await reminded()) === 2 && (await reminderOf(remindId)) === null);
+    ok("  and none can be set on it", !(await extras.setTaskReminder({ taskId: remindId, at: clock.input(new Date(Date.now() + 3_600_000)), repeat: "ONCE" })).ok);
+    if (remindMe.ok) await tasks.setTaskStatus(remindId, "TODO");
+    await extras.setTaskReminder({ taskId: remindId, at: clock.input(new Date(Date.now() + 3_600_000)), repeat: "WEEKLY" });
+    ok("removed, it's gone", (await extras.clearTaskReminder(remindId)).ok && (await reminderOf(remindId)) === null);
 
     section("Challenges and the leaderboard");
 

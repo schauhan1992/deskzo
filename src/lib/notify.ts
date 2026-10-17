@@ -15,6 +15,8 @@ import { moduleAvailableForTenant } from "@/lib/modules-access";
 import { workspaceClock } from "@/lib/time/workspace";
 import type { Clock } from "@/lib/time/zone";
 import { companyPath, personPath, ticketPath } from "@/lib/record-links";
+import { notMigratedYet } from "@/lib/custom-fields/server";
+import { nextReminder } from "@/lib/tasks/rules";
 
 const DAY_MS = 86_400_000;
 
@@ -281,6 +283,7 @@ export async function syncSystemNotifications(userId: string) {
     });
   }
 
+  candidates.push(...(await taskReminderCandidates(userId, now)));
   candidates.push(...(await peopleCandidates(userId, now, clock)));
   candidates.push(...(await meetingCandidates(userId, now, clock)));
 
@@ -303,6 +306,45 @@ export async function syncSystemNotifications(userId: string) {
 
   if (allowed.length === 0) return;
   await db.notification.createMany({ data: allowed, skipDuplicates: true });
+}
+
+/**
+ * Reminders somebody set on a task for themselves (owner, 17 Oct 2026), come round. Each fires once and
+ * is moved to its next hour, day or week — or gone, for a one-off. One missed while nobody had Deskzo
+ * open fires once, not once a step. A closed task's reminder is taken off instead of firing. The time is
+ * in the key, as a note reminder's is, so two sweeps at once raise it once. A workspace still waiting for
+ * 20261110170000_task_reminders has none.
+ */
+async function taskReminderCandidates(
+  userId: string,
+  now: Date,
+): Promise<{ userId: string; type: NotificationType; title: string; message: string | null; link: string | null; dedupeKey: string }[]> {
+  const due = await db.taskReminder
+    .findMany({
+      where: { userId, nextAt: { lte: now } },
+      select: { id: true, nextAt: true, repeat: true, task: { select: { id: true, title: true, done: true } } },
+    })
+    .catch((err) => {
+      if (notMigratedYet(err)) return [];
+      throw err;
+    });
+  const out: Awaited<ReturnType<typeof taskReminderCandidates>> = [];
+  for (const r of due) {
+    // Another sweep may have moved or removed it already: that's the same reminder, handled.
+    const next = r.task.done ? null : nextReminder(r.nextAt, r.repeat, now);
+    if (next) await db.taskReminder.update({ where: { id: r.id }, data: { nextAt: next } }).catch(() => {});
+    else await db.taskReminder.delete({ where: { id: r.id } }).catch(() => {});
+    if (r.task.done) continue;
+    out.push({
+      userId,
+      type: "TASK_REMINDER",
+      title: "Task reminder",
+      message: r.task.title,
+      link: `/tasks?task=${r.task.id}`,
+      dedupeKey: `task-reminder:${r.id}:${r.nextAt.toISOString()}`,
+    });
+  }
+  return out;
 }
 
 /**

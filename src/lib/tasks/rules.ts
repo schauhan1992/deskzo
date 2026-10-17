@@ -100,3 +100,27 @@ export function onlyWorks(task: { assignedToUserId: string | null; createdByUser
 }
 
 export const ONLY_WORKS = "This task was given to you — you can move it along, tick its steps, comment and log time, but changing or deleting it is for whoever set it.";
+
+// ─── Reminders (owner, 17 Oct 2026) ──────────────────────────────────────────────────────────────
+
+export const TASK_REMINDER_REPEATS = ["ONCE", "HOURLY", "DAILY", "WEEKLY"] as const;
+export type TaskReminderRepeatKey = (typeof TASK_REMINDER_REPEATS)[number];
+export const REMINDER_REPEAT_LABELS: Record<TaskReminderRepeatKey, string> = {
+  ONCE: "Once",
+  HOURLY: "Every hour until it's done",
+  DAILY: "Every day until it's done",
+  WEEKLY: "Every week until it's done",
+};
+const REMINDER_STEP_MS: Record<Exclude<TaskReminderRepeatKey, "ONCE">, number> = { HOURLY: 3_600_000, DAILY: 86_400_000, WEEKLY: 7 * 86_400_000 };
+
+/**
+ * When a reminder that has just come round comes round next: never, for a one-off; otherwise the first of
+ * its hours, days or weeks after `now` — a reminder missed while nobody had Deskzo open fires once, not
+ * once for every step it missed.
+ */
+export function nextReminder(at: Date, repeat: TaskReminderRepeatKey, now: Date): Date | null {
+  if (repeat === "ONCE") return null;
+  const step = REMINDER_STEP_MS[repeat];
+  const steps = Math.max(1, Math.floor((now.getTime() - at.getTime()) / step) + 1);
+  return new Date(at.getTime() + steps * step);
+}

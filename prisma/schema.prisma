@@ -342,6 +342,7 @@ enum NotificationType {
   TASK_OVERDUE
   /// Somebody commented on a task you are on (owner, 16 Oct 2026).
   TASK_COMMENT
+  TASK_REMINDER
   LEAD_ASSIGNED
   LEAD_STATUS_CHANGED
   LEAD_ACTIVITY
@@ -859,6 +860,7 @@ model User {
   taskAttachments        TaskAttachment[]         @relation("TaskAttachmentUploader")
   taskTimeLogs           TaskTimeLog[]            @relation("TaskTimeLogger")
   taskStars              TaskStar[]               @relation("TaskStarrer")
+  taskReminders          TaskReminder[]           @relation("TaskReminderOwner")
   taskChallengesMade     TaskChallenge[]          @relation("TaskChallengeCreator")
   creditDecisions        CreditDecision[]         @relation("CreditDecidedBy")
   messagesSent           MarketingMessage[]       @relation("MarketingMessageSentBy")
@@ -3785,6 +3787,7 @@ model Task {
   attachments TaskAttachment[]
   timeLogs    TaskTimeLog[]
   stars       TaskStar[]
+  reminders   TaskReminder[]
 
   @@index([assignedToUserId])
   @@index([companyId])
@@ -3885,6 +3888,32 @@ model TaskTimeLog {
 }
 
 /// A task somebody starred — theirs alone.
+/// A reminder somebody set on a task for themselves (owner, 17 Oct 2026): a notification at `nextAt`, once or
+/// again every hour, day or week until the task is closed. Theirs alone — whoever else can see the task
+/// isn't reminded. Fired by the notifications sweep (src/lib/notify.ts), which moves `nextAt` on.
+model TaskReminder {
+  id        String             @id @default(cuid())
+  taskId    String
+  task      Task               @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User               @relation("TaskReminderOwner", fields: [userId], references: [id], onDelete: Cascade)
+  nextAt    DateTime
+  repeat    TaskReminderRepeat @default(ONCE)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  @@unique([taskId, userId])
+  @@index([userId, nextAt])
+  @@map("task_reminders")
+}
+
+enum TaskReminderRepeat {
+  ONCE
+  HOURLY
+  DAILY
+  WEEKLY
+}
+
 model TaskStar {
   taskId    String
   task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)

@@ -9,14 +9,17 @@ import { Input, Select, Textarea } from "@/components/ui/input";
 import { TaskAboutPicker, aboutIds, type About } from "@/components/tasks/task-about-picker";
 import {
   PRIORITY_LABELS,
+  REMINDER_REPEAT_LABELS,
   REPEAT_LABELS,
   STATUS_LABELS,
   TASK_PRIORITIES,
+  TASK_REMINDER_REPEATS,
   TASK_REPEATS,
   TASK_STATUSES,
   XP_MAX,
   dayKeyOf,
   type TaskPriorityKey,
+  type TaskReminderRepeatKey,
   type TaskStatusKey,
 } from "@/lib/tasks/rules";
 
@@ -99,6 +102,9 @@ export function TaskDialog({
   const [description, setDescription] = useState(task?.description ?? "");
   const [about, setAbout] = useState<About | null>(() => aboutOf(task));
   const [steps, setSteps] = useState("");
+  // A reminder for whoever makes it — new tasks only; the task panel sets and changes one after.
+  const [remindAt, setRemindAt] = useState("");
+  const [remindRepeat, setRemindRepeat] = useState<TaskReminderRepeatKey>("ONCE");
   // Made on a record's page, the task is about that record — no picker.
   const madeOnRecord = !!(link.companyId || link.leadId || link.ticketId);
 
@@ -140,7 +146,7 @@ export function TaskDialog({
       const checklist = steps.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
       const result = task
         ? await updateTask({ id: task.id, ...fields, ...(aboutChanged ? { about: aboutIds(about) } : {}) })
-        : await createTask({ ...fields, ...(madeOnRecord ? link : aboutIds(about)), steps: checklist });
+        : await createTask({ ...fields, ...(madeOnRecord ? link : aboutIds(about)), steps: checklist, ...(remindAt ? { remindAt, remindRepeat } : {}) });
       if (!result.ok) {
         setError(result.error);
         return;
@@ -262,6 +268,25 @@ export function TaskDialog({
         <Field label="Description">
           <Textarea rows={4} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What it's about, and what done looks like" disabled={pending} />
         </Field>
+        {!task && (
+          // Not a <label>: a time and how often.
+          <div className="space-y-1.5">
+            <span className="block text-sm font-medium text-text">Remind me</span>
+            <div className="flex flex-wrap gap-2">
+              <Input type="datetime-local" aria-label="Remind me at" value={remindAt} onChange={(e) => setRemindAt(e.target.value)} className="w-56" disabled={pending} />
+              {remindAt && (
+                <Select aria-label="How often" value={remindRepeat} onChange={(e) => setRemindRepeat(e.target.value as TaskReminderRepeatKey)} className="w-60" disabled={pending}>
+                  {TASK_REMINDER_REPEATS.map((r) => (
+                    <option key={r} value={r}>
+                      {REMINDER_REPEAT_LABELS[r]}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </div>
+            <span className="block text-xs text-subtle">Optional — a notification for you, once or again until the task is done.</span>
+          </div>
+        )}
         {!task && (
           <Field label="Checklist" hint="A step a line — ticked off in the task. More can be added there later.">
             <Textarea rows={3} value={steps} onChange={(e) => setSteps(e.target.value)} placeholder={"Collect the documents\nPrepare the working\nSend it for review"} disabled={pending} />
