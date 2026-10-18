@@ -337,7 +337,6 @@ function fixtures(actor: { id: string; name: string }): Fixture[] {
           Type: "GOOD",
           Brand: `${PREFIX} Brand`,
           Family: `${PREFIX} Family`,
-          "Billing cycle": "ONE_TIME",
           Unit: "Nos",
           Price: "72500",
           "Tax %": "18",

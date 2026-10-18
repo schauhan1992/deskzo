@@ -177,7 +177,10 @@ async function resolve(row: Record<string, string>): Promise<Resolved<ResolvedIt
 }
 
 export const itemsImporter: Importer = {
-  templateColumns: ["Key", "Name", "SKU", "Type", "Brand", "Family", "Billing cycle", "Unit", "Price", "Tax %"],
+  // No "Billing cycle": a subscription's term is its order's since 14 Oct 2026 (050c821), and the item's
+  // own is no longer read. Offering the column made the template promise a field the import drops; a
+  // file that still has one is now told it's ignored.
+  templateColumns: ["Key", "Name", "SKU", "Type", "Brand", "Family", "Unit", "Price", "Tax %"],
   customEntity: "ITEM",
 
   async plan(row, line, ctx) {
