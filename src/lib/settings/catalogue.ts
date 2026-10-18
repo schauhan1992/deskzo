@@ -450,6 +450,14 @@ export const SETTINGS: SettingsSection[] = [
             permission: "settings.manage",
             module: "leads",
           },
+          {
+            key: "developers",
+            label: "Developers & API",
+            description: "Keys for the public API that act as you — for Zapier, Make or your own systems — and its documentation.",
+            href: "/settings/developers",
+            icon: KeyRound,
+            permission: "api.manage",
+          },
         ],
       },
       {

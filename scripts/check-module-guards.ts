@@ -208,7 +208,8 @@ const texts = new Map(sources.map((f) => [f, readFileSync(f, "utf8")]));
  * Whether a file asks after one of these modules — in a call that answers that question, not merely
  * anywhere: a tab called "forms" is not a check that the Forms module is there.
  */
-const CHECKS = "isModuleEnabled|isModuleEntitled|moduleAccess|moduleAccessFor|moduleAvailableForTenant|planGate|requireModuleUser";
+// needModule: the public API's (src/lib/api/v1/shared.ts) — plan, switch and the key's person, the module first.
+const CHECKS = "isModuleEnabled|isModuleEntitled|moduleAccess|moduleAccessFor|moduleAvailableForTenant|planGate|requireModuleUser|needModule";
 const mentions = (file: string, keys: readonly string[]) =>
   keys.some((k) => {
     const key = k.replace(/[^a-z_]/g, "");

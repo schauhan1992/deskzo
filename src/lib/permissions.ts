@@ -718,6 +718,17 @@ export const PERMISSION_REGISTRY = [
     tier: "critical",
   },
   {
+    // Owner, 17 Oct 2026: the public API (src/lib/api). A key acts as the person who makes it — it can
+    // never do more than they can — so this is only who may make one for themselves.
+    key: "api.manage",
+    label: "Make API keys",
+    description: "Make keys for the public API that act as you — for Zapier, Make or your own systems — choose what each may touch, and revoke them. A key can never do more than you can.",
+    defaultRoles: [],
+    group: "Administration",
+    delegable: false,
+    tier: "sensitive",
+  },
+  {
     key: "security.manage",
     label: "Change the security and DLP policy",
     description: "Sign-in policy, data-loss-prevention settings, crawler blocking and log retention.",

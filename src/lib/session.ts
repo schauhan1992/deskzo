@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { evaluateAccess } from "@/lib/access/gate";
 import { requestFacts } from "@/lib/access/request";
 import { resolveViewAs, VIEW_AS_BLOCKED_MESSAGE, type ViewAsContext } from "@/lib/impersonation";
+import { apiActor } from "@/lib/api/actor";
 
 export class UnauthorizedError extends Error {
   constructor() {
@@ -44,6 +45,9 @@ export async function requireUser() {
   if (!session?.user) {
     throw new UnauthorizedError();
   }
+  // A public API call: its key, and its person's standing where they are, were checked at the door
+  // (src/lib/api/handler.ts) — there is no browser session, device or "view as" to ask about.
+  if (apiActor()) return session.user;
   if (await heldAtGate(session.user.id, session.user.sid)) throw new UnauthorizedError();
   const viewAs = await resolveViewAs(session.user.id);
   return viewAs ? { ...session.user, ...viewAs.user } : session.user;
@@ -53,6 +57,7 @@ export async function requireUser() {
 export async function currentUser() {
   const session = await auth();
   if (!session?.user) return null;
+  if (apiActor()) return session.user;
   if (await heldAtGate(session.user.id, session.user.sid)) return null;
   const viewAs = await resolveViewAs(session.user.id);
   return viewAs ? { ...session.user, ...viewAs.user } : session.user;
@@ -63,6 +68,7 @@ export async function currentUser() {
  * Null whenever the signed-in user is simply themselves.
  */
 export async function viewAsContext(): Promise<ViewAsContext | null> {
+  if (apiActor()) return null;
   const session = await auth();
   if (!session?.user) return null;
   return resolveViewAs(session.user.id);

@@ -15,6 +15,7 @@ import { currentTenantOrNull } from "@/lib/tenancy/resolve";
 import { handoffAccount } from "@/lib/platform/handoff-sign-in";
 import { linkedAccount } from "@/lib/platform/linked/switch";
 import { isAutomationKind } from "@/lib/people";
+import { apiActor } from "@/lib/api/actor";
 import type { Provider } from "@auth/core/providers";
 import { workplaceSignInProviders } from "@/lib/workplace/auth-providers";
 import { accountAddress, ssoVerdict } from "@/lib/workplace/sign-in";
@@ -307,6 +308,14 @@ const currentIdentity = cache(async (userId: string) =>
  * token's, and an account no longer here ends the session.
  */
 export async function auth(): Promise<Session | null> {
+  // A public API call whose key src/lib/api/handler.ts has checked: its person, for this call only —
+  // no cookie is read, so no browser session can ride along with a key (src/lib/api/actor.ts).
+  const api = apiActor();
+  if (api) {
+    const tenant = await currentTenantOrNull();
+    if (!tenant) return null;
+    return { user: { id: api.userId, name: api.name, email: api.email, role: api.role, tid: tenant.id }, expires: new Date(Date.now() + 60_000).toISOString() };
+  }
   const session = await nextAuth.auth();
   if (!session?.user) return null;
   const tenant = await currentTenantOrNull();

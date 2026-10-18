@@ -898,6 +898,7 @@ model User {
   chatPresence         ChatPresence?      @relation("ChatPresence")
   chatReactions        ChatReaction[]     @relation("ChatReactions")
   chatPinsMade         ChatPin[]          @relation("ChatPinsMade")
+  apiKeys              ApiKey[]           @relation("ApiKeyUser")
 
   @@index([departmentId])
   @@index([managerId])
@@ -11372,6 +11373,60 @@ model LeadCaptureKey {
   leads Lead[]
 
   @@map("lead_capture_keys")
+}
+
+/// A key for the public API (/api/v1 — src/lib/api), made in Settings › Developers (owner, 17 Oct 2026).
+///
+/// It acts as the person who made it, and never as more: every call is that person's, through the
+/// same permission and visibility checks as the screens, and only within the key's scopes. The secret
+/// is shown once and only its digest is kept. Revoked, expired, or its person switched off: it stops.
+model ApiKey {
+  id           String    @id @default(cuid())
+  /// What it is for — "Zapier", "our ERP sync".
+  name         String
+  /// The public half: `dzk_` and 20 hex characters.
+  keyId        String    @unique
+  /// `digestSecret` of the secret half.
+  secretDigest String
+  /// What it may touch: "leads:read", "leads:write"… (src/lib/api/scopes.ts). The person's own
+  /// permissions still decide what it may do there.
+  scopes       String[]
+  /// The person it acts as — who made it.
+  userId       String
+  user         User      @relation("ApiKeyUser", fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt    DateTime?
+  revokedAt    DateTime?
+  revokedById  String?
+  lastUsedAt   DateTime?
+  lastUsedIp   String?
+  useCount     Int       @default(0)
+  /// The rate limit's minute: when it started, and the calls in it — counted in one statement.
+  windowStart  DateTime?
+  windowCount  Int       @default(0)
+  createdAt    DateTime  @default(now())
+
+  idempotency ApiIdempotency[]
+
+  @@index([userId])
+  @@map("api_keys")
+}
+
+/// A create or change sent with an `Idempotency-Key` header, and what it answered — so the same request
+/// sent again (a retry after a timeout) gets the same answer instead of doing it twice. Kept a day.
+model ApiIdempotency {
+  id        String   @id @default(cuid())
+  apiKeyId  String
+  apiKey    ApiKey   @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  key       String
+  method    String
+  path      String
+  status    Int
+  body      Json
+  createdAt DateTime @default(now())
+
+  @@unique([apiKeyId, key])
+  @@index([createdAt])
+  @@map("api_idempotency")
 }
 
 enum LeadAssignmentStrategy {

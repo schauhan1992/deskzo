@@ -1,3 +1,5 @@
+import { apiRoute } from "@/lib/api/handler";
+import { createLeadApi, listLeadsApi } from "@/lib/api/v1/leads";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
@@ -30,6 +32,13 @@ import { MAX_BODY_BYTES, RATE_LIMIT_PER_MINUTE } from "@/lib/lead-capture/spec";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * The same address is the public API's lead list and create (owner, 17 Oct 2026 — src/lib/api): a call
+ * with a Bearer API key (`dzk_….dzs_…`) goes there; Basic, a website's capture key, stays here.
+ */
+const apiLeads = { GET: apiRoute({ scope: "leads:read" }, listLeadsApi), POST: apiRoute({ scope: "leads:write" }, createLeadApi) };
+const bearer = (request: Request) => /^bearer\s/i.test(request.headers.get("authorization") ?? "");
+
 const deny = () => NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401, headers: { "WWW-Authenticate": 'Basic realm="Deskzo One lead capture"' } });
 
 async function authenticate(request: Request) {
@@ -45,12 +54,14 @@ async function authenticate(request: Request) {
 
 /** Checks a key works, without creating anything. */
 export async function GET(request: Request) {
+  if (bearer(request)) return apiLeads.GET(request);
   const key = await authenticate(request);
   if (!key) return deny();
   return NextResponse.json({ ok: true, key: key.name });
 }
 
 export async function POST(request: Request) {
+  if (bearer(request)) return apiLeads.POST(request);
   const key = await authenticate(request);
   if (!key) return deny();
 

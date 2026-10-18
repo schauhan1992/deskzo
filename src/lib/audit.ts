@@ -2,6 +2,7 @@ import type { AuditAction } from "@prisma/client";
 import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { resolveViewAs } from "@/lib/impersonation";
+import { apiActor } from "@/lib/api/actor";
 
 /**
  * Server-only, same reasoning as `notifyUser` in `src/lib/notify.ts` — not exported from a
@@ -15,8 +16,11 @@ export async function recordAudit(params: {
   entityId: string;
   entityLabel: string;
 }) {
+  // Done through the public API: which key did it, on the entry itself (src/lib/api/actor.ts).
+  const api = apiActor();
+  const entityLabel = api ? `${params.entityLabel} — via API key “${api.keyName}”` : params.entityLabel;
   try {
-    await db.auditLog.create({ data: { ...params, impersonatedByUserId: await impersonator() } });
+    await db.auditLog.create({ data: { ...params, entityLabel, impersonatedByUserId: api ? null : await impersonator() } });
   } catch (err) {
     // An audit entry is a side effect of the action that triggered it — it should never fail that action.
     console.error("recordAudit failed", err);
