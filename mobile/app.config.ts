@@ -28,15 +28,27 @@ const config: ExpoConfig = {
     },
     // Only what calling needs; the camera is added by expo-camera, for scanning the pairing code.
     permissions: ["android.permission.READ_CALL_LOG", "android.permission.READ_PHONE_STATE", "android.permission.POST_NOTIFICATIONS"],
-    blockedPermissions: ["android.permission.RECORD_AUDIO", "android.permission.SYSTEM_ALERT_WINDOW"],
+    // Nothing the app does: the microphone, drawing over other apps, and files (a library asks for them on its own).
+    blockedPermissions: ["android.permission.RECORD_AUDIO", "android.permission.SYSTEM_ALERT_WINDOW", "android.permission.READ_EXTERNAL_STORAGE", "android.permission.WRITE_EXTERNAL_STORAGE"],
     allowBackup: false,
     predictiveBackGestureEnabled: false,
   },
   plugins: [
     "expo-router",
     ["expo-camera", { recordAudioAndroid: false, barcodeScannerEnabled: true, cameraPermission: "Deskzo uses the camera to scan the code that pairs this phone." }],
-    ["expo-build-properties", { android: { usesCleartextTraffic: dev } }],
+    [
+      "expo-build-properties",
+      {
+        android: {
+          usesCleartextTraffic: dev,
+          // A release is shrunk (R8). Android's background jobs (WorkManager) open their database by a constructor
+          // nothing calls directly — kept, or the app crashes on launch; and the calling module, kept whole.
+          extraProguardRules: "-keep class * extends androidx.room.RoomDatabase { <init>(); }\n-keep class com.deskzo.calls.** { *; }",
+        },
+      },
+    ],
     "./plugins/with-short-native-paths",
+    "./plugins/with-release-signing",
   ],
   experiments: { typedRoutes: false },
   extra: { dev },

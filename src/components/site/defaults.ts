@@ -867,6 +867,105 @@ const PRIVACY: SitePage = {
 };
 
 /**
+ * The Deskzo app's own privacy notice (owner, 18 Oct 2026) — the address Google Play is given for the app.
+ * Only what the app does (mobile/, src/lib/app): change it with the app.
+ */
+const APP_PRIVACY: SitePage = {
+  slug: "privacy/app",
+  title: "The Deskzo app — privacy",
+  seo: { title: "The Deskzo app: privacy", description: "What the Deskzo app for Android reads on your phone, what it sends to your company's Deskzo, and what stays on the phone." },
+  blocks: [
+    {
+      id: "app-privacy-header",
+      type: "pageHeader",
+      props: {
+        eyebrow: "Legal",
+        heading: "The {siteName} app: privacy",
+        intro: "What the app on your phone reads, what it sends to your company's {siteName}, what stays on the phone, and how to stop it.",
+        notice: { tone: "warning", text: DRAFT },
+      },
+    },
+    {
+      id: "app-privacy-body",
+      type: "richText",
+      props: {
+        content: [
+          { type: "heading", level: 2, text: "Who is responsible" },
+          {
+            type: "paragraph",
+            text: "The app is for people whose company uses {siteName}. It signs your phone in to your company's {siteName} workspace, and what it sends goes there. Your company decides how that information is used (it is the controller, or Data Fiduciary under the DPDP Act); we run {siteName} for it on its instructions. The main privacy notice covers the rest of the platform.",
+          },
+          { type: "heading", level: 2, text: "What the app reads on your phone" },
+          {
+            type: "paragraph",
+            text: "Nothing until you turn on call sync in the app yourself. After that:",
+          },
+          {
+            type: "list",
+            items: [
+              [{ text: "Your call log: ", strong: true }, { text: "for each call since you turned call sync on, the number, whether you made it or took it, when it started and how long it lasted. Calls from before you turned it on are never read." }],
+              [{ text: "The phone's call state: ", strong: true }, { text: "when a call rings, starts and ends, and the number that is ringing — so the app can show who is calling and send the call once it ends. Android describes this permission as \"make and manage phone calls\"; the app never makes, answers or ends a call." }],
+              [{ text: "The camera, ", strong: true }, { text: "only while you scan the code that pairs your phone. No picture is taken or kept." }],
+            ],
+          },
+          {
+            type: "paragraph",
+            text: "The app does not record or listen to calls, and does not read your messages, your phone's contacts, your location, your photos or your files.",
+          },
+          { type: "heading", level: 2, text: "What leaves your phone" },
+          {
+            type: "list",
+            items: [
+              [{ text: "Each call, to your company's {siteName}: ", strong: true }, { text: "its number, direction, time and length. {siteName} checks the number against the customers and contacts you can see there. A call with one of them is logged in your company's {siteName} as your call. Any other call — a personal one — is answered \"no match\" and is not stored or logged anywhere." }],
+              [{ text: "A ringing number, ", strong: true }, { text: "to look up who is calling. It is not stored." }],
+              [{ text: "What you add to a call: ", strong: true }, { text: "how it went, your notes, a callback and the lead it was about." }],
+              [{ text: "About the phone: ", strong: true }, { text: "its model and the app's version when it is paired, and its network address when it connects — kept with the device, so your company's administrators can see your paired phones and sign one out." }],
+            ],
+          },
+          {
+            type: "paragraph",
+            text: "Everything travels encrypted (HTTPS), only to your company's {siteName}. The app has no advertising and no analytics, and passes nothing to anyone else.",
+          },
+          { type: "heading", level: 2, text: "What stays on your phone" },
+          {
+            type: "paragraph",
+            text: "Your workspace's address and the phone's own sign-in key, whether call sync is on and how far it has got — in the app's private storage, which other apps cannot read and which is not backed up.",
+          },
+          { type: "heading", level: 2, text: "How long it is kept" },
+          {
+            type: "table",
+            columns: ["What", "Kept"],
+            rows: [
+              ["Calls with your company's customers", "As long as your company keeps its call records in {siteName}"],
+              ["Any other call", "Not kept — it is checked and dropped"],
+              ["A ringing number looked up", "Not kept"],
+              ["Your paired phone (model, last address seen)", "While it is paired, and in your company's security log after"],
+            ],
+          },
+          { type: "heading", level: 2, text: "Your choices" },
+          {
+            type: "list",
+            items: [
+              [{ text: "Turn call sync off ", strong: true }, { text: "in the app at any time. Nothing more is read or sent." }],
+              [{ text: "Sign out ", strong: true }, { text: "in the app's Settings. The phone's sign-in stops working at once and the app clears what it kept on the phone. Your company's administrators can sign a phone out too." }],
+              [{ text: "Uninstall the app ", strong: true }, { text: "to remove everything it kept on the phone." }],
+              [{ text: "Calls already logged ", strong: true }, { text: "are part of your company's records: to have one corrected or deleted, ask your company's {siteName} administrator, or write to us." }],
+            ],
+          },
+          { type: "heading", level: 2, text: "Children" },
+          { type: "paragraph", text: "The app is a tool for work, for adults whose company uses {siteName}. It is not meant for children." },
+          { type: "heading", level: 2, text: "Asking us" },
+          {
+            type: "paragraph",
+            text: [{ text: "Use the " }, { text: "contact form", href: "/contact?topic=other" }, { text: " or write to {salesEmail}. If this notice changes, the new one is published here before the app does anything new." }],
+          },
+        ],
+      },
+    },
+  ],
+};
+
+/**
  * The Help Center: every module's guide (pages at help/<guide>, src/lib/help/guides.ts), listed by the
  * helpIndex block once each is published in the CMS.
  */
@@ -900,4 +999,4 @@ const HELP: SitePage = {
 };
 
 /** Every page the site has by default, in the order the sitemap lists them. */
-export const DEFAULT_SITE_PAGES: SitePage[] = [HOME, PRICING, SECURITY, CONTACT, SIGNIN, SIGNUP, TERMS, PRIVACY, HELP];
+export const DEFAULT_SITE_PAGES: SitePage[] = [HOME, PRICING, SECURITY, CONTACT, SIGNIN, SIGNUP, TERMS, PRIVACY, APP_PRIVACY, HELP];

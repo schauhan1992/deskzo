@@ -5,7 +5,8 @@ import type { SeedGuide } from "./types";
  * Calls — written from src/app/(dashboard)/calls, src/components/calls (the phone icon's dialog and the
  * call history), src/actions/call.ts (logging, callbacks, who sees which calls), src/lib/calls.ts (the
  * outcomes and what counts as connected), src/lib/tasks/server.ts (a callback's task) and
- * src/lib/notify.ts (the "Callback due" reminder).
+ * src/lib/notify.ts (the "Callback due" reminder); the phone app's calling from mobile/, src/lib/app and
+ * src/app/(dashboard)/settings/phone; the team report from src/lib/call-report.ts and src/actions/call-report.ts.
  */
 export const guide: SeedGuide = {
   slug: "help/calls",
@@ -23,6 +24,7 @@ export const guide: SeedGuide = {
       p("Calls is the call log for your calling and sales teams. You place the call on your phone as usual; the app times it and records who you rang, the number, how it went and what was said — so the account's history shows every conversation, not just the ones somebody remembered to write up."),
       p(runs("The ", { b: "Calls" }, " screen shows the day at a glance: ", { b: "Calls today" }, ", how many ", { b: "Connected" }, " (with the share of dials that reached a person), total ", { b: "Talk time" }, ", and ", { b: "Callbacks due" }, " — callbacks promised whose time has passed. Below that is every call logged, newest first.")),
       p("A callback you promise becomes a task for you, and you're reminded when it falls due. A call logged against a lead also goes on that lead's activity timeline."),
+      p(runs("With the ", { b: "{siteName} app" }, " on an Android phone, calls log themselves: after each call with a customer the phone sends it to Calls, shows who a customer is while they ring, and asks how the call went. ", { b: "Team report" }, " shows each person's calling — how much reached somebody, when their day's calling starts and stops, and how fast new leads are called.")),
       note(runs("A call counts as connected when its outcome is ", { b: "Connected" }, ", ", { b: "Callback requested" }, " or ", { b: "Not interested" }, " — somebody actually spoke to a person. No answer, Busy, Switched off, Wrong number and Left voicemail are dials that didn't connect.")),
     ],
     access: [
@@ -44,8 +46,36 @@ export const guide: SeedGuide = {
       p("There is nothing to set up: once the module is on, the phone icon appears on companies, leads, tickets, orders and renewals."),
       p("The dialog offers the company's contacts who have a phone number on file, primary contact first. So the better your contacts' numbers are kept, the less anybody has to type — add numbers on the company's Contacts tab."),
       p(runs("For a manager to see their team's calls, each person in the team needs that manager as their ", { b: "Reporting manager" }, " in ", { b: "Settings › Users" }, ". To show somebody every caller's calls, tick ", { b: "See everyone's calls, notes & meetings" }, " for their role in ", { b: "Settings › Roles & Permissions" }, ".")),
+      p(runs("For calls that log themselves, each person installs the {siteName} app on their Android phone and pairs it from ", { b: "Settings › {siteName} app" }, " — see the first task below. Nothing needs setting up for the company: a role that only admits approved devices gets each phone waiting for an administrator in ", { b: "Settings › Devices, networks & sign-ins" }, ".")),
     ],
     tasks: [
+      task(
+        "Have your calls log themselves",
+        ol(
+          "Install the {siteName} app on your Android phone.",
+          runs("On a computer, open ", { b: "Settings › {siteName} app" }, " and select ", { b: "Show a pairing code" }, "."),
+          runs("In the app, select ", { b: "Scan the code" }, " and point the camera at it — or type your workspace's address and the ten characters. A code works once, for ten minutes."),
+          runs("Select ", { b: "Turn on call sync" }, " and allow the call log, phone and notification permissions. If the app says so, allow it to run in the background in the phone's battery settings."),
+        ),
+        p(runs("From then on, every call with a number on a customer or contact you can see is logged on Calls as yours — connected or no answer by its length — and on the lead it was about when there's only one. Calls with anybody else are not kept. A customer's missed call puts a callback on your list. In the app, ", { b: "How did these go?" }, " lists your calls waiting for a word: choose how it went, add a note, a callback and the lead, and save.")),
+      ),
+      task(
+        "Ring your phone from a call dialog",
+        ol(
+          "Open the call dialog from the phone icon, as when logging a call, and pick who you're calling.",
+          runs("Select ", { b: "Ring my" }, " and your phone's name. Your phone offers to dial the number — while the app is open it shows under ", { b: "Asked to call" }, "."),
+          "Make the call. When it ends it logs itself, with what the dialog was about — the lead, ticket or order.",
+        ),
+        p("The button shows only when one of your phones is paired, approved and has call sync on."),
+      ),
+      task(
+        "See how the team is calling",
+        ol(
+          runs("Open ", { b: "Prospecting › Calls" }, " and select ", { b: "Team report" }, "."),
+          runs("Choose ", { b: "Today" }, ", ", { b: "Yesterday" }, ", ", { b: "This week" }, ", ", { b: "Last 7 days" }, ", ", { b: "This month" }, " or your own dates — up to three months."),
+        ),
+        p("Each person's row shows their calls and how many connected, talk time, their first and last call of the day, how many the app logged and how many still need a word, callbacks overdue, and for the leads they own that came in during the period, how fast each was first called. Over several days the first and last call are the middle value of the days they called. You see the people whose calls you can see — your own, your team's, or everybody's."),
+      ),
       task(
         "Log a call",
         ol(
@@ -96,6 +126,11 @@ export const guide: SeedGuide = {
         p("Calls follow the account, then the caller: each person sees calls on the companies they can see, logged by themselves or the people who report to them. Tick See everyone's calls, notes & meetings for a role to show it every caller's calls, and See every account, not just your own to widen the accounts."),
       ),
       setting(
+        "{siteName} app",
+        "Settings › {siteName} app",
+        p("Everybody's own: a code to pair your phone with the app, and the phones you have paired — signed in, waiting for approval or signed out — with whether call sync is on and when each was last seen. Sign a phone out here, and it stops at once. Administrators see every phone in Settings › Devices, networks & sign-ins."),
+      ),
+      setting(
         "Call back on",
         "In the call dialog",
         p("A date and time in your workspace's time zone. Anything set here makes a task for you and puts the call on the callbacks list. Required when the outcome is Callback requested; optional otherwise."),
@@ -121,6 +156,14 @@ export const guide: SeedGuide = {
       qa(
         "I can't see a colleague's calls.",
         p("You see your own calls and your team's — the people who report to you — and only on accounts you can see. To see everybody's calls, your role needs See everyone's calls, notes & meetings."),
+      ),
+      qa(
+        "Does the app send my personal calls?",
+        p("Each call's number is checked against the customers and contacts you can see. A call with one of them is logged; any other call is dropped there and then — it isn't stored or shown anywhere. Calls from before you switched call sync on are never read, and the app doesn't record calls."),
+      ),
+      qa(
+        "My phone stopped logging calls.",
+        p("Open the app: it says if call sync is off, the phone was signed out, or it's waiting for an administrator's approval. If calls only log when you open the app, allow it to run in the background in the phone's battery settings — some phones stop apps that aren't allowed to."),
       ),
       qa(
         "Why can't I save the call?",

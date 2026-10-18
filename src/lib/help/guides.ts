@@ -127,10 +127,13 @@ export function expectedGuideSettings(moduleKey: string): SettingsItem[] {
   return SETTINGS.flatMap((section) => section.groups.flatMap((group) => group.items)).filter((item) => modulesOfSetting(item).includes(moduleKey));
 }
 
-/** Whether a guide's Settings section covers this settings screen: an entry names it by its label, in its name or its "where". */
+/**
+ * Whether a guide's Settings section covers this settings screen: an entry names it by its label, in its name or
+ * its "where". A guide writes the brand as {siteName}, which a label like "Deskzo app" says as the family's name.
+ */
 export function guideCoversSetting(settings: HelpGuideProps["settings"] | undefined, item: Pick<SettingsItem, "label">): boolean {
   const label = item.label.toLowerCase();
-  return (settings ?? []).some((s) => `${s.name ?? ""} ${s.where ?? ""}`.toLowerCase().includes(label));
+  return (settings ?? []).some((s) => `${s.name ?? ""} ${s.where ?? ""}`.replace(/\{siteName\}/g, PRODUCT_FAMILY).toLowerCase().includes(label));
 }
 
 // ─── What a guide may name ───────────────────────────────────────────────────────────────────────
