@@ -1,4 +1,5 @@
 import type { TransformExpr } from "@/lib/automate/definition";
+import { safeText } from "@/lib/automate/safe-text";
 import { resolveValue, type RunContext } from "@/lib/automate/references";
 import type { Clock } from "@/lib/time/zone";
 
@@ -11,9 +12,7 @@ import type { Clock } from "@/lib/time/zone";
 const DAY_MS = 86_400_000;
 
 function text(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
+  return safeText(value);
 }
 
 function num(value: unknown): number | null {

@@ -565,5 +565,8 @@ export const config = {
    */
   // /api is in, but only for the workspace check above; /iclock stays out until devices are routed
   // by serial number (a terminal is often configured with a bare IP that names no workspace).
-  matcher: ["/((?!iclock|_next/static|_next/image|favicon.ico|robots.txt).*)"],
+  // Automate's webhook addresses stay out too: inside the matcher Next holds a body up to
+  // proxyClientMaxBodySize (36 MB, for inbound email) before the route sees it, and the route's own
+  // 256 KB cap came too late. The route finds and holds its workspace itself.
+  matcher: ["/((?!iclock|api/automate/hooks|_next/static|_next/image|favicon.ico|robots.txt).*)"],
 };

@@ -60,6 +60,7 @@ import {
 } from "../src/lib/backup/maintenance";
 import { db } from "../src/lib/db";
 import { REFERENCE_TABLES } from "../src/lib/reference-data";
+import { afterRestore } from "../src/lib/automate/restore";
 
 async function main(tenant: Tenant, id: string) {
   const existing = await readRestoreStatus();
@@ -246,6 +247,14 @@ async function main(tenant: Tenant, id: string) {
 
   // Reference data is not in a workspace's database or its backups any more (prisma/reference), so a
   // restore neither rewinds nor reloads it: every workspace's address lookups carry on as they were.
+
+  // Automate's runs held by a worker when the backup was taken are let go, and the workspace woken.
+  // Not worth failing a finished restore over: the worker's lease runs out on its own within minutes.
+  try {
+    await afterRestore();
+  } catch (err) {
+    console.error("[restore] Automate's runs could not be let go", err instanceof Error ? err.message : err);
+  }
 
   status.phase = "done";
   status.message =

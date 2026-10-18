@@ -523,7 +523,7 @@ async function main() {
       workplace.invalidateWorkplaceSettingsCache();
     });
     const SHEET = "https://docs.google.com/spreadsheets/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789/edit";
-    const sheetStep = [{ id: "row", type: "action", action: "sheets.append", input: { spreadsheet: SHEET, sheet: "Leads", values: ["Asha", 2, null, { a: 1 }] } }];
+    const sheetStep = [{ id: "row", type: "action", action: "sheets.append", input: { spreadsheet: SHEET, sheet: "Leads", values: ["Asha", 2, null, { a: 1 }, "=IMPORTXML(1)"] } }];
     const noMailbox = await runOnce("ZZ Sheets, no mailbox", sheetStep);
     ok("without Google connected: refused for good, saying where to connect it", noMailbox.status === "FAILED" && noMailbox.error.includes("Automate › Connections"), noMailbox.error);
     const GMAIL_ONLY = "openid email https://www.googleapis.com/auth/gmail.send";
@@ -541,7 +541,7 @@ async function main() {
     const sheetCall = since(mark)[0];
     ok("with it: a row appended to the named tab, as the owner", appended.status === "SUCCEEDED" && sheetCall?.method === "POST" && sheetCall.path === "/sheets/v4/spreadsheets/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789/values/'Leads'!A1:append" && header(sheetCall, "authorization") === "Bearer zz-google-token", `${appended.status} ${appended.error} ${sheetCall?.path}`);
     ok("  entered as typed, as new rows", sheetCall?.query === "?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS", sheetCall?.query);
-    ok("  the values as cells: blanks empty, data as JSON", sheetCall?.body === JSON.stringify({ values: [["Asha", 2, "", '{"a":1}']] }), sheetCall?.body);
+    ok("  the values as cells: blanks empty, data as JSON, a formula as the text it is", sheetCall?.body === JSON.stringify({ values: [["Asha", 2, "", '{"a":1}', "'=IMPORTXML(1)"]] }), sheetCall?.body);
     ok("  and the range it landed in, for the next step", JSON.stringify(appended.steps[0]?.outputSummary).includes("Leads!A2:D2"));
     ok("the Connections page says Sheets is connected", (await inA(() => actions.getAutomationConnections())).sheets.connected);
     const notASheet = await runOnce("ZZ Sheets, not a sheet", [{ id: "row", type: "action", action: "sheets.append", input: { spreadsheet: "my budget", values: ["x"] } }]);
@@ -606,7 +606,9 @@ async function main() {
     await inA(() => actions.setWorkflowWebhookSigned(onHook, true));
     const unsignedNow = await call_(token, JSON.stringify({ name: "Plain" }));
     const ts2 = nowS();
-    const signedNow = await call_(token, signedBody, { "x-deskzo-timestamp": ts2, "x-deskzo-signature": signatureOf(secret, ts2, signedBody) });
+    // Its own body: the same signature again (the same second) is a replay, refused (Phase 8).
+    const againBody = JSON.stringify({ name: "Signed again" });
+    const signedNow = await call_(token, againBody, { "x-deskzo-timestamp": ts2, "x-deskzo-signature": signatureOf(secret, ts2, againBody) });
     ok("set to take only signed calls: an unsigned one is refused, a signed one taken", unsignedNow.status === 401 && signedNow.status === 202);
     await inA(() => actions.setWorkflowWebhookSigned(onHook, false));
 

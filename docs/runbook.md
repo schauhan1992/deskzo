@@ -8,7 +8,7 @@ For whoever runs the platform: what runs where, what to back up, how to release,
 |---|---|---|
 | App server | `npm run build` then `npm start` — every workspace, the public site (`www.`), the staff console (`admin.`) and the website's CMS (`cms.`) | Behind a reverse proxy doing TLS, with `TRUST_PROXY=1`; `NODE_ENV=production` |
 | Partner portal | `partners.<domain>` — resellers' and distributors' own portal (§12), with its own accounts; served by the same app server, from `src/app/platform-partners` | Nothing more to run: `partners.<domain>` in DNS and the proxy's certificate (§8) |
-| Platform worker | `npm run platform:worker` — sets new workspaces up, keeps the warm pool full | Long-lived under pm2 or systemd; restarts on failure |
+| Platform worker | `npm run platform:worker` — sets new workspaces up, keeps the warm pool full, runs Automate's workflows (§13) | Long-lived under pm2 or systemd; restarts on failure |
 | Schedulers | Plain HTTPS calls with a bearer secret | cron / systemd timers (below) |
 | PostgreSQL 16 | One database per workspace, plus the control plane and the reference database | With continuous archiving (point-in-time recovery) |
 | PgBouncer | Pools the app's connections to workspace databases | Transaction mode (§7) |
@@ -307,3 +307,37 @@ Resellers and distributors sell the platform and are paid commission on what the
 - **What partners see, and never see.** Their own profile, terms, payout mask and activity; the customers credited to them now — the workspace's name and address, country, status, billing standing, plans, what it pays each month (at list prices), its renewal date, and how it was credited — and, for ADMIN and FINANCE, the commission earned from each. Never: anything inside a workspace (no workspace database is opened for them, and there is no support entry), a customer's contact addresses, tax id or invoices, another partner's anything (a refused registration or a conflict never names the other partner), staff notes and reasons, or — for a distributor — its resellers' rates, entries, statements or people.
 - **Applications.** The public "Become a partner" form (`/partners`) is open by default and limited per address, per caller and in all; each application is mailed to `PLATFORM_SALES_EMAIL` and kept in the console (Partners → Requests → Applications), where staff turn one into a partner. The public directory (`/partners/find`) lists only active partners who chose to be listed, and is off by default.
 - **The portal host** answers no `/api` path — its work is server actions — and is never indexed or cached. `npm run check:partners` covers all of the above on a scratch control plane; `npm run pentest` probes PRT-1 to PRT-12.
+
+## 13. Deskzo Automate
+
+Workflows run in the **platform worker** (§1): it follows the wake list in the control plane (`automation_wake`) every couple of seconds, works up to four workspaces at a time and five runs at once in each, and sweeps every workspace every ten minutes for a wake that was lost. The five-minute marketing tick also runs Automate, as the fallback when the worker isn't running — then delays and waits are only as punctual as the tick. Load: `npm run load:automate` (docs/reports/automate-load-test.md).
+
+### 13.1 Pausing automations — one workspace, or all
+
+- **One workspace:** its admins press **Pause every workflow** on Automate › Workflows. Nothing starts or moves on until they let workflows run again; runs keep their place.
+- **Every workspace:** console → Settings → Automate → pause. The worker does nothing at all until it is lifted, and the health board shows Automate as off. Use it for an incident that isn't one workspace's (a bad release, a runaway connector).
+- A workflow that fails twenty times in a row pauses itself and tells its owner. One whose owner left, or lost what a step needs, pauses at its next step.
+
+### 13.2 Retrying failed runs in bulk
+
+Fix the cause first — a connection mended, a module switched back on, the owner's access restored. Then, in the workspace: Automate › Runs, **State: Failed** (and a workflow, to narrow it) → **Retry failed runs**. Each goes back to the step that failed, newest first, two hundred at a time (press it again for the rest); it is audited. Runs marked **Needs a decision** are left out on purpose: each stopped at a step whose outcome isn't known (an email or a call that may have gone out), and a person decides it — **Try the step again** or **Cancel run** — one by one.
+
+### 13.3 Reading a run for a support ticket
+
+Open the run (Automate › Runs, or RUN-000123 from the ticket) and press **Copy for a support ticket**: the run, its workflow and version, who it runs as, and each step's status, time and error — never what went in or came out. Each step's data is shown only to the workflow's owner and the super admin (owner, 18 Oct 2026), so support staff entering through a grant see statuses and errors, which is what a ticket needs. Errors are masked as they are stored: keys, tokens, `?token=` values, hook addresses.
+
+A workflow runs as its owner, so only its owner changes, tests or publishes it. Another admin can pause it, run it, duplicate it, or **Take over** — it becomes theirs, switched off until they publish it, and the owner before is told.
+
+### 13.4 The backlog alarm
+
+The health board's Automate row and the console alerts **automate.backlog** (work waiting more than five minutes) and **automate.stalled** (more than an hour, critical) mean workflow work is due and not being taken up.
+
+1. Is the worker running? On Coolify it is a Scheduled Task (§1); on the server, `npm run platform:worker -- --once` works one pass by hand and prints what it did.
+2. One workspace, or all? The alert says how many. One workspace stuck while the rest move usually means its turns fail: search the logs for `[automate]` and the workspace's `[slug]`. An event no rule could read, or a step that threw, is now passed over or fails its run rather than stopping the turn — so a repeated failure there is a bug to report.
+3. All of them, with the worker running: it isn't keeping up. Look at the database (slow queries, connections — §7) and at the load report's numbers. Pause Automate for everybody (13.1) if pages are slowing down, while you find out.
+
+### 13.5 Restores and outside steps
+
+A workspace restored from a backup resumes its runs where the backup left them; the restore lets go of runs a worker held then and wakes the workspace. A step that reached outside Deskzo (an email, a webhook, a message) after the backup was taken is not done again: such steps are recorded in the control plane (`automation_sent_steps`, kept 120 days), and a run that reaches one again stops at **Needs a decision**, saying it went out before the restore. The worker leaves a workspace alone while it is being restored.
+
+**Checks:** `npm run check:automate-hardening` (restores, the security review's fixes, the alarm), `check:automate-limits`, and the other `check:automate*` suites.

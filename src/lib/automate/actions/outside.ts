@@ -320,7 +320,12 @@ export const sheetsAppend = defineAction({
     if (!access.ok) throw new ActionError(access.error, access.reconnect ? "PERMANENT" : "TRANSIENT");
     const range = encodeURIComponent(i.sheet ? `'${i.sheet.replace(/'/g, "''")}'!A1` : "A1");
     const url = `${googleSheetsBase()}/v4/spreadsheets/${id}/values/${range}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
-    const values = i.values.map((v) => (v === null || v === undefined ? "" : typeof v === "object" ? JSON.stringify(v) : v));
+    // Text that Sheets would read as a formula (=, +, -, @ first) goes in as the text it is: a lead's name
+    // or a ticket's subject from outside must never become =IMPORTXML(…) in the owner's sheet.
+    const values = i.values.map((v) => {
+      const value = v === null || v === undefined ? "" : typeof v === "object" ? JSON.stringify(v) : v;
+      return typeof value === "string" && /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+    });
     const { output } = await withOutsideEffect(ctx, () =>
       callOnce(ctx, { method: "POST", url, headers: { authorization: `Bearer ${access.token}`, "content-type": "application/json" }, body: JSON.stringify({ values: [values] }), sign: false }, (body) => ({
         range: String((body as { updates?: { updatedRange?: string } } | null)?.updates?.updatedRange ?? ""),

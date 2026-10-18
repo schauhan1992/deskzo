@@ -13,6 +13,7 @@ import { sampleTrigger } from "@/lib/automate/samples";
 import { blankProblem, templateByKey, type BlankValues } from "@/lib/automate/templates";
 import { connectorLevelOf, connectorRefusal, type AutomationLimits } from "@/lib/automate/limits";
 import { WorkflowLimitReached, claimActivePlace, limitsHere, stepsRefusal } from "@/lib/automate/usage";
+import { forgetSending, sentKey } from "@/lib/automate/sent";
 
 /**
  * Making and changing workflows, and the person-led things done to runs (Deskzo Automate). Server-only,
@@ -21,6 +22,13 @@ import { WorkflowLimitReached, claimActivePlace, limitsHere, stepsRefusal } from
  */
 
 export type StoreResult<T> = { ok: true; data: T } | { ok: false; error: string; problems?: DefinitionProblem[] };
+
+/**
+ * A workflow runs as its owner — their mailbox, their connections, the records they may see — so only
+ * they change, test or publish it (owner, 18 Oct 2026). Anybody else with Automate may pause it, run it,
+ * duplicate it, or take it over (`takeOverWorkflow`).
+ */
+export const NOT_OWNER = "Only the workflow's owner can change, test or publish it — it runs as them. Duplicate it to make your own, or take it over.";
 
 export type NewWorkflow = {
   name: string;
@@ -94,6 +102,7 @@ export async function publishWorkflow(
   const workflow = await db.automationWorkflow.findUnique({ where: { id: workflowId }, select: { draft: true, status: true, ownerUserId: true } });
   if (!workflow) return { ok: false, error: "That workflow no longer exists." };
   if (workflow.status === "ARCHIVED") return { ok: false, error: "An archived workflow can't be published." };
+  if (publisherId !== workflow.ownerUserId) return { ok: false, error: NOT_OWNER };
   const checked = validateDefinition(workflow.draft);
   if (!checked.ok) return { ok: false, error: "The workflow has problems to fix before it can be published.", problems: checked.problems };
   const definition = checked.definition;
@@ -105,12 +114,8 @@ export async function publishWorkflow(
     if (!action) continue;
     const ownerRefusal = await actorRefusal(workflow.ownerUserId, action);
     if (ownerRefusal) problems.push({ stepId: step.id, field: null, message: ownerRefusal });
-    if (publisherId !== workflow.ownerUserId) {
-      const publisherRefusal = await actorRefusal(publisherId, action);
-      if (publisherRefusal) problems.push({ stepId: step.id, field: null, message: publisherRefusal.replace("The workflow's owner", "You") });
-    }
   }
-  if (problems.length) return { ok: false, error: "Somebody involved can't take one of its actions.", problems };
+  if (problems.length) return { ok: false, error: "Its owner can't take one of its actions.", problems };
   const limits = await limitsHere();
   if (!options.converting) {
     const outside = connectorProblems(definition, limits);
@@ -187,6 +192,24 @@ export async function setWorkflowStatus(workflowId: string, status: Extract<Auto
   return { ok: true, data: null };
 }
 
+/**
+ * Makes `userId` a workflow's owner. Its published version is let go, so it is off and nothing runs as
+ * them until they publish it themselves — checked then against their own access, as anyone's first
+ * publish is. Its draft and versions stay. Runs already going carry on, as the new owner.
+ */
+export async function takeOverWorkflow(workflowId: string, userId: string): Promise<StoreResult<{ previousOwnerId: string }>> {
+  const workflow = await db.automationWorkflow.findUnique({ where: { id: workflowId }, select: { ownerUserId: true, status: true } });
+  if (!workflow) return { ok: false, error: "That workflow no longer exists." };
+  if (workflow.status === "ARCHIVED") return { ok: false, error: "An archived workflow stays as it is." };
+  if (workflow.ownerUserId === userId) return { ok: false, error: "It's yours already." };
+  const taken = await db.automationWorkflow.updateMany({
+    where: { id: workflowId, ownerUserId: workflow.ownerUserId },
+    data: { ownerUserId: userId, status: "DRAFT", activeVersionId: null, pausedReason: "Taken over: publish it to switch it on as its new owner.", failureStreak: 0 },
+  });
+  if (!taken.count) return { ok: false, error: "That workflow changed meanwhile; look again." };
+  return { ok: true, data: { previousOwnerId: workflow.ownerUserId } };
+}
+
 /** Starts a workflow whose trigger is "manual", now, as `byUserId`. */
 export async function startManualRun(workflowId: string, byUserId: string, data: Record<string, unknown> = {}): Promise<StoreResult<{ runId: string }>> {
   const workflow = await db.automationWorkflow.findUnique({ where: { id: workflowId }, select: { status: true, activeVersionId: true, triggers: { select: { type: true } } } });
@@ -229,7 +252,7 @@ export async function cancelRun(runId: string): Promise<StoreResult<null>> {
  * outcome was unknown is tried again only because a person has looked and said so.
  */
 export async function retryRun(runId: string): Promise<StoreResult<null>> {
-  const run = await db.automationRun.findUnique({ where: { id: runId }, select: { status: true, createdAt: true } });
+  const run = await db.automationRun.findUnique({ where: { id: runId }, select: { status: true, createdAt: true, idempotencyKey: true } });
   if (!run) return { ok: false, error: "That run no longer exists." };
   if (run.status !== "FAILED" && run.status !== "NEEDS_ATTENTION") return { ok: false, error: "Only a failed run, or one waiting for a decision, can be tried again." };
   if (Date.now() - run.createdAt.getTime() > ENGINE_LIMITS.runLifeMs) return { ok: false, error: "The run is past its 120-day limit; start a new one instead." };
@@ -239,9 +262,33 @@ export async function retryRun(runId: string): Promise<StoreResult<null>> {
   });
   if (!retried.count) return { ok: false, error: "That run changed meanwhile; look again." };
   // A person has looked and says it didn't happen: the step's "under way" mark goes, so it is done now.
-  if (run.status === "NEEDS_ATTENTION") await db.automationEffect.deleteMany({ where: { runId, output: { path: ["$sending"], equals: true } } });
+  // Its record outside the database too (sent.ts), or a step done before a restore would wait again.
+  if (run.status === "NEEDS_ATTENTION") {
+    const marked = await db.automationEffect.findMany({ where: { runId, output: { path: ["$sending"], equals: true } }, select: { key: true } });
+    await db.automationEffect.deleteMany({ where: { key: { in: marked.map((m) => m.key) } } });
+    await forgetSending(marked.map((m) => sentKey({ key: m.key, runId, runKey: run.idempotencyKey })));
+  }
   await requestWakeHere();
   return { ok: true, data: null };
+}
+
+/** The most failed runs one "Retry failed runs" takes up — the newest first. */
+export const BULK_RETRY_LIMIT = 200;
+
+/**
+ * Failed runs tried again in bulk — one workflow's, or all of them — once their cause is fixed (the
+ * runbook: a connection mended, a module switched back on). Each goes back to its failed step, as
+ * Retry does one. Runs waiting for a decision are left for a person: each needs looking at.
+ */
+export async function retryFailedRuns(filter: { workflowId?: string | null } = {}): Promise<{ retried: number; left: number }> {
+  const where = { status: "FAILED" as const, isTest: false, parentRunId: null, createdAt: { gte: new Date(Date.now() - ENGINE_LIMITS.runLifeMs) }, ...(filter.workflowId ? { workflowId: filter.workflowId } : {}) };
+  const [runs, total] = await Promise.all([
+    db.automationRun.findMany({ where, orderBy: { createdAt: "desc" }, take: BULK_RETRY_LIMIT, select: { id: true } }),
+    db.automationRun.count({ where }),
+  ]);
+  let retried = 0;
+  for (const run of runs) if ((await retryRun(run.id)).ok) retried += 1;
+  return { retried, left: total - retried };
 }
 
 // ─── The builder (Phase 3) ──────────────────────────────────────────────────────────────────────
@@ -294,8 +341,10 @@ export type TestOutcome = { runId: string; status: string; about: string | null 
  * Carried out here rather than by the worker, so the builder shows the result straight away.
  */
 export async function testDraft(workflowId: string, testerId: string, live: boolean): Promise<StoreResult<TestOutcome>> {
-  const workflow = await db.automationWorkflow.findUnique({ where: { id: workflowId }, select: { draft: true, status: true } });
+  const workflow = await db.automationWorkflow.findUnique({ where: { id: workflowId }, select: { draft: true, status: true, ownerUserId: true } });
   if (!workflow) return { ok: false, error: "That workflow no longer exists." };
+  // A test reads for real as the owner, and shows what it read: theirs alone.
+  if (testerId !== workflow.ownerUserId) return { ok: false, error: NOT_OWNER };
   const checked = validateDefinition(workflow.draft);
   if (!checked.ok) return { ok: false, error: "Fix the problems marked before testing.", problems: checked.problems };
   const sample = await sampleTrigger(testerId, checked.definition.trigger.type, new Date(), workflowId);

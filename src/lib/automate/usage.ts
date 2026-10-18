@@ -20,7 +20,8 @@ import { PLAN_LIMITS, automationLimits, type AutomationLimits } from "@/lib/auto
  *     month at four fifths, and once when none are left.
  *   · Workflows switched on: refused past the limit when one is published or switched on, under a lock
  *     so two at once can't both take the last place. Workflows already on stay on when a plan shrinks.
- *   · History: finished runs older than the plan keeps are deleted once a day, their steps with them.
+ *   · History: finished runs older than the plan keeps are deleted once a day, their steps with them,
+ *     and the approval requests made from them.
  *
  * A workspace whose entitlements were worked out before Phase 7 has no limits written: none apply.
  */
@@ -144,6 +145,11 @@ export async function pruneRunHistory(clock: Clock, now: Date = new Date(), limi
   const gone = await db.automationRun.deleteMany({
     where: { status: { in: ["SUCCEEDED", "FAILED", "CANCELLED"] }, finishedAt: { lt: new Date(now.getTime() - historyDays * DAY_MS) } },
   });
+  // Approval requests are built from a run's data but not tied to it in the database: they go with it.
+  await db.$executeRaw`
+    DELETE FROM "approval_requests" a
+     WHERE a."runId" IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM "automation_runs" r WHERE r."id" = a."runId")`;
   return gone.count;
 }
 

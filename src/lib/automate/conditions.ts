@@ -1,5 +1,6 @@
 import type { Filter, Rule, RuleOp } from "@/lib/automate/definition";
 import { readPath, resolveValue, type RunContext } from "@/lib/automate/references";
+import { safeText } from "@/lib/automate/safe-text";
 
 /**
  * Whether a condition holds (Deskzo Automate). Pure. `all` needs every rule, `any` one of them; an
@@ -37,9 +38,10 @@ function same(a: unknown, b: unknown): boolean {
   const ta = asTime(a);
   const tb = asTime(b);
   if (ta !== null && tb !== null) return ta === tb;
-  if (typeof a === "boolean" || typeof b === "boolean") return String(a) === String(b);
+  if (typeof a === "boolean" || typeof b === "boolean") return safeText(a) === safeText(b);
   if (empty(a) && empty(b)) return true;
-  return String(a ?? "").toLowerCase() === String(b ?? "").toLowerCase();
+  // Never String(): a webhook's {"toString": 1} would throw, and stop the workspace's turn.
+  return safeText(a).toLowerCase() === safeText(b).toLowerCase();
 }
 
 /** -1, 0 or 1, or null when the two can't be ordered. */
@@ -55,7 +57,7 @@ function order(a: unknown, b: unknown): number | null {
 
 function contains(haystack: unknown, needle: unknown): boolean {
   if (Array.isArray(haystack)) return haystack.some((item) => same(item, needle));
-  if (typeof haystack === "string") return haystack.toLowerCase().includes(String(needle ?? "").toLowerCase());
+  if (typeof haystack === "string") return haystack.toLowerCase().includes(safeText(needle).toLowerCase());
   return false;
 }
 

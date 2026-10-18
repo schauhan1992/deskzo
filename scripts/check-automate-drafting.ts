@@ -246,13 +246,14 @@ async function main() {
     ok("the file says what it is, and is named after the workflow", file.deskzo === "automate-workflow" && file.version === 1 && /^WF-\d{4}-zz-export-me\.json$/.test(exported.data.fileName), exported.data.fileName);
     ok("  no id of this workspace's is in it — person, connection, record", ![colleague.id, connection.id, owner, company.id].some((id) => exported.data.text.includes(id)));
     ok("  nor a secret, nor a connection's name", !exported.data.text.includes("zzmarksecret") && !exported.data.text.includes("Quokka room"));
-    ok("  what it cleared is said", exported.data.cleared.length === 3, exported.data.cleared.join(" | "));
+    // Four: the person, the channel and the rule — and the outside address, which may carry a key (Phase 8).
+    ok("  what it cleared is said", exported.data.cleared.length === 4 && !exported.data.text.includes("api.example.com"), exported.data.cleared.join(" | "));
     ok("  the step's note goes with it", exported.data.text.includes("They handle these."));
     const preview = await inA(() => actions.previewWorkflowImport(exported.data.text));
     if (!preview.ok) throw new Error(preview.error);
     ok("importing it says what starts it and its steps", preview.data.trigger === "A lead is created" && preview.data.steps.join("|") === "Give it to the colleague|Post it|Tell our ERP", preview.data.steps.join("|"));
-    ok("  every outside place it would send to: the API's host, and Slack", preview.data.calls.includes("api.example.com") && preview.data.calls.includes("Slack"), preview.data.calls.join(", "));
-    ok("  and what's left to choose: the person, the channel, the rule", preview.data.blanks.length === 3 && preview.data.others.length === 0, preview.data.blanks.map((b) => `${b.stepId}/${b.field}`).join(" "));
+    ok("  every outside place it would send to: an outside API (its address left out), and Slack", preview.data.calls.some((c) => c.startsWith("An outside API")) && preview.data.calls.includes("Slack"), preview.data.calls.join(", "));
+    ok("  and what's left to choose: the person, the channel, the rule, the address", preview.data.blanks.length === 4 && preview.data.others.length === 0, preview.data.blanks.map((b) => `${b.stepId}/${b.field}`).join(" "));
     const before = await inA(() => db.automationWorkflow.count());
     ok("a preview makes nothing", (await inA(() => db.automationWorkflow.count())) === before);
     const imported = await inA(() => actions.importAutomationWorkflow(exported.data.text));
@@ -275,7 +276,7 @@ async function main() {
     ok("  one starting from something unknown", (await refusal(JSON.stringify({ ...file, definition: { ...file.definition, trigger: { type: "zz.whenever" } } }))).includes("zz.whenever"));
     ok("  one over 512 KB", (await refusal(JSON.stringify({ ...file, padding: "x".repeat(600 * 1024) }))).includes("512 KB"));
     const edited = await inA(() => actions.previewWorkflowImport(JSON.stringify({ ...file, definition: exportable })));
-    ok("a file edited to name records again is cleared again on import", edited.ok && edited.data.cleared.length === 3 && !JSON.stringify(edited.data).includes(colleague.id));
+    ok("a file edited to name records again is cleared again on import", edited.ok && edited.data.cleared.length === 4 && !JSON.stringify(edited.data).includes(colleague.id));
     const editedImport = await inA(() => actions.importAutomationWorkflow(JSON.stringify({ ...file, name: "ZZ edited file", definition: exportable })));
     const editedRow = await inA(() => db.automationWorkflow.findFirst({ where: { name: "ZZ edited file" }, select: { draft: true } }));
     ok("  and the draft it makes names none of them", editedImport.ok && !!editedRow && ![colleague.id, connection.id].some((id) => JSON.stringify(editedRow.draft).includes(id)));
@@ -283,7 +284,7 @@ async function main() {
     // ─── Company templates ──────────────────────────────────────────────────────────────────────
     section("A company's own templates");
     const saved = await inA(() => actions.saveAsCompanyTemplate(original.id));
-    ok("a workflow is saved as a template, cleared as an export is", saved.ok && saved.data.cleared.length === 3);
+    ok("a workflow is saved as a template, cleared as an export is", saved.ok && saved.data.cleared.length === 4);
     const row = await inA(() => db.automationTemplate.findFirst({ select: { id: true, definition: true, name: true } }));
     ok("  nothing of this workspace's is kept in it", !!row && ![colleague.id, connection.id].some((id) => JSON.stringify(row.definition).includes(id)));
     const listed = await inA(() => actions.listAutomationCompanyTemplates());

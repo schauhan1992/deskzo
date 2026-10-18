@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { nestsDeeperThan } from "@/lib/automate/safe-text";
 import { safeFetch, SafeFetchError, type SafeFetchOptions, type SafeResponse } from "@/lib/net/safe-fetch";
 import { currentKeys } from "@/lib/tenancy/keys";
 import { ActionError, type ActionContext, type FailureKind } from "@/lib/automate/action-types";
@@ -99,7 +100,9 @@ export function answerBody(response: SafeResponse): unknown {
   const type = response.headers.get("content-type") ?? "";
   if (type.includes("json")) {
     try {
-      return JSON.parse(response.body);
+      const parsed: unknown = JSON.parse(response.body);
+      // Nested too deep to carry through a run (it couldn't be saved): kept as the text it came as.
+      if (!nestsDeeperThan(parsed)) return parsed;
     } catch {
       /* not JSON after all: the text */
     }

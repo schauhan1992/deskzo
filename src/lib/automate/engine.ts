@@ -14,7 +14,7 @@ import { filterHolds } from "@/lib/automate/conditions";
 import { advance, currentStep, enterBranch, enterList, isCursor, startCursor, stepKey, type Cursor } from "@/lib/automate/cursor";
 import { LIMITS, childList, definitionSchema, delayMs, eachStep, type Definition, type Step } from "@/lib/automate/definition";
 import { resolveValue, type RunContext } from "@/lib/automate/references";
-import { summarize } from "@/lib/automate/redact";
+import { maskStepText, summarize } from "@/lib/automate/redact";
 import { actionByKey, actorRefusal } from "@/lib/automate/registry";
 import { delayUntil, nextFire } from "@/lib/automate/schedule";
 import { workspacePause } from "@/lib/automate/switches";
@@ -24,6 +24,8 @@ import { requestWakeHere } from "@/lib/automate/wake";
 import { runRef, workflowPath } from "@/lib/automate/refs";
 import { approversToTell, resolveApprovers, tellApprovers } from "@/lib/automate/approvals";
 import { eventMeets, fixRules, type WaitRule } from "@/lib/automate/waits";
+import { restoreInProgress } from "@/lib/backup/maintenance";
+import { eventAsOwner, type ReachCache } from "@/lib/automate/trigger-reach";
 import { connectorLevelOf, connectorRefusal } from "@/lib/automate/limits";
 import { afterStepCounted, countStep, limitsHere, pruneRunHistory, stepsRefusal } from "@/lib/automate/usage";
 
@@ -61,6 +63,8 @@ export const ENGINE_LIMITS = {
   turnMs: 10_000,
   retryDelaysMs: [60_000, 5 * 60_000, 30 * 60_000, 2 * 3_600_000, 6 * 3_600_000],
   eventDays: 30,
+  /** A webhook's calls: long enough for its Idempotency-Key (a day) and its fields in the builder's picker. */
+  webhookEventDays: 7,
 } as const;
 
 /** Which process holds a run: host, pid and a tag, for the lease and the log. */
@@ -147,7 +151,7 @@ export async function matchEvents(now: Date = new Date(), limit = 200): Promise<
 
   const triggers = await db.automationTrigger.findMany({
     where: { type: { in: [...new Set(events.map((e) => e.type))] }, workflow: { status: "ACTIVE" } },
-    select: { workflowId: true, versionId: true, type: true, workflow: { select: { activeVersionId: true } } },
+    select: { workflowId: true, versionId: true, type: true, workflow: { select: { activeVersionId: true, ownerUserId: true } } },
   });
   const versions = new Map(
     (await db.automationVersion.findMany({ where: { id: { in: triggers.map((t) => t.versionId) } }, select: { id: true, definition: true } })).map((v) => [v.id, parseDefinition(v.definition)]),
@@ -164,10 +168,24 @@ export async function matchEvents(now: Date = new Date(), limit = 200): Promise<
   let runs = 0;
   let skipped = 0;
   let woke = false;
+  const reachCache: ReachCache = new Map();
   // This month's steps used: runs already going carry on, but these events start none.
   const outOfSteps = triggers.length ? await stepsRefusal(clockOfTenant(await currentTenant()), now) : null;
   for (const event of events) {
-    if (await wakeWaiting(event, now)) woke = true;
+    try {
+      woke = (await matchEvent(event)) || woke;
+    } catch (err) {
+      // Passed over rather than tried again on every turn, which would hold up the whole workspace.
+      skipped += 1;
+      console.error(`[automate] event ${event.id} (${event.type}) could not be matched; passed over`, err instanceof Error ? err.message : err);
+    }
+    await db.automationEvent.update({ where: { id: event.id }, data: { matchedAt: now } });
+  }
+  if (woke) await requestWakeHere(now);
+  return { events: events.length, runs, skipped };
+
+  async function matchEvent(event: (typeof events)[number]): Promise<boolean> {
+    const wokeOne = await wakeWaiting(event, now, reachCache);
     for (const trigger of triggers) {
       if (outOfSteps) {
         if (trigger.type === event.type) skipped += 1;
@@ -183,7 +201,12 @@ export async function matchEvents(now: Date = new Date(), limit = 200): Promise<
       }
       const definition = versions.get(trigger.versionId);
       if (!definition) continue;
-      const payload = (event.payload ?? {}) as Record<string, unknown>;
+      // As the workflow's owner may see it — or not at all: a record they can't open starts nothing (trigger-reach.ts).
+      const payload = await eventAsOwner(trigger.workflow.ownerUserId, event, reachCache);
+      if (!payload) {
+        skipped += 1;
+        continue;
+      }
       if (!filterHolds(definition.trigger.filter, { trigger: payload, steps: {} })) continue;
 
       const recordKey = event.recordType && event.recordId ? `${event.recordType}:${event.recordId}` : null;
@@ -211,25 +234,29 @@ export async function matchEvents(now: Date = new Date(), limit = 200): Promise<
       });
       if (id) runs += 1;
     }
-    await db.automationEvent.update({ where: { id: event.id }, data: { matchedAt: now } });
+    return wokeOne;
   }
-  if (woke) await requestWakeHere(now);
-  return { events: events.length, runs, skipped };
 }
 
 /**
  * Runs waiting for this kind of event (Phase 6): each whose rules the event meets — and that began
  * waiting before it happened — takes it and wakes. True when one did.
  */
-async function wakeWaiting(event: { id: string; type: string; payload: Prisma.JsonValue; occurredAt: Date }, now: Date): Promise<boolean> {
+async function wakeWaiting(
+  event: { id: string; type: string; recordType: string | null; recordId: string | null; payload: Prisma.JsonValue; occurredAt: Date },
+  now: Date,
+  reachCache: ReachCache = new Map(),
+): Promise<boolean> {
   const waits = await db.automationEventWait.findMany({
     where: { eventType: event.type, matchedEventId: null, expiresAt: { gt: now }, createdAt: { lte: event.occurredAt } },
-    select: { id: true, runId: true, rules: true, matchAny: true },
+    select: { id: true, runId: true, rules: true, matchAny: true, run: { select: { workflow: { select: { ownerUserId: true } } } } },
   });
   let woke = false;
   for (const wait of waits) {
-    if (!eventMeets(event.payload, (wait.rules ?? []) as WaitRule[], wait.matchAny)) continue;
-    const taken = await db.automationEventWait.updateMany({ where: { id: wait.id, matchedEventId: null }, data: { matchedEventId: event.id, matchedPayload: (event.payload ?? {}) as Prisma.InputJsonValue } });
+    // The waiting run is its owner's too: only a record they may see, as they see it.
+    const seen = await eventAsOwner(wait.run.workflow.ownerUserId, event, reachCache);
+    if (!seen || !eventMeets(seen, (wait.rules ?? []) as WaitRule[], wait.matchAny)) continue;
+    const taken = await db.automationEventWait.updateMany({ where: { id: wait.id, matchedEventId: null }, data: { matchedEventId: event.id, matchedPayload: seen as Prisma.InputJsonValue } });
     if (!taken.count) continue;
     await db.automationRun.updateMany({ where: { id: wait.runId, status: "WAITING" }, data: { runAfter: now } });
     woke = true;
@@ -289,6 +316,8 @@ export async function claimRuns(now: Date = new Date()): Promise<string[]> {
 
 type Held = {
   id: string;
+  /** The same for this run after its workspace is restored from a backup (src/lib/automate/sent.ts). */
+  idempotencyKey: string;
   workflowId: string;
   versionId: string | null;
   parentRunId: string | null;
@@ -338,7 +367,7 @@ async function finish(run: Held, status: AutomationRunStatus, error: string | nu
   const terminal = status !== "NEEDS_ATTENTION";
   const saved = await db.automationRun.updateMany({
     where: { id: run.id, lockedBy: HOLDER },
-    data: { status, error: error ? error.slice(0, 1000) : null, lockedBy: null, lockedUntil: null, ...(terminal ? { finishedAt: new Date() } : {}), ...extra },
+    data: { status, error: error ? maskStepText(error).slice(0, 1000) : null, lockedBy: null, lockedUntil: null, ...(terminal ? { finishedAt: new Date() } : {}), ...extra },
   });
   if (!saved.count) return;
   if (terminal) await afterEnd(run, status);
@@ -418,7 +447,7 @@ function stepDone(row: StepRow, status: "SUCCEEDED" | "FAILED" | "SKIPPED" | "UN
       finishedAt: new Date(),
       durationMs: Date.now() - row.startedAt,
       outputSummary: output === undefined ? Prisma.JsonNull : (summarize(output) as Prisma.InputJsonValue),
-      error: error ? error.slice(0, 1000) : null,
+      error: error ? maskStepText(error).slice(0, 1000) : null,
       errorKind: kind,
       retryAt,
     },
@@ -430,6 +459,7 @@ async function load(runId: string): Promise<Held | null> {
     where: { id: runId },
     select: {
       id: true,
+      idempotencyKey: true,
       status: true,
       lockedBy: true,
       workflowId: true,
@@ -451,6 +481,7 @@ async function load(runId: string): Promise<Held | null> {
   const context = await openContext(row.contextCipher);
   return {
     id: row.id,
+    idempotencyKey: row.idempotencyKey,
     workflowId: row.workflowId,
     versionId: row.versionId,
     parentRunId: row.parentRunId,
@@ -517,9 +548,36 @@ export async function advanceRun(runId: string, clock: Clock): Promise<Automatio
       return "QUEUED";
     }
 
-    const outcome = await runStep(run, step, clock);
+    let outcome: Awaited<ReturnType<typeof runStep>>;
+    try {
+      outcome = await runStep(run, step, clock);
+    } catch (err) {
+      return stepThrew(run, step, err);
+    }
     if (outcome !== "NEXT") return outcome;
   }
+}
+
+/**
+ * A step that threw instead of answering: data it couldn't handle, a bug — or the database away for a
+ * moment. The first two fail the run; the last is tried again on the retry ladder, then fails. Left to
+ * propagate, the run stayed held, was taken up again when its lease ran out, and threw again, for ever.
+ */
+async function stepThrew(run: Held, step: Step, err: unknown): Promise<AutomationRunStatus | "LOST"> {
+  const message = `Step "${step.id}" stopped unexpectedly: ${err instanceof Error ? err.message : String(err)}`;
+  console.error(`[automate] run ${run.id}, step ${step.id}`, err);
+  const javascript = err instanceof RangeError || err instanceof TypeError || err instanceof SyntaxError || err instanceof ReferenceError;
+  await db.automationRunStep
+    .updateMany({ where: { runId: run.id, stepId: step.id, status: "RUNNING" }, data: { status: "FAILED", finishedAt: new Date(), error: maskStepText(message).slice(0, 1000), errorKind: "PERMANENT" } })
+    .catch(() => undefined);
+  if (!javascript && failureKindOf(err) === "TRANSIENT" && !run.isTest && run.attempts < ENGINE_LIMITS.retryDelaysMs.length) {
+    const retryAt = new Date(Date.now() + ENGINE_LIMITS.retryDelaysMs[run.attempts]!);
+    if (!(await checkpoint(run, { status: "QUEUED", runAfter: retryAt, attempts: run.attempts + 1, lockedBy: null, lockedUntil: null, error: maskStepText(message).slice(0, 1000) }))) return "LOST";
+    await requestWakeHere(retryAt);
+    return "QUEUED";
+  }
+  await finish(run, "FAILED", message);
+  return "FAILED";
 }
 
 /** Each for-each the cursor is in: its output names the item this time round. */
@@ -897,7 +955,7 @@ async function runAction(run: Held, step: Extract<Step, { type: "action" }>, clo
   } else {
     try {
       output = await action.run(
-        { actorId: run.ownerUserId, workflowId: run.workflowId, workflowName: run.workflowName, runId: run.id, stepId: step.id, key: `${run.id}:${stepKey(run.cursor, step.id)}`, depth: run.depth, clock },
+        { actorId: run.ownerUserId, workflowId: run.workflowId, workflowName: run.workflowName, runId: run.id, stepId: step.id, key: `${run.id}:${stepKey(run.cursor, step.id)}`, runKey: run.idempotencyKey, depth: run.depth, clock },
         input.data as never,
       );
     } catch (err) {
@@ -927,7 +985,7 @@ async function runAction(run: Held, step: Extract<Step, { type: "action" }>, clo
 
 // ─── A workspace's turn ──────────────────────────────────────────────────────────────────────────
 
-export type TenantWork = { skipped?: "not-migrated" | "paused" | "off"; fired: number; matched: number; runs: number; turns: number };
+export type TenantWork = { skipped?: "not-migrated" | "paused" | "off" | "restoring"; fired: number; matched: number; runs: number; turns: number };
 
 /** Whether this workspace's database has Automate's tables yet. */
 async function migrated(): Promise<boolean> {
@@ -946,7 +1004,12 @@ async function migrated(): Promise<boolean> {
  */
 export async function workTenant(options: { budgetMs?: number } = {}): Promise<TenantWork> {
   const result: TenantWork = { fired: 0, matched: 0, runs: 0, turns: 0 };
+  // Its database is being put back from a backup: nothing is touched until that is done (afterRestore).
+  if (await restoreInProgress()) return { ...result, skipped: "restoring" };
   if (!(await migrated())) return { ...result, skipped: "not-migrated" };
+  // Kept no longer than they should be, whether or not anything runs here now: a paused workspace, or
+  // one without Automate, still records events (src/lib/automate/events.ts) and still holds old runs.
+  await tidy(clockOfTenant(await currentTenant()));
   if ((await workspacePause()).paused) return { ...result, skipped: "paused" };
   if (!(await moduleAvailableForTenant("automate"))) return { ...result, skipped: "off" };
   // Pipeline automations not moved onto Automate yet, moved first — before the events they wait for are matched.
@@ -959,8 +1022,6 @@ export async function workTenant(options: { budgetMs?: number } = {}): Promise<T
   result.fired = await fireSchedules(clock);
   // Once a day: invoices overdue, renewals coming, deals gone quiet (src/lib/automate/dates.ts).
   await emitDateEvents(clock);
-  // Once a day: finished runs older than the plan keeps.
-  await pruneRunHistory(clock);
   const matched = await matchEvents();
   result.matched = matched.runs;
   result.runs = result.fired + result.matched;
@@ -972,9 +1033,23 @@ export async function workTenant(options: { budgetMs?: number } = {}): Promise<T
       result.turns += 1;
     }
   }
-  // Events are kept 30 days.
-  await db.automationEvent.deleteMany({ where: { matchedAt: { not: null }, occurredAt: { lt: new Date(Date.now() - ENGINE_LIMITS.eventDays * 86_400_000) } } });
   return result;
+}
+
+/**
+ * Events are kept 30 days, acted on or not — a webhook's calls 7 — and, once a day, finished runs older
+ * than the plan keeps (src/lib/automate/usage.ts).
+ */
+async function tidy(clock: Clock, now: Date = new Date()) {
+  await db.automationEvent.deleteMany({
+    where: {
+      OR: [
+        { occurredAt: { lt: new Date(now.getTime() - ENGINE_LIMITS.eventDays * 86_400_000) } },
+        { type: "webhook", occurredAt: { lt: new Date(now.getTime() - ENGINE_LIMITS.webhookEventDays * 86_400_000) } },
+      ],
+    },
+  });
+  await pruneRunHistory(clock, now);
 }
 
 /** When this workspace next has something due, or null when nothing is. */

@@ -5,6 +5,7 @@ import { ModuleDisabledNotice } from "@/components/settings/module-disabled-noti
 import { Card } from "@/components/ui/card";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
 import { StatusBadge } from "@/components/automate/status-badge";
+import { RetryFailedButton } from "@/components/automate/automate-controls";
 import { runPath, runRef } from "@/lib/automate/refs";
 import { notMigratedYet } from "@/lib/not-migrated";
 import { workspaceClock } from "@/lib/time/workspace";
@@ -54,6 +55,7 @@ export default async function AutomateRunsPage({ searchParams }: { searchParams:
             Showing one workflow · show all
           </Link>
         )}
+        {params.status === "FAILED" && <RetryFailedButton workflowId={params.workflow ?? null} count={runs.filter((r) => r.status === "FAILED" && !r.isTest).length} />}
       </div>
       <Card className="overflow-x-auto p-0">
         {runs.length === 0 ? (

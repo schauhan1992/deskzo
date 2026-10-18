@@ -1,6 +1,7 @@
 import http from "node:http";
 import https from "node:https";
 import { isIP, type LookupFunction } from "node:net";
+import { pipeline } from "node:stream";
 import zlib from "node:zlib";
 import { cidrContains, parseCidr, parseIp, type ParsedIp } from "@/lib/access/ip";
 import { DNS_TIMEOUT_MS, resolver, withTimeout } from "@/lib/dns";
@@ -37,6 +38,7 @@ const BLOCKED_RANGES = [
   "100.64.0.0/10", // carrier-grade NAT
   "127.0.0.0/8",
   "169.254.0.0/16", // link-local, and the cloud metadata address
+  "168.63.129.16/32", // Azure's host address (WireServer), reachable from every VM in Azure
   "172.16.0.0/12",
   "192.0.0.0/24", // protocol assignments
   "192.0.2.0/24", // documentation
@@ -157,10 +159,13 @@ async function checkedTarget(raw: string, options: SafeFetchOptions): Promise<{ 
 
 function decoded(response: http.IncomingMessage): NodeJS.ReadableStream {
   const encoding = String(response.headers["content-encoding"] ?? "").toLowerCase();
-  if (encoding === "gzip" || encoding === "x-gzip") return response.pipe(zlib.createGunzip());
-  if (encoding === "deflate") return response.pipe(zlib.createInflate());
-  if (encoding === "br") return response.pipe(zlib.createBrotliDecompress());
-  return response;
+  const decoder =
+    encoding === "gzip" || encoding === "x-gzip" ? zlib.createGunzip() : encoding === "deflate" ? zlib.createInflate() : encoding === "br" ? zlib.createBrotliDecompress() : null;
+  if (!decoder) return response;
+  // pipeline, not pipe: a response cut off at the deadline ends the decoder too. Through pipe() the
+  // decoder never ended, and the read waited for ever.
+  pipeline(response, decoder, () => {});
+  return decoder;
 }
 
 function headersOf(response: http.IncomingMessage): Headers {

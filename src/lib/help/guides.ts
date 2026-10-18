@@ -198,6 +198,14 @@ const PRODUCT_NAMES = new Set([...PRODUCTS.map((p) => p.name), ...ADD_ONS.map((a
 const PRODUCT_MENTION = new RegExp(`(?:\\b${PRODUCT_FAMILY}|\\{siteName\\})\\s+([A-Z][A-Za-z]+)`, "g");
 /** "Deskzo Revenue" for the add-on "Revenue & Close" is a name somebody would type: an add-on's first word counts. */
 const ADD_ON_FIRST_WORDS = new Set(ADD_ONS.map((a) => `${PRODUCT_FAMILY} ${a.name.split(/\s+/)[0]}`));
+/** The rest of each add-on's name, by its first word: "Automate" → " Plus". */
+const ADD_ON_RESTS = new Map<string, string[]>();
+for (const a of ADD_ONS) {
+  const [first, ...rest] = a.name.split(/\s+/);
+  if (first && rest.length) ADD_ON_RESTS.set(first, [...(ADD_ON_RESTS.get(first) ?? []), ` ${rest.join(" ")}`]);
+}
+/** A module's own name: "Deskzo Automate" isn't the add-on Automate Plus cut short — it needs its whole name. */
+const MODULE_LABELS = new Set(MODULE_REGISTRY.map((m) => m.label));
 /** A word that may follow "{siteName}" without naming a product: a sentence going on ("{siteName} Help Center"…). */
 const NOT_A_PRODUCT = new Set(["Help"]);
 /** "leads.view": a lower-case namespace, a dot, a camel-case verb — how every permission key is written. */
@@ -249,7 +257,10 @@ export function guideReferenceIssues(props: unknown): GuideIssue[] {
       const word = m[1]!;
       if (NOT_A_PRODUCT.has(word)) continue;
       const name = `${PRODUCT_FAMILY} ${word}`;
-      if (!PRODUCT_NAMES.has(name) && !ADD_ON_FIRST_WORDS.has(name)) issues.push({ path, message: `There's no product called "${name}" — the products are in the list under "Which products include it".` });
+      const after = text.slice((m.index ?? 0) + m[0].length);
+      const wholeAddOn = (ADD_ON_RESTS.get(word) ?? []).some((rest) => after.startsWith(rest));
+      const shortAddOn = ADD_ON_FIRST_WORDS.has(name) && !MODULE_LABELS.has(word);
+      if (!PRODUCT_NAMES.has(name) && !wholeAddOn && !shortAddOn) issues.push({ path, message: `There's no product called "${name}" — the products are in the list under "Which products include it".` });
     }
     for (const m of text.matchAll(KEY_LIKE)) {
       if (!PERMISSION_NAMESPACES.has(m[1]!)) continue;

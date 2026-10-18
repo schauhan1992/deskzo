@@ -314,7 +314,13 @@ async function main() {
     section("Events: once each, once a minute per record");
     const dup = await publish(A, owner, "ZZ dup", { schema: 1, trigger: { type: "task.created", filter: { all: [{ ref: "trigger.task.title", op: "contains", value: "ZZDUP" }] } }, steps: [{ id: "tell", type: "action", action: "notify.person", input: { title: "ZZ dup seen" } }] });
     const emit = (recordId: string, title: string, extra: { causedByRunId?: string; depth?: number } = {}) =>
-      inA(() => db.$transaction((tx) => emitEvent(tx, { type: "task.created", recordType: "task", recordId, payload: { task: { id: recordId, title } }, ...extra })));
+      inA(() =>
+        db.$transaction(async (tx) => {
+          // A real task: a workflow learns only of records its owner may see (Phase 8, trigger-reach.ts).
+          await tx.task.upsert({ where: { id: recordId }, create: { id: recordId, title, createdByUserId: owner, assignedToUserId: owner }, update: {} });
+          await emitEvent(tx, { type: "task.created", recordType: "task", recordId, payload: { task: { id: recordId, title } }, ...extra });
+        }),
+      );
     await emit("dup-1", "ZZDUP one");
     await inA(() => engine.matchEvents());
     await inA(() => db.automationEvent.updateMany({ data: { matchedAt: null } }));

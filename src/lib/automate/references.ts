@@ -8,6 +8,8 @@
  *   · Only own properties are read, and never `__proto__`, `constructor` or `prototype`.
  */
 
+import { safeText } from "@/lib/automate/safe-text";
+
 export type RunContext = {
   trigger: Record<string, unknown>;
   /** `failed`: why a step failed, in a workflow that carries on past failures. Never read by a reference. */
@@ -42,10 +44,7 @@ export function readPath(context: RunContext, path: string): unknown {
 }
 
 function asText(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  if (value instanceof Date) return value.toISOString();
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
+  return safeText(value);
 }
 
 /** Every reference in a value, deep — strings, arrays and objects. */

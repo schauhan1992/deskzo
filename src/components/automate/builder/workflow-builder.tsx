@@ -14,6 +14,7 @@ import {
   exportAutomationWorkflow,
   publishAutomationWorkflow,
   restoreAutomationVersion,
+  takeOverAutomationWorkflow,
   saveAsCompanyTemplate,
   saveWorkflowDraft,
   setAutomationWorkflowStatus,
@@ -119,11 +120,15 @@ function prefill(action: ActionSpec, draft: Draft, catalog: Catalog): Record<str
 
 /**
  * `demo`: shown and edited, never saved, tested or published — for looking at a workflow without
- * changing it (a template before it is used).
+ * changing it (a template before it is used). A workflow somebody else owns is shown read-only: it runs
+ * as them, so only they change, test or publish it (owner, 18 Oct 2026); it can be duplicated or taken over.
  */
 export function WorkflowBuilder({ workflow, demo = false }: { workflow: BuilderWorkflow; demo?: boolean }) {
   const router = useRouter();
   const { catalog } = workflow;
+  // Somebody else's: looked at, never saved.
+  const readOnly = !workflow.mine;
+  const locked = demo || readOnly;
   const [draft, setDraft] = useState<Draft>(() => readDraft(workflow.draft));
   const [name, setName] = useState(workflow.name);
   const [description, setDescription] = useState(workflow.description ?? "");
@@ -158,7 +163,7 @@ export function WorkflowBuilder({ workflow, demo = false }: { workflow: BuilderW
 
   // Saved a moment after each change; Test and Publish wait for it.
   useEffect(() => {
-    if (first.current || demo) {
+    if (first.current || locked) {
       first.current = false;
       return;
     }
@@ -167,7 +172,7 @@ export function WorkflowBuilder({ workflow, demo = false }: { workflow: BuilderW
       pending.current = save();
     }, 900);
     return () => clearTimeout(timer);
-  }, [save, demo]);
+  }, [save, locked]);
 
   const flush = async () => {
     if (saveState === "unsaved" || saveState === "failed") return save();
@@ -236,14 +241,19 @@ export function WorkflowBuilder({ workflow, demo = false }: { workflow: BuilderW
 
   const form =
     selected === "trigger" ? (
-      <TriggerForm draft={draft} onChange={setDraft} catalog={catalog} data={data} problems={problems.filter((p) => p.stepId === null)} workflowId={workflow.id} webhook={workflow.webhook} demo={demo} />
+      <fieldset disabled={readOnly} className="min-w-0">
+        <TriggerForm draft={draft} onChange={setDraft} catalog={catalog} data={data} problems={problems.filter((p) => p.stepId === null)} workflowId={workflow.id} webhook={workflow.webhook} demo={locked} />
+      </fieldset>
     ) : step ? (
-      <StepForm step={step} onChange={(s) => setDraft((d) => updateStep(d, step.id, () => s))} catalog={catalog} data={data} problems={problemsOf(step.id)} />
+      <fieldset disabled={readOnly} className="min-w-0">
+        <StepForm step={step} onChange={(s) => setDraft((d) => updateStep(d, step.id, () => s))} catalog={catalog} data={data} problems={problemsOf(step.id)} />
+      </fieldset>
     ) : null;
 
   // Render functions, not components: a component defined in here would be a new type on every
   // render, and its inputs would lose focus at every key pressed.
   const renderAddStep = (slot: Slot, index: number) => {
+    if (readOnly) return null;
     const groups = [...new Set(catalog.actions.map((a) => MODULE_GROUPS[a.module] ?? "Other"))];
     return (
       <div className="flex justify-center py-1">
@@ -316,7 +326,7 @@ export function WorkflowBuilder({ workflow, demo = false }: { workflow: BuilderW
                 </p>
               )}
             </div>
-            <div onClick={(e) => e.stopPropagation()}>
+            <div onClick={(e) => e.stopPropagation()} hidden={readOnly}>
               <Menu label={`More for ${s.name || s.id}`} icon={MoreHorizontal} width={200}>
                 {(close) => (
                   <>
@@ -392,8 +402,8 @@ export function WorkflowBuilder({ workflow, demo = false }: { workflow: BuilderW
             </Link>{" "}
             › {workflowRef(workflow.seq)}
           </p>
-          <Input value={name} maxLength={120} onChange={(e) => setName(e.target.value)} className="h-10 text-lg font-semibold" aria-label="Workflow name" />
-          <Input value={description} maxLength={500} onChange={(e) => setDescription(e.target.value)} placeholder="What it is for, in a line" className="text-sm" aria-label="What it is for" />
+          <Input value={name} maxLength={120} readOnly={readOnly} onChange={(e) => setName(e.target.value)} className="h-10 text-lg font-semibold" aria-label="Workflow name" />
+          <Input value={description} maxLength={500} readOnly={readOnly} onChange={(e) => setDescription(e.target.value)} placeholder="What it is for, in a line" className="text-sm" aria-label="What it is for" />
           <p className="flex flex-wrap items-center gap-2 text-xs text-muted">
             <StatusBadge status={workflow.status} />
             {workflow.activeVersion !== null ? <span>Version {workflow.activeVersion} runs</span> : <span>Not published yet</span>}
@@ -403,16 +413,35 @@ export function WorkflowBuilder({ workflow, demo = false }: { workflow: BuilderW
             <span>· {saveState === "saving" ? "Saving…" : saveState === "unsaved" ? "Unsaved" : saveState === "failed" ? `Not saved: ${saveError}` : "Saved"}</span>
           </p>
           {workflow.pausedReason && <p className="text-xs text-warning">{workflow.pausedReason}</p>}
+          {readOnly && !demo && (
+            <div className="flex flex-wrap items-center gap-2 rounded-base bg-surface-sunken px-3 py-2 text-xs text-muted">
+              <span>
+                It runs as {workflow.ownerName}, so only they change, test or publish it. Duplicate it to make your own, or take it over — it becomes yours, off until
+                you publish it.
+              </span>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => {
+                  if (!window.confirm(`Take this workflow over from ${workflow.ownerName}? It becomes yours and is switched off until you publish it. They are told.`)) return;
+                  void act(() => takeOverAutomationWorkflow(workflow.id), "It's yours now. Publish it to switch it on.");
+                }}
+              >
+                Take over
+              </Button>
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <label className="flex items-center gap-1.5 text-xs text-muted" title="A task, a note on a lead, a notification: done for real on the test's record.">
+          <label hidden={readOnly} className="flex items-center gap-1.5 text-xs text-muted" title="A task, a note on a lead, a notification: done for real on the test's record.">
             <input type="checkbox" checked={live} onChange={(e) => setLive(e.target.checked)} />
             Do the safe steps for real
           </label>
-          <Button variant="secondary" size="sm" disabled={testing} onClick={runTest}>
+          <Button variant="secondary" size="sm" disabled={testing} hidden={readOnly} onClick={runTest}>
             <Play className="h-3.5 w-3.5" /> {testing ? "Testing…" : "Test"}
           </Button>
-          <Button size="sm" disabled={busy || problems.length > 0} onClick={() => setPublishOpen(true)} title={problems.length ? "Fix the problems marked first" : undefined}>
+          <Button size="sm" disabled={busy || problems.length > 0} hidden={readOnly} onClick={() => setPublishOpen(true)} title={problems.length ? "Fix the problems marked first" : undefined}>
             Publish
           </Button>
           <Menu label="More" width={240}>
@@ -459,6 +488,7 @@ export function WorkflowBuilder({ workflow, demo = false }: { workflow: BuilderW
                 <MenuSeparator />
                 <MenuItem
                   danger
+                  disabled={readOnly}
                   onClick={async () => {
                     close();
                     if (!window.confirm("Archive this workflow? It stops for good; its runs stay in the history.")) return;
@@ -555,7 +585,7 @@ export function WorkflowBuilder({ workflow, demo = false }: { workflow: BuilderW
                 <Button
                   size="sm"
                   variant="secondary"
-                  disabled={busy}
+                  disabled={busy || readOnly}
                   onClick={async () => {
                     const done = await restoreAutomationVersion(workflow.id, v.id);
                     if (done.ok) window.location.reload();

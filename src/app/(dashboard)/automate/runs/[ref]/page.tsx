@@ -5,7 +5,7 @@ import { getAutomationRun } from "@/actions/automate";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { Card } from "@/components/ui/card";
 import { StatusBadge } from "@/components/automate/status-badge";
-import { RunControls } from "@/components/automate/automate-controls";
+import { CopyForSupport, RunControls } from "@/components/automate/automate-controls";
 import { runRef } from "@/lib/automate/refs";
 import { triggerByType } from "@/lib/automate/triggers";
 import { workspaceClock } from "@/lib/time/workspace";
@@ -28,6 +28,16 @@ export default async function AutomateRunPage({ params }: { params: Promise<{ re
   }
   const [run, clock] = found;
   if (!run) notFound();
+  // For a support ticket: the run and its steps, never their data.
+  const forSupport = [
+    `${runRef(run.seq)} — "${run.workflowName}" (${run.version === null ? "a test of the draft" : `version ${run.version}`}) — ${run.status}`,
+    `Started by: ${triggerByType(run.trigger)?.label ?? run.trigger}. Created ${clock.dateTimeShort(run.createdAt)}${run.finishedAt ? `, finished ${clock.dateTimeShort(run.finishedAt)}` : ""}. Runs as ${run.ownerName}.`,
+    ...(run.error ? [`Error: ${run.error}`] : []),
+    "Steps:",
+    ...run.steps.map(
+      (s, i) => `  ${i + 1}. ${s.stepId} (${s.type})${s.attempt > 1 ? `, try ${s.attempt}` : ""} — ${s.status}${s.durationMs === null ? "" : ` in ${s.durationMs} ms`}${s.error ? ` — ${s.error}` : ""}`,
+    ),
+  ].join("\n");
 
   return (
     <div className="space-y-5">
@@ -52,8 +62,16 @@ export default async function AutomateRunPage({ params }: { params: Promise<{ re
             {` · ${run.stepsUsed} step${run.stepsUsed === 1 ? "" : "s"} counted`}
           </p>
           {run.error && <p className="mt-2 rounded-base bg-danger-bg px-3 py-2 text-sm text-danger">{run.error}</p>}
+          {!run.dataShown && (
+            <p className="mt-2 text-xs text-muted">
+              Each step&apos;s input and output are shown to the workflow&apos;s owner, {run.ownerName}, and the super admin — they are what {run.ownerName} can see.
+            </p>
+          )}
         </div>
-        <RunControls id={run.id} status={run.status} />
+        <div className="flex flex-col items-end gap-2">
+          <RunControls id={run.id} status={run.status} />
+          <CopyForSupport text={forSupport} />
+        </div>
       </div>
 
       <Card className="overflow-x-auto p-0">
@@ -89,10 +107,10 @@ export default async function AutomateRunPage({ params }: { params: Promise<{ re
                   <td className="px-4 py-3 text-muted">{clock.dateTimeShort(s.startedAt)}</td>
                   <td className="px-4 py-3 text-muted">{s.durationMs === null ? "—" : s.durationMs < 1000 ? `${s.durationMs} ms` : `${(s.durationMs / 1000).toFixed(1)} s`}</td>
                   <td className="px-4 py-3">
-                    <Summary value={s.input} />
+                    {run.dataShown ? <Summary value={s.input} /> : <span className="text-xs text-subtle">—</span>}
                   </td>
                   <td className="px-4 py-3">
-                    <Summary value={s.output} />
+                    {run.dataShown ? <Summary value={s.output} /> : <span className="text-xs text-subtle">—</span>}
                   </td>
                 </tr>
               ))}

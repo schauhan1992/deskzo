@@ -25,6 +25,8 @@ import {
 import { RETENTION_DAYS } from "@/lib/platform/lifecycle";
 import { autoDeprovision } from "@/lib/platform/settings";
 import type { Clock } from "@/lib/time/zone";
+import { overdueWakes } from "@/lib/automate/wake";
+import { platformPause } from "@/lib/automate/switches";
 
 /**
  * The console's alerts: what is wrong now, or about to be, derived on every request from the control
@@ -96,7 +98,9 @@ type AlertKind =
   | "seats.over"
   | "purge.due"
   | "signups.stuck"
-  | "grant.live";
+  | "grant.live"
+  | "automate.backlog"
+  | "automate.stalled";
 
 type KindSpec = {
   severity: AlertSeverity;
@@ -133,6 +137,9 @@ const KINDS: Record<AlertKind, KindSpec> = {
   "purge.due": { severity: "info", category: "workspaces", instance: true, tenantFirst: true },
   "signups.stuck": { severity: "info", category: "workspaces", instance: false },
   "grant.live": { severity: "info", category: "workspaces", instance: true },
+  // Deskzo Automate's worker behind: past five minutes a warning, past an hour critical (docs/runbook.md).
+  "automate.backlog": { severity: "warning", category: "jobs", instance: false },
+  "automate.stalled": { severity: "critical", category: "jobs", instance: false },
 };
 
 const isKind = (k: string): k is AlertKind => Object.prototype.hasOwnProperty.call(KINDS, k);
@@ -273,6 +280,26 @@ async function warmAlerts(): Promise<Alert[]> {
       title: ready === 0 ? `The warm pool is empty (0 of ${target} ready)` : `The warm pool is low (${ready} of ${target} ready)`,
       detail: "New signups wait while a database is made. The platform worker tops the pool up.",
       href: "/provisioning#warm-pool",
+    }),
+  ];
+}
+
+/**
+ * Workflow work waiting past its time on the wake list (the health board's Automate row): the platform
+ * worker isn't running, or isn't keeping up. Nothing while Automate is paused for everybody.
+ */
+async function automateAlerts({ now }: Ctx): Promise<Alert[]> {
+  if ((await platformPause()).paused) return [];
+  const late = await overdueWakes(5 * 60_000, now);
+  if (!late.length) return [];
+  const oldest = late[0]!.nextDueAt;
+  const stalled = now.getTime() - oldest.getTime() > 3_600_000;
+  return [
+    make(stalled ? "automate.stalled" : "automate.backlog", [], {
+      title: `Workflow work in ${plural(late.length, "workspace")} has waited ${forHowLong(now.getTime() - oldest.getTime())}`,
+      detail: "The platform worker runs it (npm run platform:worker). Check it is running, then see the runbook: Automate's backlog.",
+      href: "/health",
+      since: oldest,
     }),
   ];
 }
@@ -718,6 +745,7 @@ async function derive(role: ConsoleRole, now: Date): Promise<Alert[]> {
     ["the warm pool", warmAlerts],
     ["migrations", migrationAlerts],
     ["the platform tick", tickAlerts],
+    ["workflows", automateAlerts],
     ["scheduled jobs", jobAlerts],
     ["trials", trialAlerts],
     ["reference syncs", referenceAlerts],

@@ -7,6 +7,7 @@ import { moduleAvailableForTenant } from "@/lib/modules-access";
 import { notMigratedYet } from "@/lib/not-migrated";
 import { requestWakeHere } from "@/lib/automate/wake";
 import { signature } from "@/lib/automate/outbound";
+import { MAX_NESTING, nestsDeeperThan, safeText } from "@/lib/automate/safe-text";
 
 /**
  * A workflow started by an outside app (Deskzo Automate, Phase 4): its own address, POST
@@ -25,7 +26,8 @@ import { signature } from "@/lib/automate/outbound";
  *     run happens in the worker (src/lib/automate/engine.ts).
  */
 
-export const HOOK_LIMITS = { bodyBytes: 256 * 1024, perMinute: 60, skewSeconds: 300, idempotencyHours: 24 } as const;
+/** Per address: a body, calls a minute and a day (counted under a lock), a signature's window, how long a key is remembered. */
+export const HOOK_LIMITS = { bodyBytes: 256 * 1024, perMinute: 60, perDay: 5_000, skewSeconds: 300, idempotencyHours: 24 } as const;
 
 async function derive(purpose: string, hookId: string): Promise<string> {
   const { digestKey } = await currentKeys();
@@ -60,9 +62,15 @@ export async function webhookOf(workflowId: string): Promise<WebhookView | null>
 export async function ensureWebhook(workflowId: string, fresh = false): Promise<WebhookView> {
   const existing = fresh ? null : await webhookOf(workflowId);
   if (existing) return existing;
-  const before = await db.automationWebhook.findFirst({ where: { workflowId }, orderBy: { createdAt: "desc" }, select: { requireSignature: true } });
   const id = randomUUID();
   const created = await db.$transaction(async (tx) => {
+    // One at a time for a workflow: two asks at once (a double click, two admins) leave one address.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`automate-hook-make:${workflowId}`}))`;
+    if (!fresh) {
+      const made = await tx.automationWebhook.findFirst({ where: { workflowId }, orderBy: { createdAt: "desc" }, select: { id: true, workflowId: true, requireSignature: true, lastReceivedAt: true } });
+      if (made) return made;
+    }
+    const before = await tx.automationWebhook.findFirst({ where: { workflowId }, orderBy: { createdAt: "desc" }, select: { requireSignature: true } });
     await tx.automationWebhook.deleteMany({ where: { workflowId } });
     return tx.automationWebhook.create({
       data: { id, workflowId, tokenHash: hashOf(await derive("address", id)), requireSignature: before?.requireSignature ?? false },
@@ -74,6 +82,13 @@ export async function ensureWebhook(workflowId: string, fresh = false): Promise<
 
 export async function setRequireSignature(workflowId: string, required: boolean): Promise<void> {
   await db.automationWebhook.updateMany({ where: { workflowId }, data: { requireSignature: required } });
+}
+
+/** Whether a parsed body nests deeper than anything a workflow should carry, or holds a NUL Postgres refuses. */
+function unstorable(body: unknown): string | null {
+  if (nestsDeeperThan(body)) return `The body nests more than ${MAX_NESTING} levels deep.`;
+  if (safeText(body).includes("\\u0000")) return "The body holds a NUL character.";
+  return null;
 }
 
 export type WebhookCall = { token: string; body: string; contentType: string | null; headers: Headers; query: URLSearchParams; now?: Date };
@@ -127,38 +142,54 @@ export async function receiveWebhook(call: WebhookCall): Promise<WebhookAnswer> 
   }
 
   const prefix = `${hook.id}:`;
-  const recent = await db.automationEvent.count({ where: { type: "webhook", recordId: { startsWith: prefix }, occurredAt: { gte: new Date(now.getTime() - 60_000) } } });
-  if (recent >= HOOK_LIMITS.perMinute) return refuse(429, "More than 60 calls in a minute. Try again shortly.", { "retry-after": "60" });
+  const body = readBody(call.body, call.contentType);
+  const bad = unstorable(body);
+  if (bad) return refuse(400, bad);
 
   const key = call.headers.get("idempotency-key")?.trim().slice(0, 200) || null;
   const recordId = `${prefix}${key ?? randomUUID()}`;
+  // A signed call taken once is never taken again — not even under another Idempotency-Key.
+  const signatureHash = signed ? createHash("sha256").update(signed.trim().toLowerCase()).digest("hex").slice(0, 32) : null;
   const payload = {
     workflowId: hook.workflowId,
-    body: readBody(call.body, call.contentType),
+    body,
     query: Object.fromEntries(call.query),
-    headers: { contentType: call.contentType, userAgent: call.headers.get("user-agent"), signed: !!signed },
+    headers: { contentType: call.contentType, userAgent: call.headers.get("user-agent"), signed: !!signed, ...(signatureHash ? { signatureHash } : {}) },
     receivedAt: now.toISOString(),
   };
   // Written here rather than through emitEvents, which swallows a failure so a business write never
   // fails for its event: here the event is the write, and a caller told 202 must be able to rely on it.
-  let duplicate: boolean;
+  let outcome: "taken" | "duplicate" | "replayed" | "minute" | "day";
   try {
-    duplicate = await db.$transaction(async (tx) => {
+    outcome = await db.$transaction(async (tx) => {
+      // One call at a time per address, so the limits are counted against what is really there: sent
+      // all at once, sixty-one calls still find sixty.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`automate-hook-rate:${hook.id}`}))`;
+      const mine = { type: "webhook", recordId: { startsWith: prefix } };
+      if ((await tx.automationEvent.count({ where: { ...mine, occurredAt: { gte: new Date(now.getTime() - 60_000) } } })) >= HOOK_LIMITS.perMinute) return "minute";
+      if ((await tx.automationEvent.count({ where: { ...mine, occurredAt: { gte: new Date(now.getTime() - 86_400_000) } } })) >= HOOK_LIMITS.perDay) return "day";
+      if (signatureHash) {
+        const window = new Date(now.getTime() - 2 * HOOK_LIMITS.skewSeconds * 1000);
+        if (await tx.automationEvent.findFirst({ where: { ...mine, occurredAt: { gte: window }, payload: { path: ["headers", "signatureHash"], equals: signatureHash } }, select: { id: true } })) return "replayed";
+      }
       if (key) {
         // Two calls racing with the same key: the second waits, then finds the first.
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`automate-hook:${recordId}`}))`;
         const since = new Date(now.getTime() - HOOK_LIMITS.idempotencyHours * 3_600_000);
-        if (await tx.automationEvent.findFirst({ where: { type: "webhook", recordId, occurredAt: { gte: since } }, select: { id: true } })) return true;
+        if (await tx.automationEvent.findFirst({ where: { type: "webhook", recordId, occurredAt: { gte: since } }, select: { id: true } })) return "duplicate";
       }
       await tx.automationEvent.create({ data: { type: "webhook", recordType: "webhook", recordId, payload: payload as unknown as Prisma.InputJsonValue } });
       await tx.automationWebhook.update({ where: { id: hook.id }, data: { lastReceivedAt: now } });
-      return false;
+      return "taken";
     });
   } catch (err) {
     if (notMigratedYet(err)) return refuse(503, "Not ready yet. Try again shortly.", { "retry-after": "60" });
     throw err;
   }
-  if (duplicate) return { status: 200, body: { ok: true, accepted: true, duplicate: true } };
+  if (outcome === "minute") return refuse(429, "More than 60 calls in a minute. Try again shortly.", { "retry-after": "60" });
+  if (outcome === "day") return refuse(429, `More than ${HOOK_LIMITS.perDay.toLocaleString("en-IN")} calls in a day. Try again tomorrow.`, { "retry-after": "3600" });
+  if (outcome === "replayed") return refuse(409, "This signed call was taken already. Sign each call afresh.");
+  if (outcome === "duplicate") return { status: 200, body: { ok: true, accepted: true, duplicate: true } };
   // A moment ahead, so the transaction is visible by the time the worker looks.
   void requestWakeHere(new Date(Date.now() + 1_000));
   return { status: 202, body: { ok: true, accepted: true } };

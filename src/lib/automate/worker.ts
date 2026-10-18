@@ -6,6 +6,7 @@ import { tenantAfter } from "@/lib/tenancy/after";
 import { nextDueAt, workTenant, type TenantWork } from "@/lib/automate/engine";
 import { platformPausedForWorker } from "@/lib/automate/switches";
 import { dueWakes, settleWake } from "@/lib/automate/wake";
+import { pruneSent } from "@/lib/automate/sent";
 
 /**
  * Deskzo Automate's turn in the platform worker (scripts/platform-worker.ts), every couple of seconds:
@@ -26,7 +27,8 @@ export type AutomateTurn = { paused: boolean; workspaces: number; outcomes: JobO
 
 async function workAndSettle(tenant: Tenant, readVersion: number | null, budgetMs: number): Promise<TenantWork> {
   const work = await workTenant({ budgetMs });
-  const next = work.skipped ? null : await nextDueAt();
+  // Being restored: looked at again in a minute, when the restore has likely finished.
+  const next = work.skipped === "restoring" ? new Date(Date.now() + 60_000) : work.skipped ? null : await nextDueAt();
   await settleWake(tenant.id, readVersion, next);
   return work;
 }
@@ -38,6 +40,8 @@ export async function runAutomate(options: { sweepAll?: boolean; budgetMs?: numb
   const versions = new Map<string, number>();
   if (due === null) {
     tenants = await activeTenants();
+    // On a sweep: records of outside steps older than any run may live.
+    await pruneSent().catch((err) => console.error("[automate] could not prune sent steps", err instanceof Error ? err.message : err));
   } else {
     tenants = [];
     for (const wake of due) {

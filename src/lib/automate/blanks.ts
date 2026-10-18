@@ -91,6 +91,19 @@ function clearStep(step: Step, cleared: Cleared[]): Step {
           input[field] = "";
         }
       }
+      // A call to an outside address carries its own keys: an address with a token in it (a Slack or
+      // Teams hook, ?key=…) and header values (Authorization). Neither leaves the workspace in a file or
+      // a template — emptied for whoever uses it to fill in, or to choose a saved connection instead.
+      if (step.action === "http.request") {
+        if (typeof input.url === "string" && input.url !== "") {
+          cleared.push({ stepId: step.id, field: "url", label: `${title} › The address` });
+          input.url = "";
+        }
+        if (input.headers && typeof input.headers === "object" && !Array.isArray(input.headers) && Object.keys(input.headers).length) {
+          cleared.push({ stepId: step.id, field: "headers", label: `${title} › The headers' values` });
+          input.headers = Object.fromEntries(Object.keys(input.headers).map((name) => [name, ""]));
+        }
+      }
       return { ...step, input };
     }
     case "condition":
@@ -145,7 +158,9 @@ export function splitProblems(definition: Definition, problems: DefinitionProble
     const isBlank =
       p.message === NOTHING_CHOSEN ||
       (step?.type === "approval" && top === "approvers") ||
-      (step?.type === "action" && !!top && isWorkspaceField(step.action, top) && (step.input[top] === undefined || step.input[top] === "" || (Array.isArray(step.input[top]) && (step.input[top] as unknown[]).length === 0)));
+      (step?.type === "action" && !!top && isWorkspaceField(step.action, top) && (step.input[top] === undefined || step.input[top] === "" || (Array.isArray(step.input[top]) && (step.input[top] as unknown[]).length === 0))) ||
+      // An outside call's address, emptied because it may carry a key (clearStep): to fill in, or a connection to choose.
+      (step?.type === "action" && step.action === "http.request" && (top === "url" || top === "connectionId") && !step.input.url && !step.input.connectionId);
     (isBlank ? blanks : others).push(p);
   }
   return { blanks, others };

@@ -37,7 +37,13 @@ const SECRETS = {
     .object({
       url: https("The base address"),
       headers: z
-        .record(z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9-]+$/, "A header's name is letters, digits and hyphens."), z.string().max(2000))
+        .record(
+          z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9-]+$/, "A header's name is letters, digits and hyphens."),
+          z
+            .string()
+            .max(2000)
+            .refine((v) => !/[\r\n\0]/.test(v), "A header's value is one line."),
+        )
         .refine((h) => Object.keys(h).length <= 20, "At most 20 headers.")
         .default({}),
     })

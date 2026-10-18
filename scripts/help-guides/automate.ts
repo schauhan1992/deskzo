@@ -8,7 +8,9 @@ import type { SeedGuide } from "./types";
  * action needs settings.manage for now), src/lib/automate (triggers.ts, registry.ts and actions/*, the
  * engine's limits, templates.ts, test runs in store.ts) and src/components/settings/pipeline-automations.tsx.
  * Automate was still being built when this was written — connections, webhooks and outside calls were
- * uncommitted — so check it against the screens before publishing.
+ * uncommitted — so check it against the screens before publishing. Brought up to date on 18 Oct 2026
+ * (Phases 6-8): the waiting and repeating steps, the plan's limits, owner-only changes and taking a
+ * workflow over, who sees a run's data, retrying failed runs together, and restores.
  */
 export const guide: SeedGuide = {
   slug: "help/automate",
@@ -24,8 +26,8 @@ export const guide: SeedGuide = {
     summary: "Workflows that run on their own — on a schedule, when something happens in your workspace, when an outside app calls, or when somebody presses Run — with every run and every step recorded.",
     purpose: [
       p("Automate does the routine follow-through for you. A workflow has one thing that starts it and a list of steps it then carries out, in order. A lead arrives, so it is assigned and thanked. An invoice falls overdue, so the customer is sent it again. Every morning, yesterday's wins are emailed to the managers."),
-      p("Steps can create a task, notify a person, create, assign or move a lead, add a note to a lead, open or escalate a ticket, send an email, email a document or a report, schedule a meeting, call an outside app's web address, post to Slack or Microsoft Teams, send a WhatsApp template, or add a row to a Google Sheet. Between them a workflow can check a condition, branch into paths, or wait."),
-      p("Every workflow runs as the person who owns it, and can never do more than that person may do at that moment. Each run is recorded with every step: when it ran, how long it took, what went in and what came out, and what went wrong."),
+      p("Steps can create a task, notify a person, create, assign or move a lead, add a note to a lead, open or escalate a ticket, send an email, email a document or a report, schedule a meeting, call an outside app's web address, post to Slack or Microsoft Teams, send a WhatsApp template, or add a row to a Google Sheet. Between them a workflow can check a condition, branch into paths, wait, ask somebody to approve, wait for something to happen, repeat steps for each item in a list, or run paths at the same time."),
+      p("Every workflow runs as the person who owns it, and can never do more than that person may do at that moment — it starts only on records they may see, and reads them as they see them. So only its owner changes, tests or publishes it. Each run is recorded with every step: when it ran, how long it took, what went in and what came out, and what went wrong."),
       note(runs("The automations a lead pipeline used to have are workflows here now. A pipeline's settings still list them and link to each one — see ", ["Leads", "/help/leads"], ".")),
     ],
     access: [
@@ -37,11 +39,13 @@ export const guide: SeedGuide = {
         "If the owner's account is switched off, every step the workflow tries is refused.",
       ),
       p("A connection to an outside app belongs to the person who added it. Only they can change or remove it. If they share it with the workspace, anybody's workflows may use it."),
+      p("A workflow belongs to its owner too. Anybody else who can open Automate may pause it, switch it on, run it or duplicate it, and sees it read-only in the builder. To change it, they take it over: it becomes theirs, switched off until they publish it, and its owner before is told."),
+      p("A run's steps — their status, time and errors — are there for everybody who can open Automate. What each step took in and gave out is shown only to the workflow's owner and the super admin, because it is what the owner can see."),
     ],
     permissions: [
       perm(
         "settings.manage",
-        "Opens Automate — Workflows, Templates, Runs and Connections — and lets somebody make, test, publish, pause and archive workflows, cancel and retry runs, and pause every workflow at once. Admins hold it by default. It also opens the organisation's settings, so give it to as few people as possible.",
+        "Opens Automate — Workflows, Templates, Runs and Connections — and lets somebody make workflows; change, test, publish and archive their own; pause, switch on, run, duplicate or take over anybody's; cancel and retry runs; and pause every workflow at once. Admins hold it by default. It also opens the organisation's settings, so give it to as few people as possible.",
       ),
       perm("documents.send", "Needed by a workflow's owner for an Email a document step to run. Sales, Accounts and Management have it by default, as do admins."),
       perm("meetings.schedule", "Needed by a workflow's owner for a Schedule a meeting step to run. Most built-in roles have it by default."),
@@ -127,6 +131,24 @@ export const guide: SeedGuide = {
         p(runs("A step that fails for a network reason is tried again on its own, a few times over several hours, before the run fails. A run marked ", { b: "Needs a decision" }, " stopped at a step whose outcome can't be known — choose ", { b: "Try the step again" }, " or ", { b: "Cancel run" }, ".")),
       ),
       task(
+        "Take over a colleague's workflow",
+        ol(
+          "Open the workflow. The builder shows it read-only, with who it runs as.",
+          runs("Select ", { b: "Take over" }, " and confirm. It is yours now, and switched off."),
+          runs("Check its steps — it now runs as you, with your access and your connections — and select ", { b: "Publish" }, " to switch it on."),
+        ),
+        p(runs("To keep the original as it is, select ", { b: "More › Duplicate" }, " instead: the copy is yours to change.")),
+      ),
+      task(
+        "Retry many failed runs at once",
+        ol(
+          "Fix what made them fail first — a connection, a module switched off, the owner's access.",
+          runs("Open ", { b: "Automate › Runs" }, " and choose ", { b: "State: Failed" }, " (and a workflow, to narrow it)."),
+          runs("Select ", { b: "Retry failed runs" }, ". Each goes back to the step that failed, the newest two hundred at a time."),
+        ),
+        p(runs("Runs marked ", { b: "Needs a decision" }, " are left out: each needs a person to decide whether its step went out.")),
+      ),
+      task(
         "Let an outside app start a workflow",
         ol(
           runs("In the builder, set ", { b: "Starts when" }, " to ", { b: "An outside app calls its webhook address" }, "."),
@@ -134,7 +156,7 @@ export const guide: SeedGuide = {
           "In the outside app — your website, a form tool, your own system — send JSON or a form to that address with POST.",
           runs("To accept only calls that prove where they came from, tick ", { b: "Take only calls signed with its secret" }, ", and give the app the secret from ", { b: "Show the secret" }, "."),
         ),
-        p(runs("Keep the address private: anybody who has it can start the workflow. ", { b: "New address" }, " replaces it, and the old one stops working at once.")),
+        p(runs("Keep the address private: anybody who has it can start the workflow. ", { b: "New address" }, " replaces it, and the old one stops working at once. Only the workflow's owner sees its address and secret. An address takes up to 60 calls a minute and 5,000 a day; a signed call is taken once, never again.")),
       ),
       task(
         "Connect Slack, Teams or an outside API",
@@ -158,6 +180,11 @@ export const guide: SeedGuide = {
       setting("Only when", "In the builder, on the Starts when card", p("Rules that narrow what starts it. Choose whether all of them or any one of them must hold. With no rules, it starts every time.")),
       setting("When a step fails", "In the builder, on the Starts when card", p("Stop the run there, or note the failure and carry on with the next step.")),
       setting("Wait", "In the builder, on a Wait step", p("For a while, until a time of day, or until a time in the data — such as some hours before a booking starts. A time already gone waits for nothing.")),
+      setting(
+        "Your plan's limits",
+        "Automate › Workflows, the line at the top",
+        p("How many workflows may be switched on at once, how many steps may run in a month (every action that ran, never a test, across the workspace, by the workspace's own calendar month), how long a finished run's history is kept, and which outside apps a workflow may reach. They come from your plans: the more people, the more steps. When four fifths of the month's steps are used, and again when none are left, the admins are told; with none left, no new run starts until the month turns, though runs already going finish. The Automate Plus add-on raises every limit and adds WhatsApp."),
+      ),
       setting(
         "Signing secret",
         "Automate › Connections",
@@ -183,6 +210,11 @@ export const guide: SeedGuide = {
       qa("Does a test send emails or call outside apps?", p("No. A test does the look-ups and works out the conditions, and says what every other step would have done. With Do the safe steps for real ticked, it also creates the task, adds the lead note or sends the notification.")),
       qa("I changed a workflow, but runs still do the old thing.", p("Your changes are in the draft. Publish it to make it the version that runs. Runs that had already started finish on their own version.")),
       qa("Why can't I change or remove a connection?", p("Only the person who added a connection can change or remove it. If it's shared with the workspace you can still use it in your workflows.")),
+      qa("Why can't I change a colleague's workflow?", p("A workflow runs as its owner — their mailbox, their connections, the records they may see — so only they change, test or publish it. Duplicate it to make your own, or take it over.")),
+      qa("Why can't I see what a step took in or gave out?", p("That data is what the workflow's owner could see, so it is shown to the owner and the super admin only. You still see each step's status, time and error, and Copy for a support ticket puts them into a message.")),
+      qa("It says this month's steps are used up.", p("Your plan's steps for the month have all run. No new run starts until the month turns — runs already going finish. Ask whoever manages your plan about more people or the Automate Plus add-on.")),
+      qa("A step says it isn't on this workspace's plan.", p("Some outside apps come with some plans only: webhooks with every plan; saved APIs, Slack and Teams with any product; Google Sheets with the full suite or Automate Plus; WhatsApp with Automate Plus. A workflow already on when the plan changed pauses at that step, and its owner is told.")),
+      qa("A run says a step went out before the workspace was restored.", p("Your workspace was put back from a backup, and the run came back with it. That step — an email, a call, a message — had already gone out after the backup, so it wasn't sent twice. Run it again if it should go again; otherwise cancel the run.")),
     ],
     related: ["leads", "helpdesk", "sales_documents", "notifications"],
   },

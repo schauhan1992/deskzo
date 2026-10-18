@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { ActionError, type ActionContext, type FailureKind } from "@/lib/automate/action-types";
+import { forgetSending, noteSending, sentKey } from "@/lib/automate/sent";
 
 /**
  * Doing an action once, however often its step is tried (Deskzo Automate).
@@ -79,6 +80,9 @@ const SENDING = "$sending";
  *     between doing it and saying so — so the run waits for a person (UNKNOWN) rather than risk the
  *     customer getting the email twice.
  *   · A failure that certainly did nothing removes the mark, so the next try may do it.
+ *   · The step is also recorded outside the workspace's database (src/lib/automate/sent.ts) before it
+ *     is done: a run brought back by a restore from a backup taken before the mark finds it there, and
+ *     waits for a person too.
  */
 export async function withOutsideEffect<T>(ctx: ActionContext, act: () => Promise<OutsideOutcome<T>>): Promise<{ output: T; fresh: boolean }> {
   const done = await priorOutput<T>(ctx);
@@ -90,6 +94,17 @@ export async function withOutsideEffect<T>(ctx: ActionContext, act: () => Promis
     if (recordedAlready(err)) throw unknownWhetherDone();
     throw err;
   }
+  const sent = sentKey(ctx);
+  let noted: Awaited<ReturnType<typeof noteSending>>;
+  try {
+    noted = await noteSending(sent);
+  } catch (err) {
+    // Not recorded where a restore can't forget it: not done now, tried again shortly.
+    await db.automationEffect.delete({ where: { key: ctx.key } });
+    throw new ActionError(`It couldn't be recorded before it was done: ${err instanceof Error ? err.message : String(err)}`, "TRANSIENT");
+  }
+  // Done, or begun, before this workspace was restored from a backup. The mark stays, for a person.
+  if (noted === "seen") throw doneBeforeRestore();
   let outcome: OutsideOutcome<T>;
   try {
     outcome = await act();
@@ -99,6 +114,7 @@ export async function withOutsideEffect<T>(ctx: ActionContext, act: () => Promis
   }
   if (!outcome.ok) {
     await db.automationEffect.delete({ where: { key: ctx.key } });
+    await forgetSending([sent]);
     throw new ActionError(outcome.error, outcome.kind);
   }
   await db.automationEffect.update({
@@ -106,6 +122,13 @@ export async function withOutsideEffect<T>(ctx: ActionContext, act: () => Promis
     data: { output: outcome.output as Prisma.InputJsonValue, recordType: outcome.recordType ?? null, recordId: outcome.recordId ?? null },
   });
   return { output: outcome.output, fresh: true };
+}
+
+function doneBeforeRestore(): ActionError {
+  return new ActionError(
+    "This step went out before the workspace was restored from a backup, so it wasn't done again. If it should go again, run it again; otherwise cancel the run.",
+    "UNKNOWN",
+  );
 }
 
 function unknownWhetherDone(): ActionError {

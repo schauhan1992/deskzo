@@ -2549,6 +2549,21 @@ model AutomationWake {
   @@map("automation_wake")
 }
 
+/// Deskzo Automate: each step that reached outside Deskzo (an email, a webhook, a message), recorded
+/// before it is done — here, because a workspace restored from a backup forgets what its own database
+/// learned since (src/lib/automate/sent.ts). A run brought back by a restore that reaches a step found
+/// here waits for a person instead of doing it twice. `key`: the run's idempotency key and the step's.
+/// Kept 120 days, as long as a run may live.
+model AutomationSentStep {
+  tenantId String
+  key      String
+  sentAt   DateTime @default(now())
+
+  @@id([tenantId, key])
+  @@index([sentAt])
+  @@map("automation_sent_steps")
+}
+
 // ─── Deskzo AI (owner, 17 Oct 2026; src/lib/ai) ───────────────────────────────────────────────────
 //
 // AI runs on Deskzo's own accounts, chosen in console › Settings › AI, and is paid for in credits: each

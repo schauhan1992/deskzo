@@ -7,6 +7,7 @@ import {
   cancelAutomationRun,
   createBlankWorkflow,
   retryAutomationRun,
+  retryFailedAutomationRuns,
   runAutomationWorkflowNow,
   setAutomationPaused,
   setAutomationWorkflowStatus,
@@ -84,6 +85,57 @@ export function RunControls({ id, status }: { id: string; status: string }) {
       </div>
       <Refusal error={error} />
     </div>
+  );
+}
+
+/** Automate › Runs, filtered to the failed ones: every one tried again from its failed step, once the cause is fixed. */
+export function RetryFailedButton({ workflowId, count }: { workflowId: string | null; count: number }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [said, setSaid] = useState<{ ok: boolean; text: string } | null>(null);
+  if (count === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        size="sm"
+        variant="secondary"
+        disabled={pending}
+        onClick={() => {
+          if (!window.confirm(`Try ${count === 1 ? "this failed run" : "these failed runs"} again from the step that failed? Fix what made them fail first.`)) return;
+          start(async () => {
+            const result = await retryFailedAutomationRuns(workflowId);
+            if (!result.ok) return setSaid({ ok: false, text: result.error });
+            setSaid({ ok: true, text: `${result.data.retried} tried again${result.data.left ? `; ${result.data.left} more — retry again for those` : ""}.` });
+            router.refresh();
+          });
+        }}
+      >
+        {pending ? "Retrying…" : "Retry failed runs"}
+      </Button>
+      {said && <span className={`text-xs ${said.ok ? "text-success" : "text-danger"}`}>{said.text}</span>}
+    </div>
+  );
+}
+
+/**
+ * A run as plain text for a support ticket (the runbook): which run, how it went, and each step — its
+ * status, time and error — never what went in or came out.
+ */
+export function CopyForSupport({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <Button
+      size="sm"
+      variant="secondary"
+      onClick={() => {
+        void navigator.clipboard?.writeText(text).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+    >
+      {copied ? "Copied" : "Copy for a support ticket"}
+    </Button>
   );
 }
 

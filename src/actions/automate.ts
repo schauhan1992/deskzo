@@ -10,7 +10,24 @@ import { requireModuleUser } from "@/lib/modules-access";
 import { refuseWhileViewingAs } from "@/lib/session";
 import { summarize } from "@/lib/automate/redact";
 import { parseRunRef, parseWorkflowRef, workflowPath } from "@/lib/automate/refs";
-import { cancelRun, createFromTemplate, createWorkflow, duplicateWorkflow, publishWorkflow, restoreVersion, retryRun, saveDraft, setWorkflowStatus, startManualRun, testDraft } from "@/lib/automate/store";
+import {
+  NOT_OWNER,
+  cancelRun,
+  createFromTemplate,
+  createWorkflow,
+  duplicateWorkflow,
+  publishWorkflow,
+  restoreVersion,
+  retryFailedRuns,
+  retryRun,
+  saveDraft,
+  setWorkflowStatus,
+  startManualRun,
+  takeOverWorkflow,
+  testDraft,
+} from "@/lib/automate/store";
+import { notifyUser } from "@/lib/notify";
+import { maskStepText } from "@/lib/automate/redact";
 import { platformPause, setWorkspacePaused, workspacePause } from "@/lib/automate/switches";
 import { nudgeAutomate } from "@/lib/automate/worker";
 import { validateDefinition, type DefinitionProblem } from "@/lib/automate/validate";
@@ -57,6 +74,19 @@ async function changer() {
   const refusal = await refuseWhileViewingAs();
   if (refusal) throw new NotAllowed(refusal);
   return user;
+}
+
+/** The workflow, when `userId` owns it: only its owner changes, tests or publishes it (store.ts `NOT_OWNER`). */
+async function ownerOf(id: string, userId: string): Promise<void> {
+  const workflow = await db.automationWorkflow.findUnique({ where: { id: String(id ?? "") }, select: { ownerUserId: true } });
+  if (!workflow) throw new NotAllowed("That workflow no longer exists.");
+  if (workflow.ownerUserId !== userId) throw new NotAllowed(NOT_OWNER);
+}
+
+/** Whether a person may see a run's step data: what its owner could see, so its owner — and the super admin. */
+async function seesStepData(userId: string, ownerUserId: string): Promise<boolean> {
+  if (userId === ownerUserId) return true;
+  return !!(await db.user.findUnique({ where: { id: userId }, select: { isSuperAdmin: true } }))?.isSuperAdmin;
 }
 
 function refused<T>(err: unknown): ActionResult<T> {
@@ -169,13 +199,20 @@ export async function listAutomationRuns(filter: { status?: string; workflowId?:
     runAfter: r.runAfter,
     stepsUsed: r.stepsUsed,
     isTest: r.isTest,
-    error: r.error,
+    error: r.error ? maskStepText(r.error) : null,
   }));
 }
 
 export type RunDetail = RunRow & {
   /** Null for a test of a draft, which has no version. */
   version: number | null;
+  /**
+   * Whether each step's input and output are shown: they are what the workflow's owner could see, so
+   * only to its owner and the super admin (owner, 18 Oct 2026). Everybody else sees steps, statuses,
+   * times and errors — enough for a support ticket.
+   */
+  dataShown: boolean;
+  ownerName: string;
   trigger: string;
   steps: {
     id: string;
@@ -196,7 +233,7 @@ export type RunDetail = RunRow & {
 
 /** One run by its number (RUN-000123, or 123), and every try of every step — inputs and outputs as their redacted summaries, never the full values. */
 export async function getAutomationRun(ref: string): Promise<RunDetail | null> {
-  await admin();
+  const viewer = await admin();
   const seq = parseRunRef(ref);
   if (seq === null) return null;
   const run = await db.automationRun.findUnique({
@@ -213,12 +250,14 @@ export async function getAutomationRun(ref: string): Promise<RunDetail | null> {
       stepsUsed: true,
       isTest: true,
       error: true,
-      workflow: { select: { name: true, draft: true } },
+      workflow: { select: { name: true, draft: true, ownerUserId: true } },
       version: { select: { number: true, triggerType: true } },
       steps: { orderBy: { startedAt: "asc" } },
     },
   });
   if (!run) return null;
+  const dataShown = await seesStepData(viewer.id, run.workflow.ownerUserId);
+  const owner = await db.user.findUnique({ where: { id: run.workflow.ownerUserId }, select: { name: true } });
   return {
     id: run.id,
     seq: run.runSeq,
@@ -231,8 +270,10 @@ export async function getAutomationRun(ref: string): Promise<RunDetail | null> {
     runAfter: run.runAfter,
     stepsUsed: run.stepsUsed,
     isTest: run.isTest,
-    error: run.error,
+    error: run.error ? maskStepText(run.error) : null,
     version: run.version?.number ?? null,
+    dataShown,
+    ownerName: owner?.name ?? "Someone who has left",
     // A test of a draft: the draft's trigger, as it stood.
     trigger: run.version?.triggerType ?? String((run.workflow.draft as { trigger?: { type?: unknown } } | null)?.trigger?.type ?? "manual"),
     steps: run.steps.map((s) => ({
@@ -245,9 +286,9 @@ export async function getAutomationRun(ref: string): Promise<RunDetail | null> {
       finishedAt: s.finishedAt,
       durationMs: s.durationMs,
       // Summarised again on the way out: a summary stored before a rule changed still shows safely.
-      input: summarize(s.inputSummary),
-      output: summarize(s.outputSummary),
-      error: s.error,
+      input: dataShown ? summarize(s.inputSummary) : null,
+      output: dataShown ? summarize(s.outputSummary) : null,
+      error: s.error ? maskStepText(s.error) : null,
       errorKind: s.errorKind,
       retryAt: s.retryAt,
     })),
@@ -287,7 +328,8 @@ export async function createAutomationWorkflow(input: unknown): Promise<ActionRe
 /** Saves the draft — a definition as JSON, until the builder (Phase 3) — and says what publishing would refuse. */
 export async function saveAutomationDraft(id: string, draftJson: string): Promise<ActionResult<{ problems: DefinitionProblem[] }>> {
   try {
-    await changer();
+    const user = await changer();
+    await ownerOf(id, user.id);
     let draft: unknown;
     try {
       draft = JSON.parse(draftJson);
@@ -321,11 +363,38 @@ export async function setAutomationWorkflowStatus(id: string, status: "ACTIVE" |
   try {
     const user = await changer();
     if (!["ACTIVE", "PAUSED", "ARCHIVED"].includes(status)) return { ok: false, error: "Choose on, paused or archived." };
+    // Anybody with Automate may pause or switch on; archiving — for good — is the owner's.
+    if (status === "ARCHIVED") await ownerOf(id, user.id);
     const changed = await setWorkflowStatus(id, status);
     if (!changed.ok) return { ok: false, error: changed.error };
     const workflow = await db.automationWorkflow.findUnique({ where: { id }, select: { name: true } });
     const word = status === "ACTIVE" ? "switched on" : status === "PAUSED" ? "paused" : "archived";
     await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Workflow", entityId: id, entityLabel: `${workflow?.name ?? "Workflow"} — ${word}` });
+    revalidateAutomate();
+    return { ok: true, data: null };
+  } catch (err) {
+    return refused(err);
+  }
+}
+
+/**
+ * Takes a colleague's workflow over: it becomes the caller's, off until they publish it (store.ts
+ * `takeOverWorkflow`). Audited, and its previous owner told.
+ */
+export async function takeOverAutomationWorkflow(id: string): Promise<ActionResult<null>> {
+  try {
+    const user = await changer();
+    const taken = await takeOverWorkflow(String(id ?? ""), user.id);
+    if (!taken.ok) return { ok: false, error: taken.error };
+    const workflow = await db.automationWorkflow.findUnique({ where: { id }, select: { name: true, workflowSeq: true } });
+    await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Workflow", entityId: id, entityLabel: `${workflow?.name ?? "Workflow"} — taken over` });
+    await notifyUser({
+      userId: taken.data.previousOwnerId,
+      type: "WORKFLOW_PAUSED",
+      title: `${user.name} took over "${workflow?.name ?? "a workflow"}"`,
+      message: "It's theirs now, and off until they publish it. Ask them if that wasn't meant.",
+      link: workflow ? workflowPath(workflow.workflowSeq) : "/automate/workflows",
+    }).catch(() => undefined);
     revalidateAutomate();
     return { ok: true, data: null };
   } catch (err) {
@@ -372,6 +441,22 @@ export async function retryAutomationRun(id: string): Promise<ActionResult<null>
 }
 
 /** The workspace's kill switch: nothing starts or moves on while it is on. */
+/** Every failed run — of one workflow, or all — tried again from its failed step, the newest 200 at a time. Audited. */
+export async function retryFailedAutomationRuns(workflowId?: string | null): Promise<ActionResult<{ retried: number; left: number }>> {
+  try {
+    const user = await changer();
+    const done = await retryFailedRuns({ workflowId: workflowId ? String(workflowId) : null });
+    if (done.retried) {
+      await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Workflow", entityId: workflowId ?? "all", entityLabel: `${done.retried} failed run${done.retried === 1 ? "" : "s"} tried again` });
+      await nudgeAutomate();
+    }
+    revalidateAutomate();
+    return { ok: true, data: done };
+  } catch (err) {
+    return refused(err);
+  }
+}
+
 export async function setAutomationPaused(paused: boolean): Promise<ActionResult<null>> {
   try {
     const user = await changer();
@@ -389,6 +474,8 @@ export async function setAutomationPaused(paused: boolean): Promise<ActionResult
 // ─── The builder (Phase 3) ──────────────────────────────────────────────────────────────────────
 
 export type BuilderWorkflow = {
+  /** Whether the person looking owns it — only they change, test or publish it. */
+  mine: boolean;
   id: string;
   seq: number;
   name: string;
@@ -409,7 +496,7 @@ export type BuilderWorkflow = {
 
 /** Everything the builder shows for one workflow, by its number (WF-0042, or 42). */
 export async function getWorkflowForBuilder(ref: string): Promise<BuilderWorkflow | null> {
-  await admin();
+  const viewer = await admin();
   const seq = parseWorkflowRef(ref);
   if (seq === null) return null;
   const w = await db.automationWorkflow.findUnique({
@@ -437,7 +524,9 @@ export async function getWorkflowForBuilder(ref: string): Promise<BuilderWorkflo
     const spec = catalog.triggers.find((t) => t.type === "webhook");
     if (spec) spec.paths = [...spec.paths, ...webhook.sampleKeys.map((k) => ({ ref: `trigger.body.${k}`, label: `Body › ${k}` }))];
   }
+  const mine = viewer.id === w.ownerUserId;
   return {
+    mine,
     id: w.id,
     seq: w.workflowSeq,
     name: w.name,
@@ -452,7 +541,8 @@ export async function getWorkflowForBuilder(ref: string): Promise<BuilderWorkflo
     versions: w.versions.map((v) => ({ id: v.id, number: v.number, note: v.note, publishedAt: v.publishedAt, publishedBy: names.get(v.publishedById) ?? "Someone who has left" })),
     problems: checked.ok ? [] : checked.problems,
     catalog,
-    webhook,
+    // Its address is the key to start it, and the secret signs for it: its owner's, and asked for (workflowWebhook).
+    webhook: webhook ? { ...webhook, secret: "", address: mine ? webhook.address : "" } : null,
   };
 }
 
@@ -461,7 +551,8 @@ const draftMeta = z.object({ name: z.string().trim().min(1, "Give the workflow a
 /** Saves the builder's draft as it stands, unfinished or not, and says what publishing would refuse. */
 export async function saveWorkflowDraft(id: string, draft: unknown, meta: unknown = {}): Promise<ActionResult<{ problems: DefinitionProblem[] }>> {
   try {
-    await changer();
+    const user = await changer();
+    await ownerOf(id, user.id);
     const parsedMeta = draftMeta.safeParse(meta);
     if (!parsedMeta.success) return { ok: false, error: parsedMeta.error.issues[0]?.message ?? "Check the name." };
     // A draft is the builder's own JSON — kept to a sane size, and never anything but plain data.
@@ -542,7 +633,8 @@ export async function duplicateAutomationWorkflow(id: string): Promise<ActionRes
 /** Puts a published version back in the draft; what runs is unchanged until it is published again. */
 export async function restoreAutomationVersion(id: string, versionId: string): Promise<ActionResult<null>> {
   try {
-    await changer();
+    const user = await changer();
+    await ownerOf(id, user.id);
     const done = await restoreVersion(id, versionId);
     if (!done.ok) return { ok: false, error: done.error };
     revalidateAutomate();
@@ -588,10 +680,13 @@ export async function createPipelineWorkflow(pipelineId: string, stageId: string
 export async function workflowWebhook(id: string, fresh = false): Promise<ActionResult<WebhookView>> {
   try {
     const user = await changer();
+    await ownerOf(id, user.id);
     const workflow = await db.automationWorkflow.findUnique({ where: { id }, select: { name: true } });
     if (!workflow) return { ok: false, error: "That workflow no longer exists." };
+    const had = !!(await webhookOf(id));
     const hook = await ensureWebhook(id, fresh);
     if (fresh) await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Workflow", entityId: id, entityLabel: `${workflow.name} — a new webhook address; the old one stops` });
+    else if (!had) await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Workflow", entityId: id, entityLabel: `${workflow.name} — a webhook address made` });
     return { ok: true, data: hook };
   } catch (err) {
     return refused(err);
@@ -600,8 +695,18 @@ export async function workflowWebhook(id: string, fresh = false): Promise<Action
 
 export async function setWorkflowWebhookSigned(id: string, required: boolean): Promise<ActionResult<WebhookView | null>> {
   try {
-    await changer();
+    const user = await changer();
+    await ownerOf(id, user.id);
     await setRequireSignature(id, required === true);
+    // Taking unsigned calls again weakens the address: on the record either way.
+    const workflow = await db.automationWorkflow.findUnique({ where: { id }, select: { name: true } });
+    await recordAudit({
+      userId: user.id,
+      action: "UPDATE",
+      entityType: "Workflow",
+      entityId: id,
+      entityLabel: `${workflow?.name ?? "Workflow"} — its address ${required === true ? "takes only signed calls" : "takes unsigned calls too"}`,
+    });
     return { ok: true, data: await webhookOf(id) };
   } catch (err) {
     return refused(err);
@@ -743,7 +848,8 @@ export async function draftWorkflowWithAI(description: string): Promise<ActionRe
 /** A workflow's draft as a file to download — people, connections and records cleared. */
 export async function exportAutomationWorkflow(id: string): Promise<ActionResult<{ fileName: string; text: string; cleared: string[] }>> {
   try {
-    const user = await admin();
+    // Not while viewing as somebody: the file, and the audit line, would be theirs.
+    const user = await changer();
     const exported = await exportWorkflow(id);
     if (!exported.ok) return exported;
     await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Workflow", entityId: id, entityLabel: `Exported as a file, ${exported.data.fileName} — nothing changed` });

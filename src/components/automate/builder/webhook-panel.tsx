@@ -40,6 +40,16 @@ export function WebhookPanel({ workflowId, initial, demo }: { workflowId: string
     );
   }
 
+  // Its address and secret are its owner's (the builder is read-only for anybody else).
+  if (!hook.address) {
+    return (
+      <div className="space-y-1 rounded-base border border-line p-3 text-sm text-muted">
+        <p>It has an address an outside app calls. Only the workflow&apos;s owner sees it, and its signing secret.</p>
+        <p className="text-xs">{hook.lastReceivedAt ? `Last called ${clock.dateTimeShort(hook.lastReceivedAt)}` : "Not called yet."}</p>
+      </div>
+    );
+  }
+
   const example = `curl -X POST '${hook.address}' \\\n  -H 'Content-Type: application/json' \\\n  -H 'Idempotency-Key: order-1042' \\\n  -d '{"name": "Asha", "email": "asha@example.com"}'`;
   return (
     <div className="space-y-3 rounded-base border border-line p-3">
@@ -72,7 +82,16 @@ export function WebhookPanel({ workflowId, initial, demo }: { workflowId: string
         {showSecret ? (
           <Input readOnly value={hook.secret} onFocus={(e) => e.currentTarget.select()} className="font-mono text-xs" />
         ) : (
-          <button type="button" className="text-xs font-medium text-brand hover:underline" onClick={() => setShowSecret(true)}>
+          <button
+            type="button"
+            disabled={demo || pending}
+            className="text-xs font-medium text-brand hover:underline disabled:opacity-50"
+            onClick={() => {
+              // Asked for when shown, never sent with the page.
+              act(() => workflowWebhook(workflowId));
+              setShowSecret(true);
+            }}
+          >
             Show the secret
           </button>
         )}

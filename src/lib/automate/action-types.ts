@@ -20,6 +20,8 @@ export type ActionContext = {
   stepId: string;
   /** `runId:stepId` — the same on every try of this step. */
   key: string;
+  /** The run's idempotency key — the same for the run after its workspace is restored from a backup (src/lib/automate/sent.ts). */
+  runKey?: string;
   /** How many workflows deep this run is; events it causes are one deeper. */
   depth: number;
   clock: Clock;
