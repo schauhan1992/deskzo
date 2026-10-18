@@ -340,6 +340,14 @@ function AccountDialog({ account, onClose }: { account: AccountView | null; onCl
             </Select>
           </div>
         )}
+        <details className="rounded-lg border border-line bg-surface-sunken px-4 py-3 text-sm" open={!editing}>
+          <summary className="cursor-pointer font-medium text-text">Where to get these for {def.label}</summary>
+          <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-xs text-muted">
+            {def.steps.map((s) => (
+              <li key={s}>{s}</li>
+            ))}
+          </ol>
+        </details>
         <div className="grid gap-4 sm:grid-cols-2">
           {field("name", "Name in the console")}
           {field("residency", "Where it processes requests", "Shown to workspaces before they use AI: “India (Mumbai and Hyderabad)”.")}

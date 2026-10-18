@@ -49,6 +49,8 @@ export type ProviderKindDef = {
   endpoint?: Field;
   keyId?: Field;
   secret: Field;
+  /** Where to get what the form asks for, step by step — shown in the console's Add account dialog. docs/deskzo-ai.md has the long form. */
+  steps: string[];
   /** Filled in when staff add an account of this kind; every value can be changed. */
   suggested: { name: string; residency: string; region?: string; endpoint?: string; keyId?: string; models: SuggestedModel[] };
 };
@@ -70,12 +72,25 @@ export const PROVIDER_KINDS: Record<AiProviderKind, ProviderKindDef> = {
     region: { label: "AWS region", placeholder: "ap-south-1", help: "Where requests are sent from. India's inference profiles (in.…) keep them in Mumbai and Hyderabad." },
     keyId: { label: "Access key ID", placeholder: "AKIA…", help: "An IAM user allowed bedrock:InvokeModel. Leave it empty to use a Bedrock API key instead." },
     secret: { label: "Secret access key, or Bedrock API key", placeholder: "Saved sealed; type a new one to replace it" },
+    steps: [
+      "Sign in to the AWS console with an account that can manage IAM, and switch the region (top right) to Asia Pacific (Mumbai), ap-south-1.",
+      "Open Amazon Bedrock › Model catalog (older consoles: Model access) and enable Claude Sonnet 5, Claude Opus 5 and Claude Haiku 4.5. For Anthropic's models AWS asks once for a short use-case form.",
+      "Open IAM › Users › Create user — a name like deskzo-bedrock, no console access. Give it a policy allowing bedrock:InvokeModel and bedrock:InvokeModelWithResponseStream on the in.anthropic.* inference profiles and Anthropic's models in ap-south-1 and ap-south-2 (docs/deskzo-ai.md has the policy to paste).",
+      "On that user: Security credentials › Create access key › “Application running outside AWS”. Copy the Access key ID (AKIA…) into Access key ID and the Secret access key into the key field — AWS shows the secret once.",
+      "Or, instead of an IAM user: Amazon Bedrock › API keys › Generate a long-term API key, paste it into the key field and leave Access key ID empty. Renew it before it expires.",
+      "Before ticking “no training”: AWS's Bedrock terms say prompts and answers aren't used to train models or shared with the model's maker. Read them on aws.amazon.com/bedrock/security-compliance.",
+    ],
     suggested: { name: "Bedrock India", residency: "India (Mumbai and Hyderabad)", region: "ap-south-1", models: BEDROCK_INDIA },
   },
   ANTHROPIC: {
     label: "Claude (Anthropic's API)",
     family: "ANTHROPIC",
     secret: { label: "API key", placeholder: "sk-ant-…" },
+    steps: [
+      "Sign in at console.anthropic.com with the company's organisation.",
+      "Settings › API keys › Create key — name it Deskzo. Copy it; it's shown once.",
+      "Requests are processed in the United States. Anthropic's commercial terms say API data isn't used for training.",
+    ],
     suggested: {
       name: "Anthropic",
       residency: "United States",
@@ -86,6 +101,11 @@ export const PROVIDER_KINDS: Record<AiProviderKind, ProviderKindDef> = {
     label: "OpenAI",
     family: "OPENAI",
     secret: { label: "API key", placeholder: "sk-…" },
+    steps: [
+      "Sign in at platform.openai.com with the company's organisation.",
+      "API keys › Create new secret key, owned by a project for Deskzo. Copy it; it's shown once.",
+      "OpenAI says API data isn't used for training by default.",
+    ],
     suggested: { name: "OpenAI", residency: "United States", models: [] },
   },
   AZURE_OPENAI: {
@@ -94,12 +114,22 @@ export const PROVIDER_KINDS: Record<AiProviderKind, ProviderKindDef> = {
     endpoint: { label: "Resource endpoint", placeholder: "https://<resource>.openai.azure.com", help: "A resource in Central or South India, with Standard (regional) deployments, keeps processing there." },
     keyId: { label: "API version", placeholder: "2024-10-21" },
     secret: { label: "API key", placeholder: "Saved sealed; type a new one to replace it" },
+    steps: [
+      "In the Azure portal, create an Azure OpenAI resource in Central India or South India.",
+      "In Azure AI Foundry, deploy each model as a Standard (regional) deployment — not Global — so processing stays in that region. The deployment's name is what goes in the model's “Name at the provider”.",
+      "On the resource: Keys and Endpoint — copy the endpoint and KEY 1.",
+    ],
     suggested: { name: "Azure OpenAI India", residency: "India (Central India)", keyId: "2024-10-21", models: [] },
   },
   GEMINI: {
     label: "Gemini (Google AI Studio)",
     family: "GEMINI",
     secret: { label: "API key", placeholder: "AIza…" },
+    steps: [
+      "Sign in at aistudio.google.com with the company's Google account.",
+      "Get API key › Create API key, in a Google Cloud project for Deskzo. Copy it.",
+      "Requests aren't confined to a region. Use Vertex AI in asia-south1 to keep them in India.",
+    ],
     suggested: { name: "Gemini", residency: "United States", models: [] },
   },
   VERTEX: {
@@ -108,6 +138,12 @@ export const PROVIDER_KINDS: Record<AiProviderKind, ProviderKindDef> = {
     region: { label: "Location", placeholder: "asia-south1", help: "Never 'global', which sends requests anywhere." },
     keyId: { label: "Project ID", placeholder: "my-project" },
     secret: { label: "Service account key (JSON)", placeholder: "Paste the whole JSON key file" },
+    steps: [
+      "In Google Cloud, choose (or create) a project and enable the Vertex AI API.",
+      "IAM & Admin › Service accounts › Create — a name like deskzo-vertex — with the role Vertex AI User.",
+      "On it: Keys › Add key › JSON. Paste the whole file into the key field; the project ID is in it as project_id.",
+      "Use the location asia-south1 (Mumbai) and models Google lists for it in its data-residency table.",
+    ],
     suggested: { name: "Vertex Mumbai", residency: "India (Mumbai)", region: "asia-south1", models: [] },
   },
   OPENAI_COMPATIBLE: {
@@ -115,6 +151,11 @@ export const PROVIDER_KINDS: Record<AiProviderKind, ProviderKindDef> = {
     family: "OPENAI",
     endpoint: { label: "Base URL", placeholder: "https://ai.internal.example/v1", help: "vLLM, Ollama or another server speaking /chat/completions — Deskzo's own GPU when it comes." },
     secret: { label: "API key", placeholder: "Leave empty if the server takes none" },
+    steps: [
+      "The server's base URL ends in /v1 — vLLM and Ollama both serve OpenAI's /chat/completions there.",
+      "If it asks for a key (vLLM's --api-key), put it in the key field; otherwise leave it empty.",
+      "Plain http is accepted only on the private network.",
+    ],
     suggested: { name: "Private AI", residency: "Deskzo's own servers", models: [] },
   },
 };

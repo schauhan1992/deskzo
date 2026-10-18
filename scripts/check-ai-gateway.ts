@@ -170,6 +170,7 @@ async function main() {
     section("The catalogue");
     ok("every feature once, and recognised", new Set(catalogue.AI_FEATURES.map((f) => f.key)).size === catalogue.AI_FEATURES.length && catalogue.AI_FEATURES.every((f) => catalogue.isAiFeature(f.key)) && !catalogue.isAiFeature("copilot.anything"));
     ok("every kind of account listed once, each with a name and the API it speaks", new Set(catalogue.PROVIDER_KIND_ORDER).size === Object.keys(catalogue.PROVIDER_KINDS).length && catalogue.PROVIDER_KIND_ORDER.every((k) => !!catalogue.PROVIDER_KINDS[k].label && ["ANTHROPIC", "OPENAI", "GEMINI"].includes(catalogue.familyOf(k))));
+    ok("  and says where its key comes from, step by step", catalogue.PROVIDER_KIND_ORDER.every((k) => catalogue.PROVIDER_KINDS[k].steps.length >= 3) && catalogue.PROVIDER_KINDS.BEDROCK.steps.some((s) => s.includes("Create access key")) && catalogue.PROVIDER_KINDS.BEDROCK.steps.some((s) => s.includes("API key")));
     const bedrock = catalogue.PROVIDER_KINDS.BEDROCK.suggested;
     ok("Bedrock's suggested models are India's profiles, from Mumbai", bedrock.region === "ap-south-1" && bedrock.models.length === 3 && bedrock.models.every((m) => m.providerModel.startsWith("in.anthropic.")));
     ok("  each priced above what it costs Deskzo (a credit is ₹1, 100 paise)", bedrock.models.every((m) => m.inputRate * 100 > m.inputCost && m.outputRate * 100 > m.outputCost));
