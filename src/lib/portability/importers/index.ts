@@ -1,6 +1,7 @@
 import type { Importer } from "./types";
 import { companiesImporter } from "./companies";
 import { contactsImporter } from "./contacts";
+import { leadsImporter } from "./leads";
 import { itemsImporter } from "./items";
 import { ticketsImporter } from "./tickets";
 import { suppressionImporter } from "./suppression";
@@ -37,6 +38,7 @@ export const IMPORTERS: Record<string, Importer> = {
   resellers: companiesImporter,
   "commission-parties": companiesImporter,
   contacts: contactsImporter,
+  leads: leadsImporter,
   items: itemsImporter,
   tickets: ticketsImporter,
   suppression: suppressionImporter,

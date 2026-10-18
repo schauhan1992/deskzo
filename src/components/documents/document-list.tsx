@@ -24,6 +24,8 @@ import { getViewMode } from "@/actions/view-mode";
 import { formatCurrency } from "@/lib/utils";
 import { PAGE_SIZES, resolvePage, resolvePageSize } from "@/lib/pagination";
 import { documentWriteKey } from "@/lib/documents/write-permission";
+import { isDocumentImportType } from "@/lib/portability/documents";
+import { DocumentImport } from "@/components/documents/document-import";
 import {
   documentDirection,
   documentListPath,
@@ -88,6 +90,8 @@ export async function DocumentList({
   // "New …" only for somebody who may raise one (owner, 8 Oct 2026): a purchase order asks "Raise
   // purchase orders", every other type "Raise and issue sales documents".
   const canRaise = await viewerHas(documentWriteKey(docType, "issue"));
+  // Open documents from the system used before Deskzo (owner, 18 Oct 2026): raising them, and importing finance data.
+  const canImport = canRaise && isDocumentImportType(docType) && (await viewerHas("data.importFinance"));
   const [viewMode, { rows, total }, summary, approvalPolicy, users, multiBranch, branches] = await Promise.all([
     getViewMode("documents"),
     multiBranchCheck.then((multi) =>
@@ -235,6 +239,7 @@ export async function DocumentList({
           these stay on the right rather than falling to the left margin. */}
       <div className="ml-auto flex shrink-0 items-center gap-2">
         <ViewModeToggle viewKey="documents" mode={viewMode} />
+        {canImport && isDocumentImportType(docType) && <DocumentImport docType={docType} />}
         {canRaise && (
           <Link href={`/documents/new?type=${docType}`}>
             <Button>New {tradeDocumentLabels[docType].toLowerCase()}</Button>

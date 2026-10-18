@@ -65,10 +65,13 @@ const headingKey = (h: string) => h.toLowerCase().replace(/[^a-z0-9]/g, "");
  * what was read as what. Two headings that would land in one column refuse the file: which of them to
  * believe is the uploader's call, not ours.
  */
-export function readHeadings(importer: Importer, rows: Record<string, string>[]): { rows: Record<string, string>[]; readAs: { from: string; to: string }[] } {
+export function readHeadings(
+  importer: Pick<Importer, "templateColumns" | "headerAliases" | "extraColumns">,
+  rows: Record<string, string>[],
+): { rows: Record<string, string>[]; readAs: { from: string; to: string }[] } {
   if (!importer.headerAliases) return { rows, readAs: [] };
   const byKey = new Map<string, string>();
-  for (const column of importer.templateColumns) byKey.set(headingKey(column), column);
+  for (const column of [...importer.templateColumns, ...(importer.extraColumns ?? [])]) byKey.set(headingKey(column), column);
   for (const [column, aliases] of Object.entries(importer.headerAliases)) for (const a of aliases) byKey.set(headingKey(a), column);
 
   const headings = [...new Set(rows.flatMap((r) => Object.keys(r)))];
@@ -208,7 +211,7 @@ export async function planWith(
     planned.push(result);
   }
 
-  const known = new Set([...importer.templateColumns, ...(custom?.headers ?? [])]);
+  const known = new Set([...importer.templateColumns, ...(importer.extraColumns ?? []), ...(custom?.headers ?? [])]);
   const present = new Set(rows.flatMap((r) => Object.keys(r)));
   const unknownColumns = [...present].filter((c) => c && !known.has(c));
   const notices = new Map<string, number[]>();

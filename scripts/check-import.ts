@@ -329,6 +329,48 @@ function fixtures(actor: { id: string; name: string }): Fixture[] {
     },
 
     {
+      // As another CRM exports them: its stage words, its record ids, a company Deskzo doesn't have yet,
+      // and an owner who isn't a Deskzo user (src/lib/portability/importers/leads.ts).
+      area: "leads",
+      setup: async () => void (await probeCompany(actor.id)),
+      rows: [
+        {
+          "Old system ID": "ZZIC-L1",
+          Title: `${PREFIX} Laptop refresh`,
+          Company: `${PREFIX} Alpha`,
+          Contact: `${PREFIX} Ravi`,
+          "Contact email": `${MARK}.ravi@example.invalid`,
+          Stage: "Proposal/Price Quote",
+          Owner: owner,
+          Value: "2,50,000",
+          "Expected close": "15/12/2026",
+          Source: "Web Site",
+          Description: "From the old CRM",
+        },
+        {
+          "Old system ID": "ZZIC-L2",
+          Title: `${PREFIX} Firewall`,
+          Company: `${PREFIX} Gamma Traders`,
+          Contact: `${PREFIX} Meena`,
+          Stage: "Closed Won",
+          "Closed on": "2026-03-10",
+          Value: "90000",
+          Owner: "Somebody Who Left",
+          Source: "Trade fair stall",
+        },
+      ],
+      creates: 2,
+      edit: { column: "Value", to: "260000", expectField: "Value" },
+      refusals: [
+        { label: "a won deal with no day it was won", row: { Title: "x", Company: `${PREFIX} Alpha`, Stage: "Closed Won" }, expect: /needs the day it was won/i },
+        { label: "a stage nothing can place", row: { Title: "x", Company: `${PREFIX} Alpha`, Stage: "Banana" }, expect: /isn't one Deskzo can place/i },
+        { label: "a lead key naming nothing", row: { Key: "LEAD-999999", Title: "x" }, expect: /No lead with key/i },
+        { label: "a lead with no company", row: { Title: "x" }, expect: /Company is required/i },
+      ],
+      cleanup: cleanupAll,
+    },
+
+    {
       area: "items",
       rows: [
         {

@@ -240,6 +240,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   // Tickets by email: the address and its settings, the Support inbox, replies (src/lib/support-mail).
   "support-mail.ts": ["helpdesk"],
   "trade-document.ts": ["sales_documents", "purchase_documents"],
+  // Open documents from the system used before Deskzo (src/lib/portability/documents.ts).
+  "document-import.ts": ["sales_documents", "purchase_documents"],
   "transporter.ts": ["sales_documents", "it_assets"],
   "user-photo.ts": "core",
   "user.ts": "core",

@@ -83,6 +83,12 @@ export type Importer = {
    */
   headerAliases?: Record<string, string[]>;
   /**
+   * Columns read besides the template's, which the template doesn't offer and the export doesn't write —
+   * another system's split fields ("First name", "Last name") that a Deskzo file holds as one. Not
+   * flagged as unknown.
+   */
+  extraColumns?: string[];
+  /**
    * The record type whose custom fields (src/lib/custom-fields) this import also carries — their
    * columns join the template, and `ctx.custom` reads them.
    */

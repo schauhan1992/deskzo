@@ -11,6 +11,7 @@ import {
 } from "./crm";
 import { itemsExporter, ordersExporter, renewalsExporter, paymentsExporter } from "./trade";
 import { statementsExporter } from "./statements";
+import { leadsExporter } from "./leads";
 import { visitsExporter } from "./visits";
 import { assetsExporter } from "./assets";
 import { workspaceExporter } from "./workspace";
@@ -34,6 +35,7 @@ export const EXPORTERS: Record<string, Exporter> = {
   resellers: resellersExporter,
   "commission-parties": commissionPartiesExporter,
   contacts: contactsExporter,
+  leads: leadsExporter,
   tickets: ticketsExporter,
   suppression: suppressionExporter,
   items: itemsExporter,

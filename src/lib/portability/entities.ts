@@ -161,7 +161,7 @@ export const CANONICAL_ENTITIES: CanonicalEntity[] = [
     naturalKey: ["leadSeq"],
     keyNote:
       "LEAD-nnnnnn from leadSeq. The title is mutable free text that changes as a deal evolves, which would make any key built from it unstable — worse than non-unique, because a renamed record simply imports twice and nothing notices.",
-    area: "companies",
+    area: "leads",
     fields: [
       { name: "leadSeq", kind: "number", required: true },
       { name: "account", kind: "string", referencesEntity: "account", required: true },

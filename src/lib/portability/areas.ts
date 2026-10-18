@@ -63,6 +63,13 @@ export const PORTABLE_AREAS: PortableArea[] = [
     importPermission: "data.importCrm",
   },
   {
+    key: "leads",
+    label: "Leads",
+    description: "Deals in every pipeline, with their stage, owner, value and close date — and another CRM's, Zoho's included.",
+    exportPermission: "data.exportCrm",
+    importPermission: "data.importCrm",
+  },
+  {
     key: "vendors",
     label: "Vendors",
     description: "Suppliers, their onboarding status and payout details.",

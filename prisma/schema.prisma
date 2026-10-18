@@ -2050,6 +2050,12 @@ enum DocumentOrigin {
    * Raised as a draft by recurring billing — a subscription's next term, or one instalment of it.
    */
   RECURRING_BILLING
+  /**
+   * Brought from the system a company used before Deskzo, still open on the day it moved (owner,
+   * 18 Oct 2026): its number, date and lines as they were there. Nothing about it posts again
+   * (src/lib/portability/documents.ts).
+   */
+  IMPORTED
 }
 
 /**
