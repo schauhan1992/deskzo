@@ -165,6 +165,8 @@ const EXTRA_ROUTES: [string, string][] = [
   ["/letters", "hr"],
   ["/payslips", "payroll"],
   ["/api/hr", "hr"],
+  // The Deskzo app's calling (src/lib/app): every route there asks for Calls first (appRoute({ calls: true })).
+  ["/api/app/calls", "calls"],
 ];
 /** Component folders that belong to one module. */
 const COMPONENT_FOLDERS: Record<string, string[]> = {

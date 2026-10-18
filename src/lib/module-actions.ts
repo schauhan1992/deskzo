@@ -58,6 +58,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "brand.ts": ["items"],
   "branding.ts": "core",
   "call.ts": ["calls"],
+  // Calls › Team report — each person's calling in a period.
+  "call-report.ts": ["calls"],
   "calling-activity.ts": ["calls"],
   // "Ring my phone" in a call dialog — the Deskzo app on the caller's phone dials it.
   "phone-calls.ts": ["calls"],

@@ -117,6 +117,10 @@ export default async function CallsPage({
             {tab.label}
           </Link>
         ))}
+        {/* Each person's calling in a period (owner, 18 Oct 2026). */}
+        <Link href="/calls/report" className="rounded-full border border-line-strong bg-surface px-3 py-1 text-sm text-muted transition-colors hover:text-text">
+          Team report
+        </Link>
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
