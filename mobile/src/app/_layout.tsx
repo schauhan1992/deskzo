@@ -4,7 +4,10 @@ import { StatusBar } from "expo-status-bar";
 import { colors } from "@/components/ui";
 import { SessionProvider, useSession } from "@/lib/session";
 
-/** Everything but pairing needs a paired phone; a paired phone has no business on the pairing screen. */
+/**
+ * The tabs — Deskzo, Calls, Settings — and over them, pairing, call sync and the after-call card. Everything but
+ * pairing needs a paired phone; a paired phone has no business on the pairing screen.
+ */
 function Screens() {
   const { ready, paired } = useSession();
   const segments = useSegments();
@@ -19,11 +22,10 @@ function Screens() {
 
   return (
     <Stack screenOptions={{ headerTintColor: colors.brand, headerTitleStyle: { fontWeight: "600", color: colors.text }, contentStyle: { backgroundColor: colors.sunken } }}>
-      <Stack.Screen name="index" options={{ title: "Deskzo" }} />
+      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="pair" options={{ title: "Pair this phone" }} />
       <Stack.Screen name="setup" options={{ title: "Call sync" }} />
       <Stack.Screen name="review/[id]" options={{ title: "How did it go?" }} />
-      <Stack.Screen name="settings" options={{ title: "Settings" }} />
     </Stack>
   );
 }

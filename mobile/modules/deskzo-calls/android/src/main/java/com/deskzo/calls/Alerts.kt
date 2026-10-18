@@ -64,7 +64,7 @@ internal object Alerts {
         .setCategory(NotificationCompat.CATEGORY_CALL)
         .setOnlyAlertOnce(true)
         .setTimeoutAfter(120_000)
-        .setContentIntent(open(c, "deskzo://", CALLER_ID)),
+        .setContentIntent(open(c, "deskzo://calls", CALLER_ID)),
     )
   }
 
@@ -96,7 +96,7 @@ internal object Alerts {
         .setContentTitle("Missed call from $who")
         .setContentText("$company — a callback is on your list.")
         .setAutoCancel(true)
-        .setContentIntent(open(c, "deskzo://", id)),
+        .setContentIntent(open(c, "deskzo://calls", id)),
     )
   }
 

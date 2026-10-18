@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Linking, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
-import { Stack, useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { Button, Card, Heading, Notice, colors, styles } from "@/components/ui";
 import { ApiError, api, type Callback, type ReviewCall, type Ring } from "@/lib/api";
 import { length, overdue, when } from "@/lib/format";
@@ -81,17 +81,11 @@ export default function Home() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} />}>
-      <Stack.Screen
-        options={{
-          title: me?.workspace.name ?? "Deskzo",
-          headerRight: () => (
-            <Pressable accessibilityRole="button" accessibilityLabel="Settings" onPress={() => router.push("/settings")} hitSlop={12}>
-              <Text style={{ color: colors.brand, fontSize: 16, fontWeight: "600" }}>Settings</Text>
-            </Pressable>
-          ),
-        }}
-      />
-      {me && <Text style={styles.small}>Signed in as {me.person.name}</Text>}
+      {me && (
+        <Text style={styles.small}>
+          {me.workspace.name ? `${me.workspace.name} · ` : ""}signed in as {me.person.name}
+        </Text>
+      )}
       {problem && (
         <Card>
           <Notice tone="warning">{problem}</Notice>

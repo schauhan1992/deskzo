@@ -23,6 +23,10 @@ export async function handoffAccount(ticket: string, tenantId: string) {
   if (isAutomationKind(user.kind)) return null;
   if (pass.purpose === "owner-signup") {
     if (user.kind !== "MEMBER" || (await doorCheck(user))) return null;
+  } else if (pass.purpose === "app") {
+    // The Deskzo app's pages: a member, through the door as at any sign-in (the pass only comes from a paired,
+    // approved phone — src/app/api/app/web-session).
+    if (user.kind !== "MEMBER" || (await doorCheck(user))) return null;
   } else if (pass.purpose === "support") {
     if (user.kind !== "SUPPORT" || !(await activeSupportGrant(tenantId, true))) return null;
   } else {

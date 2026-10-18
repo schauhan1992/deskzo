@@ -11,6 +11,7 @@ import { throttle } from "@/lib/security/throttle";
 import { tenantKey } from "@/lib/tenancy/cache";
 import { logActivity } from "@/lib/activity";
 import { clientIpFrom } from "@/lib/client-ip";
+import { safeAppPath } from "@/lib/app/paths";
 import { isAutomationKind } from "@/lib/people";
 import { signInPolicyFor } from "@/lib/workplace/sign-in-rules-server";
 
@@ -123,9 +124,10 @@ export async function checkCredentials(email: string, password: string): Promise
  * Signs in with a handoff pass — the /handoff page, straight after a signup. A pass that is spent,
  * stale or for another workspace lands on the sign-in page instead, with nothing said about why.
  */
-export async function handoffAction(ticket: string): Promise<{ error: string } | void> {
+export async function handoffAction(ticket: string, next?: string): Promise<{ error: string } | void> {
   try {
-    await signIn("handoff", { ticket: String(ticket ?? ""), redirectTo: "/dashboard?tab=getting-started" });
+    // Where the pass said to go — the Deskzo app's pages (src/lib/app/web-session.ts); a new owner's Getting started otherwise.
+    await signIn("handoff", { ticket: String(ticket ?? ""), redirectTo: safeAppPath(next) ?? "/dashboard?tab=getting-started" });
   } catch (error) {
     if (error instanceof AuthError) return { error: "That sign-in link has expired. Sign in with your email and password." };
     throw error;

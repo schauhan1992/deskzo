@@ -11469,6 +11469,10 @@ model AppDevice {
   /// app's secret.
   deviceId    String     @unique
   device      UserDevice @relation("AppDeviceSignIn", fields: [deviceId], references: [id], onDelete: Cascade)
+  /// The digest of the phone's own secret, for /api/app (owner, 18 Oct 2026) — kept apart from the device row's
+  /// tokenHash, which is now the in-app pages' device cookie (src/lib/app/web-session.ts). Null on a phone paired
+  /// before: its secret is the device row's.
+  secretDigest String?
   userId      String
   user        User       @relation("AppDevices", fields: [userId], references: [id], onDelete: Cascade)
   /// "android" or "ios".

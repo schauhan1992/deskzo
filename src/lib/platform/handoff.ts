@@ -13,7 +13,8 @@ import { AUTOMATION_EMAIL } from "@/lib/people";
  * the workspace the request is on.
  */
 
-export type HandoffPurpose = "owner-signup" | "support";
+/** "app": the Deskzo app opening the workspace's own pages, signed in by the paired phone (src/lib/app/web-session.ts). */
+export type HandoffPurpose = "owner-signup" | "support" | "app";
 
 const TTL_MS = 60_000;
 

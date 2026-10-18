@@ -67,13 +67,16 @@ export async function pairPhone(input: PairInput, ip: string | null): Promise<{ 
 
   // The person, where they are now — as at every call afterwards. The phone isn't approved yet: a role that
   // admits only approved devices gets it waiting for an administrator instead of refused.
-  const refusal = await personRefusal(user, ip, true);
+  const refusal = await personRefusal(user, ip, true, "MOBILE");
   if (refusal) throw new ApiError(403, "person_not_allowed", PHONE_REFUSALS[refusal]);
   const needsApproval = (await rolePolicy(user.role)).requireDeviceApproval && !user.isSuperAdmin;
 
   const model = clip(input.model, 80);
   const appVersion = clip(input.appVersion, 30);
+  // Two secrets: the phone's own, for /api/app; and its device row's, which only the in-app pages' device cookie
+  // ever holds — made afresh each time they open (src/lib/app/web-session.ts), so this first one is never handed out.
   const secret = newPhoneSecret();
+  const deviceSecret = newPhoneSecret();
   const label = `Deskzo app on ${model ?? (platform === "ios" ? "an iPhone" : "an Android phone")}`;
 
   const made = await db.$transaction(async (tx) => {
@@ -83,7 +86,7 @@ export async function pairPhone(input: PairInput, ip: string | null): Promise<{ 
     const device = await tx.userDevice.create({
       data: {
         userId: user.id,
-        tokenHash: digest(secret),
+        tokenHash: digest(deviceSecret),
         kind: "MOBILE",
         label,
         userAgent: `Deskzo app${appVersion ? ` ${appVersion}` : ""} (${platform})`,
@@ -92,7 +95,7 @@ export async function pairPhone(input: PairInput, ip: string | null): Promise<{ 
       },
       select: { id: true },
     });
-    const phone = await tx.appDevice.create({ data: { deviceId: device.id, userId: user.id, platform, model, appVersion }, select: { id: true } });
+    const phone = await tx.appDevice.create({ data: { deviceId: device.id, userId: user.id, platform, model, appVersion, secretDigest: digest(secret) }, select: { id: true } });
     await tx.appPairing.update({ where: { id: pairing.id }, data: { appDeviceId: phone.id } });
     return { device, phone };
   });

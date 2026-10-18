@@ -5,17 +5,18 @@ import Link from "next/link";
 import { handoffAction } from "@/actions/auth";
 
 /** Spends the pass as soon as the page opens — once, even under React's double effects in development. */
-export function HandoffForm({ ticket }: { ticket: string }) {
+/** `next`: where the Deskzo app's pages land (src/lib/app/web-session.ts) — a new owner goes to Getting started. */
+export function HandoffForm({ ticket, next }: { ticket: string; next?: string }) {
   const [error, setError] = useState<string | null>(ticket ? null : "This sign-in link is incomplete.");
   const started = useRef(false);
 
   useEffect(() => {
     if (!ticket || started.current) return;
     started.current = true;
-    handoffAction(ticket).then((result) => {
+    handoffAction(ticket, next).then((result) => {
       if (result?.error) setError(result.error);
     });
-  }, [ticket]);
+  }, [ticket, next]);
 
   if (error) {
     return (
@@ -27,5 +28,5 @@ export function HandoffForm({ ticket }: { ticket: string }) {
       </div>
     );
   }
-  return <p className="text-sm text-muted">Signing you in to your new workspace…</p>;
+  return <p className="text-sm text-muted">{next ? "Signing you in…" : "Signing you in to your new workspace…"}</p>;
 }

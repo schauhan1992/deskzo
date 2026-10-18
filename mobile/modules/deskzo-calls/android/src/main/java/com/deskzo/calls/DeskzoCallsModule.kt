@@ -2,8 +2,12 @@ package com.deskzo.calls
 
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
+import android.webkit.CookieManager
+import android.webkit.WebStorage
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.IOException
@@ -34,6 +38,11 @@ class DeskzoCallsModule : Module() {
       CallSyncWorker.cancelAll(context)
       Alerts.clearAll(context)
       Store.clear(context)
+      // The in-app pages' sign-in and device cookie, and what they stored — nothing of Deskzo stays on the phone.
+      Handler(Looper.getMainLooper()).post {
+        CookieManager.getInstance().removeAllCookies(null)
+        WebStorage.getInstance().deleteAllData()
+      }
     }
 
     Function("getCallSync") {

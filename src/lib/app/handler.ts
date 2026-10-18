@@ -15,7 +15,7 @@ import { tenantKey } from "@/lib/tenancy/cache";
  * Every call from the Deskzo app (owner, 18 Oct 2026) — /api/app/* — goes through `appRoute`, in this order:
  *
  *   1. The workspace not under maintenance.
- *   2. The phone: `Authorization: Bearer dzp_<app device>.<secret>`, its secret matching the device row's
+ *   2. The phone: `Authorization: Bearer dzp_<app device>.<secret>`, its secret matching the phone's own
  *      digest, the device not revoked or turned down. Every way of being wrong answers the same 401, and
  *      too many from one address lock it out for a while. A phone still waiting for an administrator's
  *      approval is told so.
@@ -66,6 +66,7 @@ export const PHONE_REFUSALS: Record<PersonRefusal, string> = {
   network: "You may not use Deskzo from this network.",
   device: "Your role only allows approved devices, and this phone isn't one yet.",
   location: "Your role asks for your location at every sign-in, which the Deskzo app can't share yet.",
+  mobile: "Your role doesn't allow Deskzo on a phone.",
 };
 
 /** A thrown error as the phone sees it — never a stack, never a database message. */
@@ -115,13 +116,15 @@ export function appRoute(options: RouteOptions, handler: (call: AppCall) => Prom
               model: true,
               callSync: true,
               createdAt: true,
+              secretDigest: true,
               device: { select: { id: true, tokenHash: true, status: true, lastSeenAt: true, lastIp: true } },
               user: { select: { id: true, name: true, email: true, role: true, isSuperAdmin: true, active: true, kind: true, lockedAt: true, lockedUntil: true } },
             },
           })
         : null;
       // A digest is always worked out, so a phone that doesn't exist takes as long as one that does.
-      const matches = secretMatches(token?.secret ?? "x".repeat(43), phone?.device.tokenHash ?? "0".repeat(64));
+      // The phone's own secret; a phone paired before it had one uses its device row's (src/lib/app/web-session.ts).
+      const matches = secretMatches(token?.secret ?? "x".repeat(43), phone?.secretDigest ?? phone?.device.tokenHash ?? "0".repeat(64));
       if (!token || !phone || !matches || phone.device.status === "REVOKED" || phone.device.status === "REJECTED") {
         recordFailure([lockKey]);
         return SIGNED_OUT();
@@ -129,7 +132,7 @@ export function appRoute(options: RouteOptions, handler: (call: AppCall) => Prom
       clearFailures([lockKey]);
       if (phone.device.status === "PENDING") return appFailure(403, "device_pending", "This phone is waiting for an administrator to approve it. You'll be able to use it once they have.");
 
-      const refusal = await personRefusal(phone.user, ip, true);
+      const refusal = await personRefusal(phone.user, ip, true, "MOBILE");
       if (refusal) return appFailure(403, "person_not_allowed", PHONE_REFUSALS[refusal]);
 
       const used = await countCall(phone.id);

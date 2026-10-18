@@ -71,18 +71,20 @@ const failure = (status: number, code: string, message: string, fields?: Record<
 
 const UNAUTHORIZED = () => failure(401, "unauthorized", "The API key is missing, wrong, expired or revoked.", undefined, { "www-authenticate": 'Bearer realm="Deskzo API"' });
 
-export type PersonRefusal = "switched_off" | "locked" | "workspace_locked" | "network" | "device" | "location";
+export type PersonRefusal = "switched_off" | "locked" | "workspace_locked" | "network" | "device" | "location" | "mobile";
 
 /**
  * What a person's standing says about acting as them now, from `ip` — null when they may. Shared with the
  * Deskzo app (src/lib/app/handler.ts), whose phone is a device of its own: `approvedDevice` says it has
- * been approved, which answers a role that admits only approved devices. Nothing answers one that asks
- * for the location at every sign-in.
+ * been approved, which answers a role that admits only approved devices — and says it is a phone, which a
+ * role may not allow. Nothing answers one that asks for the location at every sign-in. An unknown network
+ * that the role holds for an administrator is refused as one it blocks: nobody is there to be held.
  */
 export async function personRefusal(
   user: { id: string; role: string; isSuperAdmin: boolean; active: boolean; kind: string; lockedAt: Date | null; lockedUntil: Date | null },
   ip: string | null,
   approvedDevice = false,
+  kind: "MOBILE" | null = null,
 ): Promise<PersonRefusal | null> {
   if (!user.active || user.kind !== "MEMBER") return "switched_off";
   if (personalLockActive(user)) return "locked";
@@ -91,7 +93,8 @@ export async function personRefusal(
   // The sign-in door check (src/lib/access/record.ts `doorCheck`), on this request's own address.
   const [rules, policy] = await Promise.all([activeIpRules(), rolePolicy(user.role)]);
   const network = networkStanding(ip, user.role, rules, new Date());
-  if (network.standing === "BLOCKED" || (network.standing === "UNKNOWN" && policy.unknownNetwork === "BLOCK")) return "network";
+  if (network.standing === "BLOCKED" || (network.standing === "UNKNOWN" && (policy.unknownNetwork === "BLOCK" || policy.unknownNetwork === "HOLD"))) return "network";
+  if (kind === "MOBILE" && !policy.allowMobile) return "mobile";
   if (policy.requireDeviceApproval && !approvedDevice) return "device";
   if (policy.requireLocation) return "location";
   return null;
@@ -104,6 +107,7 @@ const KEY_REFUSALS: Record<PersonRefusal, string> = {
   network: "The key's person may not use Deskzo from this network.",
   device: "The key's person may only use Deskzo from an approved device — an API key can't be one.",
   location: "The key's person may only use Deskzo from an approved device — an API key can't be one.",
+  mobile: "The key's person may not use Deskzo from a phone.",
 };
 
 /** One more call in this key's minute; how many it has made in it. One statement, so every server counts the same. */

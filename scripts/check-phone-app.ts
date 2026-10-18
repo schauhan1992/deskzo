@@ -105,6 +105,7 @@ const ROUTES: [RegExp, string, string[]][] = [
   [/^\/pair$/, "pair", []],
   [/^\/me$/, "me", []],
   [/^\/device$/, "device", []],
+  [/^\/web-session$/, "web-session", []],
   [/^\/calls\/lookup$/, "calls/lookup", []],
   [/^\/calls\/sync$/, "calls/sync", []],
   [/^\/calls\/review$/, "calls/review", []],
@@ -146,6 +147,8 @@ async function main() {
   /* eslint-disable @typescript-eslint/no-require-imports */
   const pairing = require("../src/lib/app/pairing") as typeof import("../src/lib/app/pairing");
   const tokens = require("../src/lib/app/tokens") as typeof import("../src/lib/app/tokens");
+  /** Whether a phone's token would pass for its device row's secret — it mustn't, once the pages have their own. */
+  const secretMatchesDevice = (token: string, hash: string) => tokens.secretMatches(token.split(".")[1] ?? "", hash);
   const push = require("../src/lib/app/push") as typeof import("../src/lib/app/push");
   const { clearAccessCache } = require("../src/lib/access/gate") as typeof import("../src/lib/access/gate");
   const { canSeeCompany } = require("../src/lib/authz/company-scope") as typeof import("../src/lib/authz/company-scope");
@@ -223,6 +226,12 @@ async function main() {
     await db.userDevice.updateMany({ where: { app: { is: { id: carefulToken.slice(4, carefulToken.indexOf(".")) } } }, data: { status: "APPROVED" } });
     const carefulMe = await call("GET", "/me", { token: carefulToken });
     ok("  approved in Security › Devices: in", carefulMe.status === 200, carefulMe.status);
+    await db.roleAccessPolicy.update({ where: { roleKey: ROLE }, data: { allowMobile: false } });
+    clearAccessCache();
+    const noPhones = await call("GET", "/me", { token: carefulToken });
+    ok("  a role that doesn't allow phones: refused, and told why", noPhones.status === 403 && noPhones.body.error?.message === "Your role doesn't allow Deskzo on a phone.", noPhones.body.error?.message);
+    await db.roleAccessPolicy.update({ where: { roleKey: ROLE }, data: { allowMobile: true } });
+    clearAccessCache();
     ok("  a person without Calls: the app says so, and calling is refused", (carefulMe.body.data as { can: { calls: boolean } }).can.calls === false && (await call("GET", `/calls/lookup?number=${num(1)}`, { token: carefulToken })).body.error?.code === "calls_unavailable");
 
     section("The phone's token");
@@ -246,6 +255,48 @@ async function main() {
     ok("switched on from the phone, with its push address", on.status === 200 && (on.body.data as { call_sync: boolean; push: boolean }).call_sync && (on.body.data as { push: boolean }).push);
     const syncAudit = await db.auditLog.findFirst({ where: { userId: rep.id, entityType: "AppDevice", entityLabel: { startsWith: "Call sync on" } } });
     ok("  audited as the person, naming the phone", !!syncAudit?.entityLabel.includes(`via the Deskzo app on “${TAG} Pixel”`), syncAudit?.entityLabel);
+
+    section("Deskzo's own pages in the app");
+    const { safeAppPath } = require("../src/lib/app/paths") as typeof import("../src/lib/app/paths");
+    ok(
+      "a page to land on stays inside the workspace",
+      safeAppPath("/leads?view=board") === "/leads?view=board" &&
+        ["//evil.example", "/\\evil.example", "https://evil.example", "/api/app/me", "/handoff?t=x", "/login", "leads", "/a b", ""].every((p) => safeAppPath(p) === null),
+    );
+    const before = (await db.userDevice.findUniqueOrThrow({ where: { id: phoneRow.deviceId } })).tokenHash;
+    const opened = await call("POST", "/web-session", { token, body: { path: "/leads" } });
+    const form = (opened.body.data as { open: { path: string; form: { d: string; t: string; n: string } }; sign_in: boolean } | undefined)?.open.form;
+    const after = await db.userDevice.findUniqueOrThrow({ where: { id: phoneRow.deviceId } });
+    const { hashDeviceToken } = require("../src/lib/access/device-token") as typeof import("../src/lib/access/device-token");
+    ok("opened: a fresh device cookie for the phone's own row, a one-time pass, and where to land", opened.status === 200 && !!form && /^[A-Za-z0-9_-]{43}$/.test(form.d) && /^[A-Za-z0-9_-]{43}$/.test(form.t) && form.n === "/leads" && after.tokenHash === hashDeviceToken(form.d) && after.tokenHash !== before, opened.status);
+    const { controlDb } = require("../src/lib/platform/control-db") as typeof import("../src/lib/platform/control-db");
+    const pass = form ? await controlDb().platformHandoffTicket.findUnique({ where: { tokenHash: hashDeviceToken(form.t) } }) : null;
+    ok("  the pass is the app's, for the rep, for a minute", pass?.purpose === "app" && pass.email === rep.email && pass.expiresAt.getTime() - Date.now() <= 60_000);
+    ok("  and the phone's own secret still works: it isn't the device row's any more", (await call("GET", "/me", { token })).status === 200 && !secretMatchesDevice(token, after.tokenHash));
+    const webOpen = require("../src/app/api/app/web-open/route") as { POST: (req: Request) => Promise<Response> };
+    const post = (fields: Record<string, string>, headers: Record<string, string> = {}) =>
+      webOpen.POST(new Request("http://deskzo.localhost:3000/api/app/web-open", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", ...headers }, body: new URLSearchParams(fields).toString() }));
+    const went = await post({ d: form!.d, t: form!.t, n: "/leads" }, { "sec-fetch-site": "none" });
+    ok("the page view opens: the device cookie set, on to the pass's sign-in", went.status === 303 && went.headers.get("location") === `/handoff?t=${form!.t}&n=%2Fleads` && /deskzo_device=[A-Za-z0-9_-]{43}; Path=\/; Max-Age=\d+; HttpOnly; SameSite=Lax/.test(went.headers.get("set-cookie") ?? ""), `${went.status} ${went.headers.get("location")}`);
+    ok("  never from another site's form", (await post({ d: form!.d, t: form!.t, n: "/leads" }, { "sec-fetch-site": "cross-site" })).status === 403);
+    ok("  nor with a device cookie that isn't a paired phone's", (await post({ d: "A".repeat(43), t: form!.t, n: "/leads" })).status === 403);
+    ok("  and a page outside the workspace lands on the dashboard instead", (await post({ d: form!.d, t: form!.t, n: "//evil.example" })).headers.get("location") === `/handoff?t=${form!.t}&n=%2Fdashboard`);
+    await db.user.update({ where: { id: rep.id }, data: { twoFactorEnabledAt: new Date() } });
+    const twoFactor = await call("POST", "/web-session", { token, body: { path: "/tasks" } });
+    const tfForm = (twoFactor.body.data as { open: { form: { d: string; t: string } }; sign_in: boolean }).open.form;
+    ok("somebody with two-factor: no pass — they sign in on the pages once, as on any device", (twoFactor.body.data as { sign_in: boolean }).sign_in && tfForm.t === "" && (await post({ d: tfForm.d, t: "", n: "/tasks" })).headers.get("location") === "/login?callbackUrl=%2Ftasks");
+    await db.user.update({ where: { id: rep.id }, data: { twoFactorEnabledAt: null } });
+    // A phone paired before phones had a secret of their own: its device row's is its secret.
+    const legacyCode = await pairing.startPairing(rep.id);
+    const legacyToken = ((await call("POST", "/pair", { body: { code: legacyCode.code, platform: "android", model: `${TAG} Old` } })).body.data as { token: string }).token;
+    const legacyId = legacyToken.slice(4, legacyToken.indexOf("."));
+    const legacy = await db.appDevice.findUniqueOrThrow({ where: { id: legacyId } });
+    await db.appDevice.update({ where: { id: legacyId }, data: { secretDigest: null } });
+    await db.userDevice.update({ where: { id: legacy.deviceId }, data: { tokenHash: legacy.secretDigest! } });
+    ok("a phone paired before: signed in with its device row's secret", (await call("GET", "/me", { token: legacyToken })).status === 200);
+    await call("POST", "/web-session", { token: legacyToken, body: {} });
+    ok("  and still after its pages are opened — the secret moved to its own first", (await call("GET", "/me", { token: legacyToken })).status === 200 && (await db.appDevice.findUniqueOrThrow({ where: { id: legacyId } })).secretDigest === legacy.secretDigest);
+    await call("DELETE", "/device", { token: legacyToken });
 
     section("Caller ID");
     const ways = [num(1), `+91${num(1)}`, `0${num(1)}`, `+91 ${num(1).slice(0, 5)}-${num(1).slice(5)}`];
