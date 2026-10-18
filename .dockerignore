@@ -27,6 +27,9 @@ prisma/reference/geonames
 npm-debug.log*
 coverage
 
+# The Deskzo app for phones (mobile/) — built on its own, never part of the server image
+mobile
+
 # Notes and files that only matter beside the code
 docs
 README.md

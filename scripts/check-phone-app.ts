@@ -110,6 +110,7 @@ const ROUTES: [RegExp, string, string[]][] = [
   [/^\/calls\/review$/, "calls/review", []],
   [/^\/calls\/callbacks$/, "calls/callbacks", []],
   [/^\/calls\/requests$/, "calls/requests", []],
+  [/^\/calls\/callbacks\/([^/]+)$/, "calls/callbacks/[id]", ["id"]],
   [/^\/calls\/([^/]+)$/, "calls/[id]", ["id"]],
 ];
 
@@ -307,6 +308,11 @@ async function main() {
     ok("somebody else's call: not found", (await call("PATCH", `/calls/${othersCall.id}`, { token, body: { outcome: "BUSY" } })).status === 404);
     const callbacks = (await call("GET", "/calls/callbacks", { token })).body.data as { id: string }[];
     ok("the callbacks owed: the promise and the missed call", callbacks.some((c) => c.id === k1.id) && callbacks.some((c) => c.id === missed[0]!.id));
+    const returned = await call("POST", `/calls/callbacks/${missed[0]!.id}`, { token });
+    const missedAfter = await db.callLog.findUniqueOrThrow({ where: { id: missed[0]!.id }, include: { followUpTask: true } });
+    const stillOwed = (await call("GET", "/calls/callbacks", { token })).body.data as { id: string }[];
+    ok("a callback returned, from the phone: done, and its task with it", returned.status === 200 && missedAfter.followUpDone && !!missedAfter.followUpTask?.done && !stillOwed.some((c) => c.id === missed[0]!.id));
+    ok("  somebody else's: not found", (await call("POST", `/calls/callbacks/${othersCall.id}`, { token })).status === 404);
 
     section("Ring my phone");
     const pushed: unknown[] = [];

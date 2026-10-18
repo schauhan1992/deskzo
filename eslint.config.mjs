@@ -54,6 +54,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // The Deskzo app (mobile/): its own package, lint and typecheck (mobile/package.json).
+    "mobile/**",
   ]),
 ]);
 

@@ -1,0 +1,24 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.deskzo.calls'
+version = '0.1.0'
+
+android {
+  namespace "com.deskzo.calls"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+  lintOptions {
+    abortOnError false
+  }
+}
+
+dependencies {
+  // Sending the calls when the phone is free to, even with the app closed.
+  implementation "androidx.work:work-runtime:2.10.1"
+  implementation "androidx.core:core:1.13.1"
+}
