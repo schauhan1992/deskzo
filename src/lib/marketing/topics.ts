@@ -21,3 +21,27 @@ export const TOPICS: { key: MarketingTopic; label: string; blurb: string }[] = [
   { key: "NEWSLETTER", label: "Newsletter", blurb: "The occasional round-up. No more than monthly." },
 ];
 
+/**
+ * Reminders about what a customer has with the company (owner, 18 Oct 2026): a renewal reminder, a
+ * workflow's email about their order or booking. Sent unless they turn them off — not only when they
+ * opt in, as offers are — so the preference centre shows them ticked until they untick them, and a
+ * box left ticked records nothing.
+ */
+export const REMINDER_TOPICS: ReadonlySet<MarketingTopic> = new Set<MarketingTopic>(["RENEWALS", "SERVICE"]);
+
+/**
+ * When the preference centre began showing reminders ticked unless turned off — 18 Oct 2026, 18:30 in
+ * India. Before it, every topic showed unticked until opted into, so saving the page left the reminders
+ * "turned off" for somebody who never chose that; such an opt-out isn't held against them.
+ */
+export const REMINDER_OPT_OUTS_FROM = new Date("2026-10-18T13:00:00.000Z");
+
+/**
+ * Whether a consent row stops a reminder: turned off — by the customer in the preference centre since
+ * it showed reminders honestly, or any other way (an import, a campaign's unsubscribe link).
+ */
+export function countsAsOptOut(row: { status: string; source: string; withdrawnAt: Date | null }): boolean {
+  if (row.status !== "UNSUBSCRIBED") return false;
+  return !(row.source === "PREFERENCE_CENTRE" && (row.withdrawnAt === null || row.withdrawnAt < REMINDER_OPT_OUTS_FROM));
+}
+

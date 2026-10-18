@@ -141,6 +141,7 @@ export const guide: SeedGuide = {
         "Settings › Support email",
         p(runs("Which mail sends your replies and the “we've received it” email, in your company's name: ", { b: "{siteName}'s mail" }, " (the default, nothing to set up), or ", { b: "Your mail server" }, ", the one set up for transactional mail in ", { b: "Settings › Mail & messaging" }, ". With your server, type your support address under ", { b: "Send as" }, ".")),
         p("If your mail server can't send a reply, it goes through the other mail instead and the ticket says why. Customers' answers always come back to the same ticket."),
+        note("Nothing is sent to an address that bounced or reported your mail as spam, nor to a reseller's customer, who hears from their reseller — the reply or the “we've received it” email is kept on the ticket as not sent, with the reason. Somebody copied who can't be is left off, and the email says so."),
       ),
       setting(
         "Tickets",

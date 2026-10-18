@@ -86,6 +86,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "copilot.ts": "core",
   "credit.ts": ["receivables"],
   "customer-category.ts": "core",
+  // Settings › Customer emails: a settings screen across modules — each row asks for its own module.
+  "customer-emails.ts": "core",
   // The workspace's own fields on its records (src/lib/custom-fields) — settings, in every plan.
   "custom-fields.ts": "core",
   // Lead stages and pipelines (leads), and order steps (orders) — each half checks its own.

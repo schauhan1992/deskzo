@@ -24,6 +24,7 @@ import {
   Globe,
   LifeBuoy,
   MailPlus,
+  MailCheck,
   Megaphone,
   Palette,
   Languages,
@@ -405,6 +406,15 @@ export const SETTINGS: SettingsSection[] = [
             icon: Send,
             permission: "settings.manage",
             module: "marketing",
+          },
+          {
+            // Owner, 18 Oct 2026: every email customers get, where it goes from, and the switches for those that go on their own (src/lib/customer-emails.ts).
+            key: "customer-emails",
+            label: "Customer emails",
+            description: "Every email your customers get from here — which go on their own, where they're sent from, and what stops them — with a switch for the automatic ones.",
+            href: "/settings/customer-emails",
+            icon: MailCheck,
+            permission: "settings.manage",
           },
           {
             // Owner, 18 Oct 2026: which notifications go by email too, chosen for everyone (src/lib/notifications/email-settings.ts).

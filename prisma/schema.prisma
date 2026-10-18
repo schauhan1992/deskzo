@@ -4088,6 +4088,20 @@ model NotificationEmailClaim {
 }
 
 /**
+ * Settings › Customer emails (owner, 18 Oct 2026): the switches for what's emailed to customers on its
+ * own, kept where no other screen keeps one (src/lib/customer-emails.ts). One row, "global".
+ */
+model CustomerEmailSettings {
+  id            String   @id @default("global")
+  /** A booking page emails the guest a calendar invitation. Off: the time goes in the host's calendar, and the guest isn't emailed. */
+  bookingInvite Boolean  @default(true)
+  updatedById   String?
+  updatedAt     DateTime @updatedAt
+
+  @@map("customer_email_settings")
+}
+
+/**
  * In-app notifications. `dedupeKey` is set only for lazily-reconciled system alerts (a task going
  * overdue, a ticket breaching SLA, a renewal entering its expiry window) so the same alert isn't
  * created twice — Postgres treats NULLs as distinct, so plain event-triggered notifications (no

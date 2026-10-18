@@ -20,7 +20,7 @@ export function BookingWidget({ page }: { page: PublicBookingPage }) {
   const [slot, setSlot] = useState<string | null>(null);
   const [form, setForm] = useState({ name: "", email: "", phone: "", company: "", notes: "", website: "" });
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<{ when: string; host: string; invited: boolean } | null>(null);
+  const [done, setDone] = useState<{ when: string; host: string; invited: boolean; invites: boolean } | null>(null);
   const zone = page.zone;
   const dayLabel = (iso: string) => new Intl.DateTimeFormat("en-IN", { weekday: "short", day: "numeric", month: "short", timeZone: zone }).format(new Date(iso));
   const timeLabel = (iso: string) => new Intl.DateTimeFormat("en-IN", { hour: "numeric", minute: "2-digit", timeZone: zone }).format(new Date(iso));
@@ -39,7 +39,11 @@ export function BookingWidget({ page }: { page: PublicBookingPage }) {
           {done.when ? (
             <p className="text-sm text-muted">
               {page.title} with {done.host}, {done.when}.{" "}
-              {done.invited ? `An invitation is on its way to ${form.email}.` : `${done.host} will send you an invitation.`}
+              {done.invited
+                ? `An invitation is on its way to ${form.email}.`
+                : done.invites
+                  ? `${done.host} will send you an invitation.`
+                  : `It's in ${done.host}'s calendar.`}
             </p>
           ) : (
             <p className="text-sm text-muted">Thank you.</p>

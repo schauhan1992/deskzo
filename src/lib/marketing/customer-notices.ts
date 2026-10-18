@@ -10,7 +10,9 @@ import type { MarketingTopic } from "@prisma/client";
  *
  * Both are **transactional**. A notice about a service you pay for is not an offer, so an
  * unsubscribe from marketing does not silence it — while a bounce, a spam complaint or a reseller's
- * customer still does. That distinction is the whole reason `messageClass` exists.
+ * customer still does. That distinction is the whole reason `messageClass` exists. The renewal reminder
+ * is a reminder, though (owner, 18 Oct 2026): somebody who unticked renewal reminders, or unsubscribed
+ * from everything, isn't sent one. The two confirmations are business they're part of, and always go.
  *
  * Every field in every template carries a fallback. A notice that cannot go out because a unit
  * price was never filled in is worse than one that reads slightly more generally.
@@ -56,7 +58,7 @@ A quick note that {{companyName}}'s {{productName|subscription}} is due for rene
 
 {{ownerName|Your account manager}} will be in touch to confirm, but reply to this and we'll get it sorted.${SIGN_OFF}`,
   footnote:
-    "Sent as a service notice about their own subscription, so it reaches people who have opted out of marketing — but never a bounced address, a spam complaint, or a reseller's customer.",
+    "A reminder about their own subscription: it reaches people who opted out of offers, but not anyone who unticked renewal reminders or unsubscribed from everything — and never a bounced address, a spam complaint, or a reseller's customer.",
 };
 
 /**

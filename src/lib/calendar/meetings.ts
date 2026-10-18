@@ -7,6 +7,7 @@ import type { MeetingDraft, MeetingOutcome } from "@/lib/calendar/types";
 import { calendarsWanted } from "@/lib/calendar/account";
 import { hasWorkingCalendar } from "@/lib/calendar/connected";
 import { cancelNative, rescheduleNative, scheduleNative } from "@/lib/calendar/native";
+import { refusalAmong, screenInvitees } from "@/lib/calendar/invitees";
 
 /**
  * Meetings scheduled, moved and cancelled from here — always in the calendar of the person doing it, as
@@ -17,6 +18,10 @@ import { cancelNative, rescheduleNative, scheduleNative } from "@/lib/calendar/n
  * Somebody with no working calendar connection has Deskzo's own (owner, 17 Oct 2026 — native.ts): the
  * meeting is kept here alone and Deskzo emails the invitations. A meeting stays where it was made: one of
  * Deskzo's own is moved and cancelled by Deskzo even after its organiser connects a calendar.
+ *
+ * Who may be invited is checked the same way either way (invitees.ts — owner, 18 Oct 2026): the calendar
+ * sends the invitations, but they're the company's mail all the same, so never to an address that bounced
+ * or reported it as spam, nor to a reseller's customer.
  */
 
 export type { MeetingOutcome };
@@ -31,6 +36,10 @@ export async function scheduleMeeting(userId: string, draft: MeetingDraft, links
     if (already) await db.calendarEvent.update({ where: { id: already.id }, data: { visitId: null } });
   }
   if (!(await hasWorkingCalendar(userId))) return scheduleNative(userId, draft, links, label);
+  if (draft.attendees.length) {
+    const refused = refusalAmong(await screenInvitees(draft.attendees.map((a) => a.email)));
+    if (refused) return { ok: false, error: refused, lasting: true };
+  }
   const made = await withCalendar(userId, (token, ctx) => createEvent(ctx, token, draft));
   if (!made.ok) return { ok: false, error: made.error, reconnect: made.reconnect };
   const now = new Date();
@@ -71,6 +80,13 @@ export async function rescheduleMeeting(userId: string, eventId: string, draft: 
     const native = await rescheduleNative(userId, eventId, draft);
     if (native.ok && own.row.visitId) await db.visit.updateMany({ where: { id: own.row.visitId, userId, status: "PLANNED" }, data: { scheduledFor: draft.startsAt } });
     return native;
+  }
+  // Somebody added must be somebody who can be invited; those already invited stay as they were.
+  const before = new Set(((Array.isArray(own.row.attendees) ? own.row.attendees : []) as { email?: string }[]).map((a) => a.email?.trim().toLowerCase()).filter(Boolean));
+  const added = draft.attendees.filter((a) => !before.has(a.email.trim().toLowerCase()));
+  if (added.length) {
+    const refused = refusalAmong(await screenInvitees(added.map((a) => a.email)));
+    if (refused) return { ok: false, error: refused, lasting: true };
   }
   const moved = await withCalendar(userId, (token, ctx) => updateEvent(ctx, token, refOf(own.row), draft));
   if (!moved.ok && (moved.status === 404 || moved.status === 410)) {

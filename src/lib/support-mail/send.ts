@@ -10,6 +10,7 @@ import { inboundDomain, workspaceSupportAddress } from "@/lib/support-mail/confi
 import { replySubject } from "@/lib/support-mail/rules";
 import { companyAddressing, deskzoAddressing, isReplyFrom, type ReplyFrom } from "@/lib/support-mail/reply-from";
 import { helpdeskFromOwnAddress } from "@/lib/platform/helpdesk-from";
+import { screenAddresses } from "@/lib/calendar/invitees";
 
 /**
  * An email from the helpdesk to a customer: an agent's reply, or the acknowledgement of a new ticket.
@@ -26,6 +27,11 @@ import { helpdeskFromOwnAddress } from "@/lib/platform/helpdesk-from";
  * its In-Reply-To and References, or failing those (a provider that writes its own Message-ID) by the
  * [TCK-…] tag in the subject. Every email sent is kept in the ticket's conversation, and one no mail
  * server took is kept as FAILED with the reason.
+ *
+ * Screened as any mail sent for the company is (src/lib/calendar/invitees.ts — owner, 18 Oct 2026):
+ * never to an address that bounced or reported the company's mail as spam, nor to a reseller's customer,
+ * who hears from their reseller. Not sent then — the acknowledgement as much as a reply — and kept on the
+ * ticket as FAILED with the reason; somebody copied who can't be is left off, and the email says so.
  */
 
 export type SupportSend = {
@@ -79,13 +85,21 @@ export async function sendSupportEmail(input: SupportSend): Promise<{ ok: true; 
   const fromName = await supportFromName();
   const cc = (input.cc ?? []).filter((a) => a && a !== input.to);
   const settings = await supportReplySettings();
+  const screened = await screenAddresses([input.to, ...cc]);
+  // Somebody who has left their company still gets an answer where they wrote from.
+  const stopped = (address: string) => {
+    const verdict = screened.find((v) => v.email === address.trim().toLowerCase());
+    return verdict && !verdict.ok && !verdict.left ? verdict.reason : null;
+  };
+  const leftOff = cc.filter((a) => stopped(a));
+  const copied = cc.filter((a) => !stopped(a));
 
-  let failure: string | null = null;
+  let failure: string | null = stopped(input.to);
   /** Why it went another way than the one chosen, kept on the email. */
-  let note: string | null = null;
-  let fromAddress: string | null = null;
+  let note: string | null = leftOff.length ? `Not copied to ${leftOff.join(", ")}: ${stopped(leftOff[0]!)}` : null;
+  let fromAddress: string | null = failure ? helpdesk : null;
 
-  if (settings.replyFrom === "COMPANY") {
+  if (!failure && settings.replyFrom === "COMPANY") {
     const route = await emailRouteFor("TRANSACTIONAL");
     if (!route) {
       note = "Your mail server isn't set up in Settings › Messaging, so this went through Deskzo's mail.";
@@ -94,7 +108,7 @@ export async function sendSupportEmail(input: SupportSend): Promise<{ ok: true; 
       const sent = await deliverNow(
         {
           to: input.to,
-          ...(cc.length ? { cc } : {}),
+          ...(copied.length ? { cc: copied } : {}),
           subject,
           text: input.body,
           html: textToHtml(input.body),
@@ -116,7 +130,7 @@ export async function sendSupportEmail(input: SupportSend): Promise<{ ok: true; 
   }
 
   if (!fromAddress) {
-    const mail: PlatformMail = { type: "SUPPORT", to: input.to, cc, subject, text: input.body, fromName, messageId, inReplyTo: input.answering?.messageId ?? undefined, references };
+    const mail: PlatformMail = { type: "SUPPORT", to: input.to, cc: copied, subject, text: input.body, fromName, messageId, inReplyTo: input.answering?.messageId ?? undefined, references };
     const own = deskzoAddressing(await helpdeskFromOwnAddress(), helpdesk);
     try {
       const used = await sendPlatformMail({ ...mail, ...(own.from ? { fromAddress: own.from } : {}), ...(own.replyTo ? { replyTo: own.replyTo } : {}) });
@@ -147,7 +161,7 @@ export async function sendSupportEmail(input: SupportSend): Promise<{ ok: true; 
       fromAddress,
       fromName,
       toAddresses: [input.to],
-      ccAddresses: cc,
+      ccAddresses: copied,
       subject,
       body: input.body,
       messageId,

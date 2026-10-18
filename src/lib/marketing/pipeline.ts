@@ -13,6 +13,7 @@ import { nextSendTime, type ScheduleRules } from "@/lib/marketing/schedule";
 import { render, type MergeValues } from "@/lib/marketing/merge";
 import { composeEmail, escapeHtml } from "@/lib/marketing/html";
 import { trackedLinkWith } from "@/lib/marketing/tracking";
+import { countsAsOptOut } from "@/lib/marketing/topics";
 import { currentKeys } from "@/lib/tenancy/keys";
 import { postalAddressFor } from "@/lib/marketing/footer";
 import { providerByKey, routeFor, type RoutableProvider } from "@/lib/marketing/providers";
@@ -107,6 +108,8 @@ export async function resolveRecipients(params: {
   topic: MarketingTopic;
   messageClass: MessageClass;
   settings: MarketingSettings;
+  /** A reminder: the person's own opt-outs stop it too (src/lib/marketing/suppression.ts `optOuts`). */
+  optOuts?: boolean;
 }): Promise<ResolvedRecipient[]> {
   const companyFilters = parseCompanyFilters(params.companyFilters);
   const contactFilters = parseContactFilters(params.contactFilters);
@@ -172,7 +175,7 @@ export async function resolveRecipients(params: {
     }),
     db.contactConsent.findMany({
       where: { contactId: { in: contactIds }, channel: params.channel, topic: params.topic },
-      select: { contactId: true, status: true },
+      select: { contactId: true, status: true, source: true, withdrawnAt: true },
     }),
     // Feedback at 3 or below that nobody has answered — the strongest "don't sell to them" signal
     // the app has, after the reseller flag.
@@ -225,7 +228,9 @@ export async function resolveRecipients(params: {
     const days = daysOverdue(inv.dueDate, inv.issueDate, now);
     overdueBy.set(inv.companyId, Math.max(overdueBy.get(inv.companyId) ?? 0, days));
   }
-  const consentBy = new Map(consents.map((c) => [c.contactId, c.status]));
+  // A reminder asks only whether they turned it off, as src/lib/marketing/topics.ts counts that.
+  const reminder = params.optOuts === true && params.messageClass !== "MARKETING";
+  const consentBy = new Map(consents.filter((c) => !reminder || countsAsOptOut(c)).map((c) => [c.contactId, c.status]));
   const sentBy = new Map(recentSends.map((r) => [r.contactId ?? "", r._count._all]));
 
   const ctx: SendContext = {
@@ -233,6 +238,7 @@ export async function resolveRecipients(params: {
     channel: params.channel,
     topic: params.topic,
     limits: params.settings.limits,
+    optOuts: params.optOuts === true,
   };
 
   return capped.map((contact) => {

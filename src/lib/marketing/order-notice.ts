@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { ConsentStatus, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { STILL_THERE } from "@/lib/contacts/left";
 import { toPlain } from "@/lib/serialize";
@@ -19,6 +19,7 @@ import { formatCurrency } from "@/lib/utils";
 import { workspaceClock } from "@/lib/time/workspace";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { formatOrderId } from "@/lib/order-id";
+import { countsAsOptOut } from "@/lib/marketing/topics";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -125,7 +126,10 @@ export async function resolveNoticeRecipients(companyProductId: string, kind: No
   const domains = [...new Set(addresses.map((a) => a.split("@")[1]).filter(Boolean))];
   const now = new Date();
 
-  const [suppressions, feedback, invoices, tickets, clock] = await Promise.all([
+  // A renewal reminder is a reminder: somebody who unticked renewal reminders, or unsubscribed from
+  // everything, isn't sent one (owner, 18 Oct 2026). A confirmation of what they bought always goes.
+  const optOuts = kind === "RENEWAL";
+  const [suppressions, feedback, invoices, tickets, clock, consents] = await Promise.all([
     db.suppression.findMany({
       where: {
         OR: [
@@ -155,7 +159,12 @@ export async function resolveNoticeRecipients(companyProductId: string, kind: No
       select: { priority: true, status: true, createdAt: true },
     }),
     workspaceClock(),
+    optOuts
+      ? db.contactConsent.findMany({ where: { contactId: { in: contacts.map((c) => c.id) }, channel: "EMAIL", topic: notice.topic }, select: { contactId: true, status: true, source: true, withdrawnAt: true } })
+      : Promise.resolve([] as { contactId: string; status: ConsentStatus; source: string; withdrawnAt: Date | null }[]),
   ]);
+  // Only a turning-off counts (src/lib/marketing/topics.ts): a reminder needs no opt-in.
+  const consentBy = new Map(consents.filter(countsAsOptOut).map((c) => [c.contactId, c.status]));
 
   const overdue = invoices.reduce((worst, i) => Math.max(worst, daysOverdue(i.dueDate, i.issueDate, now)), 0);
   const breached = tickets.filter((t) => getTicketSlaStatus(t.priority, t.status, t.createdAt, clock, now).key === "overdue").length;
@@ -180,8 +189,8 @@ export async function resolveNoticeRecipients(companyProductId: string, kind: No
             (s.scope === "DOMAIN" && domain !== null && s.value === domain),
         )
         .map((s) => ({ reason: s.reason })),
-      // Consent is not consulted for a transactional notice, but the shape wants a value.
-      consent: null,
+      // Only a reminder asks: whether they opted out of its topic.
+      consent: optOuts && consentBy.has(contact.id) ? { status: consentBy.get(contact.id)! } : null,
       signals: {
         unansweredFeedback: feedback,
         daysOverdue: overdue > 0 ? overdue : null,
@@ -195,6 +204,7 @@ export async function resolveNoticeRecipients(companyProductId: string, kind: No
       channel: "EMAIL",
       topic: notice.topic,
       limits: settings.limits,
+      optOuts,
     });
 
     return {

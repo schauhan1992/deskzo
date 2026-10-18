@@ -189,6 +189,8 @@ export const TEMPLATES: readonly Template[] = [
                 to: "company_contact",
                 companyId: "{{trigger.company.id}}",
                 from: "company",
+                // Stopped for a customer who unticks renewal reminders (owner, 18 Oct 2026).
+                topic: "RENEWALS",
                 subject: "Your {{trigger.order.itemName}} renews in {{trigger.daysLeft}} days",
                 body: "Hello,\n\nYour subscription to {{trigger.order.itemName}} ({{trigger.order.quantity}}) comes up for renewal in {{trigger.daysLeft}} days. We will be in touch about renewing it; reply to this email with any questions.\n\nRegards",
               },

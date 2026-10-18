@@ -17,10 +17,18 @@ import { canSend } from "@/lib/marketing/suppression";
 
 export type InviteeVerdict = { email: string; ok: true } | { email: string; ok: false; left: boolean; detail: string };
 
+/** One address's verdict in plain terms: `who` and `reason` for whoever words the refusal. */
+export type AddressVerdict = { email: string; ok: true } | { email: string; ok: false; left: true; who: string; company: string } | { email: string; ok: false; left: false; reason: string };
+
 const TRANSACTIONAL = { messageClass: "TRANSACTIONAL", channel: "EMAIL", topic: "SERVICE", limits: { maxPerContactPerWeek: 0, overdueDaysBlock: 0, requireVerifiedAddress: false } } as const;
 const NO_SIGNALS = { unansweredFeedback: 0, daysOverdue: null, breachedTickets: 0, sentInLastWeek: 0 };
 
-export async function screenInvitees(emails: string[], now = new Date()): Promise<InviteeVerdict[]> {
+/**
+ * The hard stops for mail to these addresses, worded by nobody yet — the meeting invitations below, and
+ * the helpdesk's emails (src/lib/support-mail/send.ts), which ignore `left`: somebody who wrote in is
+ * answered wherever they work now.
+ */
+export async function screenAddresses(emails: string[], now = new Date()): Promise<AddressVerdict[]> {
   const addresses = [...new Set(emails.map((e) => e.trim().toLowerCase()).filter(Boolean))];
   if (!addresses.length) return [];
   const domains = [...new Set(addresses.map((a) => a.split("@")[1]).filter((d): d is string => !!d))];
@@ -50,14 +58,14 @@ export async function screenInvitees(emails: string[], now = new Date()): Promis
   ]);
   const ours = new Set(colleagues.map((u) => u.email?.trim().toLowerCase()).filter(Boolean));
 
-  return addresses.map((email): InviteeVerdict => {
+  return addresses.map((email): AddressVerdict => {
     const domain = email.split("@")[1] ?? "";
     const colleague = ours.has(email);
     const theirs = colleague ? [] : contacts.filter((c) => c.email?.trim().toLowerCase() === email);
     const still = theirs.filter((c) => !left.has(c.id));
     if (theirs.length > 0 && still.length === 0) {
       const who = theirs[0]!;
-      return { email, ok: false, left: true, detail: `${who.name} has left ${who.company.name}, so isn't invited.` };
+      return { email, ok: false, left: true, who: who.name, company: who.company.name };
     }
     const onAddress = suppressions.filter((s) => (s.scope === "EMAIL" && s.value === email) || (s.scope === "DOMAIN" && s.value === domain));
     // Each contact still there with this address must be one mail may go to — the address is theirs.
@@ -70,10 +78,20 @@ export async function screenInvitees(emails: string[], now = new Date()): Promis
       : [{ company: { managedByResellerId: null }, contact: { email, phone: null, emailStatus: "UNKNOWN", emailCheckedValue: null }, suppressions: onAddress.map((s) => ({ reason: s.reason })) }];
     for (const state of cases) {
       const verdict = canSend({ ...state, consent: null, signals: NO_SIGNALS }, TRANSACTIONAL);
-      if (!verdict.ok) return { email, ok: false, left: false, detail: `${email} can't be invited: ${verdict.detail}` };
+      if (!verdict.ok) return { email, ok: false, left: false, reason: verdict.detail };
     }
     return { email, ok: true };
   });
+}
+
+export async function screenInvitees(emails: string[], now = new Date()): Promise<InviteeVerdict[]> {
+  return (await screenAddresses(emails, now)).map((v): InviteeVerdict =>
+    v.ok
+      ? v
+      : v.left
+        ? { email: v.email, ok: false, left: true, detail: `${v.who} has left ${v.company}, so isn't invited.` }
+        : { email: v.email, ok: false, left: false, detail: `${v.email} can't be invited: ${v.reason}` },
+  );
 }
 
 /** The first refusal among these, in words — or null when everybody may be invited. */

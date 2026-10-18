@@ -90,6 +90,12 @@ export const FIELD_HINTS: Record<string, Record<string, FieldHint>> = {
     companyId: { ...company, showWhen: { to: ["company_contact"] } },
     userId: { label: "Colleague", kind: "person", special: [OWNER], showWhen: { to: ["person"] } },
     from: { label: "From", options: { owner: "The workflow owner's mailbox", lead_owner: "The lead owner's mailbox", company: "The company's mail server" } },
+    topic: {
+      label: "Customers can stop it as",
+      options: { SERVICE: "Service notices", RENEWALS: "Renewal reminders" },
+      hint: "A customer who unticks this in “Manage what we send you”, or unsubscribes from everything, isn't sent it.",
+      showWhen: { to: ["lead_contact", "contact", "company_contact"] },
+    },
     body: { label: "Message", kind: "longText" },
   },
   "document.email": {

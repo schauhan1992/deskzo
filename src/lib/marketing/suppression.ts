@@ -124,6 +124,13 @@ export type SendContext = {
     /** Marketing to an address with no current verdict. Off is the permissive setting. */
     requireVerifiedAddress: boolean;
   };
+  /**
+   * A reminder, not business the customer is part of (owner, 18 Oct 2026): a renewal reminder, a
+   * workflow's email. Transactional still — no opt-in asked for — but the person's own opt-outs stop
+   * it: their unsubscribe from everything, an address suppressed here by hand, and this topic unticked
+   * in the preference centre. An invoice, a ticket reply or a meeting invitation never sets it.
+   */
+  optOuts?: boolean;
 };
 
 /**
@@ -145,6 +152,7 @@ export function suppressionReasons(state: RecipientState, ctx: SendContext): Sup
     found.push({ key, label: suppressionLabels[key], detail, hard });
 
   const marketing = ctx.messageClass === "MARKETING";
+  const optOuts = marketing || ctx.optOuts === true;
   const needsEmail = ctx.channel === "EMAIL";
   const needsPhone = ctx.channel === "WHATSAPP";
 
@@ -175,15 +183,20 @@ export function suppressionReasons(state: RecipientState, ctx: SendContext): Sup
     if (s.reason === "COMPLAINT") {
       add("COMPLAINT", "They marked us as spam. Sending again risks the whole domain.", true);
     }
-    // Marketing only, both of them. Somebody who unsubscribed from offers has not asked to stop
-    // receiving their own invoices, and treating the two as one is how an opt-out turns into a
+    // Marketing and reminders only, both of them. Somebody who unsubscribed from offers has not asked
+    // to stop receiving their own invoices, and treating the two as one is how an opt-out turns into a
     // customer not being told their subscription lapsed.
-    if (s.reason === "UNSUBSCRIBED" && marketing) {
-      add("UNSUBSCRIBED", "They asked us to stop sending marketing.", false);
+    if (s.reason === "UNSUBSCRIBED" && optOuts) {
+      add("UNSUBSCRIBED", marketing ? "They asked us to stop sending marketing." : "They unsubscribed from everything we send.", false);
     }
-    if (s.reason === "MANUAL" && marketing) {
+    if (s.reason === "MANUAL" && optOuts) {
       add("MANUAL", "Somebody here suppressed this address by hand.", false);
     }
+  }
+
+  // A reminder: their own opt-out from its topic stops it — never the lack of an opt-in.
+  if (!marketing && optOuts && state.consent?.status === "UNSUBSCRIBED") {
+    add("NO_CONSENT", "They opted out of this topic.", false);
   }
 
   // ── Marketing only, from here down ─────────────────────────────────────────

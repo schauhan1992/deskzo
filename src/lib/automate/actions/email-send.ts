@@ -11,6 +11,7 @@ import { senderDisplayName } from "@/lib/documents/mail-route-labels";
 import { textToHtml } from "@/lib/pipeline/automation-rules";
 import { ActionError, defineAction, type ActionContext } from "@/lib/automate/action-types";
 import { priorOutput, withOutsideEffect } from "@/lib/automate/effects";
+import { tenantOrigin } from "@/lib/tenancy/resolve";
 import { activePerson, byWorkflow, notReached, personField, reach, type Person } from "@/lib/automate/actions/shared";
 
 /**
@@ -23,7 +24,10 @@ import { activePerson, byWorkflow, notReached, personField, reach, type Person }
  *
  * A customer's contact is held to the rules every transactional email keeps (src/lib/marketing/
  * suppression.ts): somebody still at the company, an address that works and hasn't bounced or
- * complained, and never a reseller's customer. The workflow's owner must be able to see contacts'
+ * complained, and never a reseller's customer. It's a reminder, not business they're part of (owner,
+ * 18 Oct 2026), so their own opt-outs stop it too — unsubscribed from everything, suppressed here by
+ * hand, or its topic (service notices, renewal reminders) unticked — and it carries the link to choose:
+ * stopped that way, the step finishes without sending (`sent: false`), as nothing went wrong. The workflow's owner must be able to see contacts'
  * details, and reach the lead or contact. What went out is logged as the document emails are: on the
  * contact's mail log, and on the lead's timeline when there is a lead.
  *
@@ -31,7 +35,9 @@ import { activePerson, byWorkflow, notReached, personField, reach, type Person }
  * person rather than send it again (src/lib/automate/effects.ts).
  */
 
-type Output = { sent: true; via: "mailbox" | "company"; from: string; recipient: "contact" | "person"; contactId: string | null; userId: string | null };
+type Output =
+  | { sent: true; via: "mailbox" | "company"; from: string; recipient: "contact" | "person"; contactId: string | null; userId: string | null }
+  | { sent: false; skipped: string; recipient: "contact"; contactId: string; userId: null };
 
 const optionalId = z.string().trim().min(1).max(60).optional();
 
@@ -48,6 +54,8 @@ const input = z
     userId: personField.optional(),
     /** From: the workflow owner's mailbox, the lead owner's, or the company's mail server. */
     from: z.enum(["owner", "lead_owner", "company"]).default("owner"),
+    /** What a customer can stop it as in the preference centre: a service notice, or a renewal reminder. */
+    topic: z.enum(["SERVICE", "RENEWALS"]).default("SERVICE"),
     subject: z
       .string()
       .trim()
@@ -65,7 +73,10 @@ const input = z
   });
 
 type Input = z.infer<typeof input>;
-type Recipient = { kind: "contact"; contactId: string; companyId: string; name: string; email: string } | { kind: "person"; userId: string; name: string; email: string };
+type Recipient =
+  | { kind: "contact"; contactId: string; companyId: string; name: string; email: string }
+  | { kind: "person"; userId: string; name: string; email: string }
+  | { kind: "opted_out"; contactId: string; reason: string };
 
 /** Who it goes to, checked — or refused with the reason. */
 async function recipientFor(ctx: ActionContext, i: Input): Promise<Recipient> {
@@ -96,13 +107,18 @@ async function recipientFor(ctx: ActionContext, i: Input): Promise<Recipient> {
   const [resolved] = await resolveRecipients({
     contactIds: [contactId!],
     channel: "EMAIL",
-    topic: "SERVICE",
+    topic: i.topic,
     messageClass: "TRANSACTIONAL",
     settings: await marketingSettings(),
+    optOuts: true,
   });
   // Not found by name: they have left their company (src/lib/contacts/left.ts).
   if (!resolved) throw new ActionError("The contact has left their company, so wasn't emailed.", "PERMANENT");
-  if (!resolved.verdict.ok) throw new ActionError(`${resolved.recipient.name} can't be emailed: ${resolved.verdict.detail}`, "PERMANENT");
+  if (!resolved.verdict.ok) {
+    // Their own choice — nothing wrong with the workflow: not sent, and the run goes on.
+    if (resolved.verdict.findings.every((f) => !f.hard)) return { kind: "opted_out", contactId: resolved.recipient.contactId, reason: `${resolved.recipient.name} wasn't emailed: ${resolved.verdict.detail}` };
+    throw new ActionError(`${resolved.recipient.name} can't be emailed: ${resolved.verdict.detail}`, "PERMANENT");
+  }
   const r = resolved.recipient;
   return { kind: "contact", contactId: r.contactId, companyId: r.companyId, name: r.name, email: r.email!.trim() };
 }
@@ -133,7 +149,7 @@ export const emailSend = defineAction({
   permission: null,
   risk: "irreversible",
   input,
-  outputs: ["sent", "via", "from", "recipient", "contactId", "userId"],
+  outputs: ["sent", "skipped", "via", "from", "recipient", "contactId", "userId"],
   preview: (i) =>
     `Would email ${i.to === "lead_contact" ? "the lead's contact" : i.to === "contact" ? "a contact" : i.to === "company_contact" ? "the customer's main contact" : "a colleague"} from ${i.from === "company" ? "the company's mail server" : i.from === "lead_owner" ? "the lead owner's mailbox" : "the workflow owner's mailbox"}: "${i.subject}".`,
   async run(ctx, i): Promise<Output> {
@@ -145,12 +161,16 @@ export const emailSend = defineAction({
     if (i.leadId && (await moduleAccessFor(ctx.actorId, "leads")) !== "available") throw new ActionError("The workflow's owner can't use Leads, so can't email from a lead.", "PERMANENT");
     if (i.leadId && i.to !== "lead_contact") await reach(ctx, "leads", "view", i.leadId, "lead");
     const recipient = await recipientFor(ctx, i);
+    if (recipient.kind === "opted_out") return { sent: false, skipped: recipient.reason, recipient: "contact", contactId: recipient.contactId, userId: null };
     const sender = await senderFor(ctx, i);
     const actor = await db.user.findUnique({ where: { id: ctx.actorId }, select: { name: true, email: true } });
     if (!actor) throw notReached("workflow's owner");
-    const html = textToHtml(i.body);
+    // To a customer: the link to choose what they're sent, as every reminder carries — this email's own.
+    const token = randomBytes(24).toString("base64url");
+    const text = recipient.kind === "contact" ? `${i.body}\n\n—\nManage what we send you: ${await tenantOrigin()}/preferences/${token}` : i.body;
+    const html = textToHtml(text);
 
-    const { output, fresh } = await withOutsideEffect<Output>(ctx, async () => {
+    const { output, fresh } = await withOutsideEffect<Extract<Output, { sent: true }>>(ctx, async () => {
       const base = { sent: true as const, recipient: recipient.kind, contactId: recipient.kind === "contact" ? recipient.contactId : null, userId: recipient.kind === "person" ? recipient.userId : null };
       if (sender) {
         const sent = await sendAsUser(sender.id, { subject: i.subject, html, to: [{ name: recipient.name, email: recipient.email }], attachments: [] });
@@ -166,7 +186,7 @@ export const emailSend = defineAction({
           replyTo: actor.email,
           subject: i.subject,
           html,
-          text: i.body,
+          text,
         },
         "TRANSACTIONAL",
         { delivering: true },
@@ -182,14 +202,14 @@ export const emailSend = defineAction({
       if (recipient.kind === "contact") {
         await db.marketingMessage.create({
           data: {
-            token: randomBytes(24).toString("base64url"),
+            token,
             companyId: recipient.companyId,
             contactId: recipient.contactId,
             channel: "EMAIL",
             messageClass: "TRANSACTIONAL",
             subject: i.subject,
             body: html,
-            textBody: i.body,
+            textBody: text,
             toEmail: recipient.email,
             status: "SENT",
             scheduledFor: now,

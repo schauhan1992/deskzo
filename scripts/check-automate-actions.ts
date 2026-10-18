@@ -153,6 +153,14 @@ async function main() {
     const gone = await contact(acme.id, "Gone ZZ", "gone@zzact.invalid", { leftAt: new Date() });
     const bounced = await contact(acme.id, "Bounced ZZ", "bounced@zzact.invalid");
     await inA(() => db.suppression.create({ data: { scope: "EMAIL", value: "bounced@zzact.invalid", reason: "HARD_BOUNCE" } }));
+    // Customers' own choices (owner, 18 Oct 2026): one unsubscribed from everything, one who unticked renewal
+    // reminders on the preference page, one who did that on the page before it showed reminders honestly.
+    const leaver = await contact(acme.id, "Unsubscribed ZZ", "unsub@zzact.invalid");
+    await inA(() => db.suppression.create({ data: { scope: "EMAIL", value: "unsub@zzact.invalid", reason: "UNSUBSCRIBED" } }));
+    const noRenewals = await contact(acme.id, "No renewals ZZ", "norenew@zzact.invalid");
+    await inA(() => db.contactConsent.create({ data: { contactId: noRenewals, topic: "RENEWALS", status: "UNSUBSCRIBED", source: "PREFERENCE_CENTRE", withdrawnAt: new Date() } }));
+    const oldPage = await contact(acme.id, "Old page ZZ", "oldpage@zzact.invalid");
+    await inA(() => db.contactConsent.create({ data: { contactId: oldPage, topic: "RENEWALS", status: "UNSUBSCRIBED", source: "PREFERENCE_CENTRE", withdrawnAt: new Date("2026-10-01T00:00:00Z") } }));
     const lead = (companyId: string, title: string, ownerUserId: string | null, extra: Record<string, unknown> = {}) =>
       inA(() => db.lead.create({ data: { companyId, title, ownerUserId, createdByUserId: owner, source: "OTHER", ...extra }, select: { id: true } }).then((l) => l.id));
     const deal = await lead(acme.id, "ZZ deal", owner, { contactId: asha });
@@ -301,12 +309,24 @@ async function main() {
     const mailed = await runOnce("ZZ mail the contact", fromCompany({ to: "lead_contact", leadId: deal }));
     const toAsha = sent.find((m) => m.to === "asha@zzact.invalid");
     ok("sent to the lead's contact through the company's mail server", mailed.status === "SUCCEEDED" && !!toAsha, mailed.error);
-    ok("  in the owner's name, replies to them, the body as paragraphs", toAsha?.replyTo === "zzowner@zzact.invalid" && !!toAsha.fromName?.includes("zzowner") && (toAsha.html.match(/<p>/g) ?? []).length === 2);
+    ok("  in the owner's name, replies to them, the body as paragraphs", toAsha?.replyTo === "zzowner@zzact.invalid" && !!toAsha.fromName?.includes("zzowner") && (toAsha.html.match(/<p>/g) ?? []).length === 3);
+    const ashaLog = await inA(() => db.marketingMessage.findFirst({ where: { contactId: asha, messageClass: "TRANSACTIONAL" }, orderBy: { createdAt: "desc" }, select: { token: true } }));
+    ok("  ending with the link to choose what they're sent — its own logged email's", !!ashaLog && !!toAsha?.text?.includes(`/preferences/${ashaLog.token}`) && !!toAsha.text.includes("Manage what we send you"), toAsha?.text?.split("Regards")[1]);
     ok("  on the contact's mail log and the lead's timeline", (await inA(() => db.marketingMessage.count({ where: { contactId: asha, status: "SENT", messageClass: "TRANSACTIONAL" } }))) === 1 && (await inA(() => db.activity.count({ where: { leadId: deal, type: "EMAIL" } }))) === 1);
     const toGone = await runOnce("ZZ mail the leaver", fromCompany({ to: "contact", contactId: gone }));
     ok("not to somebody who has left the company", toGone.status === "FAILED" && toGone.error.includes("has left"), toGone.error);
     const toBounced = await runOnce("ZZ mail the bounced", fromCompany({ to: "contact", contactId: bounced }));
     ok("not to an address that bounced", toBounced.status === "FAILED" && toBounced.error.toLowerCase().includes("bounced"), toBounced.error);
+    const sentBeforeChoices = sent.length;
+    const toLeaver = await runOnce("ZZ mail the unsubscribed", fromCompany({ to: "contact", contactId: leaver }));
+    const leaverStep = toLeaver.steps.find((s) => s.stepId === "send");
+    ok("not to somebody who unsubscribed from everything — and the run goes on, nothing wrong", toLeaver.status === "SUCCEEDED" && leaverStep?.status === "SUCCEEDED" && JSON.stringify(leaverStep.outputSummary).includes('"sent":false') && sent.length === sentBeforeChoices, JSON.stringify(leaverStep?.outputSummary));
+    const renewalNote = await runOnce("ZZ renewal to the opted out", fromCompany({ to: "contact", contactId: noRenewals, topic: "RENEWALS" }));
+    ok("a renewal reminder not to somebody who unticked renewal reminders", renewalNote.status === "SUCCEEDED" && sent.length === sentBeforeChoices && JSON.stringify(renewalNote.steps[0]?.outputSummary).includes("opted out"), JSON.stringify(renewalNote.steps[0]?.outputSummary));
+    const serviceNote = await runOnce("ZZ service note to them", fromCompany({ to: "contact", contactId: noRenewals }));
+    ok("  a service notice still reaches them", serviceNote.status === "SUCCEEDED" && sent.some((m) => m.to === "norenew@zzact.invalid"), serviceNote.error);
+    const oldPageNote = await runOnce("ZZ renewal to the old page", fromCompany({ to: "contact", contactId: oldPage, topic: "RENEWALS" }));
+    ok("  and one unticked on the page before it showed reminders honestly isn't held against them", oldPageNote.status === "SUCCEEDED" && sent.some((m) => m.to === "oldpage@zzact.invalid"), oldPageNote.error);
     const toColleague = await runOnce("ZZ mail a colleague", fromCompany({ to: "person", userId: colleague }));
     ok("to a colleague: sent, and not on any customer's log", toColleague.status === "SUCCEEDED" && sent.some((m) => m.to === "zzcolleague@zzact.invalid") && (await inA(() => db.marketingMessage.count({ where: { toEmail: "zzcolleague@zzact.invalid" } }))) === 0, toColleague.error);
 

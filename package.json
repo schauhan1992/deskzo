@@ -84,6 +84,7 @@
     "check:notes": "tsx scripts/check-notes.ts",
     "check:notifications": "tsx scripts/check-notifications.ts",
     "check:notification-emails": "tsx scripts/check-notification-emails.ts",
+    "check:customer-emails": "tsx scripts/check-customer-emails.ts",
     "check:analytics": "tsx scripts/check-analytics.ts",
     "check:finance": "tsx scripts/check-finance-cards.ts",
     "check:layouts": "tsx scripts/check-layouts.ts",

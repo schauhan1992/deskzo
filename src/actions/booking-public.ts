@@ -23,14 +23,14 @@ export async function bookingTimes(slug: string): Promise<PublicBookingPage | nu
 export async function makeBooking(
   slug: string,
   input: { start: string; name: string; email: string; phone?: string; company?: string; notes?: string; website?: string; elapsedMs?: number },
-): Promise<ActionResult<{ when: string; host: string; invited: boolean }>> {
+): Promise<ActionResult<{ when: string; host: string; invited: boolean; invites: boolean }>> {
   if (!(await moduleAvailableForTenant("booking"))) return { ok: false, error: CLOSED };
   const given = input && typeof input === "object" ? input : ({} as typeof input);
   // A field no person sees, filled in; or the page answered faster than anybody reads it.
   if (given.website || (typeof given.elapsedMs === "number" && given.elapsedMs < 2000)) {
-    return { ok: true, data: { when: "", host: "", invited: true } };
+    return { ok: true, data: { when: "", host: "", invited: true, invites: true } };
   }
   const source = clientIpFrom(await headers()) ?? "unknown";
   const made = await bookSlot(String(slug ?? ""), given, source);
-  return made.ok ? { ok: true, data: { when: made.when, host: made.host, invited: made.invited } } : made;
+  return made.ok ? { ok: true, data: { when: made.when, host: made.host, invited: made.invited, invites: made.invites } } : made;
 }

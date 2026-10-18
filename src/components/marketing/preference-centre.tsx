@@ -44,8 +44,9 @@ export function PreferenceCentre({ token, preferences }: { token: string; prefer
           <MailX className="mx-auto h-8 w-8 text-subtle" aria-hidden />
           <h1 className="text-lg font-semibold text-text">You&apos;re unsubscribed.</h1>
           <p className="text-sm text-muted">
-            {preferences.ourName} won&apos;t send you marketing again. Anything to do with your account — an invoice,
-            a renewal you asked about, a service notice — still reaches you.
+            {preferences.ourName} won&apos;t send you news, offers or reminders again. What&apos;s part of business you
+            have with them — an invoice or quote, an order confirmation, a reply to your support request, a meeting
+            invitation — still reaches you.
           </p>
           <Button
             variant="secondary"
@@ -75,28 +76,46 @@ export function PreferenceCentre({ token, preferences }: { token: string; prefer
           </p>
         </div>
 
-        <div className="space-y-2">
-          {preferences.topics.map((topic) => {
-            const on = chosen.has(topic.key);
-            return (
-              <label
-                key={topic.key}
-                className="flex cursor-pointer items-start gap-3 rounded-lg border border-line px-3 py-2.5 hover:bg-surface-sunken"
-              >
-                <input
-                  type="checkbox"
-                  checked={on}
-                  onChange={() => toggle(topic.key)}
-                  className="mt-0.5 h-4 w-4 shrink-0 accent-brand"
-                />
-                <span>
-                  <span className="block text-sm font-medium text-text">{topic.label}</span>
-                  <span className="block text-xs text-muted">{topic.blurb}</span>
-                </span>
-              </label>
-            );
-          })}
-        </div>
+        {(
+          [
+            { reminder: true, title: "Reminders about what you have with us", note: "Sent unless you untick them." },
+            { reminder: false, title: "News and offers", note: "Only the ones you tick." },
+          ] as const
+        ).map((group) => (
+          <div key={group.title} className="space-y-2">
+            <div>
+              <h2 className="text-sm font-medium text-text">{group.title}</h2>
+              <p className="text-xs text-muted">{group.note}</p>
+            </div>
+            {preferences.topics
+              .filter((topic) => topic.reminder === group.reminder)
+              .map((topic) => {
+                const on = chosen.has(topic.key);
+                return (
+                  <label
+                    key={topic.key}
+                    className="flex cursor-pointer items-start gap-3 rounded-lg border border-line px-3 py-2.5 hover:bg-surface-sunken"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={() => toggle(topic.key)}
+                      className="mt-0.5 h-4 w-4 shrink-0 accent-brand"
+                    />
+                    <span>
+                      <span className="block text-sm font-medium text-text">{topic.label}</span>
+                      <span className="block text-xs text-muted">{topic.blurb}</span>
+                    </span>
+                  </label>
+                );
+              })}
+          </div>
+        ))}
+
+        <p className="text-xs text-muted">
+          Whatever you choose, what&apos;s part of business you have with {preferences.ourName} still reaches you: an invoice or
+          quote, an order confirmation, a reply to your support request, a meeting invitation.
+        </p>
 
         {error && <p className="text-sm text-danger">{error}</p>}
 

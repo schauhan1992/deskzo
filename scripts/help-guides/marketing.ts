@@ -229,7 +229,8 @@ export const guide: SeedGuide = {
       qa("Can we write to a reseller's customers?", p("No. They are left out of every audience and refused at every send, whatever list they are on.")),
       qa(
         "How does somebody unsubscribe?",
-        p("Every email ends with a link to their own preferences page, where they choose the topics they want or unsubscribe from everything. Unsubscribing puts them on the suppression list and ends any journey they are in. Mail about their account, such as an invoice, still reaches them."),
+        p("Every email ends with a link to their own preferences page, where they choose the topics they want or unsubscribe from everything. Unsubscribing puts them on the suppression list and ends any journey they are in."),
+        p("Renewal reminders and service notices are reminders: they show ticked until the person unticks them. Unticking one, or unsubscribing from everything, also stops your renewal reminders and your workflows' emails to them. What's part of business they have with you — an invoice or quote, an order confirmation, a ticket reply, a meeting invitation — still reaches them. Settings › Customer emails lists every email your customers get."),
       ),
       qa("Why does a campaign wait for approval?", p("It goes to at least as many people as Approval needed above in Settings › Mail & messaging. Somebody else with the permission to approve a large send has to approve it.")),
       qa(

@@ -25,7 +25,7 @@ import {
 } from "@/lib/marketing/form-fields";
 import { stillToFill, stillToFillLines } from "@/lib/custom-fields/outside";
 import { createData, outsideDefinitions } from "@/lib/custom-fields/outside-server";
-import { TOPICS } from "@/lib/marketing/topics";
+import { REMINDER_TOPICS, TOPICS, countsAsOptOut } from "@/lib/marketing/topics";
 // Whichever kind of token arrived — a message's, or the contact's own long-lived one.
 import { contactForToken, unsubscribeByToken } from "@/lib/marketing/unsubscribe";
 import { notifyUser } from "@/lib/notify";
@@ -73,7 +73,7 @@ export async function getPreferences(token: string) {
       : Promise.resolve(null),
   ]);
 
-  const byTopic = new Map(consents.map((c) => [c.topic, c.status]));
+  const byTopic = new Map(consents.map((c) => [c.topic, c]));
   return {
     firstName: contact.name.trim().split(/\s+/)[0] ?? null,
     email: contact.email,
@@ -81,10 +81,15 @@ export async function getPreferences(token: string) {
     ourName: org.tradeName || org.legalName || "us",
     postalAddress: org.marketingPostalAddress,
     unsubscribedFromEverything: !!suppressed,
-    topics: TOPICS.map((t) => ({
-      ...t,
-      subscribed: byTopic.get(t.key) === "SUBSCRIBED",
-    })),
+    /**
+     * Offers and news: ticked only when they opted in. Reminders (src/lib/marketing/topics.ts): ticked
+     * unless they turned them off, or unsubscribed from everything — as they're sent.
+     */
+    topics: TOPICS.map((t) => {
+      const row = byTopic.get(t.key);
+      const reminder = REMINDER_TOPICS.has(t.key);
+      return { ...t, reminder, subscribed: reminder ? !suppressed && !(row && countsAsOptOut(row)) : row?.status === "SUBSCRIBED" };
+    }),
   };
 }
 
@@ -97,11 +102,16 @@ export async function updatePreferences(input: {
 
   const chosen = new Set(input.topics);
   const now = new Date();
+  const existing = new Map((await db.contactConsent.findMany({ where: { contactId: contact.id, channel: "EMAIL" }, select: { topic: true, status: true, source: true, withdrawnAt: true } })).map((c) => [c.topic, c]));
 
   // The day on the workspace's calendar, not UTC's.
   const stamp = (await workspaceClock()).today(now);
   for (const topic of TOPICS) {
     const subscribed = chosen.has(topic.key);
+    // A reminder left ticked is as it was: shown ticked because it's sent, not an opt-in they gave. Ticked
+    // again after turning it off, it's on again.
+    const row = existing.get(topic.key);
+    if (REMINDER_TOPICS.has(topic.key) && subscribed && !(row && countsAsOptOut(row))) continue;
     // The evidence has to describe the status it sits beside. A row reading SUBSCRIBED while its
     // evidence recounts an unsubscribe is the kind of consent record that is worse than none.
     const evidence = subscribed

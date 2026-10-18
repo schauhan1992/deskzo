@@ -5,6 +5,7 @@ import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
 import { notMigratedYet } from "@/lib/custom-fields/server";
 import { scheduleMeeting } from "@/lib/calendar/meetings";
+import { bookingInvitesOn } from "@/lib/customer-email-settings";
 import { busyFor } from "@/lib/calendar/busy";
 import { intakeLead, leadPayloadSchema } from "@/lib/lead-capture/intake";
 import { companyPath, leadPath } from "@/lib/record-links";
@@ -154,7 +155,7 @@ export async function bookSlot(
   input: BookingInput,
   source: string,
   now = new Date(),
-): Promise<{ ok: true; when: string; host: string; invited: boolean } | { ok: false; error: string }> {
+): Promise<{ ok: true; when: string; host: string; invited: boolean; invites: boolean } | { ok: false; error: string }> {
   const page = await pageBySlug(slug);
   if (!page) return { ok: false, error: "This booking page isn't taking bookings." };
   const name = clean(input.name, BOOKING_LIMITS.name);
@@ -222,16 +223,19 @@ export async function bookSlot(
     }
   }
 
+  // The guest is emailed an invitation unless the workspace turned that off (Settings › Customer emails —
+  // owner, 18 Oct 2026): then the time goes in the host's calendar with the guest's details, nobody invited.
+  const invites = await bookingInvitesOn();
   const meeting = await scheduleMeeting(
     hostId,
     {
       title: `${page.title} — ${name}${company ? `, ${company}` : ""}`,
-      description: [notes ? `From ${name}: ${notes}` : null, phone ? `Phone: ${phone}` : null, `Booked on your booking page “${page.title}”.`].filter(Boolean).join("\n\n"),
+      description: [notes ? `From ${name}: ${notes}` : null, phone ? `Phone: ${phone}` : null, invites ? null : `Guest: ${name} <${email}> — not emailed an invitation.`, `Booked on your booking page “${page.title}”.`].filter(Boolean).join("\n\n"),
       location: "",
       startsAt: start,
       endsAt: end,
       online: page.online,
-      attendees: [{ email, name }],
+      attendees: invites ? [{ email, name }] : [],
     },
     { ...links, ticketId: null, visitId: null },
     `Booking page ${page.title}`,
@@ -250,5 +254,5 @@ export async function bookSlot(
     link: leadSeq ? leadPath(leadSeq) : companySeq ? companyPath(companySeq) : "/calendar",
   });
   await recordAudit({ userId: page.createdById, action: "CREATE", entityType: "Booking", entityId: booking.id, entityLabel: `${page.title}: ${name} with ${host.name}, ${clock.dateTime(start)}` });
-  return { ok: true, when: clock.dateTime(start), host: host.name, invited: meeting.ok };
+  return { ok: true, when: clock.dateTime(start), host: host.name, invited: invites && meeting.ok, invites };
 }

@@ -95,6 +95,11 @@ export const guide: SeedGuide = {
       setting("Open a lead in", "In each booking page", p("The pipeline a booking's lead starts in. Shown only where your workspace has leads.")),
       setting("Add an online meeting link", "In each booking page", p("Adds an online meeting to the invitation when the host's calendar is connected. The page tells the customer the link comes with the invitation.")),
       setting("Taking bookings", "In each booking page", p("Whether the page is in use. Switched off, its address says the booking page isn't available.")),
+      setting(
+        "Booking invitation",
+        "Settings › Customer emails",
+        p("On by default: the guest is emailed an invitation to the time they booked. Switched off, the time still goes in the host's calendar with the guest's name and address, and the guest isn't emailed — the page tells them it's in the host's calendar. It's for every booking page at once."),
+      ),
     ],
     faq: [
       qa(
