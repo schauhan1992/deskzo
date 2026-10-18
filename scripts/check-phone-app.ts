@@ -17,6 +17,10 @@
  *     comes back logged with what the dialog was about.
  *   · Calls switched off for the person: refused. Signed out: the token stops at once.
  *   · Settings › Deskzo app: not there until the app is out; then a code and a QR, the phones, signing out.
+ *   · Signing in through the phone's browser: the page the app opens, a code bound to the app's challenge that
+ *     nothing else can spend, the sign-in in Security › Sign-ins.
+ *   · Tablets as tablets, under the role's own rule; a role that asks where you are at sign-in answered by the
+ *     app, and a phone signed in before it asked told to sign in again.
  *
  * Everything is named ZZPHONE and removed at the end.
  *
@@ -35,6 +39,7 @@ process.env.DESKZO_APP = "on";
 const TAG = "ZZPHONE";
 const MAIL = "@zzphone.invalid";
 const ROLE = "ZZPHONE_APPROVED_DEVICES";
+const ROLE_FIELD = "ZZPHONE_FIELD";
 let requestHeaders = new Headers({ host: "deskzo.localhost:3000", "user-agent": "check:phone-app", "x-forwarded-for": "198.51.100.40" });
 let browserUser: { id: string; name: string; email: string; role: string } | null = null;
 
@@ -97,8 +102,8 @@ async function cleanup() {
   await db.task.deleteMany({ where: { id: { in: tasks.map((t) => t.id) } } });
   await db.company.deleteMany({ where: { id: { in: companyIds } } });
   await db.user.deleteMany({ where: { id: { in: ids } } });
-  await db.roleAccessPolicy.deleteMany({ where: { roleKey: ROLE } });
-  await db.role.deleteMany({ where: { key: ROLE } });
+  await db.roleAccessPolicy.deleteMany({ where: { roleKey: { in: [ROLE, ROLE_FIELD] } } });
+  await db.role.deleteMany({ where: { key: { in: [ROLE, ROLE_FIELD] } } });
 }
 
 const ROUTES: [RegExp, string, string[]][] = [
@@ -408,6 +413,69 @@ async function main() {
     ok("  the page renders them", page.includes(`${TAG} Pixel`) && page.includes("Show a pairing code"));
     browserUser = { id: other.id, name: other.name, email: other.email, role: "SALES" };
     ok("nobody signs out somebody else's phone", !(await deviceActions.signOutPhone(phoneId)).ok);
+
+    section("Signing in through the phone's browser");
+    const { createHash, randomBytes } = require("node:crypto") as typeof import("node:crypto");
+    const verifier = randomBytes(32).toString("base64url");
+    const challenge = createHash("sha256").update(verifier).digest("base64url");
+    browserUser = { id: rep.id, name: rep.name, email: rep.email, role: "SALES" };
+    type SignInProps = { params: Promise<{ kind: string; challenge: string }> };
+    const SignInPage = (require("../src/app/(auth)/app-sign-in/[kind]/[challenge]/page") as { default: (p: SignInProps) => Promise<unknown> }).default;
+    const consent = await renderHtml((await SignInPage({ params: Promise.resolve({ kind: "phone", challenge }) })) as never);
+    ok("the page the app opens: who, which workspace, Allow", consent.includes("Sign in to the Deskzo app?") && consent.includes(rep.email) && consent.includes("Allow"));
+    const changed = await renderHtml((await SignInPage({ params: Promise.resolve({ kind: "phone", challenge: "short" }) })) as never);
+    ok("  a link that has been changed: said so, and no Allow", changed.includes("or it has been changed") && !changed.includes("Allow"));
+    const allowed = await deviceActions.allowAppSignIn("phone", challenge);
+    const link = allowed.ok ? allowed.data.link : "";
+    const browserCode = /code=([A-Z0-9]+)$/.exec(link)?.[1] ?? "";
+    const browserPairing = await db.appPairing.findUnique({ where: { codeHash: tokens.digest(browserCode) } });
+    const left = (browserPairing?.expiresAt.getTime() ?? 0) - Date.now();
+    ok("Allow: a code back to the app by its link, bound to its challenge, for two minutes", allowed.ok && link.startsWith("deskzo://signed-in?code=") && browserPairing?.codeChallenge === challenge && left > 100_000 && left <= 120_000);
+    ok("  never for a link that has been changed", !(await deviceActions.allowAppSignIn("phone", "x".repeat(10))).ok && !(await deviceActions.allowAppSignIn("laptop", challenge)).ok);
+    from("198.51.100.43");
+    const caught = await call("POST", "/pair", { body: { code: browserCode, platform: "android", model: `${TAG} Browser` } });
+    ok("another app that caught the link, without the secret: refused", caught.status === 401 && caught.body.error?.code === "wrong_code", caught.status);
+    ok("  nor with a secret of its own", (await call("POST", "/pair", { body: { code: browserCode, verifier: randomBytes(32).toString("base64url"), platform: "android" } })).status === 401);
+    const viaBrowser = await call("POST", "/pair", { body: { code: browserCode, verifier, platform: "android", model: `${TAG} Browser`, form_factor: "phone" } });
+    const browserToken = (viaBrowser.body.data as { token: string } | undefined)?.token ?? "";
+    ok("the app that started it: signed in", viaBrowser.status === 201 && (await call("GET", "/me", { token: browserToken })).status === 200, viaBrowser.status);
+    const browserSignIn = await db.signIn.findFirst({ where: { userId: rep.id, provider: "app-browser" }, orderBy: { at: "desc" } });
+    ok("  in Security › Sign-ins, as the app through the browser, on a phone, from where it was", browserSignIn?.deviceKind === "MOBILE" && browserSignIn.ip === "198.51.100.43");
+    ok("  and the code is spent", (await call("POST", "/pair", { body: { code: browserCode, verifier, platform: "android" } })).status === 401);
+    await call("DELETE", "/device", { token: browserToken });
+
+    section("Tablets, and a role that asks where you are");
+    from("198.51.100.44");
+    const tabCode = await pairing.startPairing(rep.id);
+    const tab = await call("POST", "/pair", { body: { code: tabCode.code, platform: "android", form_factor: "tablet", model: `${TAG} Tab` } });
+    const tabToken = (tab.body.data as { token: string } | undefined)?.token ?? "";
+    const tabRow = tabToken ? await db.appDevice.findUnique({ where: { id: tabToken.slice(4, tabToken.indexOf(".")) }, include: { device: true } }) : null;
+    ok("a tablet signs in as a tablet, in Security › Devices", tab.status === 201 && tabRow?.device.kind === "TABLET" && tabRow.device.label === `Deskzo app on ${TAG} Tab`, tab.status);
+    await call("DELETE", "/device", { token: tabToken });
+    await db.role.create({ data: { key: ROLE_FIELD, name: `${TAG} field` } });
+    await db.roleAccessPolicy.create({ data: { roleKey: ROLE_FIELD, allowTablet: false, requireLocation: true } });
+    clearAccessCache();
+    const field = await db.user.create({ data: { name: `${TAG} Field`, email: `field${MAIL}`, role: ROLE_FIELD, passwordHash: "x".repeat(60) } });
+    const fieldCode = await pairing.startPairing(field.id);
+    const asTablet = await call("POST", "/pair", { body: { code: fieldCode.code, platform: "android", form_factor: "tablet", latitude: 19.076, longitude: 72.8777 } });
+    ok("a role that doesn't allow tablets: a tablet is refused, and told why", asTablet.status === 403 && asTablet.body.error?.message === "Your role doesn't allow Deskzo on a tablet.", asTablet.body.error?.message);
+    const noPlace = await call("POST", "/pair", { body: { code: fieldCode.code, platform: "android", form_factor: "phone" } });
+    ok("a role that asks where you are at sign-in: a phone that doesn't say is asked to", noPlace.status === 403 && noPlace.body.error?.code === "location_needed", noPlace.body.error?.code);
+    const withPlace = await call("POST", "/pair", { body: { code: fieldCode.code, platform: "android", form_factor: "phone", model: `${TAG} Field phone`, latitude: 19.076, longitude: 72.8777, accuracy: 20 } });
+    const fieldToken = (withPlace.body.data as { token: string } | undefined)?.token ?? "";
+    ok("  the same code, with where it is: signed in — asking didn't spend it", withPlace.status === 201 && (await call("GET", "/me", { token: fieldToken })).status === 200, withPlace.status);
+    const fieldSignIn = await db.signIn.findFirst({ where: { userId: field.id, provider: "app-code" } });
+    ok("  where it was, in Security › Sign-ins", Number(fieldSignIn?.gpsLatitude) === 19.076 && fieldSignIn?.gpsAccuracyM === 20, JSON.stringify(fieldSignIn?.gpsLatitude));
+    await db.roleAccessPolicy.update({ where: { roleKey: ROLE_FIELD }, data: { requireLocation: false } });
+    clearAccessCache();
+    const earlierCode = await pairing.startPairing(field.id);
+    const earlier = ((await call("POST", "/pair", { body: { code: earlierCode.code, platform: "android", model: `${TAG} Earlier` } })).body.data as { token: string }).token;
+    await db.roleAccessPolicy.update({ where: { roleKey: ROLE_FIELD }, data: { requireLocation: true } });
+    clearAccessCache();
+    const askedLater = await call("GET", "/me", { token: earlier });
+    ok("  a phone signed in before the role asked: refused, and told to sign in again", askedLater.status === 403 && (askedLater.body.error?.message ?? "").includes("Sign the app in again"), askedLater.body.error?.message);
+    ok("  the one that shared where it was: still in", (await call("GET", "/me", { token: fieldToken })).status === 200);
+    from("198.51.100.41");
 
     section("Signing out");
     const second = await pairing.startPairing(rep.id);

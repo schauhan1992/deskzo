@@ -2,7 +2,7 @@
 
 The answers below describe the app as built (mobile/, src/lib/app). Google counts data as **collected**
 when the app sends it off the phone, and **shared** when it is passed to a third party. If the app changes
-— push notifications through Firebase, call recordings — update this and the privacy page
+— push notifications through Firebase, call recordings, location at any time but clocking in and signing in — update this and the privacy page
 (https://deskzo.com/privacy/app) first.
 
 ## Overview questions
@@ -25,15 +25,35 @@ when the app sends it off the phone, and **shared** when it is passed to a third
 | Required or optional | **Optional** — nothing is read until the user switches call sync on, and they can switch it off. |
 | Purposes | **App functionality** (logging the user's calls with customers; caller ID). |
 
+### Location → "Approximate location" and "Precise location"
+
+| Question | Answer |
+|---|---|
+| Collected | **Yes** — the phone's position at the moment the user clocks in or out in the app, if they allow it; and once when they sign the app in, if their company requires location at sign-in (a security setting of the company's, applied to its website too). Never in the background (`ACCESS_BACKGROUND_LOCATION` is blocked in the build). |
+| Shared | **No** — it goes only to the user's company's Deskzo, kept with that day's attendance. |
+| Processed ephemerally | **No** — stored with the attendance. |
+| Required or optional | **Optional** — the user can refuse it; clocking in works without it. (Where the company requires location at sign-in, the app can't be signed in without it.) |
+| Purposes | **App functionality** (attendance: where somebody clocked in from, seen by them, their managers and HR); **Fraud prevention, security, and compliance** (where the company requires it, where somebody signed in from, in its security log). |
+
 ### App activity → "Other user-generated content"
 
 | Question | Answer |
 |---|---|
-| Collected | **Yes** — what the user writes on the after-call card: outcome, notes, callback time, the lead. |
+| Collected | **Yes** — what the user writes on the after-call card (outcome, notes, callback time, the lead); clocking in and out; tasks they add or tick off; leave they ask for; their decisions on what waits for their approval. |
 | Shared | **No** |
 | Processed ephemerally | **No** |
 | Required or optional | **Optional** — the card is the user's choice. |
 | Purposes | **App functionality** |
+
+### App activity → "Other actions"
+
+| Question | Answer |
+|---|---|
+| Collected | **Yes** — where the user's company limits screenshots (a security setting of the company's, applied to its website too): that a screenshot was taken in the app, when, and on which screen. Android 14+ tells the app; the image itself is never read, and the photo library is never opened. |
+| Shared | **No** |
+| Processed ephemerally | **No** — counted and kept in the company's security log. |
+| Required or optional | **Required** where the company sets the limit. |
+| Purposes | **Fraud prevention, security, and compliance** |
 
 ### Device or other IDs
 
@@ -48,7 +68,7 @@ when the app sends it off the phone, and **shared** when it is passed to a third
 ## Not collected
 
 - **Personal info** — the user's name and email are shown from their Deskzo account; the app sends none.
-- **Location** — not read. (The network address a phone connects from is kept with the device for the company's security log; it is not turned into a location.)
+- **Location, at any other time** — read only when the user clocks in or out, or signs in where the company requires it (above). (The network address a phone connects from is kept with the device for the company's security log; it is not turned into a location.)
 - **Photos and videos** — the camera is used only to scan the pairing code; no image is taken or kept.
 - **Audio** — calls are not recorded.
 - **Messages, Calendar, Files and docs, Web browsing, App info and performance, Financial, Health** — none.

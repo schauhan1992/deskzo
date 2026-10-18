@@ -318,6 +318,39 @@ async function main() {
     ok("  nobody decides on their own device", !(await control.decideDevice(approverDevice!.id, "REVOKE")).ok);
 
     // ───────────────────────────────────────────────────────────────────────────
+    section("Rules for a person");
+
+    as(admin);
+    at("203.0.113.10", WINDOWS, adminDesk);
+    const forAgent = await control.savePersonDeviceRule(agent.id, { allowMobile: true, allowTablet: null, allowComputer: null });
+    ok("an admin lets one agent use a phone their role doesn't allow", forAgent.ok, forAgent.ok ? "" : forAgent.error);
+    const agentPhone = await evaluate(agent, "sid-a", phone, "203.0.113.9", IPHONE);
+    ok("  the agent's phone is no longer refused for its kind — it waits for approval like any device", !agentPhone.ok && agentPhone.reason === "DEVICE_PENDING", agentPhone.ok ? "ok" : agentPhone.reason);
+    const forApprover = await control.savePersonDeviceRule(approver.id, { allowMobile: null, allowTablet: null, allowComputer: false });
+    ok("and keeps somebody off computers their role allows", forApprover.ok, forApprover.ok ? "" : forApprover.error);
+    const approverOff = await evaluate(approver, null, adminDesk, "192.0.2.44");
+    ok("  their computer is refused at once", !approverOff.ok && approverOff.reason === "DEVICE_KIND", approverOff.ok ? "ok" : approverOff.reason);
+    const { personRefusal } = require("../src/lib/api/handler") as typeof import("../src/lib/api/handler");
+    const approverRow = await db.user.findUniqueOrThrow({ where: { id: approver.id }, select: { id: true, role: true, isSuperAdmin: true, active: true, kind: true, lockedAt: true, lockedUntil: true } });
+    await control.savePersonDeviceRule(approver.id, { allowMobile: false, allowTablet: null, allowComputer: false });
+    ok("  and the Deskzo app is told the same about a phone", (await personRefusal(approverRow, "192.0.2.44", true, "MOBILE")) === "mobile");
+    ok("a rule that leaves no device at all is refused", !(await control.savePersonDeviceRule(approver.id, { allowMobile: false, allowTablet: false, allowComputer: false })).ok);
+    const boss = await db.user.findFirst({ where: { isSuperAdmin: true }, select: { id: true } });
+    ok("the super admin is never given one", !boss || !(await control.savePersonDeviceRule(boss.id, { allowMobile: false, allowTablet: null, allowComputer: null })).ok);
+    const ownLockout = await control.savePersonDeviceRule(admin.id, { allowMobile: null, allowTablet: null, allowComputer: false });
+    ok("nobody sets a rule that refuses the device they're on", !ownLockout.ok && ownLockout.error.includes("lock you out"), ownLockout.ok ? "" : ownLockout.error);
+    const personRules = await control.listPersonDeviceRules();
+    const agentRule = personRules?.find((r) => r.userId === agent.id);
+    ok("the list: each person's own say beside their role's", !!agentRule && agentRule.own.allowMobile === true && agentRule.role.allowMobile === false && !!personRules?.some((r) => r.userId === approver.id && r.own.allowComputer === false));
+    const rulesHtml = await html(SettingsPage({ searchParams: Promise.resolve({ tab: "rules" }) }));
+    ok("  and on Security › Access › Rules", rulesHtml.includes("By person") && rulesHtml.includes("Zzprobe agent"));
+    ok("taken away, the role's rule applies again", (await control.removePersonDeviceRule(approver.id)).ok && (await evaluate(approver, null, adminDesk, "192.0.2.44")).ok);
+    as(approver);
+    ok("somebody without the security permission can't set one", !(await control.savePersonDeviceRule(agent.id, { allowMobile: false, allowTablet: null, allowComputer: null })).ok);
+    as(admin);
+    ok("  all three \"as the role\" takes one away too", (await control.savePersonDeviceRule(agent.id, { allowMobile: null, allowTablet: null, allowComputer: null })).ok && !(await db.userAccessPolicy.findUnique({ where: { userId: agent.id } })));
+
+    // ───────────────────────────────────────────────────────────────────────────
     section("Sign-ins, and ending them");
 
     as(agent);

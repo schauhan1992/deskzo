@@ -24,3 +24,14 @@ export const calls = {
   ignoresBatteryOptimizations: () => native?.ignoresBatteryOptimizations() ?? true,
   openBatterySettings: () => native?.openBatterySettings(),
 };
+
+/** The workspace's screen rules on this phone (src/lib/screen-rules.tsx): told of screenshots, and blocking them. */
+export const screen = {
+  /** Android 14 and later tell the app when a screenshot is taken; elsewhere nothing can. */
+  detectable: () => native?.screenshotsDetectable() ?? false,
+  setBlocked: (blocked: boolean) => native?.setScreenshotsBlocked(blocked),
+  onScreenshot: (listener: () => void): (() => void) => {
+    const sub = native?.addListener("onScreenshot", listener);
+    return () => sub?.remove();
+  },
+};

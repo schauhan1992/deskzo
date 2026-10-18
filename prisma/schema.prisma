@@ -788,6 +788,8 @@ model User {
   signInsEnded             SignIn[]                   @relation("SignInEndedBy")
   ipRulesCreated           IpRule[]                   @relation("IpRuleCreatedBy")
   accessPoliciesChanged    RoleAccessPolicy[]         @relation("AccessPolicyUpdatedBy")
+  personAccessPolicy       UserAccessPolicy?          @relation("UserAccessPolicy")
+  personPoliciesChanged    UserAccessPolicy[]         @relation("UserAccessPolicyUpdatedBy")
   forecastCommits          ForecastCommit[]           @relation("ForecastCommitOwner")
   forecastWeightsSet       ForecastStageWeight[]      @relation("ForecastWeightUpdatedBy")
   targets                  Target[]                   @relation("TargetOwner")
@@ -908,6 +910,7 @@ model User {
   appDevices           AppDevice[]        @relation("AppDevices")
   appPairings          AppPairing[]       @relation("AppPairings")
   appCallRequests      AppCallRequest[]   @relation("AppCallRequests")
+  attendanceLocations  AttendanceLocation[] @relation("AttendanceLocations")
 
   @@index([departmentId])
   @@index([managerId])
@@ -5355,6 +5358,33 @@ model AttendanceDay {
   @@map("attendance_days")
 }
 
+/// Where somebody clocked in or out from the Deskzo app (owner, 18 Oct 2026) — the phone's location at that moment,
+/// when they let it share one; never tracked in between. Kept beside the day (AttendanceDay) rather than on it, and
+/// shown to whoever may see that person's attendance, in the day's details.
+model AttendanceLocation {
+  id          String                 @id @default(cuid())
+  userId      String
+  user        User                   @relation("AttendanceLocations", fields: [userId], references: [id], onDelete: Cascade)
+  /// The workspace's day, as AttendanceDay.date holds it.
+  date        DateTime               @db.Date
+  kind        AttendanceLocationKind
+  at          DateTime               @default(now())
+  latitude    Float
+  longitude   Float
+  /// How sure the phone was, in metres.
+  accuracyM   Int?
+  appDeviceId String?
+  appDevice   AppDevice?             @relation(fields: [appDeviceId], references: [id], onDelete: SetNull)
+
+  @@index([userId, date])
+  @@map("attendance_locations")
+}
+
+enum AttendanceLocationKind {
+  IN
+  OUT
+}
+
 enum AttendanceStatus {
   PRESENT
   WORK_FROM_HOME
@@ -8751,6 +8781,26 @@ model RoleAccessPolicy {
 }
 
 /**
+ * Which kinds of device one person may use Deskzo on (owner, 18 Oct 2026), over their role's rule
+ * (RoleAccessPolicy) — the person's own word wins, as a sign-in rule's does (SignInRule). Null is "as their
+ * role". Read wherever the role's rule is (src/lib/access/gate.ts `personPolicy`): the web on every request,
+ * the Deskzo app on every call. The super admin is never held by one.
+ */
+model UserAccessPolicy {
+  userId        String   @id
+  user          User     @relation("UserAccessPolicy", fields: [userId], references: [id], onDelete: Cascade)
+  allowMobile   Boolean?
+  allowTablet   Boolean?
+  allowComputer Boolean?
+
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+  updatedBy   User?    @relation("UserAccessPolicyUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@map("user_access_policies")
+}
+
+/**
  * An address or range that is allowed or blocked — the office network, a branch, a known-bad host.
  * `cidr` is canonical: a single address is stored as /32 (or /128), and host bits are cleared. A
  * rule applies to the roles listed, or to everybody when the list is empty. A block beats an allow
@@ -11542,6 +11592,7 @@ model AppDevice {
 
   calls        CallLog[]
   callRequests AppCallRequest[]
+  locations    AttendanceLocation[]
 
   @@index([userId])
   @@map("app_devices")
@@ -11558,6 +11609,10 @@ model AppPairing {
   appDeviceId String?   @unique
   usedAt      DateTime?
   createdAt   DateTime  @default(now())
+  /// Signing in through the phone's browser (owner, 18 Oct 2026): the code went back to the app by a link, so only
+  /// the app that started the sign-in may spend it — it shows the secret this is the SHA-256 of (PKCE, base64url).
+  /// None for a code typed or scanned from Settings › Deskzo app.
+  codeChallenge String?
 
   @@index([userId])
   @@map("app_pairings")

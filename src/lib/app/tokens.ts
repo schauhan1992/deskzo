@@ -52,3 +52,25 @@ export function secretMatches(secret: string, storedDigest: string): boolean {
   const b = Buffer.from(storedDigest.padEnd(64, "0").slice(0, 64), "hex");
   return a.length === b.length && timingSafeEqual(a, b);
 }
+
+// ─── Signing in through the phone's browser ──────────────────────────────────────────────────────
+
+/**
+ * How long a code sent back to the app by the browser lasts. It goes straight from the page to the app, so it
+ * needs seconds; a slow phone gets two minutes.
+ */
+export const BROWSER_SIGN_IN_MINUTES = 2;
+
+/** A PKCE challenge as the app sends it (RFC 7636, S256): 43 characters of base64url. */
+export const validChallenge = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9_-]{43}$/.test(value);
+
+/** Whether the app's secret is the one the challenge was made from — compared in constant time. */
+export function verifierMatches(verifier: unknown, challenge: string): boolean {
+  if (typeof verifier !== "string" || !/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) return false;
+  const a = Buffer.from(createHash("sha256").update(verifier).digest("base64url"));
+  const b = Buffer.from(challenge);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/** Where the page sends the code: back into the app that asked. */
+export const signedInLink = (code: string) => `deskzo://signed-in?code=${code}`;

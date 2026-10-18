@@ -7,7 +7,7 @@ import { recordAudit } from "@/lib/audit";
 import { requireUser, viewAsContext } from "@/lib/session";
 import { deskzoAppReady } from "@/lib/app/ready";
 import { pairingState, startPairing, unpairPhone } from "@/lib/app/pairing";
-import { pairingLink, spacedCode } from "@/lib/app/tokens";
+import { BROWSER_SIGN_IN_MINUTES, pairingLink, signedInLink, spacedCode, validChallenge } from "@/lib/app/tokens";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
 import type { ActionResult } from "@/actions/company";
 
@@ -20,6 +20,7 @@ import type { ActionResult } from "@/actions/company";
 
 const NOT_YET = "The Deskzo app isn't available yet.";
 const AS_YOURSELF = "You're viewing Deskzo as somebody else — a phone can only be paired or signed out as yourself.";
+const BAD_LINK = "This sign-in link isn't right, or it has been changed. Start again from the Deskzo app.";
 
 export async function startPhonePairing(): Promise<ActionResult<{ id: string; code: string; qr: string; expiresAt: string }>> {
   const user = await requireUser();
@@ -79,4 +80,18 @@ export async function signOutPhone(id: string): Promise<ActionResult<null>> {
   await recordAudit({ userId: user.id, action: "UPDATE", entityType: "AppDevice", entityId: phone.id, entityLabel: `Signed a phone out of the Deskzo app — ${phone.model ?? phone.platform}` });
   revalidatePath("/settings/phone");
   return { ok: true, data: null };
+}
+
+/**
+ * "Allow" on the page the Deskzo app opens in the phone's browser (src/app/(auth)/app-sign-in): a code for the
+ * app that opened it, bound to the app's challenge and good for two minutes, and the deskzo:// link that takes it
+ * back. As yourself only, as pairing is (src/lib/app/pairing.ts).
+ */
+export async function allowAppSignIn(kind: string, challenge: string): Promise<ActionResult<{ link: string }>> {
+  const user = await requireUser();
+  if (!deskzoAppReady()) return { ok: false, error: NOT_YET };
+  if (await viewAsContext()) return { ok: false, error: AS_YOURSELF };
+  if ((kind !== "phone" && kind !== "tablet") || !validChallenge(challenge)) return { ok: false, error: BAD_LINK };
+  const pairing = await startPairing(user.id, { challenge, minutes: BROWSER_SIGN_IN_MINUTES });
+  return { ok: true, data: { link: signedInLink(pairing.code) } };
 }

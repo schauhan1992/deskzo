@@ -873,7 +873,7 @@ const PRIVACY: SitePage = {
 const APP_PRIVACY: SitePage = {
   slug: "privacy/app",
   title: "The Deskzo app — privacy",
-  seo: { title: "The Deskzo app: privacy", description: "What the Deskzo app for Android reads on your phone, what it sends to your company's Deskzo, and what stays on the phone." },
+  seo: { title: "The Deskzo app: privacy", description: "What the Deskzo app for Android reads on your phone — your calls once you turn call sync on, where you are when you clock in — what it sends to your company's Deskzo, and what stays on the phone." },
   blocks: [
     {
       id: "app-privacy-header",
@@ -898,19 +898,21 @@ const APP_PRIVACY: SitePage = {
           { type: "heading", level: 2, text: "What the app reads on your phone" },
           {
             type: "paragraph",
-            text: "Nothing until you turn on call sync in the app yourself. After that:",
+            text: "Your calls, nothing until you turn on call sync in the app yourself; your location, only when you clock in or out, or sign in if your company asks for it. In detail:",
           },
           {
             type: "list",
             items: [
+              [{ text: "Where the phone is, ", strong: true }, { text: "at the moment you clock in or out in the app — once, and only if you allow it; clocking in works without it. And when you sign the app in, if your company asks where its people are when they sign in (as it can for its website too): once, then. The app never reads your location in the background." }],
               [{ text: "Your call log: ", strong: true }, { text: "for each call since you turned call sync on, the number, whether you made it or took it, when it started and how long it lasted. Calls from before you turned it on are never read." }],
               [{ text: "The phone's call state: ", strong: true }, { text: "when a call rings, starts and ends, and the number that is ringing — so the app can show who is calling and send the call once it ends. Android describes this permission as \"make and manage phone calls\"; the app never makes, answers or ends a call." }],
               [{ text: "The camera, ", strong: true }, { text: "only while you scan the code that pairs your phone. No picture is taken or kept." }],
+              [{ text: "That you took a screenshot, ", strong: true }, { text: "when your company limits screenshots (as it can on its website) — on Android 14 and later, which tell an app that one was taken, never what it shows. The app never opens your photos." }],
             ],
           },
           {
             type: "paragraph",
-            text: "The app does not record or listen to calls, and does not read your messages, your phone's contacts, your location, your photos or your files.",
+            text: "The app does not record or listen to calls, and does not read your messages, your phone's contacts, your photos or your files, or your location at any other time.",
           },
           { type: "heading", level: 2, text: "What leaves your phone" },
           {
@@ -919,6 +921,9 @@ const APP_PRIVACY: SitePage = {
               [{ text: "Each call, to your company's {siteName}: ", strong: true }, { text: "its number, direction, time and length. {siteName} checks the number against the customers and contacts you can see there. A call with one of them is logged in your company's {siteName} as your call. Any other call — a personal one — is answered \"no match\" and is not stored or logged anywhere." }],
               [{ text: "A ringing number, ", strong: true }, { text: "to look up who is calling. It is not stored." }],
               [{ text: "What you add to a call: ", strong: true }, { text: "how it went, your notes, a callback and the lead it was about." }],
+              [{ text: "A screenshot taken in the app, ", strong: true }, { text: "when your company limits them: that one was taken, when, and on which of the app's screens — counted against your daily allowance and shown to your administrators, as on the website. Past the allowance, the app blocks screenshots on its screens for the rest of the day; on an older Android, which can't tell the app, it blocks them while the limit applies." }],
+              [{ text: "Where you clocked in or out from: ", strong: true }, { text: "the phone's position and how precise it was, kept with that day's attendance — seen by you, your managers and the people in HR who can see everyone's attendance." }],
+              [{ text: "What you do in the app: ", strong: true }, { text: "clocking in and out, tasks you add or tick off, leave you ask for, your decisions on what waits for your approval, and the pages of {siteName} you open in it — as when you use {siteName} on the web." }],
               [{ text: "About the phone: ", strong: true }, { text: "its model and the app's version when it is paired, and its network address when it connects — kept with the device, so your company's administrators can see your paired phones and sign one out." }],
             ],
           },
@@ -939,6 +944,7 @@ const APP_PRIVACY: SitePage = {
               ["Calls with your company's customers", "As long as your company keeps its call records in {siteName}"],
               ["Any other call", "Not kept — it is checked and dropped"],
               ["A ringing number looked up", "Not kept"],
+              ["Where you clocked in or out from", "With your attendance, as long as your company keeps it in {siteName}"],
               ["Your paired phone (model, last address seen)", "While it is paired, and in your company's security log after"],
             ],
           },
@@ -947,6 +953,7 @@ const APP_PRIVACY: SitePage = {
             type: "list",
             items: [
               [{ text: "Turn call sync off ", strong: true }, { text: "in the app at any time. Nothing more is read or sent." }],
+              [{ text: "Keep your location to yourself: ", strong: true }, { text: "say no when the phone asks, or turn location off for {siteName} in the phone's settings. You can still clock in. (If your company asks for it at sign-in, the app can't sign in without it — as its website can't.)" }],
               [{ text: "Sign out ", strong: true }, { text: "in the app's Settings. The phone's sign-in stops working at once and the app clears what it kept on the phone. Your company's administrators can sign a phone out too." }],
               [{ text: "Uninstall the app ", strong: true }, { text: "to remove everything it kept on the phone." }],
               [{ text: "Calls already logged ", strong: true }, { text: "are part of your company's records: to have one corrected or deleted, ask your company's {siteName} administrator, or write to us." }],

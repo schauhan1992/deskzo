@@ -6,6 +6,9 @@
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
   <uses-permission android:name="android.permission.INTERNET" />
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+  <!-- Told when a screenshot is taken in the app (Android 14+), for the workspace's screenshot allowance. Granted at
+       install; it says only that one was taken, never what is in it. -->
+  <uses-permission android:name="android.permission.DETECT_SCREEN_CAPTURE" />
 
   <application>
     <!--

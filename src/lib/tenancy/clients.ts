@@ -258,6 +258,8 @@ const NOT_YET_EVERYWHERE = {
   callLog: { source: true, appDeviceId: true, phoneCallKey: true, reviewedAt: true },
   // 20261118140000_app_web_pages. Read by name in src/lib/app.
   appDevice: { secretDigest: true },
+  // 20261118170000_app_browser_sign_in. Read by name in src/lib/app/pairing.ts.
+  appPairing: { codeChallenge: true },
   // 20261013100000_deskzo_updates_seen. Read by name in src/actions/help.ts only.
   user: { deskzoUpdatesSeenAt: true, reminderSounds: true },
   // 20261014100000_custom_fields. Read by name (`select` or `omit: { customFields: false }`) through

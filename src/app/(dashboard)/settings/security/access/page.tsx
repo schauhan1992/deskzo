@@ -8,6 +8,7 @@ import {
   listDevices,
   listIpRules,
   listNetworks,
+  listPersonDeviceRules,
   listRolePolicies,
   listSignIns,
 } from "@/actions/access-control";
@@ -19,6 +20,8 @@ import { SearchParamInput } from "@/components/ui/search-param-input";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
 import { OutboundLink } from "@/components/ui/outbound-link";
 import { RolePolicies } from "@/components/access/role-policies";
+import { PersonRules } from "@/components/access/person-rules";
+import { PEOPLE_ONLY } from "@/lib/people";
 import { IpRules } from "@/components/access/ip-rules";
 import { NetworkReview } from "@/components/access/network-review";
 import { DeviceQueue } from "@/components/access/device-queue";
@@ -92,8 +95,11 @@ export default async function AccessControlPage({ searchParams }: { searchParams
 }
 
 async function RulesTab({ geo }: { geo: { installed: boolean; file: string | null; type: string | null; builtAt: string | Date | null; sizeBytes: number | null; directory: string } | null }) {
-  const [policies, rules, roles, facts, manageShared, clock] = await Promise.all([
+  const [policies, personRules, people, rules, roles, facts, manageShared, clock] = await Promise.all([
     listRolePolicies(),
+    listPersonDeviceRules(),
+    // Who may be given a rule of their own: everybody but the super admin, whom no rule holds.
+    db.user.findMany({ where: { ...PEOPLE_ONLY, active: true, isSuperAdmin: false }, orderBy: { name: "asc" }, select: { id: true, name: true, email: true } }),
     listIpRules(),
     db.role.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }], select: { key: true, name: true } }),
     requestFacts(),
@@ -106,6 +112,10 @@ async function RulesTab({ geo }: { geo: { installed: boolean; file: string | nul
       <section>
         <h2 className="mb-2 text-sm font-semibold text-text">By role</h2>
         {policies && <RolePolicies rows={policies} />}
+      </section>
+      <section>
+        <h2 className="mb-2 text-sm font-semibold text-text">By person</h2>
+        {personRules && <PersonRules rows={personRules} people={people} />}
       </section>
       <section>
         <h2 className="mb-2 text-sm font-semibold text-text">Networks</h2>

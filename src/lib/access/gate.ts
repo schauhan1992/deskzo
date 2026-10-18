@@ -95,6 +95,25 @@ export async function rolePolicy(roleKey: string): Promise<RolePolicy> {
   return policy;
 }
 
+/**
+ * One person's rules: their role's, with the kinds of device an administrator set for them alone on top (owner,
+ * 18 Oct 2026 — UserAccessPolicy). Their own word wins over their role's, either way: allowed a phone their role
+ * isn't, or kept off one it is. Not cached on its own — the verdict that reads it is.
+ */
+export async function personPolicy(userId: string, roleKey: string): Promise<RolePolicy> {
+  const [role, own] = await Promise.all([
+    rolePolicy(roleKey),
+    db.userAccessPolicy.findUnique({ where: { userId }, select: { allowMobile: true, allowTablet: true, allowComputer: true } }),
+  ]);
+  if (!own) return role;
+  return {
+    ...role,
+    allowMobile: own.allowMobile ?? role.allowMobile,
+    allowTablet: own.allowTablet ?? role.allowTablet,
+    allowComputer: own.allowComputer ?? role.allowComputer,
+  };
+}
+
 /** A session with no sid is one issued before sign-ins were recorded; it shares one key per person. */
 export function sessionKey(userId: string, sid: string | null): string {
   return sid ?? `legacy:${userId}`;
@@ -178,7 +197,7 @@ export async function evaluateAccess(input: GateInput): Promise<GateVerdict> {
   }
 
   const [policy, rules, existingDevice, signIn, company] = await Promise.all([
-    rolePolicy(user.role),
+    personPolicy(user.id, user.role),
     activeIpRules(),
     tokenHash ? db.userDevice.findUnique({ where: { userId_tokenHash: { userId: user.id, tokenHash } } }) : null,
     input.sid ? db.signIn.findUnique({ where: { sid: input.sid }, select: { id: true, endedAt: true, lastSeenAt: true, deviceId: true } }) : null,

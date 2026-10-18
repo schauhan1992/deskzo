@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, type ReactNode } from "react";
+import { useEffect, useState, useTransition, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import type { attendanceMonth } from "@/actions/attendance";
 import { clockIn, clockOut, markAttendance, saveOfficeHours } from "@/actions/attendance";
+import { attendanceLocations } from "@/actions/attendance-location";
 import { Badge, Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -490,6 +491,8 @@ function MarkDialog({
           <Input id="attNote" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Why it was corrected" />
         </div>
 
+        <ClockedFrom userId={editing.userId} date={editing.date} />
+
         <p className="text-xs text-subtle">
           Corrections are stamped with your name, so anyone asking later can see who changed it.
         </p>
@@ -506,5 +509,41 @@ function MarkDialog({
         </div>
       </div>
     </Dialog>
+  );
+}
+
+/**
+ * Where the person clocked in or out from the Deskzo app that day (owner, 18 Oct 2026) — the phone's location at
+ * that moment, when it shared one. Nothing when they used the web, or the phone didn't share.
+ */
+function ClockedFrom({ userId, date }: { userId: string; date: string }) {
+  const clock = useClock();
+  const [places, setPlaces] = useState<Awaited<ReturnType<typeof attendanceLocations>> | null>(null);
+  useEffect(() => {
+    let live = true;
+    attendanceLocations(userId, date).then(
+      (rows) => live && setPlaces(rows),
+      () => live && setPlaces([]),
+    );
+    return () => {
+      live = false;
+    };
+  }, [userId, date]);
+  if (!places || places.length === 0) return null;
+  return (
+    <div className="space-y-1.5">
+      <p className="text-sm font-medium text-text">From the Deskzo app</p>
+      <ul className="space-y-1 text-sm text-muted">
+        {places.map((p) => (
+          <li key={`${p.kind}-${p.at}`}>
+            Clocked {p.kind === "IN" ? "in" : "out"} at {clock.time(p.at)}
+            {p.accuracyM !== null ? ` (within ${p.accuracyM} m)` : ""} —{" "}
+            <a className="text-brand hover:underline" href={`https://www.google.com/maps?q=${p.latitude},${p.longitude}`} target="_blank" rel="noopener noreferrer">
+              see on a map
+            </a>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

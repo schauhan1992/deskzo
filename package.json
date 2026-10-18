@@ -122,6 +122,7 @@
     "check:lead-capture": "tsx scripts/check-lead-capture.ts",
     "check:public-api": "tsx scripts/check-public-api.ts",
     "check:phone-app": "tsx scripts/check-phone-app.ts",
+    "check:app-daily": "tsx scripts/check-app-daily.ts",
     "check:call-report": "tsx scripts/check-call-report.ts",
     "check:reassign": "tsx scripts/check-reassign.ts",
     "check:view-permissions": "tsx scripts/check-view-permissions.ts",

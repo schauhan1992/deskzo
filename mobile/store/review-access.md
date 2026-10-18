@@ -1,8 +1,8 @@
 # Google Play — App access (for the reviewers)
 
-The app does nothing until a phone is paired with a Deskzo account, so Play Console (App content › App
-access) must say how a reviewer gets in. Pairing codes last ten minutes and work once, so the reviewer makes
-their own from a demo account.
+The app does nothing until it is signed in to a Deskzo account, so Play Console (App content › App access)
+must say how a reviewer gets in. They sign in in the app with a demo account — through the phone's browser,
+no computer needed.
 
 ## Before submitting — on the live platform
 
@@ -17,10 +17,9 @@ their own from a demo account.
 
 > The app works with a company's Deskzo account. Use this demo account:
 >
-> 1. On a computer, open https://appreview.deskzo.com and sign in — email: *play-review@deskzo.com*, password: *(the password)*.
-> 2. Go to Settings › Deskzo app and choose **Show a pairing code**.
-> 3. In the app, choose **Scan the code** (or type the address appreview.deskzo.com and the ten-character code).
-> 4. Turn on call sync and allow the permissions.
-> 5. Call, or be called from, the demo contact's number *(number)* — the caller's name shows while it rings, and "How did the call go?" appears after.
+> 1. In the app, type the address *appreview.deskzo.com* and tap **Sign in**.
+> 2. In the page that opens, sign in — email: *play-review@deskzo.com*, password: *(the password)* — and tap **Allow**.
+> 3. On Calls, turn on call sync and allow the permissions.
+> 4. Call, or be called from, the demo contact's number *(number)* — the caller's name shows while it rings, and "How did the call go?" appears after.
 
 Keep the account and the sample data in place while the app is in review, and for later updates.

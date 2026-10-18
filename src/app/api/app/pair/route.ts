@@ -1,5 +1,6 @@
 import { normaliseIp } from "@/lib/access/ip";
 import { ApiError, readBody } from "@/lib/api/handler";
+import { readLocation } from "@/lib/app/daily";
 import { appAnswer, appErrorAnswer, appFailure, phoneLockKey } from "@/lib/app/handler";
 import { pairPhone } from "@/lib/app/pairing";
 import { clientIpFrom } from "@/lib/client-ip";
@@ -8,9 +9,10 @@ import { clearFailures, lockoutState, recordFailure } from "@/lib/security/locko
 import { currentTenantOrNull } from "@/lib/tenancy/resolve";
 
 /**
- * The Deskzo app pairing itself (owner, 18 Oct 2026): `{ code, platform, model?, app_version? }` from the
- * code on somebody's Settings › Deskzo app page, for the phone's token — once. Wrong codes count towards
- * the same lockout as wrong tokens (src/lib/app/handler.ts).
+ * The Deskzo app pairing itself (owner, 18 Oct 2026): `{ code, platform, model?, app_version?, form_factor?,
+ * verifier?, latitude?, longitude?, accuracy? }` — the code from somebody's Settings › Deskzo app page, or the one
+ * their browser sign-in sent back with the secret behind its challenge (src/lib/app/pairing.ts) — for the phone's
+ * token, once. Wrong codes count towards the same lockout as wrong tokens (src/lib/app/handler.ts).
  */
 
 export const dynamic = "force-dynamic";
@@ -26,7 +28,10 @@ export async function POST(req: Request): Promise<Response> {
 
     const body = await readBody(req);
     try {
-      const paired = await pairPhone({ code: body.code, platform: body.platform, model: body.model, appVersion: body.app_version }, ip);
+      const paired = await pairPhone(
+        { code: body.code, platform: body.platform, model: body.model, appVersion: body.app_version, verifier: body.verifier, formFactor: body.form_factor, location: readLocation(body) },
+        ip,
+      );
       clearFailures([lockKey]);
       const tenant = await currentTenantOrNull();
       return appAnswer(201, {

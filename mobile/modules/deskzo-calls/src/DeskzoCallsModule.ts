@@ -4,7 +4,7 @@ import { NativeModule, requireNativeModule } from "expo";
 
 export type NativeSession = { baseUrl: string; token: string; host: string | null };
 
-declare class DeskzoCallsModule extends NativeModule<Record<string, never>> {
+declare class DeskzoCallsModule extends NativeModule<{ onScreenshot: () => void }> {
   getSession(): NativeSession | null;
   /** Deskzo said this phone is no longer signed in, while the app was closed. */
   signedOut(): boolean;
@@ -15,6 +15,10 @@ declare class DeskzoCallsModule extends NativeModule<Record<string, never>> {
   syncNow(): Promise<{ sent: number; logged: number; error: string | null }>;
   ignoresBatteryOptimizations(): boolean;
   openBatterySettings(): void;
+  /** Android 14 and later tell the app when a screenshot is taken. */
+  screenshotsDetectable(): boolean;
+  /** Blocks screenshots and screen recording on the app's screens, or lets them be. */
+  setScreenshotsBlocked(blocked: boolean): void;
 }
 
 export default requireNativeModule<DeskzoCallsModule>("DeskzoCalls");

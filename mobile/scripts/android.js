@@ -32,6 +32,11 @@ const ALLOWED_PERMISSIONS = [
   "android.permission.READ_PHONE_STATE",
   "android.permission.POST_NOTIFICATIONS",
   "android.permission.CAMERA",
+  // Where the phone is when somebody clocks in or out — only while the app is open.
+  "android.permission.ACCESS_COARSE_LOCATION",
+  "android.permission.ACCESS_FINE_LOCATION",
+  // Told that a screenshot was taken in the app (Android 14+), for the workspace's screenshot allowance.
+  "android.permission.DETECT_SCREEN_CAPTURE",
   // Android's background jobs (WorkManager), which send the calls with the app closed.
   "android.permission.WAKE_LOCK",
   "android.permission.RECEIVE_BOOT_COMPLETED",

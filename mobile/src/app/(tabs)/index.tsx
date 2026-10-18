@@ -1,135 +1,178 @@
-import { useCallback, useEffect, useRef, useState, type ForwardRefExoticComponent, type RefAttributes } from "react";
-import { ActivityIndicator, BackHandler, Linking, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect } from "expo-router";
-import { WebView as NativeWebView, type WebViewNavigation, type WebViewProps } from "react-native-webview";
-import { Button, Notice, colors, styles } from "@/components/ui";
-import { ApiError, api } from "@/lib/api";
-import { webOrigin } from "@/lib/config";
-import { calls } from "@/lib/native";
+import { useCallback, useState } from "react";
+import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+import { useFocusEffect, useRouter } from "expo-router";
+import { Button, Card, Heading, Notice, colors, styles } from "@/components/ui";
+import { TaskRow } from "@/components/task-row";
+import { ApiError, api, type Attendance, type Today } from "@/lib/api";
+import { setWaiting } from "@/lib/badges";
+import { clockTime, dayOf, days, span, worked } from "@/lib/format";
+import { whereAmI } from "@/lib/location";
+import { useSession } from "@/lib/session";
 
 /**
- * All of Deskzo in the app (owner, 18 Oct 2026): the workspace's own pages, signed in by this phone and as this
- * phone (src/lib/app/web-session.ts on the server).
- *
- * The pages keep their own sign-in, as a browser does, so they open straight in; only when Deskzo shows its
- * sign-in page does the app sign them in again — with a one-time pass, or, for somebody with two-factor, by
- * letting them sign in there once. Links to anywhere else open in the phone's browser; a phone number, its
- * dialler.
+ * Today (owner, 18 Oct 2026): the app's home — clocking in and out, the tasks due today, what waits for the
+ * person's decision, and their leave. Each part only for somebody whose workspace has it and who may use it
+ * (src/lib/app/daily.ts todayFor).
  */
 
-// The library's class types read as "never" under React 19.3's; the component, typed as it is used.
-const WebView = NativeWebView as unknown as ForwardRefExoticComponent<WebViewProps & RefAttributes<NativeWebView>>;
+const greeting = () => {
+  const h = new Date().getHours();
+  return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+};
 
-type Opening = { open: { path: string; form: Record<string, string> }; sign_in: boolean };
-
-const pathOf = (url: string) => url.replace(/^https?:\/\/[^/]+/, "") || "/";
-
-export default function DeskzoPages() {
-  const session = calls.getSession();
-  const origin = session ? webOrigin(session) : "";
-  const view = useRef<NativeWebView>(null);
-  const [source, setSource] = useState<{ uri: string; method?: "POST"; body?: string; headers?: Record<string, string> } | null>(null);
+export default function TodayScreen() {
+  const router = useRouter();
+  const { me } = useSession();
+  const [today, setToday] = useState<Today | null>(null);
+  const [loading, setLoading] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const back = useRef(false);
-  const lastOpened = useRef(0);
-  const signsInHere = useRef(false);
 
-  // Signing the pages in — at most once a minute, and never for somebody who signs in there themselves.
-  const signIn = useCallback(
-    async (next: string) => {
-      if (signsInHere.current || Date.now() - lastOpened.current < 60_000) return;
-      lastOpened.current = Date.now();
-      setProblem(null);
-      try {
-        const opening = await api<Opening>("POST", "/api/app/web-session", { path: next });
-        signsInHere.current = opening.sign_in;
-        setSource({
-          uri: `${origin}${opening.open.path}`,
-          method: "POST",
-          body: new URLSearchParams(opening.open.form).toString(),
-          headers: { "content-type": "application/x-www-form-urlencoded" },
-        });
-      } catch (e) {
-        setProblem(e instanceof ApiError && e.code === "device_pending" ? "This phone is waiting for an administrator to approve it." : e instanceof Error ? e.message : "Deskzo didn't open.");
-      }
-    },
-    [origin],
-  );
+  const load = useCallback(async () => {
+    setLoading(true);
+    setProblem(null);
+    try {
+      const next = await api<Today>("GET", "/api/app/today");
+      setToday(next);
+      setWaiting(next.approvals_waiting);
+    } catch (e) {
+      setProblem(e instanceof ApiError && e.code === "device_pending" ? "This phone is waiting for an administrator to approve it in Deskzo (Security › Devices). Pull down to check again." : e instanceof Error ? e.message : "Something went wrong.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  useEffect(() => {
-    if (origin) setSource({ uri: `${origin}/dashboard` });
-  }, [origin]);
-
-  // Android's back button goes back a page while there is one.
   useFocusEffect(
     useCallback(() => {
-      const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-        if (!back.current) return false;
-        view.current?.goBack();
-        return true;
-      });
-      return () => sub.remove();
-    }, []),
+      void load();
+    }, [load]),
   );
 
-  function navigated(nav: WebViewNavigation) {
-    back.current = nav.canGoBack;
-    const path = pathOf(nav.url);
-    if (nav.url.startsWith(origin) && /^\/login(\?|$)/.test(path)) {
-      const next = /callbackUrl=([^&]+)/.exec(path)?.[1];
-      void signIn(next ? decodeURIComponent(next) : "/dashboard");
+  const first = me?.person.name.split(" ")[0];
+
+  return (
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} />}>
+      <View>
+        <Text style={styles.title}>
+          {greeting()}
+          {first ? `, ${first}` : ""}
+        </Text>
+        <Text style={styles.small}>{(today ? dayOf(today.date) : new Date()).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}</Text>
+      </View>
+
+      {problem && (
+        <Card>
+          <Notice tone="warning">{problem}</Notice>
+        </Card>
+      )}
+
+      {today?.attendance && <ClockCard attendance={today.attendance} onChanged={(attendance) => setToday({ ...today, attendance })} />}
+
+      {today && today.approvals_waiting > 0 && (
+        <Pressable accessibilityRole="button" onPress={() => router.push("/approvals")}>
+          <Card style={[styles.row, { borderColor: colors.brand }]}>
+            <Text style={[styles.body, { flex: 1 }]}>
+              {today.approvals_waiting} {today.approvals_waiting === 1 ? "thing waits" : "things wait"} for your decision
+            </Text>
+            <Text style={{ color: colors.brand, fontWeight: "600" }}>Decide</Text>
+          </Card>
+        </Pressable>
+      )}
+
+      {today?.tasks && (
+        <>
+          <Heading count={today.tasks.due_today.length}>Due today</Heading>
+          <Card>
+            {today.tasks.due_today.length === 0 ? (
+              <Notice>Nothing due today.</Notice>
+            ) : (
+              today.tasks.due_today.map((t) => (
+                <TaskRow
+                  key={t.id}
+                  task={t}
+                  onProblem={setProblem}
+                  onChanged={(changed) => {
+                    const tasks = today.tasks;
+                    if (!tasks) return;
+                    setToday({ ...today, tasks: { ...tasks, due_today: tasks.due_today.map((x) => (x.id === changed.id ? changed : x)), open: tasks.open + (changed.status === "DONE" ? -1 : 1) } });
+                  }}
+                />
+              ))
+            )}
+            <Text style={styles.small}>
+              {today.tasks.open} open{today.tasks.overdue ? ` · ` : ""}
+              {today.tasks.overdue ? <Text style={{ color: colors.danger }}>{today.tasks.overdue} overdue</Text> : null}
+            </Text>
+            <Button title="All my tasks" kind="secondary" onPress={() => router.push("/tasks")} />
+          </Card>
+        </>
+      )}
+
+      {today?.leave && (
+        <>
+          <Heading>Leave</Heading>
+          <Card>
+            {today.leave.balances.length > 0 ? (
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                {today.leave.balances.map((b) => (
+                  <View key={b.type_id} style={{ backgroundColor: colors.sunken, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 }}>
+                    <Text style={[styles.body, { fontWeight: "600" }]}>{b.available}</Text>
+                    <Text style={styles.small}>{b.name}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <Notice>No leave balances set up for you yet.</Notice>
+            )}
+            {today.leave.upcoming.map((l) => (
+              <Text key={l.id} style={styles.small}>
+                {l.type}, {span(l.from, l.to)} ({days(l.days)}) — {l.status === "PENDING" ? "waiting for approval" : "approved"}
+              </Text>
+            ))}
+            <Button title="Apply for leave" kind="secondary" onPress={() => router.push("/leave")} />
+          </Card>
+        </>
+      )}
+
+      {today && !today.attendance && !today.tasks && !today.leave && today.approvals_waiting === 0 && !problem && (
+        <Notice>Nothing here for you yet. Everything else in Deskzo is on the Deskzo tab.</Notice>
+      )}
+    </ScrollView>
+  );
+}
+
+/** Clocked in or not — and the button to change that, with where the phone is when it shares it. */
+function ClockCard({ attendance, onChanged }: { attendance: Attendance; onChanged: (a: Attendance) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ tone: "danger" | "muted"; text: string } | null>(null);
+  const action = !attendance.check_in_at ? "in" : !attendance.check_out_at ? "out" : null;
+
+  async function clock(which: "in" | "out") {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const place = await whereAmI();
+      const next = await api<Attendance>("POST", "/api/app/attendance", { action: which, ...(place ?? {}) });
+      onChanged(next);
+      if (!place) setMessage({ tone: "muted", text: `Clocked ${which} — without your location: the phone didn't share it.` });
+    } catch (e) {
+      setMessage({ tone: "danger", text: e instanceof Error ? e.message : "That didn't work." });
+    } finally {
+      setBusy(false);
     }
   }
 
-  function allow({ url }: { url: string }): boolean {
-    if (url.startsWith(origin) || url.startsWith("about:") || url.startsWith("blob:") || url.startsWith("data:")) return true;
-    // A number, an email, a map, another site: the phone's own app for it.
-    void Linking.openURL(url).catch(() => {});
-    return false;
-  }
-
-  if (!session) return null;
-  if (problem) {
-    return (
-      <SafeAreaView style={[styles.screen, styles.content]}>
-        <Notice tone="warning">{problem}</Notice>
-        <Button
-          title="Try again"
-          onPress={() => {
-            lastOpened.current = 0;
-            void signIn("/dashboard");
-          }}
-        />
-      </SafeAreaView>
-    );
-  }
-
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.surface }} edges={["top"]}>
-      {source && (
-        <WebView
-          ref={view}
-          source={source}
-          onNavigationStateChange={navigated}
-          onShouldStartLoadWithRequest={allow}
-          onLoadEnd={() => setLoading(false)}
-          onError={() => setProblem("Couldn't reach Deskzo. Check the phone's internet connection.")}
-          sharedCookiesEnabled
-          thirdPartyCookiesEnabled={false}
-          setSupportMultipleWindows={false}
-          allowsBackForwardNavigationGestures
-          pullToRefreshEnabled
-          style={{ flex: 1 }}
-        />
-      )}
-      {loading && (
-        <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface }}>
-          <ActivityIndicator color={colors.brand} />
-          <Text style={[styles.small, { marginTop: 8 }]}>Opening Deskzo…</Text>
-        </View>
-      )}
-    </SafeAreaView>
+    <Card>
+      <Text style={styles.body}>
+        {attendance.check_out_at && attendance.check_in_at
+          ? `Clocked in ${clockTime(attendance.check_in_at)}, out ${clockTime(attendance.check_out_at)}${attendance.worked_minutes ? ` · ${worked(attendance.worked_minutes)}` : ""}`
+          : attendance.check_in_at
+            ? `Clocked in at ${clockTime(attendance.check_in_at)}`
+            : "You haven't clocked in today."}
+      </Text>
+      {action && <Button title={action === "in" ? "Clock in" : "Clock out"} kind={action === "in" ? "primary" : "secondary"} busy={busy} onPress={() => void clock(action)} />}
+      {message && <Notice tone={message.tone}>{message.text}</Notice>}
+      {action && <Text style={styles.small}>Your location when you clock {action} is saved with your attendance, if you let the phone share it.</Text>}
+    </Card>
   );
 }

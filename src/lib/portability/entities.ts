@@ -482,6 +482,7 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
   AssetMovement: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   AttendanceDay: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   AttendanceRegularisation: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
+  AttendanceLocation: { disposition: "archive", reason: "Where somebody clocked in or out from the Deskzo app — immutable history beside the attendance day, archived with it." },
   ShortLeaveRequest: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   ShortLeavePolicy: { disposition: "specification", reason: "Configuration rather than records: the company's short leave length and monthly count, two numbers to set again in whatever comes next." },
   EwayBill: {
@@ -623,6 +624,10 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
   PasswordResetToken: { disposition: "excluded", reason: "One-hour links to set a new password — secrets, and gone within the hour anyway." },
   SignIn: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   UserDevice: { disposition: "excluded", reason: "A device is a hash of a cookie in one of this installation's browsers. It identifies nothing anywhere else, and carrying it over would only carry over approvals nobody can re-check." },
+  AppDevice: { disposition: "excluded", reason: "A phone signed in to the Deskzo app: a digest of its secret and its push address. It signs in to this installation only; carried over, it would sign in to nothing." },
+  AppPairing: { disposition: "excluded", reason: "One-time codes for signing a phone in, good for minutes — secrets, and gone soon after." },
+  AppCallRequest: { disposition: "excluded", reason: "A \"Ring my phone\" request lives two minutes; the call it leads to is kept as a call log." },
+  UserAccessPolicy: { disposition: "specification", reason: "Which kinds of device one person may use, over their role's rule. Configuration, keyed on people by id — rebuilt deliberately rather than loaded." },
   ActivityAward: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   MarketingAsset: { disposition: "archive", reason: "Pictures from uploaded email templates, kept so mail already sent still shows them. Exported to the archive bundle with the templates' history rather than migrated." },
   MarketingList: { disposition: "archive", reason: "Who was uploaded for a mass mail, and the consent statement they were uploaded under — evidence to keep, not configuration to load. The people themselves travel as contacts." },

@@ -9,12 +9,12 @@ import { toPlain } from "@/lib/serialize";
 import { pageSlice } from "@/lib/pagination";
 import { logActivity } from "@/lib/activity";
 import { notifyUser } from "@/lib/notify";
-import { OPEN_POLICY, decideAccess, networkStanding, type RolePolicy } from "@/lib/access/decide";
-import { deviceKindFrom } from "@/lib/access/device";
+import { OPEN_POLICY, allowsKind, decideAccess, networkStanding, type RolePolicy } from "@/lib/access/decide";
+import { DEVICE_KIND_LABEL, deviceKindFrom } from "@/lib/access/device";
 import { hashDeviceToken, validDeviceToken } from "@/lib/access/device-token";
 import { cidrSize, normaliseIp, parseCidr } from "@/lib/access/ip";
 import { geoDatabaseInfo } from "@/lib/access/geo";
-import { activeIpRules, clearAccessCache, sessionKey } from "@/lib/access/gate";
+import { activeIpRules, clearAccessCache, rolePolicy, sessionKey } from "@/lib/access/gate";
 import { requestFacts } from "@/lib/access/request";
 import { workspaceClock } from "@/lib/time/workspace";
 import type { ActionResult } from "@/actions/company";
@@ -117,13 +117,17 @@ export async function saveRolePolicy(roleKey: string, input: RolePolicy): Promis
    * everybody else — tightening your own role from a device or a network it would then refuse
    * leaves nobody but the super admin able to undo it.
    */
-  const me = await db.user.findUnique({ where: { id: user.id }, select: { role: true, isSuperAdmin: true } });
+  const me = await db.user.findUnique({ where: { id: user.id }, select: { role: true, isSuperAdmin: true, personAccessPolicy: true } });
   if (me && me.role === roleKey && !me.isSuperAdmin) {
     const here = await hereAndNow(user.id);
+    const own = me.personAccessPolicy;
     const verdict = decideAccess({
       sessionEnded: false,
       exempt: false,
-      policy,
+      // Their own device rule, if they have one, still wins over the role's.
+      policy: own
+        ? { ...policy, allowMobile: own.allowMobile ?? policy.allowMobile, allowTablet: own.allowTablet ?? policy.allowTablet, allowComputer: own.allowComputer ?? policy.allowComputer }
+        : policy,
       network: networkStanding(here.ip, roleKey, await activeIpRules(), new Date()),
       device: { kind: here.kind, status: here.device?.status ?? null },
       // Location is asked for, not refused, so it cannot lock anybody out.
@@ -164,6 +168,140 @@ export async function saveRolePolicy(roleKey: string, input: RolePolicy): Promis
       .join("; ")}`,
     metadata: { roleKey, ...policy },
   });
+  revalidatePath(REFRESH);
+  return { ok: true, data: null };
+}
+
+// ─── Rules per person ────────────────────────────────────────────────────────
+
+/** One person's own say on a kind of device: allowed, not allowed, or — null — as their role says. */
+export type DeviceSay = boolean | null;
+export type PersonDeviceRule = {
+  userId: string;
+  name: string;
+  email: string;
+  roleName: string;
+  active: boolean;
+  role: { allowMobile: boolean; allowTablet: boolean; allowComputer: boolean };
+  own: { allowMobile: DeviceSay; allowTablet: DeviceSay; allowComputer: DeviceSay };
+  updatedAt: string;
+  updatedBy: string | null;
+};
+
+const say = (value: unknown): DeviceSay => (value === true ? true : value === false ? false : null);
+const sayWords = (own: PersonDeviceRule["own"]) =>
+  (
+    [
+      ["phones", own.allowMobile],
+      ["tablets", own.allowTablet],
+      ["computers", own.allowComputer],
+    ] as const
+  )
+    .filter(([, v]) => v !== null)
+    .map(([what, v]) => `${what} ${v ? "allowed" : "not allowed"}`)
+    .join(", ");
+
+/**
+ * The people with device rules of their own (owner, 18 Oct 2026; UserAccessPolicy), over their role's — for
+ * Security › Access › Rules. Their word wins over the role's either way.
+ */
+export async function listPersonDeviceRules(): Promise<PersonDeviceRule[] | null> {
+  const user = await requireUser();
+  if (!(await can(user.id, "security.manage"))) return null;
+  const [rows, roles] = await Promise.all([
+    db.userAccessPolicy.findMany({
+      orderBy: { updatedAt: "desc" },
+      select: {
+        userId: true,
+        allowMobile: true,
+        allowTablet: true,
+        allowComputer: true,
+        updatedAt: true,
+        updatedBy: { select: { name: true } },
+        user: { select: { name: true, email: true, role: true, active: true } },
+      },
+    }),
+    db.role.findMany({ select: { key: true, name: true } }),
+  ]);
+  const roleNames = new Map(roles.map((r) => [r.key, r.name]));
+  const policies = await Promise.all(rows.map((r) => rolePolicy(r.user.role)));
+  return rows.map((r, i) => ({
+    userId: r.userId,
+    name: r.user.name,
+    email: r.user.email,
+    roleName: roleNames.get(r.user.role) ?? r.user.role,
+    active: r.user.active,
+    role: { allowMobile: policies[i]!.allowMobile, allowTablet: policies[i]!.allowTablet, allowComputer: policies[i]!.allowComputer },
+    own: { allowMobile: r.allowMobile, allowTablet: r.allowTablet, allowComputer: r.allowComputer },
+    updatedAt: r.updatedAt.toISOString(),
+    updatedBy: r.updatedBy?.name ?? null,
+  }));
+}
+
+/**
+ * Sets which kinds of device one person may use, over their role's rule. All three "as the role" takes the rule
+ * away. Never the super admin (they are the way back in), never nothing at all (lock or deactivate them instead),
+ * and never a rule that would refuse the device its author is on.
+ */
+export async function savePersonDeviceRule(userId: string, input: { allowMobile: DeviceSay; allowTablet: DeviceSay; allowComputer: DeviceSay }): Promise<ActionResult<null>> {
+  const user = await requireUser();
+  if (!(await can(user.id, "security.manage"))) return { ok: false, error: "You can't change the access rules." };
+  const person = await db.user.findUnique({
+    where: { id: typeof userId === "string" ? userId : "" },
+    select: { id: true, name: true, role: true, isSuperAdmin: true, kind: true },
+  });
+  if (!person || person.kind !== "MEMBER") return { ok: false, error: "That person isn't here any more." };
+  if (person.isSuperAdmin) return { ok: false, error: "The super admin is never held by a rule — they are the way back in if a rule locks everybody else out." };
+  const own = { allowMobile: say(input?.allowMobile), allowTablet: say(input?.allowTablet), allowComputer: say(input?.allowComputer) };
+  if (own.allowMobile === null && own.allowTablet === null && own.allowComputer === null) return removePersonDeviceRule(person.id);
+
+  const role = await rolePolicy(person.role);
+  const effective: RolePolicy = {
+    ...role,
+    allowMobile: own.allowMobile ?? role.allowMobile,
+    allowTablet: own.allowTablet ?? role.allowTablet,
+    allowComputer: own.allowComputer ?? role.allowComputer,
+  };
+  if (!effective.allowMobile && !effective.allowTablet && !effective.allowComputer) {
+    return { ok: false, error: `With this, ${person.name} couldn't use Deskzo on any device. To stop them signing in, lock or deactivate them instead.` };
+  }
+  if (person.id === user.id) {
+    const here = await hereAndNow(user.id);
+    if (!allowsKind(effective, here.kind)) {
+      return { ok: false, error: `That would lock you out of the ${DEVICE_KIND_LABEL[here.kind].toLowerCase()} you're using. Change it from another kind of device, or have the super admin do it.` };
+    }
+  }
+
+  await db.userAccessPolicy.upsert({
+    where: { userId: person.id },
+    create: { userId: person.id, ...own, updatedById: user.id },
+    update: { ...own, updatedById: user.id },
+  });
+  clearAccessCache();
+  await logActivity({
+    kind: "SECURITY_POLICY_CHANGED",
+    summary: `Devices for ${person.name}, over their role's rule: ${sayWords(own)}`,
+    metadata: { userId: person.id, ...own },
+  });
+  revalidatePath(REFRESH);
+  return { ok: true, data: null };
+}
+
+/** Takes one person's own device rule away: their role's applies again. */
+export async function removePersonDeviceRule(userId: string): Promise<ActionResult<null>> {
+  const user = await requireUser();
+  if (!(await can(user.id, "security.manage"))) return { ok: false, error: "You can't change the access rules." };
+  const rule = await db.userAccessPolicy.findUnique({ where: { userId: typeof userId === "string" ? userId : "" }, select: { userId: true, user: { select: { name: true, role: true } } } });
+  if (!rule) return { ok: true, data: null };
+  if (rule.userId === user.id) {
+    const here = await hereAndNow(user.id);
+    if (!allowsKind(await rolePolicy(rule.user.role), here.kind)) {
+      return { ok: false, error: `Your role doesn't allow the ${DEVICE_KIND_LABEL[here.kind].toLowerCase()} you're using — taking your own rule away would lock you out.` };
+    }
+  }
+  await db.userAccessPolicy.delete({ where: { userId: rule.userId } });
+  clearAccessCache();
+  await logActivity({ kind: "SECURITY_POLICY_CHANGED", summary: `Devices for ${rule.user.name}: as their role again`, metadata: { userId: rule.userId } });
   revalidatePath(REFRESH);
   return { ok: true, data: null };
 }

@@ -26,16 +26,45 @@ const config: ExpoConfig = {
       backgroundImage: "./assets/android-icon-background.png",
       monochromeImage: "./assets/android-icon-monochrome.png",
     },
-    // Only what calling needs; the camera is added by expo-camera, for scanning the pairing code.
-    permissions: ["android.permission.READ_CALL_LOG", "android.permission.READ_PHONE_STATE", "android.permission.POST_NOTIFICATIONS"],
-    // Nothing the app does: the microphone, drawing over other apps, and files (a library asks for them on its own).
-    blockedPermissions: ["android.permission.RECORD_AUDIO", "android.permission.SYSTEM_ALERT_WINDOW", "android.permission.READ_EXTERNAL_STORAGE", "android.permission.WRITE_EXTERNAL_STORAGE"],
+    // Calling, and where the phone is when somebody clocks in or out (asked then, only while the app is open);
+    // the camera is added by expo-camera, for scanning the pairing code.
+    permissions: [
+      "android.permission.READ_CALL_LOG",
+      "android.permission.READ_PHONE_STATE",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.ACCESS_COARSE_LOCATION",
+      "android.permission.ACCESS_FINE_LOCATION",
+    ],
+    // Nothing the app does: the microphone, drawing over other apps, files, and location in the background or
+    // motion (a library asks for them on its own).
+    blockedPermissions: [
+      "android.permission.RECORD_AUDIO",
+      "android.permission.SYSTEM_ALERT_WINDOW",
+      "android.permission.READ_EXTERNAL_STORAGE",
+      "android.permission.WRITE_EXTERNAL_STORAGE",
+      "android.permission.ACCESS_BACKGROUND_LOCATION",
+      "android.permission.FOREGROUND_SERVICE_LOCATION",
+      "android.permission.ACTIVITY_RECOGNITION",
+    ],
     allowBackup: false,
     predictiveBackGestureEnabled: false,
   },
   plugins: [
     "expo-router",
     ["expo-camera", { recordAudioAndroid: false, barcodeScannerEnabled: true, cameraPermission: "Deskzo uses the camera to scan the code that pairs this phone." }],
+    [
+      "expo-location",
+      {
+        locationWhenInUsePermission: "Deskzo saves where you are when you clock in or out, with your attendance. Only then — never in the background.",
+        locationAlwaysAndWhenInUsePermission: false,
+        locationAlwaysPermission: false,
+        motionUsagePermission: false,
+        locationFullAccuracyPermission: false,
+        isIosBackgroundLocationEnabled: false,
+        isAndroidBackgroundLocationEnabled: false,
+        isAndroidForegroundServiceEnabled: false,
+      },
+    ],
     [
       "expo-build-properties",
       {

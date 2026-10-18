@@ -6,7 +6,7 @@ import { ApiError, personRefusal, readBody, zodFields, type PersonRefusal } from
 import { parsePhoneToken, secretMatches } from "@/lib/app/tokens";
 import { clientIpFrom } from "@/lib/client-ip";
 import { currentMaintenance } from "@/lib/maintenance";
-import { moduleAccessFor } from "@/lib/modules-access";
+import { moduleAccessFor, ModuleNotInPlan } from "@/lib/modules-access";
 import { clearFailures, lockoutState, recordFailure } from "@/lib/security/lockout";
 import { UnauthorizedError } from "@/lib/session";
 import { tenantKey } from "@/lib/tenancy/cache";
@@ -65,15 +65,23 @@ export const PHONE_REFUSALS: Record<PersonRefusal, string> = {
   workspace_locked: "Deskzo is locked for everybody here for now.",
   network: "You may not use Deskzo from this network.",
   device: "Your role only allows approved devices, and this phone isn't one yet.",
-  location: "Your role asks for your location at every sign-in, which the Deskzo app can't share yet.",
+  location: "Your role asks where you are when you sign in. Sign the app in again and let it share your location.",
   mobile: "Your role doesn't allow Deskzo on a phone.",
+  tablet: "Your role doesn't allow Deskzo on a tablet.",
 };
+
+/**
+ * What a phone's device row holds when it shared where it was as it signed in (src/lib/app/pairing.ts) — the
+ * app's sign-in, as a browser's is its session (src/lib/access/record.ts recordLocation).
+ */
+export const appLocationKey = (appDeviceId: string) => `app:${appDeviceId}`;
 
 /** A thrown error as the phone sees it — never a stack, never a database message. */
 export function appErrorAnswer(err: unknown): Response {
   if (err instanceof ApiError) return appFailure(err.status, err.code, err.message, err.fields);
   if (err instanceof ZodError) return appFailure(400, "invalid_request", err.issues[0]?.message ?? "The request isn't valid.", zodFields(err));
   if (err instanceof UnauthorizedError) return appFailure(403, "forbidden", "You may not do that.");
+  if (err instanceof ModuleNotInPlan) return appFailure(403, "module_unavailable", "That isn't in your workspace's plan.");
   console.error("[app] call failed", err);
   return appFailure(500, "internal", "Something went wrong on our side. Try again in a moment.");
 }
@@ -117,7 +125,7 @@ export function appRoute(options: RouteOptions, handler: (call: AppCall) => Prom
               callSync: true,
               createdAt: true,
               secretDigest: true,
-              device: { select: { id: true, tokenHash: true, status: true, lastSeenAt: true, lastIp: true } },
+              device: { select: { id: true, tokenHash: true, status: true, lastSeenAt: true, lastIp: true, kind: true, locationSessionId: true } },
               user: { select: { id: true, name: true, email: true, role: true, isSuperAdmin: true, active: true, kind: true, lockedAt: true, lockedUntil: true } },
             },
           })
@@ -132,7 +140,9 @@ export function appRoute(options: RouteOptions, handler: (call: AppCall) => Prom
       clearFailures([lockKey]);
       if (phone.device.status === "PENDING") return appFailure(403, "device_pending", "This phone is waiting for an administrator to approve it. You'll be able to use it once they have.");
 
-      const refusal = await personRefusal(phone.user, ip, true, "MOBILE");
+      // As the phone or tablet it signed in as, and with the location it shared then.
+      const kind = phone.device.kind === "TABLET" ? "TABLET" : "MOBILE";
+      const refusal = await personRefusal(phone.user, ip, true, kind, phone.device.locationSessionId === appLocationKey(phone.id));
       if (refusal) return appFailure(403, "person_not_allowed", PHONE_REFUSALS[refusal]);
 
       const used = await countCall(phone.id);

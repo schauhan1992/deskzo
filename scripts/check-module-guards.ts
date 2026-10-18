@@ -211,7 +211,8 @@ const texts = new Map(sources.map((f) => [f, readFileSync(f, "utf8")]));
  * anywhere: a tab called "forms" is not a check that the Forms module is there.
  */
 // needModule: the public API's (src/lib/api/v1/shared.ts) — plan, switch and the key's person, the module first.
-const CHECKS = "isModuleEnabled|isModuleEntitled|moduleAccess|moduleAccessFor|moduleAvailableForTenant|planGate|requireModuleUser|needModule";
+// needAppModule, appModuleOpen: the Deskzo app's (src/lib/app/daily.ts) — the same, as the phone's person.
+const CHECKS = "isModuleEnabled|isModuleEntitled|moduleAccess|moduleAccessFor|moduleAvailableForTenant|planGate|requireModuleUser|needModule|needAppModule|appModuleOpen";
 const mentions = (file: string, keys: readonly string[]) =>
   keys.some((k) => {
     const key = k.replace(/[^a-z_]/g, "");
