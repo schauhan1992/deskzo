@@ -6,12 +6,15 @@ import { TRIGGERS, triggerPaths } from "@/lib/automate/triggers";
 import { LIVE_IN_TEST } from "@/lib/automate/engine";
 import { FIELD_HINTS, humanize, type FieldKind, type RecordKind } from "@/lib/automate/field-hints";
 import type { ActionRisk } from "@/lib/automate/action-types";
+import { connectorLevelOf, connectorRefusal } from "@/lib/automate/limits";
+import { limitsHere } from "@/lib/automate/usage";
 
 /**
  * Everything the builder offers (Deskzo Automate, Phase 3), as plain data for the browser: the
  * triggers with every field they carry, the actions with their fields — generated from each action's
  * own input schema, so the form and the check that runs it never disagree — whether the workflow's
- * owner may use each one now, and the people, pipelines and stages to choose from.
+ * owner may use each one now — and whether the workspace's plan has it (its connectors, Phase 7) — and
+ * the people, pipelines and stages to choose from.
  */
 
 export type FieldSpec = {
@@ -96,9 +99,11 @@ export async function builderCatalog(ownerId: string): Promise<Catalog> {
     db.automationConnection.findMany({ where: { OR: [{ ownerUserId: ownerId }, { sharedWithWorkspace: true }] }, orderBy: { name: "asc" }, select: { id: true, name: true, provider: true } }).catch(() => []),
     db.role.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }], select: { key: true, name: true } }),
   ]);
+  const limits = await limitsHere();
   const actions: ActionSpec[] = [];
   for (const action of ACTIONS) {
-    const refusal = await actorRefusal(ownerId, action as never);
+    // The least the action needs: a webhook call to an address is level 0 whatever a saved connection would need.
+    const refusal = connectorRefusal(connectorLevelOf(action.key, {}), limits) ?? (await actorRefusal(ownerId, action as never));
     actions.push({
       key: action.key,
       label: action.label,

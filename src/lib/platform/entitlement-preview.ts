@@ -10,18 +10,22 @@ import {
   PLAN_CHOICE_SELECT,
   PLAN_REFUSALS,
   PlanRefused,
+  automationLimitsOf,
+  automationOfPlan,
   checkPlanInput,
   choicePlanOf,
   limitOf,
   liveGatewaySubscription,
   planChoiceRefusal,
   planKeyOf,
+  savedAutomation,
   savedCustomDomains,
   wantedPlans,
   type LiveGateway,
   type PlanInput,
 } from "@/lib/platform/plans";
 import { ConsoleRefused } from "@/lib/platform/refused";
+import type { AutomationLimits } from "@/lib/automate/limits";
 
 /**
  * What a change to a workspace's plans, modules or limits would do — and what a change to a plan
@@ -41,8 +45,8 @@ import { ConsoleRefused } from "@/lib/platform/refused";
 export type EntitlementChange =
   | { plans: { planKey: string; quantity: number }[] }
   | { override: { moduleKey: string; granted: boolean | null } }
-  /** `customDomains` left out keeps the override it has. */
-  | { limits: { seats: number | null; copilotTokens: number | null; customDomains?: number | null } };
+  /** `customDomains` or `automation` left out keeps the override it has. */
+  | { limits: { seats: number | null; copilotTokens: number | null; customDomains?: number | null; automation?: AutomationLimits } };
 
 export type EntitlementPreview = {
   current: Entitlements;
@@ -53,6 +57,8 @@ export type EntitlementPreview = {
     seats: [number | null, number | null];
     copilotTokens: [number | null, number | null];
     customDomains: [number | null, number | null];
+    /** Automate's limits; null where they were never worked out (no limit). */
+    automation: [AutomationLimits | null, AutomationLimits | null];
   };
   gateway: LiveGateway | null;
   /** The save's refusal, word for word — or null when it would go through. The reason a change asks for is the caller's to check. */
@@ -72,6 +78,7 @@ export type PlanSavePreview = {
   seats: [number | null, number | null];
   copilotTokens: [number | null, number | null];
   customDomains: [number | null, number | null];
+  automation: [AutomationLimits | null, AutomationLimits];
   /** Workspaces that would lose modules they have now, and which — of the first 200, alphabetically. */
   losingModules: { slug: string; modules: string[] }[];
 };
@@ -100,13 +107,19 @@ function moduleDiff(before: Entitlements, after: Entitlements, country: string):
   return { added: [...will].filter((k) => !was.has(k)), removed: [...was].filter((k) => !will.has(k)) };
 }
 
+/** A workspace's Automate overrides, as `entitlementsFrom` reads them. */
+const AUTOMATION_OVERRIDES = { automationWorkflowOverride: true, automationStepOverride: true, automationHistoryOverride: true, automationConnectorOverride: true } as const;
+
 const HAND_GIVEN: StandingSub = { gateway: "MANUAL", status: "ACTIVE", trialEndsAt: null, currentPeriodEnd: null, cancelAtPeriodEnd: false, pastDueSince: null, cancelledAt: null };
 
 /** One workspace, one change: what it has now, what it would have, and whether the save would take it. */
 export async function previewEntitlements(tenantId: string, change: EntitlementChange, now = new Date()): Promise<EntitlementPreview> {
   const control = controlDb();
   const [tenant, subs, overrides, gateway, trialCap] = await Promise.all([
-    control.tenant.findUnique({ where: { id: tenantId }, select: { isDefault: true, status: true, country: true, seatOverride: true, copilotTokenOverride: true, customDomainOverride: true } }),
+    control.tenant.findUnique({
+      where: { id: tenantId },
+      select: { isDefault: true, status: true, country: true, seatOverride: true, copilotTokenOverride: true, customDomainOverride: true, ...AUTOMATION_OVERRIDES },
+    }),
     control.subscription.findMany({
       where: { tenantId },
       select: {
@@ -161,11 +174,13 @@ export async function previewEntitlements(tenantId: string, change: EntitlementC
     refuse(productRefusal(plans.map(choicePlanOf)));
 
     // Given on the live manual subscription — still the free trial, when that is what it is.
-    const chosen: EntItem[] = plans.map(({ key, kind, allModules, seats, copilotTokens, customDomains, modules }) => ({
-      quantity: wanted.get(key)!,
-      trial: !!manual && isFreeTrial(manual),
-      plan: { key, kind, allModules, seats, copilotTokens, customDomains, modules },
-    }));
+    const chosen: EntItem[] = plans.map(
+      ({ key, kind, allModules, seats, copilotTokens, customDomains, modules, automationWorkflows, automationSteps, automationHistoryDays, automationConnectors }) => ({
+        quantity: wanted.get(key)!,
+        trial: !!manual && isFreeTrial(manual),
+        plan: { key, kind, allModules, seats, copilotTokens, customDomains, modules, automationWorkflows, automationSteps, automationHistoryDays, automationConnectors },
+      }),
+    );
     next = entitlementsFrom(ws, [...itemsOf(subs.filter((s) => s !== manual)), ...chosen], overrides);
     subsAfter = manual ? subs : [...subs, HAND_GIVEN];
   } else if ("override" in change && change.override && typeof change.override === "object") {
@@ -192,7 +207,20 @@ export async function previewEntitlements(tenantId: string, change: EntitlementC
     const copilotTokenOverride = limit(change.limits.copilotTokens, "Copilot tokens", tenant.copilotTokenOverride);
     const customDomainOverride =
       change.limits.customDomains === undefined ? tenant.customDomainOverride : limit(change.limits.customDomains, "Custom domains", tenant.customDomainOverride);
-    next = entitlementsFrom({ country: tenant.country, seatOverride, copilotTokenOverride, customDomainOverride, trialSeats: trialCap }, itemsOf(subs), overrides);
+    // Automate's overrides together: one the save would refuse leaves them all as they are.
+    const askedAutomation = change.limits.automation;
+    const automationRefusal = askedAutomation === undefined ? null : refusalOf(() => automationLimitsOf(askedAutomation));
+    refuse(automationRefusal);
+    const automation =
+      askedAutomation === undefined || automationRefusal !== null
+        ? {}
+        : (({ workflows, steps, historyDays, connectors }) => ({
+            automationWorkflowOverride: workflows,
+            automationStepOverride: steps,
+            automationHistoryOverride: historyDays,
+            automationConnectorOverride: connectors,
+          }))(automationLimitsOf(askedAutomation));
+    next = entitlementsFrom({ ...tenant, seatOverride, copilotTokenOverride, customDomainOverride, ...automation, trialSeats: trialCap }, itemsOf(subs), overrides);
   } else {
     throw new ConsoleRefused("Say what to preview: its plans, a module, or its limits.");
   }
@@ -207,6 +235,7 @@ export async function previewEntitlements(tenantId: string, change: EntitlementC
       seats: [current.seats, next.seats],
       copilotTokens: [current.copilotTokens, next.copilotTokens],
       customDomains: [current.customDomains, next.customDomains],
+      automation: [current.automation ?? null, next.automation ?? null],
     },
     gateway,
     refusal: refusals[0] ?? null,
@@ -226,16 +255,30 @@ export async function previewPlanSave(input: PlanInput): Promise<PlanSavePreview
   const control = controlDb();
   const existing = await control.plan.findUnique({
     where: { key: planKeyOf(input.key) },
-    select: { id: true, kind: true, productKey: true, allModules: true, seats: true, copilotTokens: true, customDomains: true, modules: { select: { moduleKey: true } } },
+    select: {
+      id: true,
+      kind: true,
+      productKey: true,
+      allModules: true,
+      seats: true,
+      copilotTokens: true,
+      customDomains: true,
+      automationWorkflows: true,
+      automationSteps: true,
+      automationHistoryDays: true,
+      automationConnectors: true,
+      modules: { select: { moduleKey: true } },
+    },
   });
   // The save's checks first, with the plan's own product when the input leaves it out.
-  const { key, modules, data } = checkPlanInput(input, existing);
+  const { key, modules, automation: given, data } = checkPlanInput(input, existing);
   if (existing?.kind === "INTERNAL" && data.kind !== "INTERNAL") throw new PlanRefused(PLAN_REFUSALS.internalStaysInternal);
 
   const before = existing ? listedModules(existing.allModules, existing.modules.map((m) => m.moduleKey)) : new Set<string>();
   const after = listedModules(data.allModules, modules);
   // Left out of the input: kept as it is, or the default for a new plan — as the save does it.
   const customDomains = savedCustomDomains(data, existing);
+  const automation = savedAutomation(data.kind, given, existing);
   const preview: PlanSavePreview = {
     workspaces: 0,
     sample: [],
@@ -244,6 +287,7 @@ export async function previewPlanSave(input: PlanInput): Promise<PlanSavePreview
     seats: [existing?.seats ?? null, data.seats],
     copilotTokens: [existing?.copilotTokens ?? null, data.copilotTokens],
     customDomains: [existing ? existing.customDomains : null, customDomains],
+    automation: [existing ? automationOfPlan(existing) : null, automation],
     losingModules: [],
   };
   if (!existing) return preview;
@@ -255,7 +299,7 @@ export async function previewPlanSave(input: PlanInput): Promise<PlanSavePreview
     control.tenant.count({ where: onPlan }),
     control.tenant.findMany({
       where: onPlan,
-      select: { id: true, slug: true, country: true, seatOverride: true, copilotTokenOverride: true, customDomainOverride: true },
+      select: { id: true, slug: true, country: true, seatOverride: true, copilotTokenOverride: true, customDomainOverride: true, ...AUTOMATION_OVERRIDES },
       orderBy: { slug: "asc" },
       take: PREVIEW_WORKSPACES,
     }),
@@ -281,6 +325,10 @@ export async function previewPlanSave(input: PlanInput): Promise<PlanSavePreview
     seats: data.seats,
     copilotTokens: data.copilotTokens,
     customDomains,
+    automationWorkflows: automation.workflows,
+    automationSteps: automation.steps,
+    automationHistoryDays: automation.historyDays,
+    automationConnectors: automation.connectors,
     modules: data.allModules ? [] : modules.map((moduleKey) => ({ moduleKey })),
   };
   for (const t of tenants) {

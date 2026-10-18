@@ -4,6 +4,7 @@ import { dependentsOf, soldIn, withDependencies, type Entitlements } from "@/lib
 import { MODULE_REGISTRY, getModuleDefinition } from "@/lib/modules";
 import { forgetRegistry } from "@/lib/tenancy/registry";
 import { trialSeats } from "@/lib/platform/settings";
+import { PLAN_LIMITS, type AutomationLimits } from "@/lib/automate/limits";
 
 /**
  * Working out what a workspace may use, and writing it on its control-plane row — whenever its plans,
@@ -22,6 +23,8 @@ import { trialSeats } from "@/lib/platform/settings";
  *   · A workspace on its free trial and paying for nothing has no more people than a trial allows
  *     (`trialSeats`, console › Settings — 25 to start with), whatever its plan says. A staff override,
  *     or paying for an edition, lifts it.
+ *   · Deskzo Automate's limits (`automationFrom`): workflows and steps added up, the longest history
+ *     and the widest connectors; a free trial gives a trial's, whatever it trials.
  *
  * The working out itself is `entitlementsFrom`, which reads nothing: the console's previews
  * (entitlement-preview.ts) run it on a change that has not been made, so what they show is what the
@@ -41,8 +44,15 @@ export const ENTITLEMENT_PLAN_SELECT = {
   seats: true,
   copilotTokens: true,
   customDomains: true,
+  automationWorkflows: true,
+  automationSteps: true,
+  automationHistoryDays: true,
+  automationConnectors: true,
   modules: { select: { moduleKey: true } },
 } as const satisfies Prisma.PlanSelect;
+
+/** A plan's Deskzo Automate limits (prisma/control/schema.prisma `Plan`); left out, they are null. */
+type PlanAutomation = { automationWorkflows?: number | null; automationSteps?: number | null; automationHistoryDays?: number | null; automationConnectors?: number | null };
 
 /** The free trial a signup starts on: a subscription made by hand, trialing (src/lib/platform/plans.ts `startOnPlan`). */
 export const isFreeTrial = (sub: { gateway: string; status: string }) => sub.gateway === "MANUAL" && sub.status === "TRIALING";
@@ -54,7 +64,7 @@ export type EntItem = {
   trial?: boolean;
   /** Charged per person: the quantity is the people bought (the item's price, src/lib/billing/prices.ts). */
   perSeat?: boolean;
-  plan: { key: string; kind: PlanKind; allModules: boolean; seats: number | null; copilotTokens: number | null; customDomains: number | null; modules: { moduleKey: string }[] };
+  plan: { key: string; kind: PlanKind; allModules: boolean; seats: number | null; copilotTokens: number | null; customDomains: number | null; modules: { moduleKey: string }[] } & PlanAutomation;
 };
 
 type PlanForSum = { kind: PlanKind; seats: number | null; copilotTokens: number | null; customDomains: number | null };
@@ -77,12 +87,60 @@ function sumLimit(items: { quantity: number; perSeat?: boolean; plan: PlanForSum
   return items.reduce((total, i) => total + (i.plan[field] ?? (counted(i) ? 1 : 0)) * i.quantity, 0);
 }
 
+/** Staff overrides of a workspace's Automate limits; absent or null, the plans decide. */
+type AutomationOverrides = {
+  automationWorkflowOverride?: number | null;
+  automationStepOverride?: number | null;
+  automationHistoryOverride?: number | null;
+  automationConnectorOverride?: number | null;
+};
+
+/**
+ * Deskzo Automate's limits (src/lib/automate/limits.ts) from the plans. Workflows are added up, one
+ * unit for a plan sold per person; steps a month too, the allowance for each person bought on a plan
+ * sold per person — pooled across the workspace. History is the longest any plan gives, connectors the
+ * widest. An edition or internal plan without a limit means none; an add-on without one adds nothing.
+ * Free-trial plans count as one trial (`PLAN_LIMITS.trial`), whatever they trial, and what is paid for
+ * comes on top. A staff override replaces each.
+ */
+export function automationFrom(tenant: AutomationOverrides, items: EntItem[], onTrial: (i: EntItem) => boolean): AutomationLimits {
+  const parts: { open: boolean; units: number; quantity: number; limits: AutomationLimits }[] = items
+    .filter((i) => !onTrial(i))
+    .map((i) => ({
+      open: BASE_KINDS.includes(i.plan.kind),
+      units: i.perSeat ? 1 : i.quantity,
+      quantity: i.quantity,
+      limits: {
+        workflows: i.plan.automationWorkflows ?? null,
+        steps: i.plan.automationSteps ?? null,
+        historyDays: i.plan.automationHistoryDays ?? null,
+        connectors: i.plan.automationConnectors ?? null,
+      },
+    }));
+  if (items.some(onTrial)) parts.push({ open: true, units: 1, quantity: 1, limits: PLAN_LIMITS.trial });
+  const none = (field: keyof AutomationLimits) => parts.some((p) => p.open && p.limits[field] === null);
+  const added = (field: "workflows" | "steps") =>
+    none(field) ? null : parts.reduce((total, p) => total + (p.limits[field] ?? 0) * (field === "workflows" ? p.units : p.quantity), 0);
+  const highest = (field: "historyDays" | "connectors", otherwise: number) => {
+    if (none(field)) return null;
+    const given = parts.map((p) => p.limits[field]).filter((n): n is number => n !== null);
+    return given.length ? Math.max(...given) : otherwise;
+  };
+  return {
+    workflows: tenant.automationWorkflowOverride ?? added("workflows"),
+    steps: tenant.automationStepOverride ?? added("steps"),
+    // Nothing that says: a trial's history, and webhooks only.
+    historyDays: tenant.automationHistoryOverride ?? highest("historyDays", PLAN_LIMITS.trial.historyDays),
+    connectors: tenant.automationConnectorOverride ?? highest("connectors", 0),
+  };
+}
+
 /**
  * What a workspace may use, from its country and limit overrides, the plans on its live
  * subscriptions, and its module overrides — the rules above, and nothing read.
  */
 export function entitlementsFrom(
-  tenant: {
+  tenant: AutomationOverrides & {
     country: string;
     seatOverride: number | null;
     copilotTokenOverride: number | null;
@@ -118,6 +176,7 @@ export function entitlementsFrom(
     seats: tenant.seatOverride ?? (trialCap === null ? counted : counted === null ? trialCap : Math.min(counted, trialCap)),
     copilotTokens: tenant.copilotTokenOverride ?? sumLimit(items, "copilotTokens"),
     customDomains: tenant.customDomainOverride ?? sumLimit(items, "customDomains"),
+    automation: automationFrom(tenant, items, onTrial),
     plans: [...new Set(items.map((i) => i.plan.key))].sort(),
     ...(trialCap !== null ? { trial: true } : {}),
   };
@@ -126,7 +185,19 @@ export function entitlementsFrom(
 export async function computeEntitlements(tenantId: string): Promise<Entitlements> {
   const control = controlDb();
   const [tenant, items, overrides, trialCap] = await Promise.all([
-    control.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { country: true, seatOverride: true, copilotTokenOverride: true, customDomainOverride: true } }),
+    control.tenant.findUniqueOrThrow({
+      where: { id: tenantId },
+      select: {
+        country: true,
+        seatOverride: true,
+        copilotTokenOverride: true,
+        customDomainOverride: true,
+        automationWorkflowOverride: true,
+        automationStepOverride: true,
+        automationHistoryOverride: true,
+        automationConnectorOverride: true,
+      },
+    }),
     control.subscriptionItem.findMany({
       // Not one authorised to start at the next renewal (a change of plan) — it counts from then.
       where: { subscription: { tenantId, status: { in: [...LIVE_STATUSES] }, OR: [{ startsAt: null }, { startsAt: { lte: new Date() } }] } },

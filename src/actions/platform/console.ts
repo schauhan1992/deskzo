@@ -374,8 +374,18 @@ export async function consoleSetModuleOverride(tenantId: string, moduleKey: stri
   });
 }
 
-/** `customDomains` left out keeps the workspace's custom-domain override as it is. */
-export async function consoleSetLimitOverrides(tenantId: string, input: { seats: string | number | null; copilotTokens: string | number | null; customDomains?: string | number | null }) {
+type LimitText = string | number | null;
+
+/** `customDomains` or `automation` left out keeps that override as it is. */
+export async function consoleSetLimitOverrides(
+  tenantId: string,
+  input: {
+    seats: LimitText;
+    copilotTokens: LimitText;
+    customDomains?: LimitText;
+    automation?: { workflows: LimitText; steps: LimitText; historyDays: LimitText; connectors: LimitText };
+  },
+) {
   return asStaff(SELLERS, async (staff) => {
     const given = input && typeof input === "object" ? input : { seats: null, copilotTokens: null };
     await setLimitOverrides(
@@ -384,6 +394,7 @@ export async function consoleSetLimitOverrides(tenantId: string, input: { seats:
         seats: given.seats ?? null,
         copilotTokens: given.copilotTokens ?? null,
         ...("customDomains" in given && given.customDomains !== undefined ? { customDomains: given.customDomains } : {}),
+        ...("automation" in given && given.automation && typeof given.automation === "object" ? { automation: given.automation } : {}),
       },
       `staff:${staff.id}`,
     );

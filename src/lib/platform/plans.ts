@@ -6,6 +6,7 @@ import { productRefusal, SUITE_NAME } from "@/lib/billing/plan-choice";
 import { soldIn } from "@/lib/entitlements";
 import { MODULE_REGISTRY, getModuleDefinition, type ModuleDefinition } from "@/lib/modules";
 import { PRODUCT_KEYS } from "@/lib/products";
+import { ALL_CONNECTORS, NO_LIMITS, PLAN_LIMITS, type AutomationLimits } from "@/lib/automate/limits";
 
 /**
  * Plans, and which workspace is on which — from the console, the scripts and signup. Every change is
@@ -74,6 +75,12 @@ export type PlanInput = {
    */
   customDomains?: number | null;
   /**
+   * Deskzo Automate's limits for each unit (src/lib/platform/entitlements.ts `automationFrom`; null: no
+   * limit on an edition or internal plan, nothing from an add-on or bundle). Left out: a plan being
+   * changed keeps its own, and a new one starts with an edition's (`PLAN_LIMITS.edition`) when it is one.
+   */
+  automation?: AutomationLimits;
+  /**
    * The product it sells (src/lib/products.ts `PRODUCT_KEYS`) — an edition's only; null: none, an
    * edition of its own. "one" is Deskzo One, every module. Left out: a plan being changed keeps its
    * own, and a new one has none.
@@ -98,10 +105,49 @@ export const limitOf = (value: unknown, what: string): number | null => {
   return n;
 };
 
+/** Automate's limits as typed — each a limit (`limitOf`), the connectors a level of `CONNECTOR_LEVELS`. Refused otherwise. */
+export function automationLimitsOf(value: { [K in keyof AutomationLimits]?: unknown }): AutomationLimits {
+  const workflows = limitOf(value.workflows, "Workflows switched on");
+  const steps = limitOf(value.steps, "Steps a month");
+  const historyDays = limitOf(value.historyDays, "Days of run history");
+  const connectors = limitOf(value.connectors, "Connectors");
+  if (connectors !== null && connectors > ALL_CONNECTORS) throw new PlanRefused(`Connectors is a level from 0 to ${ALL_CONNECTORS} — or empty for every one.`);
+  return { workflows, steps, historyDays, connectors };
+}
+
+/** A plan's Automate columns, read as limits. */
+export const automationOfPlan = (plan: { automationWorkflows: number | null; automationSteps: number | null; automationHistoryDays: number | null; automationConnectors: number | null }): AutomationLimits => ({
+  workflows: plan.automationWorkflows,
+  steps: plan.automationSteps,
+  historyDays: plan.automationHistoryDays,
+  connectors: plan.automationConnectors,
+});
+
+/** Limits as a plan's Automate columns. */
+export const automationColumns = (limits: AutomationLimits) => ({
+  automationWorkflows: limits.workflows,
+  automationSteps: limits.steps,
+  automationHistoryDays: limits.historyDays,
+  automationConnectors: limits.connectors,
+});
+
+/**
+ * The Automate limits a plan is saved with: as given; or, left out, what the plan has now — and for a
+ * new plan an edition's, when it is one; otherwise none (no limit for an internal plan, nothing added
+ * by an add-on or bundle).
+ */
+export function savedAutomation(kind: PlanKind, given: AutomationLimits | undefined, existing: Parameters<typeof automationOfPlan>[0] | null): AutomationLimits {
+  if (given !== undefined) return given;
+  if (existing) return automationOfPlan(existing);
+  return kind === "EDITION" ? { ...PLAN_LIMITS.edition } : NO_LIMITS;
+}
+
 /** A plan's definition as it is saved, checked — `savePlan` stores exactly this, and `previewPlanSave` shows it. */
 export type CheckedPlan = {
   key: string;
   modules: string[];
+  /** Undefined: not given — see `savedAutomation`. */
+  automation?: AutomationLimits;
   data: {
     name: string;
     kind: PlanKind;
@@ -170,6 +216,7 @@ export function checkPlanInput(input: PlanInput, existing?: { productKey: string
   const seats = limitOf(input.seats, "Seats");
   const copilotTokens = limitOf(input.copilotTokens, "Copilot tokens");
   const customDomains = input.customDomains === undefined ? undefined : limitOf(input.customDomains, "Custom domains");
+  const automation = input.automation === undefined ? undefined : automationLimitsOf(input.automation);
   const isDefault = !!input.isDefault;
   if (isDefault && input.kind === "INTERNAL") throw new PlanRefused("New workspaces cannot start on an internal plan.");
   if (isDefault && input.active === false) throw new PlanRefused("A retired plan cannot be the one new workspaces start on.");
@@ -187,29 +234,33 @@ export function checkPlanInput(input: PlanInput, existing?: { productKey: string
     active: input.active !== false,
     sortOrder: Number.isInteger(input.sortOrder) ? input.sortOrder! : 0,
   };
-  return { key, modules, data };
+  return { key, modules, ...(automation === undefined ? {} : { automation }), data };
 }
 
 /** Creates a plan, or changes the one with this key; then every workspace on it. */
 export async function savePlan(input: PlanInput, actor: string): Promise<{ id: string; workspaces: number }> {
   // A product left out is the plan's own: read before the checks, which need it.
   const kept = input.productKey === undefined ? await controlDb().plan.findUnique({ where: { key: planKeyOf(input.key) }, select: { productKey: true } }) : null;
-  const { key, modules, data } = checkPlanInput(input, kept);
+  const { key, modules, automation: given, data } = checkPlanInput(input, kept);
   const { allModules, countries, seats, copilotTokens, isDefault, name, productKey } = data;
 
   const plan = await controlDb().$transaction(async (tx) => {
-    const existing = await tx.plan.findUnique({ where: { key }, select: { id: true, kind: true, customDomains: true } });
+    const existing = await tx.plan.findUnique({
+      where: { key },
+      select: { id: true, kind: true, customDomains: true, automationWorkflows: true, automationSteps: true, automationHistoryDays: true, automationConnectors: true },
+    });
     if (existing?.kind === "INTERNAL" && input.kind !== "INTERNAL") throw new PlanRefused(PLAN_REFUSALS.internalStaysInternal);
     if (isDefault) await tx.plan.updateMany({ where: { isDefault: true, NOT: { key } }, data: { isDefault: false } });
     const customDomains = savedCustomDomains(data, existing);
-    const row = { ...data, customDomains };
+    const automation = savedAutomation(input.kind, given, existing);
+    const row = { ...data, customDomains, ...automationColumns(automation) };
     const saved = await tx.plan.upsert({ where: { key }, create: { key, ...row }, update: row, select: { id: true } });
     await tx.planModule.deleteMany({ where: { planId: saved.id } });
     if (!allModules && modules.length) await tx.planModule.createMany({ data: modules.map((moduleKey) => ({ planId: saved.id, moduleKey })) });
     await audit(
       actor,
       existing ? "plan.update" : "plan.create",
-      { key, name, kind: input.kind, productKey, modules: allModules ? "all" : modules, countries, seats, copilotTokens, customDomains, isDefault },
+      { key, name, kind: input.kind, productKey, modules: allModules ? "all" : modules, countries, seats, copilotTokens, customDomains, automation, isDefault },
       undefined,
       tx,
     );
@@ -434,21 +485,50 @@ export async function setModuleOverride(tenantId: string, moduleKey: string, gra
   await refreshEntitlements(tenantId);
 }
 
+/** Limits as a workspace's Automate override columns (null: the plans decide). */
+export const automationOverrideColumns = (limits: AutomationLimits) => ({
+  automationWorkflowOverride: limits.workflows,
+  automationStepOverride: limits.steps,
+  automationHistoryOverride: limits.historyDays,
+  automationConnectorOverride: limits.connectors,
+});
+
 /**
- * Seats, copilot tokens and custom domains for one workspace, in place of what its plans add up to
- * (null: the plans). `customDomains` left out (undefined) keeps the override it has.
+ * Seats, copilot tokens, custom domains and Automate's limits for one workspace, in place of what its
+ * plans add up to (null: the plans). `customDomains` or `automation` left out (undefined) keeps the
+ * override it has.
  */
-export async function setLimitOverrides(tenantId: string, input: { seats: unknown; copilotTokens: unknown; customDomains?: unknown }, actor: string): Promise<void> {
+export async function setLimitOverrides(
+  tenantId: string,
+  input: { seats: unknown; copilotTokens: unknown; customDomains?: unknown; automation?: { [K in keyof AutomationLimits]?: unknown } },
+  actor: string,
+): Promise<void> {
   const seatOverride = limitOf(input.seats, "Seats");
   const copilotTokenOverride = limitOf(input.copilotTokens, "Copilot tokens");
   const keepDomains = input.customDomains === undefined;
   const customDomainOverride = keepDomains ? undefined : limitOf(input.customDomains, "Custom domains");
+  const automation = input.automation === undefined ? undefined : automationLimitsOf(input.automation);
   const saved = await controlDb().tenant.update({
     where: { id: tenantId },
-    data: { seatOverride, copilotTokenOverride, ...(keepDomains ? {} : { customDomainOverride }) },
-    select: { customDomainOverride: true },
+    data: { seatOverride, copilotTokenOverride, ...(keepDomains ? {} : { customDomainOverride }), ...(automation ? automationOverrideColumns(automation) : {}) },
+    select: { customDomainOverride: true, automationWorkflowOverride: true, automationStepOverride: true, automationHistoryOverride: true, automationConnectorOverride: true },
   });
-  await audit(actor, "tenant.limit-override", { seats: seatOverride, copilotTokens: copilotTokenOverride, customDomains: saved.customDomainOverride }, tenantId);
+  await audit(
+    actor,
+    "tenant.limit-override",
+    {
+      seats: seatOverride,
+      copilotTokens: copilotTokenOverride,
+      customDomains: saved.customDomainOverride,
+      automation: {
+        workflows: saved.automationWorkflowOverride,
+        steps: saved.automationStepOverride,
+        historyDays: saved.automationHistoryOverride,
+        connectors: saved.automationConnectorOverride,
+      },
+    },
+    tenantId,
+  );
   await refreshEntitlements(tenantId);
 }
 

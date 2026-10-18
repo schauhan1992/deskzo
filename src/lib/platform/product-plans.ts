@@ -2,6 +2,7 @@ import { LIVE_STATUSES } from "@/lib/platform/entitlements";
 import { controlDb } from "@/lib/platform/control-db";
 import { PlanRefused, checkPlanInput, savePlan, type PlanInput } from "@/lib/platform/plans";
 import { ADD_ONS, BASE_MODULES, PRODUCTS, productPlanKey, type AddOnKey, type ProductKey } from "@/lib/products";
+import { NO_LIMITS, PLAN_LIMITS } from "@/lib/automate/limits";
 
 /**
  * The products (src/lib/products.ts) as plans in the control plane — `npm run platform:plans --
@@ -15,6 +16,7 @@ import { ADD_ONS, BASE_MODULES, PRODUCTS, productPlanKey, type AddOnKey, type Pr
  *   addon-revenue-close  Revenue & Close, India only (its module is), bought with Books or One
  *   addon-ai-copilot     copilot tokens a month for each unit (1,000,000 to start with)
  *   addon-more-people    one seat for each unit
+ *   addon-automate-plus  Automate Plus: Deskzo Automate's limits raised (src/lib/automate/limits.ts)
  *
  * Names and descriptions come from products.ts. Books is sold in India only, as accounting is
  * (src/lib/modules.ts `countries`); everything else everywhere, where a product's India-only module
@@ -28,6 +30,9 @@ import { ADD_ONS, BASE_MODULES, PRODUCTS, productPlanKey, type AddOnKey, type Pr
  * prices. Those are written only when the plan is made. A run that finds every plan as the catalogue
  * has it writes nothing at all. Taking a module off a plan that workspaces are on would take it from
  * them, so that waits for `allowRemovals`; an internal plan with one of these keys is left alone.
+ *
+ * Automate's limits (Phase 7) are staff's too, with one exception: a plan made before they existed has
+ * all four empty, and the catalogue fills them in once — an empty limit on an edition means none.
  */
 
 /** Plan keys are identifiers — invitations and scripts name them — so they never follow a rename of the brand (src/lib/products.ts). */
@@ -37,6 +42,7 @@ export const ADD_ON_PLAN_KEYS: Record<AddOnKey, string> = {
   revenue_close: "addon-revenue-close",
   copilot: "addon-ai-copilot",
   seats: "addon-more-people",
+  automate_plus: "addon-automate-plus",
 };
 
 /** Copilot tokens a month for each unit of the AI Copilot add-on, until staff say otherwise. */
@@ -91,6 +97,7 @@ export function productCatalogue(): CataloguePlan[] {
       // No limit on people until staff price the plans; the copilot is bought as an add-on.
       seats: null,
       copilotTokens: 0,
+      automation: { ...(suite ? PLAN_LIMITS.one : PLAN_LIMITS.edition) },
       isDefault: suite,
       active: true,
       sortOrder: i * 10,
@@ -109,6 +116,7 @@ export function productCatalogue(): CataloguePlan[] {
       countries: ["IN"],
       seats: null,
       copilotTokens: null,
+      automation: { ...NO_LIMITS },
       isDefault: false,
       active: true,
       sortOrder: 200,
@@ -124,9 +132,26 @@ export function productCatalogue(): CataloguePlan[] {
       countries: [],
       seats: null,
       copilotTokens: COPILOT_TOKENS_PER_UNIT,
+      automation: { ...NO_LIMITS },
       isDefault: false,
       active: true,
       sortOrder: 210,
+    },
+    {
+      key: ADD_ON_PLAN_KEYS.automate_plus,
+      name: addOn("automate_plus").name,
+      kind: "ADDON",
+      description: addOn("automate_plus").tagline,
+      productKey: null,
+      allModules: false,
+      modules: [],
+      countries: [],
+      seats: null,
+      copilotTokens: null,
+      automation: { ...PLAN_LIMITS.plus },
+      isDefault: false,
+      active: true,
+      sortOrder: 215,
     },
     {
       key: ADD_ON_PLAN_KEYS.seats,
@@ -139,6 +164,7 @@ export function productCatalogue(): CataloguePlan[] {
       countries: [],
       seats: 1,
       copilotTokens: null,
+      automation: { ...NO_LIMITS },
       isDefault: false,
       active: true,
       sortOrder: 220,
@@ -176,6 +202,7 @@ export async function syncProductPlans(opts: { actor: string; dryRun?: boolean; 
       else if (plan.modules.length) changes.push(`${plan.modules.length} module${plan.modules.length === 1 ? "" : "s"}`);
       if (plan.kind === "ADDON" && plan.copilotTokens) changes.push(`${plan.copilotTokens.toLocaleString("en-IN")} copilot tokens a month a unit`);
       if (plan.kind === "ADDON" && plan.seats) changes.push(`${plan.seats} seat${plan.seats === 1 ? "" : "s"} a unit`);
+      if (plan.kind === "ADDON" && plan.automation.steps) changes.push(`${plan.automation.steps.toLocaleString("en-IN")} Automate steps a month a unit`);
       if (plan.countries.length) changes.push(`sold in ${plan.countries.join(", ")}`);
       if (plan.isDefault) changes.push(defaultNow && defaultNow.key !== plan.key ? `the default, in place of ${defaultNow.key}` : "the default");
       lines.push(await apply(plan, { outcome: "created", changes }, opts));
@@ -202,6 +229,10 @@ export async function syncProductPlans(opts: { actor: string; dryRun?: boolean; 
     if (row.productKey !== plan.productKey) changes.push(`product ${row.productKey ?? "none"} → ${plan.productKey ?? "none"}`);
     if (row.allModules !== plan.allModules) changes.push(plan.allModules ? "every module" : "a list of modules");
     if (added.length || removed.length) changes.push(`modules${added.length ? ` +${added.join(" +")}` : ""}${removed.length ? ` −${removed.join(" −")}` : ""}`);
+    // Made before Automate's limits: filled in once, then staff's.
+    const automationUnset = row.automationWorkflows === null && row.automationSteps === null && row.automationHistoryDays === null && row.automationConnectors === null;
+    const fillAutomation = automationUnset && Object.values(plan.automation).some((v) => v !== null);
+    if (fillAutomation) changes.push("Automate limits");
     if (!changes.length) {
       lines.push({ key: plan.key, outcome: "unchanged", changes, note });
       continue;
@@ -219,6 +250,7 @@ export async function syncProductPlans(opts: { actor: string; dryRun?: boolean; 
       countries: row.countries,
       seats: row.seats,
       copilotTokens: row.copilotTokens,
+      ...(fillAutomation ? { automation: plan.automation } : {}),
       isDefault: row.isDefault,
       active: row.active,
       sortOrder: row.sortOrder,

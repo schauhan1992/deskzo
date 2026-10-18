@@ -27,6 +27,10 @@ import { DraftingRefusal, draftingProvider, draftingUnavailable } from "@/lib/au
 import { copilotConfig } from "@/lib/copilot/settings";
 import { notMigratedYet } from "@/lib/not-migrated";
 import { decide, inboxFor } from "@/lib/automate/approvals";
+import { usageSummary } from "@/lib/automate/usage";
+import { clockOfTenant } from "@/lib/time/workspace";
+import { currentTenant } from "@/lib/tenancy/resolve";
+import type { AutomationLimits } from "@/lib/automate/limits";
 import { randomUUID } from "node:crypto";
 import type { ActionResult } from "@/actions/company";
 
@@ -254,6 +258,12 @@ export async function automateSwitches(): Promise<{ workspacePaused: boolean; pa
   await admin();
   const [workspace, platform] = await Promise.all([workspacePause(), platformPause().catch(() => ({ paused: false }))]);
   return { workspacePaused: workspace.paused, pausedAt: workspace.pausedAt, platformPaused: platform.paused };
+}
+
+/** This month's steps and the workflows on, against the plan's limits (Phase 7) — the Workflows page's line. */
+export async function automateUsage(): Promise<{ limits: AutomationLimits; steps: number; active: number; renews: string }> {
+  await admin();
+  return usageSummary(clockOfTenant(await currentTenant()));
 }
 
 // ─── Changing ────────────────────────────────────────────────────────────────────────────────────

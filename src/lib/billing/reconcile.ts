@@ -9,6 +9,7 @@ import { controlDb } from "@/lib/platform/control-db";
 import { forEachTenant } from "@/lib/platform/fanout";
 import { ConsoleRefused } from "@/lib/platform/refused";
 import { seatsInUse } from "@/lib/seats";
+import { automationSnapshot } from "@/lib/automate/usage";
 import { activeTenants } from "@/lib/tenancy/registry";
 
 /**
@@ -74,7 +75,9 @@ export async function snapshotUsage(now = new Date()) {
     (await activeTenants()).filter((t) => t.source === "control"),
     async (tenant) => {
       const [seatsUsed, copilotTokens] = await Promise.all([seatsInUse(), usedThisMonth(now)]);
-      const row = { seatsUsed, seatsLimit: tenant.entitlements.seats, copilotTokens, recordedAt: now };
+      // Deskzo Automate: steps this month against its allowance, and workflows switched on.
+      const automation = await automationSnapshot(tenant, now);
+      const row = { seatsUsed, seatsLimit: tenant.entitlements.seats, copilotTokens, ...automation, recordedAt: now };
       await controlDb().tenantUsage.upsert({ where: { tenantId_day: { tenantId: tenant.id, day } }, create: { tenantId: tenant.id, day, ...row }, update: row });
       return { seatsUsed, copilotTokens };
     },

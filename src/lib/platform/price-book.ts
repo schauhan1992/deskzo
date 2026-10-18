@@ -75,6 +75,8 @@ export const INDIA_LAUNCH_PRICES: readonly PriceBookEntry[] = [
   { planKey: "addon-revenue-close", month: 2499, year: 24990, perSeat: false },
   // A million copilot tokens a month on the workspace's own AI provider key — the provider bills its own use.
   { planKey: "addon-ai-copilot", month: 499, year: 4990, perSeat: false },
+  // Automate Plus: Deskzo Automate's limits raised for the whole workspace (owner, 17 Oct 2026).
+  { planKey: "addon-automate-plus", month: 999, year: 9990, perSeat: false },
 ];
 
 /** What a run did, or would do, to one plan. */

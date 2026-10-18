@@ -11,6 +11,7 @@ import { SUBSCRIPTION_STATUS, gatewayLabel, planKindLabel, subscriptionKind } fr
 import type { Caps } from "@/lib/console-shared/roles";
 import type { PlanPanel, WorkspaceHeader } from "@/lib/platform/workspace-data";
 import { productByKey } from "@/lib/products";
+import { connectorLevelText, type AutomationLimits } from "@/lib/automate/limits";
 import { AddOverrideButton, LimitsButton, ModuleGrid, RemoveOverrideButton } from "./override-dialogs";
 import { PlansEditor } from "./plans-editor";
 
@@ -82,7 +83,15 @@ export function PlanTab({ header, plan, caps }: { header: WorkspaceHeader; plan:
             description="What its plans add up to, unless staff set a limit in their place."
             actions={
               canLimit ? (
-                <LimitsButton tenantId={tenant.id} seats={plan.limits.seatOverride} copilotTokens={plan.limits.copilotTokenOverride} customDomains={plan.limits.customDomainOverride} />
+                <LimitsButton
+                  tenantId={tenant.id}
+                  current={{
+                    seats: plan.limits.seatOverride,
+                    copilotTokens: plan.limits.copilotTokenOverride,
+                    customDomains: plan.limits.customDomainOverride,
+                    ...plan.limits.automationOverride,
+                  }}
+                />
               ) : undefined
             }
           >
@@ -98,8 +107,12 @@ export function PlanTab({ header, plan, caps }: { header: WorkspaceHeader; plan:
                 value={plan.limits.customDomains === null ? "No limit" : plan.limits.customDomains === 0 ? "None" : INTEGER.format(plan.limits.customDomains)}
                 overridden={plan.limits.customDomainOverride !== null}
               />
+              <AutomationLimitRows limits={plan.limits.automation} overrides={plan.limits.automationOverride} />
             </dl>
-            {(plan.limits.seatOverride !== null || plan.limits.copilotTokenOverride !== null || plan.limits.customDomainOverride !== null) && (
+            {(plan.limits.seatOverride !== null ||
+              plan.limits.copilotTokenOverride !== null ||
+              plan.limits.customDomainOverride !== null ||
+              Object.values(plan.limits.automationOverride).some((v) => v !== null)) && (
               <p className="mt-3 text-xs text-muted">An overridden limit stays when its plans change. Clear it to let the plans decide again.</p>
             )}
           </Panel>
@@ -182,6 +195,27 @@ function PlanList({ items }: { items: PlanPanel["items"] }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+/** Deskzo Automate's four — "No limit" for each when they were never worked out (before its plans were, again, after Phase 7). */
+function AutomationLimitRows({ limits, overrides }: { limits: AutomationLimits | null; overrides: AutomationLimits }) {
+  const number = (n: number | null | undefined) => (n === null || n === undefined ? "No limit" : n === 0 ? "None" : INTEGER.format(n));
+  return (
+    <>
+      <LimitRow term="Automate: workflows switched on" value={number(limits?.workflows)} overridden={overrides.workflows !== null} />
+      <LimitRow term="Automate: steps a month" value={number(limits?.steps)} overridden={overrides.steps !== null} />
+      <LimitRow
+        term="Automate: run history"
+        value={limits === null || limits.historyDays === null ? "For good" : plural(limits.historyDays, "day")}
+        overridden={overrides.historyDays !== null}
+      />
+      <LimitRow
+        term="Automate: connectors"
+        value={connectorLevelText(limits === null ? null : limits.connectors)}
+        overridden={overrides.connectors !== null}
+      />
+    </>
   );
 }
 

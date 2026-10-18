@@ -12,6 +12,7 @@ import { Input, Label } from "@/components/ui/input";
 import { OptionCombobox } from "@/components/ui/option-combobox";
 import type { CatalogueModuleView } from "@/lib/console-shared/types";
 import type { PlanPanel } from "@/lib/platform/workspace-data";
+import { ALL_CONNECTORS, CONNECTOR_LEVELS } from "@/lib/automate/limits";
 import { cn } from "@/lib/utils";
 import { EntitlementImpact, useEntitlementPreview } from "./plans-editor";
 
@@ -265,67 +266,87 @@ export function RemoveOverrideButton({ tenantId, moduleKey, label }: { tenantId:
 
 // ─── Limits ──────────────────────────────────────────────────────────────────────────────────────
 
-/** What was typed as a limit: empty is "the plans decide" (null), a whole number 0–1,000,000,000, or invalid. */
-function limitOf(text: string): { ok: true; value: number | null } | { ok: false } {
+/** What was typed as a limit: empty is "the plans decide" (null), a whole number 0–`max`, or invalid. */
+function limitOf(text: string, max = 1_000_000_000): { ok: true; value: number | null } | { ok: false } {
   const t = text.trim();
   if (t === "") return { ok: true, value: null };
   if (!/^\d{1,10}$/.test(t)) return { ok: false };
   const n = Number(t);
-  return n <= 1_000_000_000 ? { ok: true, value: n } : { ok: false };
+  return n <= max ? { ok: true, value: n } : { ok: false };
 }
 
 const PREVIEW_DELAY_MS = 400;
 
+type LimitKey = "seats" | "copilotTokens" | "customDomains" | "workflows" | "steps" | "historyDays" | "connectors";
+
+/** The overrides, in the dialog's order; Deskzo Automate's four under their own heading. */
+const LIMIT_FIELDS: { key: LimitKey; label: string; hint: string; automate?: true; max?: number }[] = [
+  { key: "seats", label: "Seats", hint: "People who may hold an active account." },
+  { key: "copilotTokens", label: "Copilot tokens a month", hint: "Across everybody; 0 switches the copilot off." },
+  { key: "customDomains", label: "Custom domains", hint: "Addresses of its own, waiting or live; 0 allows none." },
+  { key: "workflows", label: "Workflows switched on", hint: "At once; 0 allows none.", automate: true },
+  { key: "steps", label: "Steps a month", hint: "Across everybody; 0 starts no run.", automate: true },
+  { key: "historyDays", label: "Days of run history", hint: "How long a finished run is kept.", automate: true },
+  {
+    key: "connectors",
+    label: "Connectors",
+    // Each level includes the ones before it.
+    hint: CONNECTOR_LEVELS.map((c) => `${c.level}: ${c.label}`).join(" · "),
+    automate: true,
+    max: ALL_CONNECTORS,
+  },
+];
+const LIMIT_KEYS = LIMIT_FIELDS.map((f) => f.key);
+const NO_TEXT = Object.fromEntries(LIMIT_KEYS.map((k) => [k, ""])) as Record<LimitKey, string>;
+
 /**
- * Seats, copilot tokens and custom domains for this workspace alone, in place of what its plans add
- * up to — empty lets the plans decide again. The preview follows the typing (after a short pause).
+ * Seats, copilot tokens, custom domains and Deskzo Automate's limits for this workspace alone, in place
+ * of what its plans add up to — empty lets the plans decide again. The preview follows the typing
+ * (after a short pause).
  */
-export function LimitsButton({
-  tenantId,
-  seats,
-  copilotTokens,
-  customDomains,
-}: {
-  tenantId: string;
-  seats: number | null;
-  copilotTokens: number | null;
-  customDomains: number | null;
-}) {
+export function LimitsButton({ tenantId, current }: { tenantId: string; current: Record<LimitKey, number | null> }) {
   const [open, setOpen] = useState(false);
-  const [seatText, setSeatText] = useState("");
-  const [tokenText, setTokenText] = useState("");
-  const [domainText, setDomainText] = useState("");
+  const [texts, setTexts] = useState<Record<LimitKey, string>>(NO_TEXT);
   const preview = useEntitlementPreview(tenantId);
   const save = useConsoleAction<null>();
-  const seatId = useId();
-  const tokenId = useId();
-  const domainId = useId();
+  const baseId = useId();
 
-  const seatValue = limitOf(seatText);
-  const tokenValue = limitOf(tokenText);
-  const domainValue = limitOf(domainText);
-  const valid = seatValue.ok && tokenValue.ok && domainValue.ok;
-  const key = `${seatText.trim()}|${tokenText.trim()}|${domainText.trim()}`;
-  const unchanged = valid && seatValue.value === seats && tokenValue.value === copilotTokens && domainValue.value === customDomains;
-  const ready = valid && !unchanged && preview.key === key && !preview.pending && preview.preview !== null && !preview.preview.refusal;
+  const read = (all: Record<LimitKey, string>) => {
+    const values = {} as Record<LimitKey, number | null>;
+    for (const f of LIMIT_FIELDS) {
+      const v = limitOf(all[f.key], f.max);
+      if (!v.ok) return null;
+      values[f.key] = v.value;
+    }
+    return values;
+  };
+  const keyOf = (all: Record<LimitKey, string>) => LIMIT_KEYS.map((k) => all[k].trim()).join("|");
+  const same = (values: Record<LimitKey, number | null>) => LIMIT_KEYS.every((k) => values[k] === current[k]);
+  const changeOf = (v: Record<LimitKey, number | null>) => ({
+    seats: v.seats,
+    copilotTokens: v.copilotTokens,
+    customDomains: v.customDomains,
+    automation: { workflows: v.workflows, steps: v.steps, historyDays: v.historyDays, connectors: v.connectors },
+  });
 
-  function ask(nextSeats: string, nextTokens: string, nextDomains: string) {
-    const s = limitOf(nextSeats);
-    const t = limitOf(nextTokens);
-    const d = limitOf(nextDomains);
-    if (!s.ok || !t.ok || !d.ok || (s.value === seats && t.value === copilotTokens && d.value === customDomains)) {
+  const values = read(texts);
+  const unchanged = values !== null && same(values);
+  const ready = values !== null && !unchanged && preview.key === keyOf(texts) && !preview.pending && preview.preview !== null && !preview.preview.refusal;
+
+  function type(next: Record<LimitKey, string>) {
+    setTexts(next);
+    const v = read(next);
+    if (v === null || same(v)) {
       preview.clear();
       return;
     }
-    preview.request({ limits: { seats: s.value, copilotTokens: t.value, customDomains: d.value } }, `${nextSeats.trim()}|${nextTokens.trim()}|${nextDomains.trim()}`, PREVIEW_DELAY_MS);
+    preview.request({ limits: changeOf(v) }, keyOf(next), PREVIEW_DELAY_MS);
   }
 
   function start() {
     save.reset();
     preview.clear();
-    setSeatText(seats === null ? "" : String(seats));
-    setTokenText(copilotTokens === null ? "" : String(copilotTokens));
-    setDomainText(customDomains === null ? "" : String(customDomains));
+    setTexts(Object.fromEntries(LIMIT_KEYS.map((k) => [k, current[k] === null ? "" : String(current[k])])) as Record<LimitKey, string>);
     setOpen(true);
   }
 
@@ -336,13 +357,33 @@ export function LimitsButton({
   }
 
   function confirm() {
-    if (!ready || !seatValue.ok || !tokenValue.ok || !domainValue.ok) return;
-    const all = seatValue.value === null && tokenValue.value === null && domainValue.value === null;
-    save.run(() => consoleSetLimitOverrides(tenantId, { seats: seatValue.value, copilotTokens: tokenValue.value, customDomains: domainValue.value }), {
+    if (!ready || values === null) return;
+    const all = LIMIT_KEYS.every((k) => values[k] === null);
+    save.run(() => consoleSetLimitOverrides(tenantId, changeOf(values)), {
       success: all ? "Limits cleared — its plans decide again." : "Limits saved.",
       onDone: () => setOpen(false),
     });
   }
+
+  const field = (f: (typeof LIMIT_FIELDS)[number]) => {
+    const id = `${baseId}-${f.key}`;
+    const ok = limitOf(texts[f.key], f.max).ok;
+    return (
+      <div key={f.key} className="space-y-1.5">
+        <Label htmlFor={id}>{f.label}</Label>
+        <Input
+          id={id}
+          inputMode="numeric"
+          autoComplete="off"
+          placeholder="Plans decide"
+          value={texts[f.key]}
+          aria-invalid={!ok || undefined}
+          onChange={(e) => type({ ...texts, [f.key]: e.target.value })}
+        />
+        <p className={cn("text-xs", ok ? "text-subtle" : "text-danger")}>{ok ? f.hint : f.max !== undefined ? `A level from 0 to ${f.max}.` : "A whole number, 0 or more."}</p>
+      </div>
+    );
+  };
 
   return (
     <>
@@ -361,77 +402,18 @@ export function LimitsButton({
         onConfirm={confirm}
       >
         <p className="text-muted">In place of what its plans add up to. Leave a field empty to let the plans decide.</p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label htmlFor={seatId}>Seats</Label>
-            <Input
-              id={seatId}
-              inputMode="numeric"
-              autoComplete="off"
-              placeholder="Plans decide"
-              value={seatText}
-              aria-invalid={!seatValue.ok || undefined}
-              onChange={(e) => {
-                setSeatText(e.target.value);
-                ask(e.target.value, tokenText, domainText);
-              }}
-            />
-            <p className={cn("text-xs", seatValue.ok ? "text-subtle" : "text-danger")}>{seatValue.ok ? "People who may hold an active account." : "A whole number, 0 or more."}</p>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor={tokenId}>Copilot tokens a month</Label>
-            <Input
-              id={tokenId}
-              inputMode="numeric"
-              autoComplete="off"
-              placeholder="Plans decide"
-              value={tokenText}
-              aria-invalid={!tokenValue.ok || undefined}
-              onChange={(e) => {
-                setTokenText(e.target.value);
-                ask(seatText, e.target.value, domainText);
-              }}
-            />
-            <p className={cn("text-xs", tokenValue.ok ? "text-subtle" : "text-danger")}>{tokenValue.ok ? "Across everybody; 0 switches the copilot off." : "A whole number, 0 or more."}</p>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor={domainId}>Custom domains</Label>
-            <Input
-              id={domainId}
-              inputMode="numeric"
-              autoComplete="off"
-              placeholder="Plans decide"
-              value={domainText}
-              aria-invalid={!domainValue.ok || undefined}
-              onChange={(e) => {
-                setDomainText(e.target.value);
-                ask(seatText, tokenText, e.target.value);
-              }}
-            />
-            <p className={cn("text-xs", domainValue.ok ? "text-subtle" : "text-danger")}>
-              {domainValue.ok ? "Addresses of its own, waiting or live; 0 allows none." : "A whole number, 0 or more."}
-            </p>
-          </div>
-        </div>
-        {(seatText.trim() !== "" || tokenText.trim() !== "" || domainText.trim() !== "") && (
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            onClick={() => {
-              setSeatText("");
-              setTokenText("");
-              setDomainText("");
-              ask("", "", "");
-            }}
-          >
+        <div className="grid gap-3 sm:grid-cols-2">{LIMIT_FIELDS.filter((f) => !f.automate).map(field)}</div>
+        <p className="pt-1 text-sm font-medium">Deskzo Automate</p>
+        <div className="grid gap-3 sm:grid-cols-2">{LIMIT_FIELDS.filter((f) => f.automate).map(field)}</div>
+        {LIMIT_KEYS.some((k) => texts[k].trim() !== "") && (
+          <Button type="button" size="sm" variant="ghost" onClick={() => type(NO_TEXT)}>
             Clear all — let the plans decide
           </Button>
         )}
         {unchanged ? (
           <p className="text-xs text-muted">These are its limits now — change one to see what it does.</p>
         ) : (
-          valid && <EntitlementImpact pending={preview.pending} error={preview.error} preview={preview.preview} scope="limits" />
+          values !== null && <EntitlementImpact pending={preview.pending} error={preview.error} preview={preview.preview} scope="limits" />
         )}
       </ConfirmDialog>
     </>

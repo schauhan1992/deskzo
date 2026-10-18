@@ -221,8 +221,8 @@ async function main() {
     ok("the first run makes every plan", first.every((l) => l.outcome === "created") && (await control.plan.count({ where: { key: { in: wanted.map((w) => w.key) } } })) === wanted.length, first.map((l) => `${l.key}:${l.outcome}${l.note ? ` (${l.note})` : ""}`).join(" "));
     const keysMade = wanted.map((w) => w.key);
     ok(
-      "  Deskzo One, a plan for each other product, and the three add-ons",
-      keysMade.join(",") === [...products.PRODUCTS.map((p) => `deskzo-${p.key}`), "addon-revenue-close", "addon-ai-copilot", "addon-more-people"].join(","),
+      "  Deskzo One, a plan for each other product, and the four add-ons",
+      keysMade.join(",") === [...products.PRODUCTS.map((p) => `deskzo-${p.key}`), "addon-revenue-close", "addon-ai-copilot", "addon-automate-plus", "addon-more-people"].join(","),
       keysMade.join(","),
     );
     const row = (key: string) => control.plan.findUniqueOrThrow({ where: { key }, include: { modules: { select: { moduleKey: true } }, prices: true } });

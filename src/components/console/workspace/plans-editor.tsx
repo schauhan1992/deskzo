@@ -22,6 +22,7 @@ import { productRefusal } from "@/lib/billing/plan-choice";
 import type { EntitlementChange, EntitlementPreview } from "@/lib/platform/entitlement-preview";
 import type { PlanPanel } from "@/lib/platform/workspace-data";
 import { PRODUCTS, productByKey } from "@/lib/products";
+import { NO_LIMITS, connectorLevelText, type AutomationLimits } from "@/lib/automate/limits";
 import { cn } from "@/lib/utils";
 
 /**
@@ -330,6 +331,19 @@ export function useEntitlementPreview(tenantId: string): PreviewState & {
 const seatsText = (n: number | null) => (n === null ? "No limit" : INTEGER.format(n));
 const tokensText = (n: number | null) => (n === null ? "No limit" : n === 0 ? "None" : INTEGER.format(n));
 
+/** Automate's limits that a change moves, each before → after — none when it moves none. Never worked out: no limit. */
+function automationChanges(pair: [AutomationLimits | null, AutomationLimits | null]): { label: string; value: string; tone?: Tone }[] {
+  const [before, after] = pair.map((l) => l ?? NO_LIMITS);
+  const history = (n: number | null) => (n === null ? "For good" : plural(n, "day"));
+  const rows: [string, keyof AutomationLimits, (n: number | null) => string][] = [
+    ["Automate: workflows switched on", "workflows", seatsText],
+    ["Automate: steps a month", "steps", tokensText],
+    ["Automate: run history", "historyDays", history],
+    ["Automate: connectors", "connectors", connectorLevelText],
+  ];
+  return rows.flatMap(([label, field, text]) => (before[field] === after[field] ? [] : [{ label, ...limitChange([before[field], after[field]], text) }]));
+}
+
 /** Null is "no limit" — more than any number. */
 const lessThan = (a: number | null, b: number | null) => b !== null && (a === null || b < a);
 
@@ -389,6 +403,7 @@ export function EntitlementImpact({
             { label: "Seats", value: seats.value, tone: seats.tone },
             { label: "Copilot tokens a month", value: tokens.value, tone: tokens.tone },
             { label: "Custom domains", value: domains.value, tone: domains.tone },
+            ...automationChanges(preview.diff.automation),
             ...(scope === "all" ? [{ label: "Billing standing after", value: <StatusPill tone={standing.tone}>{standing.label}</StatusPill> }] : []),
           ]}
         />

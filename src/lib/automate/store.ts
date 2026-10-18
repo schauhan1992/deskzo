@@ -11,6 +11,8 @@ import { validateDefinition, type DefinitionProblem } from "@/lib/automate/valid
 import { requestWakeHere } from "@/lib/automate/wake";
 import { sampleTrigger } from "@/lib/automate/samples";
 import { blankProblem, templateByKey, type BlankValues } from "@/lib/automate/templates";
+import { connectorLevelOf, connectorRefusal, type AutomationLimits } from "@/lib/automate/limits";
+import { WorkflowLimitReached, claimActivePlace, limitsHere, stepsRefusal } from "@/lib/automate/usage";
 
 /**
  * Making and changing workflows, and the person-led things done to runs (Deskzo Automate). Server-only,
@@ -65,12 +67,30 @@ export async function saveDraft(workflowId: string, draft: unknown, meta: { name
   return { ok: true, data: { problems: checked.ok ? [] : checked.problems } };
 }
 
+/** The steps of a definition that reach further than the plan's connectors, each with why. */
+function connectorProblems(definition: Definition, limits: AutomationLimits): DefinitionProblem[] {
+  const problems: DefinitionProblem[] = [];
+  for (const { step } of eachStep(definition.steps)) {
+    if (step.type !== "action") continue;
+    const refusal = connectorRefusal(connectorLevelOf(step.action, step.input as Record<string, unknown>), limits);
+    if (refusal) problems.push({ stepId: step.id, field: null, message: refusal });
+  }
+  return problems;
+}
+
 /**
  * Publishes the draft as the next version and makes it the one that runs. Refused, with the problems
  * named, when the draft isn't valid — or when the owner or the person publishing can't take one of
- * its actions now.
+ * its actions now, or the plan doesn't have one of its connectors or room for one more workflow on.
+ * `converting`: a pipeline automation moved onto Automate (migrate-pipeline.ts), kept on as it was
+ * whatever the plan's limits.
  */
-export async function publishWorkflow(workflowId: string, publisherId: string, note: string | null = null): Promise<StoreResult<{ versionId: string; number: number }>> {
+export async function publishWorkflow(
+  workflowId: string,
+  publisherId: string,
+  note: string | null = null,
+  options: { converting?: boolean } = {},
+): Promise<StoreResult<{ versionId: string; number: number }>> {
   const workflow = await db.automationWorkflow.findUnique({ where: { id: workflowId }, select: { draft: true, status: true, ownerUserId: true } });
   if (!workflow) return { ok: false, error: "That workflow no longer exists." };
   if (workflow.status === "ARCHIVED") return { ok: false, error: "An archived workflow can't be published." };
@@ -91,26 +111,39 @@ export async function publishWorkflow(workflowId: string, publisherId: string, n
     }
   }
   if (problems.length) return { ok: false, error: "Somebody involved can't take one of its actions.", problems };
+  const limits = await limitsHere();
+  if (!options.converting) {
+    const outside = connectorProblems(definition, limits);
+    if (outside.length) return { ok: false, error: "This workspace's plan doesn't include a connector it uses.", problems: outside };
+  }
 
   const clock = clockOfTenant(await currentTenant());
   const schedule = definition.trigger.type === "schedule" ? definition.trigger.schedule : undefined;
   const nextFireAt = schedule ? nextFire(schedule, clock, new Date()) : null;
   const hash = createHash("sha256").update(JSON.stringify(definition)).digest("hex");
 
-  const version = await db.$transaction(async (tx) => {
-    const last = await tx.automationVersion.findFirst({ where: { workflowId }, orderBy: { number: "desc" }, select: { number: true } });
-    const created = await tx.automationVersion.create({
-      data: { workflowId, number: (last?.number ?? 0) + 1, definition: definition as unknown as Prisma.InputJsonValue, definitionHash: hash, triggerType: definition.trigger.type, note, publishedById: publisherId },
-      select: { id: true, number: true },
+  let version: { id: string; number: number };
+  try {
+    version = await db.$transaction(async (tx) => {
+      // Publishing switches it on: refused when the plan has no room for one more on.
+      if (!options.converting && workflow.status !== "ACTIVE") await claimActivePlace(tx, workflowId, limits);
+      const last = await tx.automationVersion.findFirst({ where: { workflowId }, orderBy: { number: "desc" }, select: { number: true } });
+      const created = await tx.automationVersion.create({
+        data: { workflowId, number: (last?.number ?? 0) + 1, definition: definition as unknown as Prisma.InputJsonValue, definitionHash: hash, triggerType: definition.trigger.type, note, publishedById: publisherId },
+        select: { id: true, number: true },
+      });
+      await tx.automationWorkflow.update({ where: { id: workflowId }, data: { activeVersionId: created.id, status: "ACTIVE", pausedReason: null, failureStreak: 0 } });
+      await tx.automationTrigger.upsert({
+        where: { workflowId },
+        create: { workflowId, versionId: created.id, type: definition.trigger.type, nextFireAt },
+        update: { versionId: created.id, type: definition.trigger.type, nextFireAt },
+      });
+      return created;
     });
-    await tx.automationWorkflow.update({ where: { id: workflowId }, data: { activeVersionId: created.id, status: "ACTIVE", pausedReason: null, failureStreak: 0 } });
-    await tx.automationTrigger.upsert({
-      where: { workflowId },
-      create: { workflowId, versionId: created.id, type: definition.trigger.type, nextFireAt },
-      update: { versionId: created.id, type: definition.trigger.type, nextFireAt },
-    });
-    return created;
-  });
+  } catch (err) {
+    if (err instanceof WorkflowLimitReached) return { ok: false, error: err.message };
+    throw err;
+  }
   if (nextFireAt) await requestWakeHere(nextFireAt);
   return { ok: true, data: { versionId: version.id, number: version.number } };
 }
@@ -121,7 +154,24 @@ export async function setWorkflowStatus(workflowId: string, status: Extract<Auto
   if (!workflow) return { ok: false, error: "That workflow no longer exists." };
   if (workflow.status === "ARCHIVED") return { ok: false, error: "An archived workflow stays archived." };
   if (status === "ACTIVE" && !workflow.activeVersionId) return { ok: false, error: "Publish the workflow before switching it on." };
-  await db.automationWorkflow.update({ where: { id: workflowId }, data: { status, ...(status === "ACTIVE" ? { pausedReason: null, failureStreak: 0 } : {}) } });
+  if (status === "ACTIVE" && workflow.status !== "ACTIVE") {
+    const limits = await limitsHere();
+    const version = await db.automationVersion.findUnique({ where: { id: workflow.activeVersionId! }, select: { definition: true } });
+    const checked = version ? validateDefinition(version.definition) : null;
+    const outside = checked?.ok ? connectorProblems(checked.definition, limits) : [];
+    if (outside.length) return { ok: false, error: outside[0]!.message, problems: outside };
+    try {
+      await db.$transaction(async (tx) => {
+        await claimActivePlace(tx, workflowId, limits);
+        await tx.automationWorkflow.update({ where: { id: workflowId }, data: { status, pausedReason: null, failureStreak: 0 } });
+      });
+    } catch (err) {
+      if (err instanceof WorkflowLimitReached) return { ok: false, error: err.message };
+      throw err;
+    }
+  } else {
+    await db.automationWorkflow.update({ where: { id: workflowId }, data: { status, ...(status === "ACTIVE" ? { pausedReason: null, failureStreak: 0 } : {}) } });
+  }
   if (status === "ACTIVE") {
     const trigger = await db.automationTrigger.findUnique({ where: { workflowId }, select: { type: true, versionId: true } });
     if (trigger?.type === "schedule") {
@@ -143,6 +193,8 @@ export async function startManualRun(workflowId: string, byUserId: string, data:
   if (!workflow?.activeVersionId) return { ok: false, error: "Publish the workflow before running it." };
   if (workflow.status !== "ACTIVE") return { ok: false, error: "Switch the workflow on before running it." };
   if (workflow.triggers[0]?.type !== "manual") return { ok: false, error: "Only a workflow started by hand can be run from here." };
+  const outOfSteps = await stepsRefusal(clockOfTenant(await currentTenant()));
+  if (outOfSteps) return { ok: false, error: outOfSteps };
   const runId = await createRun({
     workflowId,
     versionId: workflow.activeVersionId,

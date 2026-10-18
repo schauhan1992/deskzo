@@ -140,7 +140,7 @@ export async function convertPipelineAutomations(): Promise<ConversionOutcome> {
       });
       // On as it was, or off as it was — and off when its pipeline or stage has been retired since.
       const live = old.active && !lane.archived && (!old.stageId || (stage && !stage.archived));
-      const published = await publishWorkflow(workflow.id, ownerUserId, "Moved from the pipeline's automations");
+      const published = await publishWorkflow(workflow.id, ownerUserId, "Moved from the pipeline's automations", { converting: true });
       if (published.ok && !live) await setWorkflowStatus(workflow.id, "PAUSED");
       if (!published.ok) {
         const why = published.problems?.map((p) => p.message).join(" ") || published.error;

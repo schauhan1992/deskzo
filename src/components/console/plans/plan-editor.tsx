@@ -22,6 +22,7 @@ import { getModuleDefinition, navGroupRank } from "@/lib/modules";
 import type { PlanDetail } from "@/lib/platform/console-data";
 import type { PlanSavePreview } from "@/lib/platform/entitlement-preview";
 import type { PlanInput } from "@/lib/platform/plans";
+import { CONNECTOR_LEVELS, PLAN_LIMITS, connectorLevelText, type AutomationLimits } from "@/lib/automate/limits";
 import { BASE_MODULES, PRODUCTS, productByKey } from "@/lib/products";
 import { cn } from "@/lib/utils";
 import { PriceEditor } from "./price-editor";
@@ -44,7 +45,7 @@ import { PriceEditor } from "./price-editor";
 
 type Mode = "create" | "edit" | "duplicate";
 type SectionKey = "basics" | "availability" | "limits" | "modules" | "prices" | "workspaces";
-type Field = "key" | "name" | "order" | "seats" | "copilot" | "domains" | "countries" | "modules";
+type Field = "key" | "name" | "order" | "seats" | "copilot" | "domains" | "autoWorkflows" | "autoSteps" | "autoHistory" | "countries" | "modules";
 type Problem = { section: SectionKey; field: Field; message: string };
 
 type Draft = {
@@ -60,6 +61,12 @@ type Draft = {
   copilot: string;
   /** Custom domains per unit: blank is no limit, 0 none. */
   domains: string;
+  /** Deskzo Automate (src/lib/automate/limits.ts): blank is no limit — or, on an add-on, nothing added. */
+  autoWorkflows: string;
+  autoSteps: string;
+  autoHistory: string;
+  /** A connector level, "0"–"3"; blank is every one. */
+  autoConnectors: string;
   allModules: boolean;
   modules: string[];
   /** The product an edition sells; "" for none. */
@@ -102,10 +109,18 @@ const EMPTY: Draft = {
   copilot: "",
   // A sold plan offers no custom domain until staff say so.
   domains: "0",
+  // An edition's, as the catalogue gives them.
+  ...automationDraft(PLAN_LIMITS.edition),
   allModules: false,
   modules: [],
   productKey: "",
 };
+
+/** Automate's limits as the draft holds them. */
+function automationDraft(limits: AutomationLimits): Pick<Draft, "autoWorkflows" | "autoSteps" | "autoHistory" | "autoConnectors"> {
+  const text = (n: number | null) => (n === null ? "" : String(n));
+  return { autoWorkflows: text(limits.workflows), autoSteps: text(limits.steps), autoHistory: text(limits.historyDays), autoConnectors: text(limits.connectors) };
+}
 
 function draftOf(plan: PlanDetail | null): Draft {
   if (!plan) return EMPTY;
@@ -121,6 +136,7 @@ function draftOf(plan: PlanDetail | null): Draft {
     seats: plan.seats === null ? "" : String(plan.seats),
     copilot: plan.copilotTokens === null ? "" : String(plan.copilotTokens),
     domains: plan.customDomains === null ? "" : String(plan.customDomains),
+    ...automationDraft({ workflows: plan.automationWorkflows, steps: plan.automationSteps, historyDays: plan.automationHistoryDays, connectors: plan.automationConnectors }),
     allModules: plan.allModules,
     modules: [...plan.modules],
     productKey: plan.productKey ?? "",
@@ -159,6 +175,7 @@ function inputOf(d: Draft): PlanInput {
     seats: limitOf(d.seats),
     copilotTokens: limitOf(d.copilot),
     customDomains: limitOf(d.domains),
+    automation: { workflows: limitOf(d.autoWorkflows), steps: limitOf(d.autoSteps), historyDays: limitOf(d.autoHistory), connectors: limitOf(d.autoConnectors) },
     productKey: productOf(d),
     // New workspaces never start on an internal plan, nor on a retired one — the save refuses both.
     isDefault: !internal && d.active && d.isDefault,
@@ -196,6 +213,10 @@ function problemsOf(d: Draft, mode: Mode, takenKeys: readonly string[], byKey: M
   if (badLimit(input.seats)) out.push({ section: "limits", field: "seats", message: "Users per unit is a whole number, 0 or more — or empty for no limit." });
   if (badLimit(input.copilotTokens)) out.push({ section: "limits", field: "copilot", message: "Copilot tokens is a whole number, 0 or more — or empty for no limit." });
   if (badLimit(input.customDomains ?? null)) out.push({ section: "limits", field: "domains", message: "Custom domains is a whole number, 0 or more — or empty for no limit." });
+  const automation = input.automation!;
+  if (badLimit(automation.workflows)) out.push({ section: "limits", field: "autoWorkflows", message: "Workflows switched on is a whole number, 0 or more — or empty for no limit." });
+  if (badLimit(automation.steps)) out.push({ section: "limits", field: "autoSteps", message: "Steps a month is a whole number, 0 or more — or empty for no limit." });
+  if (badLimit(automation.historyDays)) out.push({ section: "limits", field: "autoHistory", message: "Days of run history is a whole number, 0 or more — or empty to keep it for good." });
   // A product's plan may hold a module sold only in some countries: it drops out elsewhere by itself.
   if (!input.allModules && !input.productKey) {
     for (const key of input.modules) {
@@ -813,8 +834,10 @@ function LimitsSection({ draft, update, readOnly, errors }: { draft: Draft; upda
   const seats = limitOf(draft.seats);
   const copilot = limitOf(draft.copilot);
   const domains = limitOf(draft.domains);
+  const addOn = draft.kind === "ADDON" || draft.kind === "BUNDLE";
 
   if (readOnly) {
+    const automation = limitsOfDraft(draft);
     return (
       <Panel id="plan-limits" title="Limits">
         <DefinitionList
@@ -822,6 +845,10 @@ function LimitsSection({ draft, update, readOnly, errors }: { draft: Draft; upda
             { term: "Users per unit", value: <span className="tabular-nums">{limitText(seats)}</span> },
             { term: "Copilot tokens a month", value: <span className="tabular-nums">{copilot === 0 ? "None" : limitText(copilot)}</span> },
             { term: "Custom domains", value: <span className="tabular-nums">{domains === 0 ? "None" : limitText(domains)}</span> },
+            { term: "Automate: workflows switched on", value: <span className="tabular-nums">{automationText(automation.workflows, addOn)}</span> },
+            { term: "Automate: steps a month", value: <span className="tabular-nums">{automationText(automation.steps, addOn)}</span> },
+            { term: "Automate: days of run history", value: <span className="tabular-nums">{automationText(automation.historyDays, addOn, "For good")}</span> },
+            { term: "Automate: connectors", value: connectorText(automation.connectors, addOn) },
           ]}
         />
       </Panel>
@@ -914,7 +941,78 @@ function LimitsSection({ draft, update, readOnly, errors }: { draft: Draft; upda
           )}
         </div>
       </div>
+      <AutomationLimitsFields draft={draft} update={update} errors={errors} addOn={addOn} />
     </Panel>
+  );
+}
+
+/** A draft's Automate limits, as numbers (unchecked). */
+const limitsOfDraft = (d: Draft): AutomationLimits => ({
+  workflows: limitOf(d.autoWorkflows),
+  steps: limitOf(d.autoSteps),
+  historyDays: limitOf(d.autoHistory),
+  connectors: limitOf(d.autoConnectors),
+});
+
+/** One Automate limit as read: blank is no limit on a plan of its own, nothing on an add-on. */
+const automationText = (n: number | null, addOn: boolean, none = "No limit") => (n === null ? (addOn ? "Adds nothing" : none) : n.toLocaleString("en-IN"));
+
+const connectorText = (level: number | null, addOn: boolean) => (level === null && addOn ? "Adds nothing" : connectorLevelText(level));
+
+/** Deskzo Automate's four limits (src/lib/automate/limits.ts), under the plan's others. */
+function AutomationLimitsFields({ draft, update, errors, addOn }: { draft: Draft; update: Update; errors: Partial<Record<Field, string>>; addOn: boolean }) {
+  const limits = limitsOfDraft(draft);
+  const valid = (n: number | null): n is number => n !== null && Number.isInteger(n) && n >= 0;
+  const blank = addOn ? "Empty adds nothing." : "Empty is no limit.";
+  const field = (key: "autoWorkflows" | "autoSteps" | "autoHistory", label: string, hint: (n: number) => string, step = 1) => {
+    const id = `plan-field-${key}`;
+    const value = key === "autoWorkflows" ? limits.workflows : key === "autoSteps" ? limits.steps : limits.historyDays;
+    return (
+      <div className="space-y-1.5">
+        <Label htmlFor={id}>{label}</Label>
+        <Input
+          id={id}
+          data-plan-field={key}
+          type="number"
+          min={0}
+          step={step}
+          inputMode="numeric"
+          value={draft[key]}
+          placeholder={addOn ? "Adds nothing" : "No limit"}
+          aria-invalid={errors[key] ? true : undefined}
+          onChange={(e) => update(key, e.target.value)}
+          className="tabular-nums"
+        />
+        {errors[key] ? <FieldError message={errors[key]!} /> : <Hint>{value === null ? blank : valid(value) ? hint(value) : "A whole number."}</Hint>}
+      </div>
+    );
+  };
+  const connectorsId = "plan-field-autoConnectors";
+  return (
+    <div className="mt-5 border-t border-border pt-4">
+      <h3 className="text-sm font-medium">Deskzo Automate</h3>
+      <p className="mt-0.5 text-xs text-muted">
+        Workflows add up for each unit, one unit for a plan sold per person; steps add up for each unit, each person on a plan sold per person. History
+        and connectors: the most any of a workspace&apos;s plans gives. A free trial has a trial&apos;s, whatever its plan says.
+      </p>
+      <div className="mt-3 grid gap-4 sm:grid-cols-2">
+        {field("autoWorkflows", "Workflows switched on", (n) => (n === 0 ? "None may be switched on." : `${plural(n, "workflow")} at once for each unit.`))}
+        {field("autoSteps", "Steps a month", (n) => (n === 0 ? "No steps at all." : `${n.toLocaleString("en-IN")} steps a month for each unit, shared across the workspace.`), 100)}
+        {field("autoHistory", "Days of run history", (n) => `A finished run is kept ${plural(n, "day")}.`)}
+        <div className="space-y-1.5">
+          <Label htmlFor={connectorsId}>Connectors</Label>
+          <Select id={connectorsId} data-plan-field="autoConnectors" value={draft.autoConnectors} onChange={(e) => update("autoConnectors", e.target.value)}>
+            {CONNECTOR_LEVELS.map((c) => (
+              <option key={c.level} value={String(c.level)}>
+                {c.upTo}
+              </option>
+            ))}
+            <option value="">{addOn ? "Adds nothing" : "Every connector"}</option>
+          </Select>
+          <Hint>Each level includes the ones before it. Webhooks are on every plan.</Hint>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1179,6 +1277,20 @@ function WorkspacesSection({ plan }: { plan: PlanDetail }) {
 
 // ─── The save's impact ───────────────────────────────────────────────────────────────────────────
 
+/** Automate's limits in the save's confirmation: every one for a new plan (`before` null), the ones that change otherwise. */
+function automationLines(before: AutomationLimits | null, after: AutomationLimits, addOn: boolean): { label: string; value: string }[] {
+  const rows: [string, (l: AutomationLimits) => string][] = [
+    ["Automate: workflows switched on", (l) => automationText(l.workflows, addOn)],
+    ["Automate: steps a month", (l) => automationText(l.steps, addOn)],
+    ["Automate: days of run history", (l) => automationText(l.historyDays, addOn, "For good")],
+    ["Automate: connectors", (l) => connectorText(l.connectors, addOn)],
+  ];
+  return rows.flatMap(([label, text]) => {
+    if (!before) return [{ label, value: text(after) }];
+    return text(before) === text(after) ? [] : [{ label, value: `${text(before)} → ${text(after)}` }];
+  });
+}
+
 function SaveImpact({ mode, preview, sent, before }: { mode: Mode; preview: PlanSavePreview; sent: PlanInput; before: PlanInput }) {
   const added = preview.modulesAdded.map(labelOf);
   const removed = preview.modulesRemoved.map(labelOf);
@@ -1199,6 +1311,8 @@ function SaveImpact({ mode, preview, sent, before }: { mode: Mode; preview: Plan
     if (seats) items.push({ label: "Users per unit", value: seats });
     if (copilot) items.push({ label: "Copilot tokens a month", value: copilot });
     if (domains) items.push({ label: "Custom domains", value: domains });
+    const addOn = sent.kind === "ADDON" || sent.kind === "BUNDLE";
+    for (const line of automationLines(preview.automation[0], preview.automation[1], addOn)) items.push(line);
     if (soldIn) items.push({ label: "Sold in", value: soldIn });
     if (offered) items.push({ label: "Offered to new sales", value: offered, tone: sent.active === false ? "warning" : "success" });
     if (byDefault) items.push({ label: "Default for new workspaces", value: byDefault, tone: sent.isDefault ? "brand" : "warning" });
@@ -1208,6 +1322,7 @@ function SaveImpact({ mode, preview, sent, before }: { mode: Mode; preview: Plan
     items.push({ label: "Users per unit", value: limitText(sent.seats) });
     items.push({ label: "Copilot tokens a month", value: sent.copilotTokens === 0 ? "None" : limitText(sent.copilotTokens) });
     items.push({ label: "Custom domains", value: preview.customDomains[1] === 0 ? "None" : limitText(preview.customDomains[1]) });
+    for (const line of automationLines(null, preview.automation[1], sent.kind === "ADDON" || sent.kind === "BUNDLE")) items.push(line);
     items.push({ label: "Sold in", value: sent.countries.join(", ") || "Everywhere" });
     items.push({ label: "Offered to new sales", value: yesNo(sent.active !== false) });
     if (sent.isDefault) items.push({ label: "Default for new workspaces", value: "Yes — in place of any other", tone: "brand" });

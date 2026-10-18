@@ -10,6 +10,7 @@ import { documentUrl } from "@/lib/billing/tax-invoice";
 import { proformasOf } from "@/lib/billing/proforma";
 import { usageDay } from "@/lib/copilot/settings";
 import { moduleEntitled, parseEntitlements, type Entitlements } from "@/lib/entitlements";
+import type { AutomationLimits } from "@/lib/automate/limits";
 import { getModuleDefinition } from "@/lib/modules";
 import { consoleClock } from "@/lib/platform/console-clock";
 import { JOB_SAFE_SELECT, TENANT_SAFE_SELECT, clampInt, staffNameMap, toActivityItems, type SafeTenant } from "@/lib/platform/console-guard";
@@ -45,8 +46,26 @@ const GONE = "That workspace no longer exists.";
 const FORMER_STAFF = "A former staff member";
 
 /** Proven at compile time to be a subset of the safe select: no sealed column can be added here by mistake. */
-const PLAN_TENANT = { status: true, country: true, entitlements: true, seatOverride: true, copilotTokenOverride: true, customDomainOverride: true } as const satisfies Partial<typeof TENANT_SAFE_SELECT>;
-const USAGE_TENANT = { entitlements: true, seatOverride: true, copilotTokenOverride: true } as const satisfies Partial<typeof TENANT_SAFE_SELECT>;
+/** A workspace's Automate overrides (null: the plans decide). */
+const AUTOMATION_OVERRIDES = { automationWorkflowOverride: true, automationStepOverride: true, automationHistoryOverride: true, automationConnectorOverride: true } as const;
+const PLAN_TENANT = {
+  status: true,
+  country: true,
+  entitlements: true,
+  seatOverride: true,
+  copilotTokenOverride: true,
+  customDomainOverride: true,
+  ...AUTOMATION_OVERRIDES,
+} as const satisfies Partial<typeof TENANT_SAFE_SELECT>;
+const USAGE_TENANT = { entitlements: true, seatOverride: true, copilotTokenOverride: true, ...AUTOMATION_OVERRIDES } as const satisfies Partial<typeof TENANT_SAFE_SELECT>;
+
+/** A workspace's Automate overrides, as limits. */
+const automationOverrideOf = (t: { automationWorkflowOverride: number | null; automationStepOverride: number | null; automationHistoryOverride: number | null; automationConnectorOverride: number | null }): AutomationLimits => ({
+  workflows: t.automationWorkflowOverride,
+  steps: t.automationStepOverride,
+  historyDays: t.automationHistoryOverride,
+  connectors: t.automationConnectorOverride,
+});
 const SUPPORT_TENANT = { ownerEmail: true } as const satisfies Partial<typeof TENANT_SAFE_SELECT>;
 const OPS_TENANT = { dbName: true, dbRole: true, region: true, schemaVersion: true } as const satisfies Partial<typeof TENANT_SAFE_SELECT>;
 /** The provisioning job's columns the Operations tab shows — no owner details, no password hash. */
@@ -239,6 +258,10 @@ export type PlanPanel = {
     seatOverride: number | null;
     copilotTokenOverride: number | null;
     customDomainOverride: number | null;
+    /** Deskzo Automate's, as worked out — null where they never were (no limit until they are). */
+    automation: AutomationLimits | null;
+    /** Its Automate overrides, each null where the plans decide. */
+    automationOverride: AutomationLimits;
   };
   /** Whether a save of its plans could go through: not closed, and not paying at a gateway (whose plans change there). */
   canSetPlans: boolean;
@@ -320,6 +343,8 @@ export async function workspacePlan(tenantId: string, now = new Date()): Promise
       seatOverride: tenant.seatOverride,
       copilotTokenOverride: tenant.copilotTokenOverride,
       customDomainOverride: tenant.customDomainOverride,
+      automation: entitlements.automation ?? null,
+      automationOverride: automationOverrideOf(tenant),
     },
     canSetPlans: gateway === null && tenant.status !== "DEPROVISIONED",
     gateway,
@@ -584,7 +609,16 @@ async function offlineFormOptions(tenantId: string): Promise<OfflineFormOptions>
 
 // ─── Usage (features F4, F9) ─────────────────────────────────────────────────────────────────────
 
-export type UsagePoint = { day: Date; seatsUsed: number; seatsLimit: number | null; copilotTokens: number };
+export type UsagePoint = {
+  day: Date;
+  seatsUsed: number;
+  seatsLimit: number | null;
+  copilotTokens: number;
+  /** Deskzo Automate: steps so far this month, the month's allowance (null: no limit), workflows switched on. */
+  automationSteps: number;
+  automationStepsLimit: number | null;
+  automationWorkflows: number;
+};
 export type UsagePanel = {
   /** One snapshot a day, oldest first. `day` is a calendar day (midnight UTC of its date on the console's clock, as the daily work keeps it). */
   series: UsagePoint[];
@@ -592,10 +626,27 @@ export type UsagePanel = {
   latest: UsagePoint | null;
   /** Copilot tokens per calendar month of the snapshots' days ("2026-09"), oldest first: each month's highest snapshot — they count up through the month. */
   copilotByMonth: { month: string; tokens: number }[];
-  limits: { seats: number | null; copilotTokens: number | null; seatOverride: number | null; copilotTokenOverride: number | null };
+  limits: {
+    seats: number | null;
+    copilotTokens: number | null;
+    seatOverride: number | null;
+    copilotTokenOverride: number | null;
+    /** Deskzo Automate's, as worked out — null where they never were (no limit). */
+    automation: AutomationLimits | null;
+    /** Whether staff set any of them in place of the plans. */
+    automationOverridden: boolean;
+  };
 };
 
-const USAGE_SELECT = { day: true, seatsUsed: true, seatsLimit: true, copilotTokens: true } as const satisfies Prisma.TenantUsageSelect;
+const USAGE_SELECT = {
+  day: true,
+  seatsUsed: true,
+  seatsLimit: true,
+  copilotTokens: true,
+  automationSteps: true,
+  automationStepsLimit: true,
+  automationWorkflows: true,
+} as const satisfies Prisma.TenantUsageSelect;
 
 export async function workspaceUsage(tenantId: string, days = 90, now = new Date()): Promise<UsagePanel> {
   const control = controlDb();
@@ -622,7 +673,14 @@ export async function workspaceUsage(tenantId: string, days = 90, now = new Date
     series,
     latest,
     copilotByMonth: [...byMonth].map(([month, tokens]) => ({ month, tokens })).sort((a, b) => a.month.localeCompare(b.month)),
-    limits: { seats: entitlements.seats, copilotTokens: entitlements.copilotTokens, seatOverride: tenant.seatOverride, copilotTokenOverride: tenant.copilotTokenOverride },
+    limits: {
+      seats: entitlements.seats,
+      copilotTokens: entitlements.copilotTokens,
+      seatOverride: tenant.seatOverride,
+      copilotTokenOverride: tenant.copilotTokenOverride,
+      automation: entitlements.automation ?? null,
+      automationOverridden: Object.values(automationOverrideOf(tenant)).some((v) => v !== null),
+    },
   };
 }
 

@@ -40,7 +40,22 @@ The add-ons are priced for the whole workspace, not per person:
 |---|---|---|---|
 | Revenue & Close (with Books; included in One) | ₹2,499 | ₹24,990 | Ind AS 115 revenue recognition and the month-end close. No Indian SMB tool sells this. |
 | AI Copilot | ₹499 | ₹4,990 | A million tokens a month on the workspace's **own** AI key — the provider bills its use, not us. Competitors charge ₹1,495–2,399 a person for copilots (Microsoft, Freshworks) because they pay for the model. |
+| Automate Plus | ₹999 | ₹9,990 | Deskzo Automate's limits raised: 100 more workflows, 50,000 more steps a month, a year of run history, and every connector, WhatsApp too (owner, 17 Oct 2026). |
 | More people | off sale | | Every product is already priced per person. |
+
+#### Deskzo Automate's limits
+
+Automate is in every plan. What each plan allows (src/lib/automate/limits.ts; staff can change a plan's, or one workspace's, in the console):
+
+| Plan | Workflows switched on | Steps a month | Run history | Connectors |
+|---|---|---|---|---|
+| Free trial | 5 | 1,000 | 7 days | Webhooks only |
+| Any product | 20 | 1,000 a person | 30 days | Webhooks, saved API connections, Slack and Teams |
+| Deskzo One | 100 | 3,000 a person | 90 days | Everything but WhatsApp (adds Google Sheets) |
+| + Automate Plus | +100 | +50,000 | 365 days | Every connector |
+
+- **Steps** are actions that ran and did something; a test run never counts. They are pooled across the workspace and counted by its own calendar month.
+- When the steps run out, no new run starts until the month turns; runs already going finish. Admins are told at 80% and at 100%.
 
 ### Why these numbers
 

@@ -22,6 +22,12 @@ export type Entitlements = {
    * live or stopped, counts. Null: no limit; 0: none.
    */
   customDomains: number | null;
+  /**
+   * Deskzo Automate's limits (src/lib/automate/limits.ts): active workflows, steps a month across
+   * everybody, days of run history, connector level — each null for no limit. Absent: worked out before
+   * they existed — no limit until worked out again.
+   */
+  automation?: { workflows: number | null; steps: number | null; historyDays: number | null; connectors: number | null };
   /** The plans it came from, by key — for showing, never for deciding. */
   plans: string[];
   /** Its seats are a free trial's (console › Settings): it pays for nothing yet. Absent: they are not. */
@@ -35,7 +41,7 @@ export const UNRESTRICTED: Entitlements = { v: 1, all: true, modules: [], seats:
  * A workspace whose entitlements were never worked out: the core, its first owner, and nothing else.
  * Failing closed — a plan nobody wrote down is not a plan of everything.
  */
-export const CORE_ONLY: Entitlements = { v: 1, all: false, modules: [], seats: 1, copilotTokens: 0, customDomains: 0, plans: [] };
+export const CORE_ONLY: Entitlements = { v: 1, all: false, modules: [], seats: 1, copilotTokens: 0, customDomains: 0, automation: { workflows: 0, steps: 0, historyDays: 7, connectors: 0 }, plans: [] };
 
 const limit = (value: unknown): number | null | undefined =>
   value === null ? null : typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
@@ -58,9 +64,19 @@ export function parseEntitlements(json: unknown): Entitlements {
     seats,
     copilotTokens,
     customDomains,
+    ...automationOf(e.automation),
     plans: Array.isArray(e.plans) ? e.plans.filter((p): p is string => typeof p === "string") : [],
     ...(e.trial === true ? { trial: true } : {}),
   };
+}
+
+/** Automate's limits as cached, kept only when whole: one unreadable reads as never worked out (no limit). */
+function automationOf(raw: unknown): { automation?: NonNullable<Entitlements["automation"]> } {
+  if (!raw || typeof raw !== "object") return {};
+  const a = raw as Record<string, unknown>;
+  const [workflows, steps, historyDays, connectors] = [limit(a.workflows), limit(a.steps), limit(a.historyDays), limit(a.connectors)];
+  if (workflows === undefined || steps === undefined || historyDays === undefined || connectors === undefined) return {};
+  return { automation: { workflows, steps, historyDays, connectors } };
 }
 
 /** Whether a module is sold in this country at all. */

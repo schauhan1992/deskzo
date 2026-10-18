@@ -480,6 +480,8 @@ enum NotificationType {
   WORKFLOW_MESSAGE
   /// One of your workflows paused itself: you left, or it failed twenty times in a row.
   WORKFLOW_PAUSED
+  /// Four fifths of this month's Deskzo Automate steps are used, or all of them (src/lib/automate/usage.ts).
+  AUTOMATE_STEPS
 }
 
 model User {
@@ -14512,6 +14514,22 @@ model AutomationTemplate {
 
   @@index([createdAt])
   @@map("automation_templates")
+}
+
+/**
+ * Deskzo Automate's steps in a month, by the workspace's own clock (Phase 7) — what the plan's monthly
+ * allowance is counted against: actions that ran and did something, never a test — and when the
+ * admins were told it was at 80% and at 100%, so each is said once a month.
+ */
+model AutomationUsage {
+  /// The first day of the month.
+  month       DateTime  @id @db.Date
+  steps       Int       @default(0)
+  warned80At  DateTime?
+  warned100At DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  @@map("automation_usage")
 }
 
 /** The workspace's own switch: paused, no run starts or moves on until it is lifted. */

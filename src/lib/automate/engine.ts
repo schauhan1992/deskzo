@@ -24,6 +24,8 @@ import { requestWakeHere } from "@/lib/automate/wake";
 import { runRef, workflowPath } from "@/lib/automate/refs";
 import { approversToTell, resolveApprovers, tellApprovers } from "@/lib/automate/approvals";
 import { eventMeets, fixRules, type WaitRule } from "@/lib/automate/waits";
+import { connectorLevelOf, connectorRefusal } from "@/lib/automate/limits";
+import { afterStepCounted, countStep, limitsHere, pruneRunHistory, stepsRefusal } from "@/lib/automate/usage";
 
 /**
  * Deskzo Automate's engine: events and schedules become runs, and runs are carried out a step at a
@@ -162,9 +164,15 @@ export async function matchEvents(now: Date = new Date(), limit = 200): Promise<
   let runs = 0;
   let skipped = 0;
   let woke = false;
+  // This month's steps used: runs already going carry on, but these events start none.
+  const outOfSteps = triggers.length ? await stepsRefusal(clockOfTenant(await currentTenant()), now) : null;
   for (const event of events) {
     if (await wakeWaiting(event, now)) woke = true;
     for (const trigger of triggers) {
+      if (outOfSteps) {
+        if (trigger.type === event.type) skipped += 1;
+        continue;
+      }
       if (trigger.type !== event.type || trigger.versionId !== trigger.workflow.activeVersionId) continue;
       // A webhook call is for the one workflow whose address it came to.
       if (event.type === "webhook" && (event.payload as { workflowId?: string } | null)?.workflowId !== trigger.workflowId) continue;
@@ -236,6 +244,7 @@ export async function fireSchedules(clock: Clock, now: Date = new Date()): Promi
     select: { id: true, workflowId: true, versionId: true, nextFireAt: true, workflow: { select: { activeVersionId: true } } },
   });
   let fired = 0;
+  const outOfSteps = due.length ? await stepsRefusal(clock, now) : null;
   for (const trigger of due) {
     if (!trigger.nextFireAt || trigger.versionId !== trigger.workflow.activeVersionId) continue;
     const version = await db.automationVersion.findUnique({ where: { id: trigger.versionId }, select: { definition: true } });
@@ -244,7 +253,7 @@ export async function fireSchedules(clock: Clock, now: Date = new Date()): Promi
     const slot = trigger.nextFireAt;
     // Claimed by moving it on: a second worker finds it already moved and leaves it.
     const claimed = await db.automationTrigger.updateMany({ where: { id: trigger.id, nextFireAt: slot }, data: { nextFireAt: nextFire(schedule, clock, now) } });
-    if (!claimed.count) continue;
+    if (!claimed.count || outOfSteps) continue;
     const id = await createRun({
       workflowId: trigger.workflowId,
       versionId: trigger.versionId,
@@ -873,6 +882,15 @@ async function runAction(run: Held, step: Extract<Step, { type: "action" }>, clo
   // A test reads for real and says what the rest would do — except the safe steps, done for real
   // when the person testing asked for it (`LIVE_IN_TEST`).
   const really = !run.isTest || action.risk === "read" || (run.context.test?.live === true && LIVE_IN_TEST.has(action.key));
+  const limits = await limitsHere();
+  if (really) {
+    // A plan that no longer has this connector (it changed since the workflow was published): the workflow pauses, its owner told.
+    const outside = connectorRefusal(connectorLevelOf(action.key, input.data as Record<string, unknown>), limits);
+    if (outside) {
+      if (!run.isTest) await pauseWorkflow(run.workflowId, outside, run.ownerUserId);
+      return fail("PERMANENT", outside);
+    }
+  }
   let output: unknown;
   if (!really) {
     output = { preview: action.preview(input.data as never) };
@@ -888,17 +906,22 @@ async function runAction(run: Held, step: Extract<Step, { type: "action" }>, clo
   }
   run.context.steps[step.id] = { output };
   const cursor = advance(run.cursor);
+  // Counted with the step, in its transaction: a step lost to another worker is never counted.
+  let counted = null as number | null;
   const ok = await db.$transaction(async (tx) => {
     await tx.automationRunStep.update(stepDone(row, "SUCCEEDED", output));
-    return checkpoint(
+    const saved = await checkpoint(
       run,
       { cursor: cursor as unknown as Prisma.InputJsonValue, contextCipher: await sealContext(run.context), attempts: 0, stepsUsed: run.isTest ? run.stepsUsed : run.stepsUsed + 1 },
       tx,
     );
+    if (saved && !run.isTest) counted = await countStep(tx, clock);
+    return saved;
   });
   if (!ok) return "LOST";
   run.cursor = cursor;
   if (!run.isTest) run.stepsUsed += 1;
+  if (counted !== null) await afterStepCounted(counted, clock, new Date(), limits);
   return "NEXT";
 }
 
@@ -936,6 +959,8 @@ export async function workTenant(options: { budgetMs?: number } = {}): Promise<T
   result.fired = await fireSchedules(clock);
   // Once a day: invoices overdue, renewals coming, deals gone quiet (src/lib/automate/dates.ts).
   await emitDateEvents(clock);
+  // Once a day: finished runs older than the plan keeps.
+  await pruneRunHistory(clock);
   const matched = await matchEvents();
   result.matched = matched.runs;
   result.runs = result.fired + result.matched;

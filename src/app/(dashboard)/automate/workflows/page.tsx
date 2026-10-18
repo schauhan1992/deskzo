@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { isModuleEnabled } from "@/actions/module";
-import { automateSwitches, getDraftingAvailability, listAutomationWorkflows } from "@/actions/automate";
+import { automateSwitches, automateUsage, getDraftingAvailability, listAutomationWorkflows } from "@/actions/automate";
 import { DescribeWorkflowButton } from "@/components/automate/describe-workflow";
 import { ImportWorkflowButton } from "@/components/automate/import-workflow";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
@@ -11,23 +11,26 @@ import { triggerByType } from "@/lib/automate/triggers";
 import { runPath, runRef, workflowPath, workflowRef } from "@/lib/automate/refs";
 import { notMigratedYet } from "@/lib/not-migrated";
 import { workspaceClock } from "@/lib/time/workspace";
+import { LOW_SHARE } from "@/lib/automate/usage";
+import { PLAN_LIMITS, connectorLevelText } from "@/lib/automate/limits";
 
 /**
  * Automate › Workflows: each workflow, whether it is on, what starts it, who it runs as, and how its
  * last run went — with pause, switch on and run now, and the workspace's kill switch. A name opens it
- * in the builder (Phase 3); a new one starts empty or from a template.
+ * in the builder (Phase 3); a new one starts empty or from a template. Above them, this month's steps
+ * and the workflows on against the plan's limits (Phase 7), with a warning as the steps run out.
  */
 export default async function AutomateWorkflowsPage() {
   if (!(await isModuleEnabled("automate"))) return <ModuleDisabledNotice moduleKey="automate" />;
 
   let data;
   try {
-    data = await Promise.all([listAutomationWorkflows(), automateSwitches(), workspaceClock(), getDraftingAvailability()]);
+    data = await Promise.all([listAutomationWorkflows(), automateSwitches(), workspaceClock(), getDraftingAvailability(), automateUsage()]);
   } catch (err) {
     if (notMigratedYet(err)) return <NotReady />;
     throw err;
   }
-  const [workflows, switches, clock, drafting] = data;
+  const [workflows, switches, clock, drafting, usage] = data;
 
   return (
     <div className="space-y-5">
@@ -48,6 +51,8 @@ export default async function AutomateWorkflowsPage() {
           <WorkspacePauseSwitch paused={switches.workspacePaused} />
         </div>
       </div>
+
+      <PlanUsage usage={usage} />
 
       {switches.platformPaused && (
         <p className="rounded-base bg-warning-bg px-3 py-2 text-sm text-warning">Deskzo has paused every workflow for now. Runs keep their place and carry on when it is lifted.</p>
@@ -126,6 +131,53 @@ export default async function AutomateWorkflowsPage() {
           Every run →
         </Link>
       </p>
+    </div>
+  );
+}
+
+const INTEGER = new Intl.NumberFormat("en-IN");
+
+/** This month's steps and the workflows on, against the plan — and a warning at four fifths and at all of them. */
+function PlanUsage({ usage }: { usage: Awaited<ReturnType<typeof automateUsage>> }) {
+  const { limits, steps, active, renews } = usage;
+  const of = (used: number, limit: number | null) => (limit === null ? INTEGER.format(used) : `${INTEGER.format(used)} of ${INTEGER.format(limit)}`);
+  const usedUp = limits.steps !== null && steps >= limits.steps;
+  const low = !usedUp && limits.steps !== null && limits.steps > 0 && steps >= limits.steps * LOW_SHARE;
+  const full = limits.workflows !== null && active >= limits.workflows;
+  const plus = `Automate Plus adds ${INTEGER.format(PLAN_LIMITS.plus.steps)} steps a month and ${PLAN_LIMITS.plus.workflows} more workflows`;
+  return (
+    <div className="space-y-2">
+      <p className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+        <span>
+          Steps this month: <span className="font-medium text-text tabular-nums">{of(steps, limits.steps)}</span>
+        </span>
+        <span>
+          Workflows on: <span className="font-medium text-text tabular-nums">{of(active, limits.workflows)}</span>
+        </span>
+        <span>Run history: {limits.historyDays === null ? "kept for good" : `${INTEGER.format(limits.historyDays)} days`}</span>
+        <span>Connectors: {connectorLevelText(limits.connectors)}</span>
+      </p>
+      {usedUp && (
+        <p className="rounded-base bg-danger-bg px-3 py-2 text-sm text-danger">
+          This month&apos;s steps are used up, so no new run starts until {renews}. Runs already going finish. {plus} —{" "}
+          <Link href="/settings/billing" className="font-medium underline">
+            see billing
+          </Link>
+          .
+        </p>
+      )}
+      {low && (
+        <p className="rounded-base bg-warning-bg px-3 py-2 text-sm text-warning">
+          Four fifths of this month&apos;s steps are used — {INTEGER.format(limits.steps! - steps)} left until {renews}. {plus}.
+        </p>
+      )}
+      {full && !usedUp && (
+        <p className="rounded-base bg-surface-sunken px-3 py-2 text-sm text-muted">
+          {limits.workflows === 0
+            ? "This workspace's plan doesn't let workflows be switched on."
+            : `All ${INTEGER.format(limits.workflows!)} places for workflows switched on are taken: switch one off before switching another on.`}
+        </p>
+      )}
     </div>
   );
 }

@@ -97,6 +97,11 @@ model Tenant {
   copilotTokenOverride Int?
   /// Staff override of how many custom domains it may have. Null: the plans decide.
   customDomainOverride Int?
+  /// Staff overrides of the plans' Deskzo Automate limits (src/lib/automate/limits.ts). Null: the plans decide.
+  automationWorkflowOverride  Int?
+  automationStepOverride      Int?
+  automationHistoryOverride   Int?
+  automationConnectorOverride Int?
 
   /// Why it is held, when it is. A billing hold lets its owner reach the billing page and nothing
   /// else, and is lifted by paying; a staff hold only by staff.
@@ -577,6 +582,15 @@ model Plan {
   /// Custom domains a workspace may add, for each unit of quantity. Null: no limit; 0: none (the
   /// default, so a plan offers them only when staff say so).
   customDomains Int?    @default(0)
+  /// Deskzo Automate's limits (src/lib/platform/entitlements.ts). Active workflows for each unit; steps a
+  /// month for each person on a plan sold per person, otherwise for each unit — pooled across the workspace;
+  /// days of run history, the longest plan counting; and which outside connectors its workflows may use,
+  /// the highest counting: 0 webhooks, 1 also APIs, Slack and Teams, 2 also Google and Microsoft, 3 also
+  /// WhatsApp. Null: no limit on an edition or internal plan; nothing added by an add-on or bundle.
+  automationWorkflows   Int?
+  automationSteps       Int?
+  automationHistoryDays Int?
+  automationConnectors  Int?
   /// New workspaces start on it unless their invitation names another. At most one (a partial
   /// unique index).
   isDefault   Boolean  @default(false)
@@ -858,6 +872,10 @@ model TenantUsage {
   seatsUsed     Int
   seatsLimit    Int?
   copilotTokens Int
+  /// Deskzo Automate: steps this month, the month's allowance, and workflows switched on.
+  automationSteps      Int  @default(0)
+  automationStepsLimit Int?
+  automationWorkflows  Int  @default(0)
   recordedAt    DateTime @default(now())
 
   @@id([tenantId, day])

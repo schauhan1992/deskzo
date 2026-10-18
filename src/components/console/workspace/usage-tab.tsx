@@ -1,4 +1,4 @@
-import { Activity, CalendarDays, Sparkles, Users } from "lucide-react";
+import { Activity, CalendarDays, Sparkles, Users, Workflow } from "lucide-react";
 import { AreaTrend } from "@/components/console/charts/area-trend";
 import { ChartFrame, ChartTable } from "@/components/console/charts/chart-frame";
 import { ColumnChart } from "@/components/console/charts/column-chart";
@@ -10,6 +10,7 @@ import { StatusPill } from "@/components/console/kit/status";
 import { DataTable, TBody, THead, Td, Th, Tr } from "@/components/console/kit/table";
 import { compactNumber, dayKeyLabel, monthLabel, plural } from "@/lib/console-shared/format";
 import type { UsagePanel, UsagePoint } from "@/lib/platform/workspace-data";
+import { ALL_CONNECTORS, connectorLevelText } from "@/lib/automate/limits";
 
 /**
  * Workspace 360 › Usage: seats in use against the seat limit and copilot tokens against theirs, as
@@ -90,6 +91,41 @@ export function UsageTab({ usage }: { usage: UsagePanel }) {
           icon={<CalendarDays className="h-4 w-4" />}
           value={dayKeyLabel(latestKey, false)}
           secondary={`${plural(series.length, "day")} recorded in the last 90`}
+        />
+      </KpiGrid>
+
+      <KpiGrid columns={4}>
+        <KpiTile
+          label={`Automate steps, ${latestMonth}`}
+          icon={<Workflow className="h-4 w-4" />}
+          tone={pressure(latest.automationSteps, latest.automationStepsLimit)}
+          value={INTEGER.format(latest.automationSteps)}
+          meter={latest.automationStepsLimit === null ? undefined : { value: latest.automationSteps, max: latest.automationStepsLimit, label: "Automate steps this month against the allowance" }}
+          secondary={
+            <span className="inline-flex flex-wrap items-center gap-1.5">
+              {latest.automationStepsLimit === null ? "No step limit" : `of ${INTEGER.format(latest.automationStepsLimit)} a month`}
+              {limits.automationOverridden && <StatusPill tone="warning">overridden</StatusPill>}
+            </span>
+          }
+        />
+        <KpiTile
+          label="Workflows switched on"
+          icon={<Workflow className="h-4 w-4" />}
+          tone={pressure(latest.automationWorkflows, limits.automation?.workflows ?? null)}
+          value={INTEGER.format(latest.automationWorkflows)}
+          secondary={limits.automation?.workflows == null ? "No limit" : `of ${INTEGER.format(limits.automation.workflows)}`}
+        />
+        <KpiTile
+          label="Automate run history"
+          icon={<CalendarDays className="h-4 w-4" />}
+          value={limits.automation?.historyDays == null ? "For good" : plural(limits.automation.historyDays, "day")}
+          secondary="How long a finished run is kept"
+        />
+        <KpiTile
+          label="Automate connectors"
+          icon={<Activity className="h-4 w-4" />}
+          value={limits.automation?.connectors == null ? "Every one" : `Level ${limits.automation.connectors} of ${ALL_CONNECTORS}`}
+          secondary={connectorLevelText(limits.automation?.connectors ?? null)}
         />
       </KpiGrid>
 
