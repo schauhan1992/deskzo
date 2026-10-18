@@ -21,7 +21,7 @@ export default async function PayrollPage() {
           <h1 className="text-xl font-semibold text-text">Payroll</h1>
           <p className="mt-1 text-sm text-muted">
             {caps.payroll
-              ? "PF, ESI and professional tax are computed from the Indian rules. Income tax is entered by you."
+              ? "PF, ESI, professional tax and income tax (TDS) are worked out from the Indian rules. TDS follows each person's tax declaration, and a figure you type on a payslip is kept."
               : "Your payslips. Only payroll can see anybody else's."}
           </p>
         </div>
