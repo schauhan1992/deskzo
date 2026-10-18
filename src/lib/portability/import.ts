@@ -51,8 +51,11 @@ export type ImportPlan = {
   rows: PlannedRow[];
   /** Columns in the file that no field matched. Usually a wrong template or a renamed heading. */
   unknownColumns: string[];
-  /** The rows' notices (`PlannedRow.notice`), one per wording, with the lines each applies to. */
-  notices: { text: string; lines: number[] }[];
+  /**
+   * The rows' notices (`PlannedRow.notice`), one per wording, with the lines each applies to. `danger`
+   * for one somebody must not miss — the difference an opening balance sends to equity.
+   */
+  notices: { text: string; lines: number[]; tone?: "danger" }[];
   /** Headings read as a template column by the importer's `headerAliases` — "Basic Salary" as "Basic". */
   readAs: { from: string; to: string }[];
 };

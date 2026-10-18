@@ -231,7 +231,10 @@ export function ImportDialog({
 
               {/* What some rows held that is left as it is, and why — said rather than dropped. */}
               {plan.notices.map((n) => (
-                <p key={n.text} className="flex items-start gap-1.5 rounded-md bg-warning-bg px-3 py-2 text-xs text-warning">
+                <p
+                  key={n.text}
+                  className={`flex items-start gap-1.5 rounded-md px-3 py-2 text-xs ${n.tone === "danger" ? "bg-danger-bg font-medium text-danger" : "bg-warning-bg text-warning"}`}
+                >
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   <span>
                     {n.text} {rowList(n.lines)}

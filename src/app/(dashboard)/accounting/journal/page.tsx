@@ -11,6 +11,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagination";
 import { JournalEntries } from "@/components/accounting/journal-entries";
 import { NewJournalDialog } from "@/components/accounting/new-journal-dialog";
+import { OpeningBalancesImport } from "@/components/accounting/opening-balances-import";
 import { DateParamInput } from "@/components/accounting/date-param-input";
 import { can } from "@/lib/authz/resolve";
 import { listBranchChoices, listRegistrationChoices } from "@/lib/branches/identity";
@@ -44,6 +45,8 @@ export default async function JournalPage({
     listAccounts({ postableOnly: true }),
   ]);
   const isAdmin = session ? await can(session.user.id, "ledger.post") : false;
+  // Opening balances from a file (owner, 18 Oct 2026): posting journals, and importing finance data.
+  const canImportOpening = isAdmin && session ? await can(session.user.id, "data.importFinance") : false;
   // What a new entry's lines may be tagged with — only the dialog needs them, and only somebody who
   // may post sees it. Active ones only: a closed branch or a surrendered GSTIN takes no new lines.
   const [branches, registrations]: [BranchChoice[], RegistrationChoice[]] = isAdmin
@@ -60,7 +63,10 @@ export default async function JournalPage({
             here is edited or deleted; a mistake is corrected by a reversal.
           </p>
         </div>
-        {isAdmin && <NewJournalDialog accounts={accounts} branches={branches} registrations={registrations} />}
+        <div className="flex flex-wrap items-center gap-2">
+          {canImportOpening && <OpeningBalancesImport />}
+          {isAdmin && <NewJournalDialog accounts={accounts} branches={branches} registrations={registrations} />}
+        </div>
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">

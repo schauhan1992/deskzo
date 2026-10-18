@@ -46,6 +46,7 @@
     "check:payroll": "tsx scripts/check-payroll.ts",
     "check:pay-periods": "tsx scripts/check-pay-periods.ts",
     "check:crm-migration": "tsx scripts/check-crm-migration.ts",
+    "check:opening-balances": "tsx scripts/check-opening-balances.ts",
     "check:payroll-import": "tsx scripts/check-payroll-import.ts",
     "check:iclock": "tsx scripts/check-iclock.ts",
     "db:seed:hr": "tsx prisma/seed-hr.ts",

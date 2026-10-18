@@ -192,6 +192,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "payroll.ts": ["payroll"],
   // Bringing pay across from another HRMS, for payroll only (src/lib/portability/importers/payroll.ts).
   "payroll-import.ts": ["payroll"],
+  // Opening balances from a trial balance file, posted on the day the books start (src/lib/portability/opening-balances.ts).
+  "opening-balances.ts": ["accounting"],
   "performance.ts": "core",
   "permission.ts": "core",
   "portal-public.ts": "public",
