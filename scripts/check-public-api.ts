@@ -335,7 +335,8 @@ async function main() {
     };
     walk(path.join(process.cwd(), "src"));
     const entering = files.filter((f) => readFileSync(f, "utf8").includes("runAsApiActor(")).map((f) => path.relative(process.cwd(), f).split(path.sep).join("/")).sort();
-    ok("runAsApiActor is called in src/lib/api/handler.ts and nowhere else", JSON.stringify(entering) === JSON.stringify(["src/lib/api/handler.ts"]), entering.join(", "));
+    // And the Deskzo app's handler, which checks a paired phone the same way (src/lib/app/handler.ts).
+    ok("runAsApiActor is called in the two handlers that check a key or a phone, and nowhere else", JSON.stringify(entering) === JSON.stringify(["src/lib/api/handler.ts", "src/lib/app/handler.ts"]), entering.join(", "));
     const authSource = readFileSync(path.join(process.cwd(), "src/lib/auth.ts"), "utf8");
     const authFn = authSource.slice(authSource.indexOf("export async function auth()"));
     ok("sign-in answers with an API call's person before it reads a browser session", authFn.indexOf("apiActor()") > -1 && authFn.indexOf("apiActor()") < authFn.indexOf("nextAuth.auth()"));

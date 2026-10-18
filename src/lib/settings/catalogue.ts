@@ -51,7 +51,9 @@ import {
   ListPlus,
   EyeOff,
   Network,
+  Smartphone,
 } from "lucide-react";
+import { deskzoAppReady } from "@/lib/app/ready";
 
 /**
  * Every setting in the app, in one list.
@@ -107,6 +109,11 @@ export type SettingsItem = {
    * can't be said with `permission`: the super admin holds every key, and so does every admin.
    */
   superAdminOnly?: boolean;
+  /**
+   * Shown once what it is for is out — the Deskzo app's page before the app is (src/lib/app/ready.ts).
+   * Asked on the server, where the menu is worked out.
+   */
+  released?: () => boolean;
 };
 
 export type SettingsGroup = {
@@ -765,6 +772,17 @@ export const SETTINGS: SettingsSection[] = [
             module: "notifications",
             external: true,
           },
+          {
+            // Owner, 18 Oct 2026: the Deskzo app on your own phone — calling first (src/lib/app).
+            key: "phone",
+            label: "Deskzo app",
+            description: "Pair your phone with the Deskzo app: calls with customers log themselves, and Call buttons ring your phone.",
+            href: "/settings/phone",
+            icon: Smartphone,
+            permission: null,
+            module: "calls",
+            released: deskzoAppReady,
+          },
         ],
       },
     ],
@@ -803,7 +821,7 @@ export function visibleSettings(permissions: string[], enabledModules: string[],
       .map((group) => ({
         ...group,
         items: group.items.filter(
-          (item) => mayOpen(item, permissions) && moduleShown(item, enabledModules) && (!item.superAdminOnly || viewer.superAdmin === true),
+          (item) => mayOpen(item, permissions) && moduleShown(item, enabledModules) && (!item.superAdminOnly || viewer.superAdmin === true) && (!item.released || item.released()),
         ),
       }))
       .filter((group) => group.items.length > 0),
@@ -833,7 +851,7 @@ export function activeSettingsKey(pathname: string): string | null {
  */
 export function visibleSettingsKeys(permissions: string[], enabledModules: string[], viewer: { superAdmin?: boolean } = {}): string[] {
   return SETTINGS_ITEMS.filter(
-    (item) => mayOpen(item, permissions) && moduleShown(item, enabledModules) && (!item.superAdminOnly || viewer.superAdmin === true),
+    (item) => mayOpen(item, permissions) && moduleShown(item, enabledModules) && (!item.superAdminOnly || viewer.superAdmin === true) && (!item.released || item.released()),
   ).map((item) => item.key);
 }
 

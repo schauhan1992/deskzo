@@ -42,6 +42,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "analytics.ts": ["reports"],
   // The public API's keys (src/lib/api), Settings › Developers & API — each endpoint checks its own module.
   "api-keys.ts": "core",
+  // Pairing your phone with the Deskzo app (src/lib/app) — the app's calling asks Calls itself.
+  "app-devices.ts": "core",
   "asset.ts": ["accounting"],
   "attendance.ts": ["hr"],
   "auth.ts": "core",
@@ -57,6 +59,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "branding.ts": "core",
   "call.ts": ["calls"],
   "calling-activity.ts": ["calls"],
+  // "Ring my phone" in a call dialog — the Deskzo app on the caller's phone dials it.
+  "phone-calls.ts": ["calls"],
   "candidate.ts": ["hr"],
   // Deskzo Cards: issuing cards, templates, My card (src/lib/cards); the card page itself is public.
   "card.ts": ["cards"],

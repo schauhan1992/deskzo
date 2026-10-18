@@ -2,14 +2,24 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Phone, Play, Square } from "lucide-react";
+import { Phone, Play, Smartphone, Square } from "lucide-react";
 import { callsAllowed, logCall, listCompanyNumbers } from "@/actions/call";
+import { myCallingPhone, ringMyPhone, ringState } from "@/actions/phone-calls";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { callOutcomeLabels, callOutcomeValues, formatDuration, hasDialableNumber } from "@/lib/calls";
 
 type NumberOption = Awaited<ReturnType<typeof listCompanyNumbers>>[number];
+type Ring = { id: string; phone: string; pushed: boolean; state: Awaited<ReturnType<typeof ringState>> };
+
+/** What a ring sent to the caller's phone has got to, in words (owner, 18 Oct 2026). */
+function ringWords(ring: Ring): string {
+  if (ring.state === "WAITING") return ring.pushed ? `Sent to your ${ring.phone} — it will offer to dial in a moment.` : `Sent to your ${ring.phone}. Open the Deskzo app on it to dial.`;
+  if (ring.state === "TAKEN") return `Your ${ring.phone} has it — dial from the app. The call logs itself here when it ends.`;
+  if (ring.state === "LOGGED") return "Logged from your phone.";
+  return `Your ${ring.phone} didn't pick it up. Ring it again, or call and log it here.`;
+}
 
 /**
  * Whether calls may be logged here, asked once a page however many icons it has (a list of contacts
@@ -147,6 +157,52 @@ function CallDialog({
   const [direction, setDirection] = useState("OUTBOUND");
   const [notes, setNotes] = useState("");
   const [followUpAt, setFollowUpAt] = useState("");
+
+  // "Ring my phone": the caller's own phone with the Deskzo app and call sync on, if they have one.
+  const [phone, setPhone] = useState<{ id: string; name: string } | null>(null);
+  const [ring, setRing] = useState<Ring | null>(null);
+  useEffect(() => {
+    let live = true;
+    myCallingPhone().then(
+      (p) => live && setPhone(p),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
+  // Watching a ring every two seconds until the call is logged or nobody picked it up — three minutes at most.
+  const ringId = ring?.id ?? null;
+  const ringDone = ring?.state === "LOGGED" || ring?.state === "EXPIRED";
+  useEffect(() => {
+    if (!ringId || ringDone) return;
+    let live = true;
+    let ticks = 0;
+    const timer = setInterval(() => {
+      ticks += 1;
+      void ringState(ringId).then((state) => {
+        if (!live) return;
+        setRing((r) => (r && r.id === ringId ? { ...r, state: ticks >= 90 && state !== "LOGGED" ? "EXPIRED" : state } : r));
+        if (state === "LOGGED") router.refresh();
+      });
+    }, 2000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [ringId, ringDone, router]);
+
+  function ringPhone() {
+    setError(null);
+    startTransition(async () => {
+      const result = await ringMyPhone({ companyId, contactId: contactId || undefined, phoneNumber, leadId, ticketId, companyProductId });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setRing({ ...result.data, state: "WAITING" });
+    });
+  }
 
   useEffect(() => {
     if (presetContact) return;
@@ -294,6 +350,22 @@ function CallDialog({
             </p>
           )}
         </div>
+
+        {phone && (
+          <div className="rounded-base border border-line bg-surface-sunken px-3 py-2 text-sm">
+            {ring && ring.state !== "EXPIRED" ? (
+              <p className="text-text">{ringWords(ring)}</p>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <Button size="sm" onClick={ringPhone} disabled={pending || !hasDialableNumber(phoneNumber)}>
+                  <Smartphone className="mr-1.5 h-3.5 w-3.5" />
+                  {ring ? "Ring it again" : `Ring my ${phone.name}`}
+                </Button>
+                <span className="text-xs text-muted">{ring ? ringWords(ring) : "Dials from your phone — the call logs itself when it ends, no form to fill."}</span>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">

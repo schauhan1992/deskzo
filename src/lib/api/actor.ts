@@ -23,6 +23,12 @@ export type ApiActor = {
   keyId: string;
   keyName: string;
   scopes: readonly string[];
+  /**
+   * "app": the Deskzo app on the person's phone (src/lib/app/handler.ts, owner 18 Oct 2026) — the same
+   * acting-as, entered there once the phone's secret and its device are checked; keyId and keyName are
+   * the phone's.
+   */
+  channel?: "app";
 };
 
 // One store for the process, whichever bundle loads this module.
@@ -36,7 +42,10 @@ export function apiActor(): ApiActor | null {
   return store.getStore() ?? null;
 }
 
-/** Runs `work` as the key's person. Only for src/lib/api/handler.ts, once the key is checked. */
+/**
+ * Runs `work` as the key's person. Only for src/lib/api/handler.ts, once the key is checked, and
+ * src/lib/app/handler.ts, once the phone is.
+ */
 export function runAsApiActor<T>(actor: ApiActor, work: () => Promise<T>): Promise<T> {
   return store.run(actor, work);
 }

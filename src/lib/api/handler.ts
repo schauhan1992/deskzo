@@ -71,19 +71,40 @@ const failure = (status: number, code: string, message: string, fields?: Record<
 
 const UNAUTHORIZED = () => failure(401, "unauthorized", "The API key is missing, wrong, expired or revoked.", undefined, { "www-authenticate": 'Bearer realm="Deskzo API"' });
 
-/** What a person's standing says about calling the API now — null when they may. */
-async function personRefusal(user: { id: string; role: string; isSuperAdmin: boolean; active: boolean; kind: string; lockedAt: Date | null; lockedUntil: Date | null }, ip: string | null): Promise<string | null> {
-  if (!user.active || user.kind !== "MEMBER") return "The key's person is switched off.";
-  if (personalLockActive(user)) return "The key's person is locked out for now.";
+export type PersonRefusal = "switched_off" | "locked" | "workspace_locked" | "network" | "device" | "location";
+
+/**
+ * What a person's standing says about acting as them now, from `ip` — null when they may. Shared with the
+ * Deskzo app (src/lib/app/handler.ts), whose phone is a device of its own: `approvedDevice` says it has
+ * been approved, which answers a role that admits only approved devices. Nothing answers one that asks
+ * for the location at every sign-in.
+ */
+export async function personRefusal(
+  user: { id: string; role: string; isSuperAdmin: boolean; active: boolean; kind: string; lockedAt: Date | null; lockedUntil: Date | null },
+  ip: string | null,
+  approvedDevice = false,
+): Promise<PersonRefusal | null> {
+  if (!user.active || user.kind !== "MEMBER") return "switched_off";
+  if (personalLockActive(user)) return "locked";
   if (user.isSuperAdmin) return null;
-  if (companyLockActive(await companyLock())) return "The workspace is locked for now.";
+  if (companyLockActive(await companyLock())) return "workspace_locked";
   // The sign-in door check (src/lib/access/record.ts `doorCheck`), on this request's own address.
   const [rules, policy] = await Promise.all([activeIpRules(), rolePolicy(user.role)]);
   const network = networkStanding(ip, user.role, rules, new Date());
-  if (network.standing === "BLOCKED" || (network.standing === "UNKNOWN" && policy.unknownNetwork === "BLOCK")) return "The key's person may not use Deskzo from this network.";
-  if (policy.requireDeviceApproval || policy.requireLocation) return "The key's person may only use Deskzo from an approved device — an API key can't be one.";
+  if (network.standing === "BLOCKED" || (network.standing === "UNKNOWN" && policy.unknownNetwork === "BLOCK")) return "network";
+  if (policy.requireDeviceApproval && !approvedDevice) return "device";
+  if (policy.requireLocation) return "location";
   return null;
 }
+
+const KEY_REFUSALS: Record<PersonRefusal, string> = {
+  switched_off: "The key's person is switched off.",
+  locked: "The key's person is locked out for now.",
+  workspace_locked: "The workspace is locked for now.",
+  network: "The key's person may not use Deskzo from this network.",
+  device: "The key's person may only use Deskzo from an approved device — an API key can't be one.",
+  location: "The key's person may only use Deskzo from an approved device — an API key can't be one.",
+};
 
 /** One more call in this key's minute; how many it has made in it. One statement, so every server counts the same. */
 async function countCall(keyId: string, ip: string | null): Promise<number> {
@@ -99,7 +120,8 @@ async function countCall(keyId: string, ip: string | null): Promise<number> {
   return Number(rows[0]?.n ?? 0);
 }
 
-async function readBody(req: Request): Promise<Record<string, unknown>> {
+/** The request's JSON object, size-checked; `{}` when there is none. */
+export async function readBody(req: Request): Promise<Record<string, unknown>> {
   const text = await req.text();
   if (Buffer.byteLength(text, "utf8") > API_MAX_BODY_BYTES) throw new ApiError(413, "too_large", `The body is over ${API_MAX_BODY_BYTES / 1024} KB.`);
   if (!text.trim()) return {};
@@ -116,7 +138,7 @@ async function readBody(req: Request): Promise<Record<string, unknown>> {
 }
 
 /** The fields a validation error names, by field — the first message for each. */
-function zodFields(err: ZodError): Record<string, string> {
+export function zodFields(err: ZodError): Record<string, string> {
   const fields: Record<string, string> = {};
   for (const issue of err.issues) fields[issue.path.join(".") || "body"] ??= issue.message;
   return fields;
@@ -174,7 +196,7 @@ export function apiRoute(options: RouteOptions, handler: (call: ApiCall) => Prom
       clearFailures([lockKey]);
 
       const refusal = await personRefusal(key.user, ip);
-      if (refusal) return failure(403, "person_not_allowed", refusal);
+      if (refusal) return failure(403, "person_not_allowed", KEY_REFUSALS[refusal]);
       if (options.scope && !key.scopes.includes(options.scope)) return failure(403, "insufficient_scope", `This key isn't allowed ${options.scope}. Give it that in Settings › Developers & API, or make a key that has it.`);
 
       const used = await countCall(key.id, ip);

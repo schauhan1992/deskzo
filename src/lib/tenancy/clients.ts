@@ -254,6 +254,8 @@ const NOT_YET_EVERYWHERE = {
   // 20261117100000_deskzo_ai_credits. Read by name in src/lib/copilot/settings.ts, which treats a workspace
   // without them as drafting wherever the copilot is on, with no daily cap.
   copilotSettings: { draftingEnabled: true, dailyCreditLimit: true },
+  // 20261118130000_deskzo_app_calls. Read by name in src/lib/app (the Deskzo app's call sync) and the call list.
+  callLog: { source: true, appDeviceId: true, phoneCallKey: true, reviewedAt: true },
   // 20261013100000_deskzo_updates_seen. Read by name in src/actions/help.ts only.
   user: { deskzoUpdatesSeenAt: true, reminderSounds: true },
   // 20261014100000_custom_fields. Read by name (`select` or `omit: { customFields: false }`) through

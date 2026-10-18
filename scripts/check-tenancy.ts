@@ -123,6 +123,8 @@ const STATE: Record<string, Allowed> = {
   "src/lib/cms/redirects.ts:testLoader": { reason: "test override, set only by check scripts" },
   "src/lib/platform/mail/store.ts:tokens": { reason: "shared: Microsoft 365 access tokens for the platform's own mail accounts (control plane), by account — no workspace data; dropped when an account changes" },
   "src/lib/platform/mail/store.ts:testTokenFetch": { reason: "test override, set only by check scripts" },
+  "src/lib/app/push.ts:accessToken": { reason: "shared: Google's access token for the platform's own Firebase project, which pushes to the Deskzo app for every workspace — no workspace data" },
+  "src/lib/app/push.ts:testSend": { reason: "test override, set only by check scripts" },
   "src/lib/platform/mail/store.ts:testTransport": { reason: "test override, set only by check scripts" },
   "src/lib/cms/search-policy.ts:held": { reason: "shared: the public site's Search & AI policy (control plane), the same for every visitor, no workspace data — read every 30 s, and again after a save" },
   "src/lib/cms/search-policy.ts:loading": { reason: "shared: the read of the public site's search policy in progress, so concurrent requests share one query — no workspace data" },

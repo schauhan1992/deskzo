@@ -903,6 +903,9 @@ model User {
   chatReactions        ChatReaction[]     @relation("ChatReactions")
   chatPinsMade         ChatPin[]          @relation("ChatPinsMade")
   apiKeys              ApiKey[]           @relation("ApiKeyUser")
+  appDevices           AppDevice[]        @relation("AppDevices")
+  appPairings          AppPairing[]       @relation("AppPairings")
+  appCallRequests      AppCallRequest[]   @relation("AppCallRequests")
 
   @@index([departmentId])
   @@index([managerId])
@@ -4537,6 +4540,14 @@ model JournalLine {
 
 // ─── Calling ──────────────────────────────────────────────────────────────────
 
+/// Where a logged call came from.
+enum CallSource {
+  /// Typed into a call dialog.
+  TYPED
+  /// Read from the person's phone by the Deskzo app.
+  PHONE
+}
+
 enum CallDirection {
   OUTBOUND
   INBOUND
@@ -4617,6 +4628,18 @@ model CallLog {
 
   workbookRecord WorkbookRecord?
 
+  /// Typed into a call dialog, or read from a phone by the Deskzo app (owner, 18 Oct 2026).
+  source       CallSource @default(TYPED)
+  /// The phone it came from, and the phone's own key for it (its call-log entry), so the same call sent
+  /// twice is logged once.
+  appDeviceId  String?
+  appDevice    AppDevice? @relation(fields: [appDeviceId], references: [id], onDelete: SetNull)
+  phoneCallKey String?
+  /// When its caller said how it went. A call from a phone is logged with what its length implies —
+  /// connected, or no answer — and waits for this.
+  reviewedAt   DateTime?
+
+  @@unique([appDeviceId, phoneCallKey])
   @@index([companyId, startedAt])
   @@index([userId, startedAt])
   @@index([followUpAt, followUpDone])
@@ -8586,6 +8609,8 @@ model UserDevice {
   locationSessionId String?
 
   signIns SignIn[]
+  /// The Deskzo app, when this device is one (src/lib/app).
+  app     AppDevice? @relation("AppDeviceSignIn")
 
   @@unique([userId, tokenHash])
   @@index([status])
@@ -11431,6 +11456,97 @@ model ApiIdempotency {
   @@unique([apiKeyId, key])
   @@index([createdAt])
   @@map("api_idempotency")
+}
+
+
+/// The Deskzo app on somebody's phone (owner, 18 Oct 2026) — theirs alone, paired with a code from their own
+/// Settings › Deskzo app page. Its sign-in is the device it hangs off (`UserDevice`): approved like any other
+/// device where the role asks for that, listed in Security › Devices and revoked there. This holds what only
+/// the app has. Its calls act as its person (src/lib/app/handler.ts), as an API key's do.
+model AppDevice {
+  id          String     @id @default(cuid())
+  /// The device row: its approval, its revoking, where it was last seen. Its tokenHash is the digest of the
+  /// app's secret.
+  deviceId    String     @unique
+  device      UserDevice @relation("AppDeviceSignIn", fields: [deviceId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User       @relation("AppDevices", fields: [userId], references: [id], onDelete: Cascade)
+  /// "android" or "ios".
+  platform    String
+  /// The phone as it describes itself — "Samsung SM-S918B".
+  model       String?
+  appVersion  String?
+  /// Where a push reaches it (Firebase Cloud Messaging); null until the app sends one.
+  pushToken   String?
+  /// Call sync, switched on on the phone: it reads its own call log and sends the calls with customers.
+  callSync    Boolean    @default(false)
+  /// The rate limit's minute, as on an API key — counted in one statement.
+  windowStart DateTime?
+  windowCount Int        @default(0)
+  createdAt   DateTime   @default(now())
+
+  calls        CallLog[]
+  callRequests AppCallRequest[]
+
+  @@index([userId])
+  @@map("app_devices")
+}
+
+/// A pairing code on somebody's screen, waiting for their phone: ten minutes, one use. Only its digest is kept.
+model AppPairing {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation("AppPairings", fields: [userId], references: [id], onDelete: Cascade)
+  codeHash    String    @unique
+  expiresAt   DateTime
+  /// The phone it paired, once it has.
+  appDeviceId String?   @unique
+  usedAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([userId])
+  @@map("app_pairings")
+}
+
+/// "Ring my phone" from a call dialog (owner, 18 Oct 2026): a number and what the call is about, waiting for
+/// the person's phone to dial it. The call itself comes back through call sync and is logged with this context.
+model AppCallRequest {
+  id               String               @id @default(cuid())
+  userId           String
+  user             User                 @relation("AppCallRequests", fields: [userId], references: [id], onDelete: Cascade)
+  appDeviceId      String
+  appDevice        AppDevice            @relation(fields: [appDeviceId], references: [id], onDelete: Cascade)
+  /// What the call is about, checked when asked as logCall checks it. Kept as ids: a record gone by the time
+  /// the call comes back is simply left off it.
+  companyId        String
+  contactId        String?
+  leadId           String?
+  ticketId         String?
+  companyProductId String?
+  phoneNumber      String
+  /// What the phone shows — "Ravi Kumar, Acme Industries".
+  label            String
+  status           AppCallRequestStatus @default(WAITING)
+  expiresAt        DateTime
+  takenAt          DateTime?
+  /// The call it became, once the phone sent it.
+  callLogId        String?              @unique
+  createdAt        DateTime             @default(now())
+
+  @@index([appDeviceId, status])
+  @@index([userId, createdAt])
+  @@map("app_call_requests")
+}
+
+enum AppCallRequestStatus {
+  /// Sent; the phone hasn't picked it up yet.
+  WAITING
+  /// The phone has it and offered to dial.
+  TAKEN
+  /// The call came back and was logged with this request's context.
+  LOGGED
+  /// Nobody picked it up in time.
+  EXPIRED
 }
 
 enum LeadAssignmentStrategy {

@@ -178,11 +178,14 @@ function main() {
     openToAll.map((i) => i.key).join(", "),
   );
 
+  // All of it that is out: an entry whose feature isn't released yet (the Deskzo app's) is nobody's.
+  const unreleased = SETTINGS_ITEMS.filter((i) => i.released && !i.released()).map((i) => i.key);
   const owner = visibleSettings([...permissionKeys], [...moduleKeys], { superAdmin: true });
+  const ownerKeys = owner.flatMap((s) => s.groups.flatMap((g) => g.items.map((i) => i.key)));
   ok(
-    "  and the super admin, holding everything, sees all of it",
-    owner.flatMap((s) => s.groups.flatMap((g) => g.items)).length === SETTINGS_ITEMS.length,
-    `${SETTINGS_ITEMS.length} entries`,
+    "  and the super admin, holding everything, sees all of it that is out",
+    ownerKeys.length === SETTINGS_ITEMS.length - unreleased.length && unreleased.every((k) => !ownerKeys.includes(k)),
+    `${SETTINGS_ITEMS.length} entries${unreleased.length ? `, not yet out: ${unreleased.join(", ")}` : ""}`,
   );
   // Unmasking logs are the super admin's alone (src/actions/unmask-log.ts), whatever else one holds.
   const admin = visibleSettings([...permissionKeys], [...moduleKeys]);
@@ -190,7 +193,7 @@ function main() {
   const superOnly = SETTINGS_ITEMS.filter((i) => i.superAdminOnly).map((i) => i.key);
   ok(
     "  an admin holding every permission sees everything but what is the super admin's alone",
-    superOnly.length > 0 && superOnly.every((k) => !adminKeys.includes(k)) && adminKeys.length === SETTINGS_ITEMS.length - superOnly.length,
+    superOnly.length > 0 && superOnly.every((k) => !adminKeys.includes(k)) && adminKeys.length === SETTINGS_ITEMS.length - superOnly.length - unreleased.length,
     superOnly.join(", "),
   );
 

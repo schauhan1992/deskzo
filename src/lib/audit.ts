@@ -16,9 +16,11 @@ export async function recordAudit(params: {
   entityId: string;
   entityLabel: string;
 }) {
-  // Done through the public API: which key did it, on the entry itself (src/lib/api/actor.ts).
+  // Done through the public API: which key did it, on the entry itself (src/lib/api/actor.ts). Or the
+  // Deskzo app: which phone.
   const api = apiActor();
-  const entityLabel = api ? `${params.entityLabel} — via API key “${api.keyName}”` : params.entityLabel;
+  const via = api ? (api.channel === "app" ? `the Deskzo app on “${api.keyName}”` : `API key “${api.keyName}”`) : null;
+  const entityLabel = via ? `${params.entityLabel} — via ${via}` : params.entityLabel;
   try {
     await db.auditLog.create({ data: { ...params, entityLabel, impersonatedByUserId: api ? null : await impersonator() } });
   } catch (err) {
