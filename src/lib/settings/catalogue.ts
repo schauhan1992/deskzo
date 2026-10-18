@@ -198,8 +198,8 @@ export const SETTINGS: SettingsSection[] = [
           },
           {
             key: "copilot",
-            label: "AI copilot",
-            description: "Claude, ChatGPT or Gemini in the header — the provider, its key, the model and a daily allowance per person.",
+            label: "Deskzo AI",
+            description: "The copilot and drafting with AI — switch them on, cap each person's credits a day, and see who used how many.",
             href: "/settings/copilot",
             icon: Sparkles,
             permission: "settings.manage",

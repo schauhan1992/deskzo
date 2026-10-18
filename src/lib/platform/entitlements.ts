@@ -5,6 +5,7 @@ import { MODULE_REGISTRY, getModuleDefinition } from "@/lib/modules";
 import { forgetRegistry } from "@/lib/tenancy/registry";
 import { trialSeats } from "@/lib/platform/settings";
 import { PLAN_LIMITS, type AutomationLimits } from "@/lib/automate/limits";
+import { trialAiCredits } from "@/lib/ai/settings";
 
 /**
  * Working out what a workspace may use, and writing it on its control-plane row — whenever its plans,
@@ -14,7 +15,7 @@ import { PLAN_LIMITS, type AutomationLimits } from "@/lib/automate/limits";
  *   · Modules: every module of every plan on a live subscription (trialing, active, past due), and
  *     what those need (`requires` in src/lib/modules.ts); then staff overrides — added, or taken away
  *     with whatever needs them; then only those sold in its country.
- *   · Seats, copilot tokens and custom domains: an edition or internal plan without a limit means
+ *   · Seats, Deskzo AI credits a month (`copilotTokens`, an older name) and custom domains: an edition or internal plan without a limit means
  *     no limit; otherwise each plan's allowance times its quantity, added up (an add-on without one
  *     adds nothing). A staff override replaces the sum.
  *   · Seats charged per person (a per-person price) are what was bought: the quantity, times the
@@ -22,7 +23,8 @@ import { PLAN_LIMITS, type AutomationLimits } from "@/lib/automate/limits";
  *     hand has no price, so the plan's own number holds as before.
  *   · A workspace on its free trial and paying for nothing has no more people than a trial allows
  *     (`trialSeats`, console › Settings — 25 to start with), whatever its plan says. A staff override,
- *     or paying for an edition, lifts it.
+ *     or paying for an edition, lifts it. Its AI credits are a trial's too (`trialAiCredits`, console ›
+ *     Settings › AI — 200 for the workspace), in place of what its plan would give a paying one.
  *   · Deskzo Automate's limits (`automationFrom`): workflows and steps added up, the longest history
  *     and the widest connectors; a free trial gives a trial's, whatever it trials.
  *
@@ -147,6 +149,8 @@ export function entitlementsFrom(
     customDomainOverride: number | null;
     /** The most people a free trial allows (`trialSeats`); absent or null: a trial is not capped. */
     trialSeats?: number | null;
+    /** A free trial's Deskzo AI credits a month (`trialAiCredits`); absent or null: the plans decide. */
+    trialCredits?: number | null;
   },
   items: EntItem[],
   overrides: { moduleKey: string; granted: boolean }[],
@@ -174,17 +178,18 @@ export function entitlementsFrom(
     all: everything && taken.length === 0,
     modules: sold.sort(),
     seats: tenant.seatOverride ?? (trialCap === null ? counted : counted === null ? trialCap : Math.min(counted, trialCap)),
-    copilotTokens: tenant.copilotTokenOverride ?? sumLimit(items, "copilotTokens"),
+    copilotTokens: tenant.copilotTokenOverride ?? (trialOnly && typeof tenant.trialCredits === "number" ? tenant.trialCredits : sumLimit(items, "copilotTokens")),
     customDomains: tenant.customDomainOverride ?? sumLimit(items, "customDomains"),
     automation: automationFrom(tenant, items, onTrial),
     plans: [...new Set(items.map((i) => i.plan.key))].sort(),
     ...(trialCap !== null ? { trial: true } : {}),
+    inCredits: true,
   };
 }
 
 export async function computeEntitlements(tenantId: string): Promise<Entitlements> {
   const control = controlDb();
-  const [tenant, items, overrides, trialCap] = await Promise.all([
+  const [tenant, items, overrides, trialCap, trialCredits] = await Promise.all([
     control.tenant.findUniqueOrThrow({
       where: { id: tenantId },
       select: {
@@ -205,9 +210,10 @@ export async function computeEntitlements(tenantId: string): Promise<Entitlement
     }),
     control.tenantModuleOverride.findMany({ where: { tenantId }, select: { moduleKey: true, granted: true } }),
     trialSeats(),
+    trialAiCredits(),
   ]);
   return entitlementsFrom(
-    { ...tenant, trialSeats: trialCap },
+    { ...tenant, trialSeats: trialCap, trialCredits },
     items.map(({ price, subscription, ...item }) => ({ ...item, perSeat: !!price?.perSeat, trial: isFreeTrial(subscription) })),
     overrides,
   );

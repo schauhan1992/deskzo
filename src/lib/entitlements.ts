@@ -15,7 +15,10 @@ export type Entitlements = {
   modules: string[];
   /** People who may hold an active account. Null: no limit. */
   seats: number | null;
-  /** AI copilot tokens a month, across everybody. Null: no limit; 0: none. */
+  /**
+   * Deskzo AI credits a month, across everybody (src/lib/ai/credits.ts). Null: no limit; 0: none. Counted
+   * copilot tokens until 17 Oct 2026, when AI moved to credits; the name is older.
+   */
   copilotTokens: number | null;
   /**
    * Addresses of its own it may add (src/lib/platform/domains.ts) — every one it has, waiting,
@@ -32,6 +35,11 @@ export type Entitlements = {
   plans: string[];
   /** Its seats are a free trial's (console › Settings): it pays for nothing yet. Absent: they are not. */
   trial?: boolean;
+  /**
+   * Worked out since AI moved to credits, so `copilotTokens` counts credits. Absent: an answer from before,
+   * whose number counted tokens — src/lib/ai/credits.ts works it out again before relying on it.
+   */
+  inCredits?: true;
 };
 
 /** A workspace from the environment — the installation as it was before workspaces — has everything. */
@@ -67,6 +75,7 @@ export function parseEntitlements(json: unknown): Entitlements {
     ...automationOf(e.automation),
     plans: Array.isArray(e.plans) ? e.plans.filter((p): p is string => typeof p === "string") : [],
     ...(e.trial === true ? { trial: true } : {}),
+    ...(e.inCredits === true ? { inCredits: true as const } : {}),
   };
 }
 

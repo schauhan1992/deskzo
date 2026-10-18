@@ -93,6 +93,7 @@ model Tenant {
   /// out, which means the core only.
   entitlements         Json?
   /// Staff overrides of the plans' limits, for this workspace alone. Null: the plans decide.
+  /// `copilotTokenOverride` is Deskzo AI credits a month since 17 Oct 2026 (the name is older).
   seatOverride         Int?
   copilotTokenOverride Int?
   /// Staff override of how many custom domains it may have. Null: the plans decide.
@@ -161,6 +162,11 @@ model Tenant {
   linkSwitchTickets LinkSwitchTicket[]
   signInPolicy      TenantSignInPolicy?
   emailIndex        WorkspaceEmail[]
+
+  /// Deskzo AI: its credits month by month, the packs it bought or was given, and every charged turn.
+  aiCreditMonths AiCreditMonth[]
+  aiCreditPacks  AiCreditPack[]
+  aiUsage        AiUsage[]
 
   @@index([tags], type: Gin)
   @@index([partnerId])
@@ -573,7 +579,8 @@ model Plan {
   countries   String[] @default([])
   /// People included, for each unit of quantity. Null: no limit.
   seats         Int?
-  /// AI copilot tokens a month, for each unit of quantity. Null: no limit; 0: none.
+  /// Deskzo AI credits a month, for each unit of quantity (src/lib/ai/credits.ts). Null: no limit; 0:
+  /// none. Counted copilot tokens until 17 Oct 2026, when AI moved to credits; the name is older.
   copilotTokens Int?
   /// The product it sells (src/lib/products.ts: crm, books, … or one for the whole suite). A workspace
   /// holds at most one plan per product; Deskzo One holds every product, so no other with it. Null: an
@@ -864,7 +871,8 @@ model Invoice {
   @@map("invoices")
 }
 
-/// A workspace's use, a day at a time — people with an account, and copilot tokens this month so far.
+/// A workspace's use, a day at a time — people with an account, and Deskzo AI credits used this month so
+/// far (copilot tokens before 17 Oct 2026; the column's name is older).
 model TenantUsage {
   tenantId      String
   tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -2539,4 +2547,172 @@ model AutomationWake {
 
   @@index([nextDueAt])
   @@map("automation_wake")
+}
+
+// ─── Deskzo AI (owner, 17 Oct 2026; src/lib/ai) ───────────────────────────────────────────────────
+//
+// AI runs on Deskzo's own accounts, chosen in console › Settings › AI, and is paid for in credits: each
+// plan's monthly allowance, then packs bought on top. Workspaces no longer bring their own key.
+
+/// Who runs a model, and how it is called. src/lib/ai/catalogue.ts says what each one needs.
+enum AiProviderKind {
+  /// Claude through Anthropic's own API.
+  ANTHROPIC
+  /// Claude through Amazon Bedrock, from one AWS region. India's inference profiles stay in Mumbai and Hyderabad.
+  BEDROCK
+  OPENAI
+  /// An Azure OpenAI resource: its endpoint, and each model's deployment name.
+  AZURE_OPENAI
+  /// Gemini through Google AI Studio.
+  GEMINI
+  /// Gemini on Google Cloud's Vertex AI, in one location, as a service account.
+  VERTEX
+  /// Any server that speaks OpenAI's chat completions: vLLM, Ollama, Deskzo's own GPU.
+  OPENAI_COMPATIBLE
+}
+
+/// An account Deskzo AI calls models through. Its secret (an API key, an AWS secret key, a service
+/// account's JSON) is sealed under the platform key ("ai-account") and opened only to make a call.
+model AiAccount {
+  id            String         @id @default(cuid())
+  name          String
+  kind          AiProviderKind
+  /// Bedrock's AWS region, Vertex's location: "ap-south-1", "asia-south1".
+  region        String?
+  /// Azure's resource endpoint, or a compatible server's base URL.
+  endpoint      String?
+  /// Not secret: Bedrock's access key id, Vertex's project id, Azure's API version.
+  keyId         String?
+  secretCipher  String?
+  /// Where the provider processes what is sent, in the words workspaces are shown: "India (Mumbai and Hyderabad)".
+  residency     String
+  /// Staff have checked the provider's terms: nothing sent is used to train its models.
+  noTraining    Boolean        @default(false)
+  active        Boolean        @default(true)
+  lastTestAt    DateTime?
+  lastTestOk    Boolean?
+  lastTestError String?
+  updatedBy     String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  models AiModel[]
+
+  @@map("ai_accounts")
+}
+
+/// A model on an account, and what a workspace is charged for it.
+model AiModel {
+  id            String    @id @default(cuid())
+  accountId     String
+  account       AiAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  /// Stable, and kept on every charge: "claude-sonnet-5-india".
+  key           String    @unique
+  label         String
+  /// The provider's name for it: a Bedrock inference profile ("in.anthropic.claude-sonnet-5"), an Azure deployment.
+  providerModel String
+  /// Credits for a million tokens, input and output: what a workspace is charged. Cached input counts a tenth.
+  inputRate     Int
+  outputRate    Int
+  /// What the provider charges Deskzo, in paise for a million tokens. Only for the margin, never shown to a workspace.
+  inputCost     Int?
+  outputCost    Int?
+  active        Boolean   @default(true)
+  updatedBy     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  routes AiRoute[]
+
+  @@index([accountId])
+  @@map("ai_models")
+}
+
+/// Which model each AI feature runs on (src/lib/ai/catalogue.ts `AI_FEATURES`). A feature with no row is not set up.
+model AiRoute {
+  feature   String   @id
+  modelId   String
+  model     AiModel  @relation(fields: [modelId], references: [id], onDelete: Restrict)
+  updatedBy String?
+  updatedAt DateTime @updatedAt
+
+  @@index([modelId])
+  @@map("ai_routes")
+}
+
+/// A workspace's credits for one month on its own clock: the plan's allowance and what has been used. The
+/// hard stop is decided on this row, which only one UPDATE changes at a time. Amounts are in thousandths
+/// of a credit.
+model AiCreditMonth {
+  tenantId      String
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// The 1st, on the workspace's clock.
+  month         DateTime  @db.Date
+  /// What the plans allow this month, as last read. Null: no limit (an internal plan).
+  allowance     Int?
+  allowanceUsed Int       @default(0)
+  /// Paid for from packs this month.
+  packsUsed     Int       @default(0)
+  /// Used past zero by a turn that was already under way. Deskzo absorbs it.
+  overdraft     Int       @default(0)
+  /// When billing managers were told four fifths was used, and that nothing is left. Once each a month.
+  alert80At     DateTime?
+  alert100At    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@id([tenantId, month])
+  @@map("ai_credit_months")
+}
+
+/// Credits bought as a pack, or given by staff. They are used after the month's allowance, the pack that
+/// ends first used first, and lapse at `expiresAt`. Amounts are in thousandths of a credit.
+model AiCreditPack {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// STRIPE or RAZORPAY (bought online), OFFLINE (paid by bank transfer, recorded by staff), STAFF (given).
+  source     String
+  /// The pack bought (src/lib/ai/packs.ts). Null for credits given.
+  packKey    String?
+  credits    Int
+  remaining  Int
+  /// The gateway's checkout or payment link: a pack is granted once, however often the webhook comes.
+  externalId String?  @unique
+  /// Its invoice, when there is one.
+  invoiceId  String?
+  expiresAt  DateTime
+  /// Why staff gave or recorded it, and who.
+  reason     String?
+  grantedBy  String?
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, expiresAt])
+  @@map("ai_credit_packs")
+}
+
+/// One model turn, charged: who it was for, which feature and model, its tokens and its credits.
+/// Credits are in thousandths: what was charged, split into what the allowance paid, what packs paid,
+/// and what went past zero.
+model AiUsage {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// The person in the workspace, by id (it lives in the workspace's database).
+  userId        String
+  feature       String
+  modelKey      String
+  inputTokens   Int
+  outputTokens  Int
+  credits       Int
+  fromAllowance Int
+  fromPacks     Int
+  overdraft     Int
+  /// What it cost Deskzo, in paise, from the model's cost when one is set.
+  cost          Int?
+  at            DateTime @default(now())
+
+  @@index([tenantId, at])
+  @@index([tenantId, userId, at])
+  @@map("ai_usage")
 }

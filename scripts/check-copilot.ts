@@ -9,12 +9,14 @@
  *   · Tool inputs are checked whatever the model sends; unknown tools and bad input are refused.
  *   · Each provider's conversion: tool ids made safe for Claude, Claude's own turns replayed as they
  *     came, OpenAI's tool messages, Gemini's function responses.
- *   · The loop: tools run as the person and fed back; text streamed; turns and tokens saved; the
- *     step cap; a refusal; the daily allowance; switched off, no key, no permission.
+ *   · The loop, through Deskzo AI's gateway on a stand-in model: tools run as the person and fed back;
+ *     text streamed; turns saved with the model they ran on; the step cap; a refusal; Deskzo AI not set
+ *     up; switched off; no permission. What the turns cost is check:ai-credits' — here the workspace is
+ *     an unmetered stand-in, so nothing is charged to the real one.
  *   · Privacy: a conversation is its owner's alone, and nothing works while viewing as somebody.
  *   · Drafts: confirmed through the app's own action, once; cancelled; not somebody else's.
- *   · Settings: admins only; keys encrypted and never read back; the model list; the endpoint's own
- *     checks, streamed end to end.
+ *   · Settings: admins only; the switches and the daily cap in credits; where each feature's requests
+ *     go; no key anywhere since workspaces stopped bringing one; the endpoint's own checks, streamed end to end.
  *
  * Everything is named ZZCOP and removed in a finally; the settings row is put back as it was.
  *
@@ -111,10 +113,28 @@ async function main() {
         model: "fake-model",
       };
     },
-    async listModels() {
-      return ["fake-b", "fake-a"];
-    },
   });
+
+  // The workspace as the gateway sees it: the local default, but from "the environment" — so it keeps no
+  // ledger and nothing is charged to the real workspace's credits (check:ai-credits covers charging).
+  const { legacyTenant } = require("../src/lib/tenancy/registry") as typeof import("../src/lib/tenancy/registry");
+  const { tenancyState } = require("../src/lib/tenancy/state") as typeof import("../src/lib/tenancy/state");
+  const local = await legacyTenant();
+  if (!local) throw new Error("No local workspace to run as.");
+  tenancyState().als.enterWith({ ...local, source: "env" });
+  const accounts = require("../src/lib/ai/accounts") as typeof import("../src/lib/ai/accounts");
+  type Route = import("../src/lib/ai/accounts").Route;
+  let routed = true;
+  const fakeRoute = (feature: Route["feature"]): Route | null =>
+    routed
+      ? {
+          feature,
+          model: { key: "zz-model-key", label: "Zz Model", providerModel: "zz-provider-model", inputRate: 100, outputRate: 500, inputCost: null, outputCost: null },
+          account: { id: "zz-account", name: "Zz Account", kind: "BEDROCK", residency: "Zzland", noTraining: true },
+          connection: () => ({ kind: "BEDROCK", region: "ap-south-1", accessKeyId: null, secret: "zz-not-a-key" }),
+        }
+      : null;
+  accounts.setTestRoute(fakeRoute);
 
   const tools = require("../src/lib/copilot/tools") as typeof import("../src/lib/copilot/tools");
   const agent = require("../src/lib/copilot/agent") as typeof import("../src/lib/copilot/agent");
@@ -122,7 +142,6 @@ async function main() {
   const anthropicAdapter = require("../src/lib/copilot/providers/anthropic") as typeof import("../src/lib/copilot/providers/anthropic");
   const openaiAdapter = require("../src/lib/copilot/providers/openai") as typeof import("../src/lib/copilot/providers/openai");
   const geminiAdapter = require("../src/lib/copilot/providers/gemini") as typeof import("../src/lib/copilot/providers/gemini");
-  const { decryptSecret } = require("../src/lib/crypto") as typeof import("../src/lib/crypto");
   const { formatCompanyId } = require("../src/lib/order-id") as typeof import("../src/lib/order-id");
   // The model is told the workspace's today; this check's workspace keeps the default zone, India's.
   const { indiaClock } = require("../src/lib/time/zone") as typeof import("../src/lib/time/zone");
@@ -250,13 +269,12 @@ async function main() {
     ok("  and so are arguments a model sent as broken JSON", (await run("search_companies", { __unparseable: "{query:" })).isError);
 
     // ───────────────────────────────────────────────────────────────────────────
-    section("Switched on — with a key that goes nowhere");
+    section("Switched on — on a stand-in model");
 
     // A made-up configuration, in memory — the real settings row, which somebody may be using right
     // now, is not touched by any of the chats below.
-    const config = { enabled: true, provider: "ANTHROPIC" as const, model: "fake-model", dailyTokenLimit: 100_000, hasKey: { ANTHROPIC: true, OPENAI: false, GEMINI: false } };
-    const keys: Partial<Record<"ANTHROPIC" | "OPENAI" | "GEMINI", string>> = { ANTHROPIC: "sk-ant-zzcop-not-a-key" };
-    settingsLib.setTestSettings({ config, keys });
+    const config = { enabled: true, draftingEnabled: false, dailyCreditLimit: null as number | null };
+    settingsLib.setTestSettings(config);
 
     const chat = async (userId: string, text: string, conversationId?: string | null) => {
       actorId = userId;
@@ -280,10 +298,13 @@ async function main() {
     ok("  offered the tools, the same list on every turn", requests[0]!.tools.map((t) => t.name).join() === requests[1]!.tools.map((t) => t.name).join() && requests[0]!.tools.some((t) => t.name === "propose_task"));
     const streamed = first.events.filter((e) => e.type === "text").map((e) => (e as { delta: string }).delta).join("");
     ok("the answer streamed as it was written, and what it looked at was shown", streamed.includes("Found") && first.events.some((e) => e.type === "block"));
-    ok("  and it finished with the day's usage", first.events.at(-1)?.type === "done");
+    ok("  and it finished with the day's usage, in credits", first.events.at(-1)?.type === "done");
+    ok("  the provider was asked for the route's model, through its connection", requests[0]!.model === "zz-provider-model" && requests[0]!.connection.kind === "BEDROCK");
     const saved = await db.copilotMessage.findMany({ where: { conversationId: first.id! }, orderBy: { createdAt: "asc" }, select: { role: true } });
     ok("every turn is saved", saved.map((m) => m.role).join() === "user,assistant,tool,assistant", saved.map((m) => m.role).join());
-    ok("the tokens are counted against today", (await db.copilotUsage.findFirst({ where: { userId: repA.id } }))?.requests === 2);
+    const ran = await db.copilotMessage.findMany({ where: { conversationId: first.id!, role: "assistant" }, select: { provider: true, model: true, inputTokens: true } });
+    ok("each turn is kept with the API it spoke and Deskzo AI's model", ran.length === 2 && ran.every((m) => m.provider === "ANTHROPIC" && m.model === "zz-model-key" && m.inputTokens === 1000));
+    ok("  and nothing went to the old per-person token table", (await db.copilotUsage.count({ where: { userId: repA.id } })) === 0);
 
     requests.length = 0;
     script = () => ({ text: "That's the one." });
@@ -349,17 +370,12 @@ async function main() {
     const declined = await chat(repA.id, "Something odd");
     ok("a refusal is said plainly and recorded", declined.events.some((e) => e.type === "text" && e.delta.includes("declined")));
 
-    config.dailyTokenLimit = 1_000;
-    const spent = await chat(repA.id, "One more");
-    ok("the daily allowance, once used, stops the next question before anything is spent", spent.error.includes("allowance") && requests.length === 1, spent.error);
-    config.dailyTokenLimit = 100_000;
-
     ok("somebody without the permission is refused", (await chat(noCop.id, "Hi")).error.includes("access"));
-    config.hasKey.ANTHROPIC = false;
-    delete keys.ANTHROPIC;
-    ok("with no key, it says who can add one", (await chat(repB.id, "Hi")).error.includes("API key"));
-    config.hasKey.ANTHROPIC = true;
-    keys.ANTHROPIC = "sk-ant-zzcop-not-a-key";
+    routed = false;
+    requests.length = 0;
+    const unrouted = await chat(repB.id, "Hi");
+    ok("with Deskzo AI not set up for the copilot, it says so before anything is sent", unrouted.error.includes("isn't available") && requests.length === 0, unrouted.error);
+    routed = true;
     config.enabled = false;
     ok("switched off, it is off", (await chat(repB.id, "Hi")).error.includes("switched off"));
     actorId = repB.id;
@@ -372,34 +388,38 @@ async function main() {
 
     // These are about the real row, so they write it — and put it back straight after.
     settingsLib.setTestSettings(null);
-    const anthropicBefore = (await db.copilotSettings.findUnique({ where: { id: "global" } }))?.anthropicKeyCipher ?? null;
     actorId = repA.id;
-    ok("only somebody who can change settings sees or saves them", (await actions.getCopilotSettings()) === null && !(await actions.saveCopilotSettings({ enabled: true, provider: "OPENAI", model: "x", dailyTokenLimit: 5000 })).ok);
+    ok("only somebody who can change settings sees or saves them", (await actions.getCopilotSettings()) === null && !(await actions.saveCopilotSettings({ enabled: true, draftingEnabled: true, dailyCreditLimit: 20 })).ok);
     actorId = admin.id;
-    const saveRes = await actions.saveCopilotSettings({ enabled: true, provider: "OPENAI", model: "gpt-zz", dailyTokenLimit: 200_000, keys: { OPENAI: "sk-zzcop-openai-secret-123" } });
+    const saveRes = await actions.saveCopilotSettings({ enabled: true, draftingEnabled: true, dailyCreditLimit: 25 });
     const row = await db.copilotSettings.findUnique({ where: { id: "global" } });
-    ok("a key is stored encrypted", saveRes.ok && !!row?.openaiKeyCipher && !row.openaiKeyCipher.includes("sk-zzcop") && await decryptSecret(row.openaiKeyCipher) === "sk-zzcop-openai-secret-123");
+    ok("the switches and the daily cap are saved", saveRes.ok && row?.enabled === true && row.draftingEnabled === true && row.dailyCreditLimit === 25);
+    ok("  no cap is saved as none", (await actions.saveCopilotSettings({ enabled: true, draftingEnabled: false, dailyCreditLimit: null })).ok && (await db.copilotSettings.findUnique({ where: { id: "global" } }))?.dailyCreditLimit === null);
+    ok("a cap out of range is refused", !(await actions.saveCopilotSettings({ enabled: true, draftingEnabled: true, dailyCreditLimit: -3 })).ok && !(await actions.saveCopilotSettings({ enabled: true, draftingEnabled: true, dailyCreditLimit: 1_000_001 })).ok);
+    ok("the change is audited", (await db.auditLog.count({ where: { userId: admin.id, entityType: "CopilotSettings", entityLabel: { contains: "Deskzo AI" } } })) >= 2);
     const view = await actions.getCopilotSettings();
-    ok("  and never read back — the screen is told only that there is one", !!view && !JSON.stringify(view).includes("sk-zzcop") && view.hasKey.OPENAI);
-    ok("  the other providers keep their keys", (row?.anthropicKeyCipher ?? null) === anthropicBefore);
-    ok("switching on a provider with no key is refused", !(await actions.saveCopilotSettings({ enabled: true, provider: "GEMINI", model: "g", dailyTokenLimit: 5000 })).ok);
-    ok("so is a model name that isn't one, and a limit out of range", !(await actions.saveCopilotSettings({ enabled: false, provider: "ANTHROPIC", model: "rm -rf /", dailyTokenLimit: 5000 })).ok && !(await actions.saveCopilotSettings({ enabled: false, provider: "ANTHROPIC", model: "m", dailyTokenLimit: 10 })).ok);
-    const models = await actions.listCopilotModels("OPENAI");
-    ok("the model list comes from the provider, sorted", models.ok && models.data.join() === "fake-a,fake-b");
-    ok("the change is audited, without the key", (await db.auditLog.count({ where: { userId: admin.id, entityType: "CopilotSettings", entityLabel: { contains: "key replaced" } } })) === 1 && (await db.auditLog.count({ where: { userId: admin.id, entityLabel: { contains: "sk-zzcop" } } })) === 0);
-    const usage = view?.usage.find((u) => u.name === "Zzcop RepA");
-    ok("usage per person is on the settings screen", !!usage && usage.today > 0 && usage.requests > 0);
+    const copilotService = view?.services.find((x) => x.feature === "copilot.chat");
+    ok("the screen says where each feature's requests go", copilotService?.model === "Zz Model" && copilotService.residency === "Zzland" && copilotService.noTraining === true);
+    ok("  and carries no key of any kind", !!view && !/key|cipher|sk-/i.test(JSON.stringify({ ...view, services: view.services.map((x) => ({ ...x, sends: "" })) })));
 
     const { renderToStaticMarkup } = require("react-dom/server") as typeof import("react-dom/server");
     const Page = (require("../src/app/(dashboard)/settings/copilot/page") as { default: () => Promise<ReactElement> }).default;
     const html = renderToStaticMarkup(await Page());
-    ok("the settings page renders, keys shown only as saved", html.includes("AI copilot") && html.includes("key saved") && !html.includes("sk-zzcop"));
+    ok("the settings page renders as Deskzo AI, with no field for a key", html.includes("Deskzo AI") && html.includes("Zz Model") && !/API key/i.test(html));
+    actorId = repA.id;
+    let refused = "";
+    try {
+      await Page();
+    } catch (err) {
+      refused = err instanceof Error ? err.message : String(err);
+    }
+    ok("  somebody who can't change settings gets not found", refused === "notFound", refused);
     await restore();
 
     // ───────────────────────────────────────────────────────────────────────────
     section("The chat endpoint");
 
-    settingsLib.setTestSettings({ config, keys });
+    settingsLib.setTestSettings(config);
     const { POST } = require("../src/app/api/copilot/chat/route") as typeof import("../src/app/api/copilot/chat/route");
     const post = (headers: Record<string, string>, body: unknown) =>
       POST(new Request("http://localhost:3000/api/copilot/chat", { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) }));
@@ -417,6 +437,7 @@ async function main() {
     ok("from the app, it streams one event per line", res.headers.get("content-type")?.includes("ndjson") === true && lines[0]?.type === "conversation" && lines.at(-1)?.type === "done" && lines.some((l) => l.type === "text"));
   } finally {
     providers.setTestProvider(null);
+    accounts.setTestRoute(null);
     settingsLib.setTestSettings(null);
     await restore();
     await cleanup();

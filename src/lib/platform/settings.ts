@@ -59,6 +59,10 @@ export const PLAIN_KEYS = [
   "mail.documents.personDaily",
   "mail.documents.workspaceDaily",
   "mail.helpdesk.fromOwnAddress",
+  // Deskzo AI (src/lib/ai): the kill switch, the packs on sale (JSON), and a free trial's credits.
+  "ai.paused",
+  "ai.packs",
+  "trial.aiCredits",
 ] as const;
 export type PlainKey = (typeof PLAIN_KEYS)[number];
 

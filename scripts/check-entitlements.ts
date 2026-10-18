@@ -185,7 +185,7 @@ async function main() {
     const visitorPublic = require("../src/actions/visitor-public") as typeof import("../src/actions/visitor-public");
     const eway = require("../src/actions/eway") as typeof import("../src/actions/eway");
     const seats = require("../src/lib/seats") as typeof import("../src/lib/seats");
-    const copilot = require("../src/lib/copilot/settings") as typeof import("../src/lib/copilot/settings");
+    const credits = require("../src/lib/ai/credits") as typeof import("../src/lib/ai/credits");
     const staffLib = require("../src/lib/platform/staff") as typeof import("../src/lib/platform/staff");
     const consoleActions = require("../src/actions/platform/console") as typeof import("../src/actions/platform/console");
     const consoleWorkspace = require("../src/actions/platform/console-workspace") as typeof import("../src/actions/platform/console-workspace");
@@ -227,7 +227,7 @@ async function main() {
     const row = await control.tenant.findUniqueOrThrow({ where: { id: started.tenantId } });
     const first = rules.parseEntitlements(row.entitlements);
     ok("without an invitation's plan, on the default one", job?.ok === true && first.plans.join() === "zz-crm", job?.error ?? first.plans.join());
-    ok("  its entitlements written before it opens: the plan's modules, its seats, no copilot", first.modules.includes("workspace") && !first.modules.includes("helpdesk") && first.seats === 2 && first.copilotTokens === 0, JSON.stringify(first));
+    ok("  its entitlements written before it opens: the plan's modules, its seats, a trial's AI credits", first.modules.includes("workspace") && !first.modules.includes("helpdesk") && first.seats === 2 && first.copilotTokens === 200 && first.inCredits === true, JSON.stringify(first));
     const TID = started.tenantId;
 
     section("Working entitlements out");
@@ -448,13 +448,17 @@ async function main() {
     ok("  and switching them back on needs one", !backOn.ok && /seat/.test("error" in backOn ? String(backOn.error) : ""));
     await plans.setLimitOverrides(TID, { seats: null, copilotTokens: null }, "script:check");
 
-    section("The copilot's monthly allowance");
-    ok("a plan without the copilot stops it", /isn't part of this workspace's plan/.test((await inWs(() => copilot.planStopsCopilot())) ?? ""));
-    await plans.setLimitOverrides(TID, { seats: null, copilotTokens: 1000 }, "script:check");
-    ok("  with an allowance left, it runs", (await inWs(() => copilot.planStopsCopilot())) === null);
-    await inWs(() => db.copilotUsage.create({ data: { userId: owner.id, day: copilot.usageMonthStart(), inputTokens: 700, outputTokens: 400 } }));
-    ok("  spent across everybody this month, it stops", /used this month's copilot allowance/.test((await inWs(() => copilot.planStopsCopilot())) ?? ""));
+    section("The month's Deskzo AI credits (src/lib/ai/credits.ts)");
+    await plans.setLimitOverrides(TID, { seats: null, copilotTokens: 0 }, "script:check");
+    ok("an allowance of none leaves no credits to use", (await inWs(() => credits.creditStanding())).available === 0);
+    await plans.setLimitOverrides(TID, { seats: null, copilotTokens: 10 }, "script:check");
+    const tenCredits = await inWs(() => credits.creditStanding());
+    ok("  with an allowance, the month's credits are there, in thousandths", tenCredits.metered && tenCredits.available === 10_000, JSON.stringify(tenCredits.available));
+    const zzModel = { key: "zz-model", label: "Zz", providerModel: "zz", inputRate: 1000, outputRate: 0, inputCost: null, outputCost: null };
+    await inWs(() => credits.chargeTurn({ userId: owner.id, feature: "copilot.chat", route: { model: zzModel }, usage: { input: 10_000, output: 0 } }));
+    ok("  spent across everybody this month, none are left", (await inWs(() => credits.creditStanding())).available === 0);
     await plans.setLimitOverrides(TID, { seats: null, copilotTokens: null }, "script:check");
+    ok("  the override lifted, a trial's own credits again", (await inWs(() => credits.creditStanding())).allowance === 200_000);
 
     section("A workspace abroad");
     await plans.setModuleOverride(TID, "sales_documents", true, "zz documents", "zz-staff");

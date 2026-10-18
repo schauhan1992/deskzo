@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight, Check, Clock, CreditCard, Globe, LifeBuoy, Link2, Mail, Network, ReceiptText, Server, ShieldCheck, UserPlus, Waypoints, Workflow, type LucideIcon } from "lucide-react";
+import { ArrowRight, Check, Clock, CreditCard, Globe, LifeBuoy, Link2, Mail, Network, ReceiptText, Server, ShieldCheck, Sparkles, UserPlus, Waypoints, Workflow, type LucideIcon } from "lucide-react";
 import { InvoicingSettingsForm } from "@/components/console/settings/invoicing-settings";
 import { bankProblem, readBank, readSeller, sellerProblem } from "@/lib/billing/tax-invoice";
 import { GST_STATE_CODES } from "@/lib/gst-engine";
@@ -19,6 +19,8 @@ import { zoneOptions } from "@/lib/time/zones";
 import { LinkedSignInSwitch } from "@/components/console/settings/linked-sign-in-setting";
 import { AutomateSwitch } from "@/components/console/settings/automate-setting";
 import { platformPause } from "@/lib/automate/switches";
+import { aiSetup } from "@/lib/ai/accounts";
+import { featureLabel } from "@/lib/ai/catalogue";
 import { TwoFactorPolicyEditor } from "@/components/console/settings/security-settings";
 import { ChangedBy, SignupSettingsForm } from "@/components/console/settings/signup-settings";
 import type { SettingChange } from "@/components/console/settings/signup-settings";
@@ -47,6 +49,7 @@ const SECTIONS: { id: string; label: string; icon: LucideIcon }[] = [
   { id: "security", label: "Staff security", icon: ShieldCheck },
   { id: "linked-sign-in", label: "Linked sign-in", icon: Link2 },
   { id: "automate", label: "Automate", icon: Workflow },
+  { id: "ai", label: "Deskzo AI", icon: Sparkles },
   { id: "custom-domains", label: "Custom domains", icon: Globe },
   { id: "time-zone", label: "Time zone", icon: Clock },
   { id: "support", label: "Support", icon: LifeBuoy },
@@ -73,7 +76,7 @@ export default async function ConsoleSettingsPage() {
   const caps = capsFor(staff.role);
   const [seller, bank, waitingInvoices] = await Promise.all([readSeller(), readBank(), controlDb().invoice.count({ where: { taxNumber: null, currency: "INR", status: "PAID" } })]);
   const sellerIssue = sellerProblem(seller);
-  const [rows, modes, policy, open, days, people, autoClose, presence, tick, facts, support, linked, domainsOffered, timeZone, mail, automate] = await Promise.all([
+  const [rows, modes, policy, open, days, people, autoClose, presence, tick, facts, support, linked, domainsOffered, timeZone, mail, automate, ai] = await Promise.all([
     settingsOverview(),
     gatewayModes(),
     staffTwoFactorPolicy(),
@@ -91,6 +94,8 @@ export default async function ConsoleSettingsPage() {
     // Null until the release's migration has made the mail tables.
     mailSetup().catch(() => null),
     automateState(),
+    // Null until the release's migration has made the AI tables.
+    aiSetup().catch(() => null),
   ]);
   const env = platformEnv();
   const production = env.key === "production";
@@ -343,6 +348,29 @@ export default async function ConsoleSettingsPage() {
                 />
                 <ChangedBy change={supportSaved} prefix="Last saved by" never="Never saved — these are the defaults" className="border-t border-line pt-3" />
               </div>
+            )}
+          </Panel>
+
+          <Panel
+            id="ai"
+            title="Deskzo AI"
+            description="Where the copilot and Automate's drafting run, the rates workspaces pay in credits, the packs on sale, and the switch that pauses AI everywhere."
+            footer={
+              <Link href="/settings/ai" className={LINK}>
+                {caps.owner ? "Manage Deskzo AI" : "See Deskzo AI"}
+                <ArrowRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+              </Link>
+            }
+          >
+            {ai ? (
+              <p className="flex flex-wrap items-center gap-2 text-sm">
+                <StatusPill tone={ai.paused ? "warning" : "success"}>{ai.paused ? "Paused" : "Running"}</StatusPill>
+                <span className="text-muted">
+                  {ai.routes.map((r) => `${featureLabel(r.feature)}: ${ai.models.find((m) => m.id === r.modelId)?.label ?? "not set up"}`).join(" · ")}
+                </span>
+              </p>
+            ) : (
+              <p className="text-sm text-muted">{"Deskzo AI settings appear once this release's migrations have run."}</p>
             )}
           </Panel>
 

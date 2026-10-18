@@ -1,110 +1,46 @@
-import type { AiProvider } from "@prisma/client";
 import { db } from "@/lib/db";
-import { decryptSecret } from "@/lib/crypto";
-import { currentTenant } from "@/lib/tenancy/resolve";
-import { workspaceClock } from "@/lib/time/workspace";
+import { notMigratedYet } from "@/lib/not-migrated";
 import { indiaClock, type Clock } from "@/lib/time/zone";
 
 /**
- * The copilot's configuration and the daily allowance. Server-only: this is where the provider keys
- * are decrypted, and they go from here to the provider's SDK and nowhere else.
+ * Deskzo AI's switches in this workspace — the copilot's, Automate drafting's — and how many credits one
+ * person may use in a day. Since 17 Oct 2026 that is all a workspace sets: the models, where they run and
+ * what they cost are Deskzo's (src/lib/ai), paid for from the workspace's credits (src/lib/ai/credits.ts).
  */
 
 export type CopilotConfig = {
   enabled: boolean;
-  provider: AiProvider;
-  model: string;
-  dailyTokenLimit: number;
-  hasKey: Record<AiProvider, boolean>;
+  draftingEnabled: boolean;
+  /** Whole credits a person may use in a day; null: no cap of the workspace's own. */
+  dailyCreditLimit: number | null;
 };
 
-const CIPHER_FIELD = { ANTHROPIC: "anthropicKeyCipher", OPENAI: "openaiKeyCipher", GEMINI: "geminiKeyCipher" } as const;
-export { CIPHER_FIELD };
-
-async function row() {
-  return db.copilotSettings.findUnique({ where: { id: "global" } });
-}
-
 /**
- * Set only by check:copilot, so its chats run on a made-up configuration instead of rewriting the
+ * Set only by the check suites, so their turns run on a made-up configuration instead of rewriting the
  * real one under somebody who is using the copilot at the time.
  */
-let testSettings: { config: CopilotConfig; keys: Partial<Record<AiProvider, string>> } | null = null;
-export function setTestSettings(settings: typeof testSettings) {
+let testSettings: CopilotConfig | null = null;
+export function setTestSettings(settings: CopilotConfig | null) {
   testSettings = settings;
 }
 
-export async function copilotConfig(): Promise<CopilotConfig> {
-  if (testSettings) return testSettings.config;
-  const r = await row();
-  return {
-    enabled: r?.enabled ?? false,
-    provider: r?.provider ?? "ANTHROPIC",
-    model: r?.model ?? "claude-opus-5",
-    dailyTokenLimit: r?.dailyTokenLimit ?? 300_000,
-    hasKey: { ANTHROPIC: !!r?.anthropicKeyCipher, OPENAI: !!r?.openaiKeyCipher, GEMINI: !!r?.geminiKeyCipher },
-  };
-}
-
-/** The decrypted key for a provider, or null. Never returned to a browser. */
-export async function providerKey(provider: AiProvider): Promise<string | null> {
-  if (testSettings) return testSettings.keys[provider] ?? null;
-  const r = await row();
-  const cipher = r?.[CIPHER_FIELD[provider]];
-  if (!cipher) return null;
-  try {
-    return await decryptSecret(cipher);
-  } catch {
-    return null;
-  }
-}
-
 /**
- * Today on a clock, as the calendar day a `@db.Date` column holds. A person's allowance runs on the
- * workspace's day — it resets at the workspace's midnight — so the copilot passes the workspace's clock.
- * The platform's daily snapshots (revenue, usage) pass the console's (`consoleClock`). India's is only
- * the default, for a caller with no clock to hand.
+ * Today on a clock, as the calendar day a `@db.Date` column holds — the platform's daily snapshots (revenue,
+ * usage) pass the console's (`consoleClock`). India's is only the default, for a caller with no clock to hand.
  */
 export function usageDay(now = new Date(), clock: Clock = indiaClock): Date {
   return clock.calendarDate(now);
 }
 
-export async function usedToday(userId: string, now = new Date()): Promise<number> {
-  const day = usageDay(now, await workspaceClock());
-  const u = await db.copilotUsage.findUnique({ where: { userId_day: { userId, day } } });
-  return u ? u.inputTokens + u.outputTokens : 0;
-}
-
-/** The first day of this month on a clock — the workspace's for its allowance — as a `@db.Date` column holds it. */
-export function usageMonthStart(now = new Date(), clock: Clock = indiaClock): Date {
-  const { year, month } = clock.parts(now);
-  return new Date(Date.UTC(year, month, 1));
-}
-
-/** Tokens the whole workspace has used this month, everybody together — what the plan allows is counted in. */
-export async function usedThisMonth(now = new Date()): Promise<number> {
-  const from = usageMonthStart(now, await workspaceClock());
-  const sum = await db.copilotUsage.aggregate({ where: { day: { gte: from } }, _sum: { inputTokens: true, outputTokens: true } });
-  return (sum._sum.inputTokens ?? 0) + (sum._sum.outputTokens ?? 0);
-}
-
-/**
- * Why the workspace's plan stops the copilot, or null when it does not: none in the plan, or this
- * month's allowance spent. Separate from each person's daily limit, which the workspace sets itself.
- */
-export async function planStopsCopilot(now = new Date()): Promise<string | null> {
-  const { copilotTokens } = (await currentTenant()).entitlements;
-  if (copilotTokens === null) return null;
-  if (copilotTokens === 0) return "The AI copilot isn't part of this workspace's plan.";
-  if ((await usedThisMonth(now)) >= copilotTokens) return "This workspace has used this month's copilot allowance. It renews on the 1st.";
-  return null;
-}
-
-export async function recordUsage(userId: string, usage: { input: number; output: number }, now = new Date()) {
-  const day = usageDay(now, await workspaceClock());
-  await db.copilotUsage.upsert({
-    where: { userId_day: { userId, day } },
-    create: { userId, day, inputTokens: usage.input, outputTokens: usage.output, requests: 1 },
-    update: { inputTokens: { increment: usage.input }, outputTokens: { increment: usage.output }, requests: { increment: 1 } },
-  });
+export async function copilotConfig(): Promise<CopilotConfig> {
+  if (testSettings) return testSettings;
+  try {
+    const r = await db.copilotSettings.findUnique({ where: { id: "global" }, select: { enabled: true, draftingEnabled: true, dailyCreditLimit: true } });
+    return { enabled: r?.enabled ?? false, draftingEnabled: r?.draftingEnabled ?? false, dailyCreditLimit: r?.dailyCreditLimit ?? null };
+  } catch (err) {
+    // Before 20261117100000_deskzo_ai_credits: drafting went with the copilot, and there was no cap in credits.
+    if (!notMigratedYet(err)) throw err;
+    const r = await db.copilotSettings.findUnique({ where: { id: "global" }, select: { enabled: true } });
+    return { enabled: r?.enabled ?? false, draftingEnabled: r?.enabled ?? false, dailyCreditLimit: null };
+  }
 }

@@ -129,7 +129,7 @@ export async function SummaryStrip({ header, plan, usage, support }: { header: W
             </>
           )}
         </Value>
-        {latest && tokenLimit !== null && tokenLimit > 0 && <Meter value={latest.copilotTokens} max={tokenLimit} label="Copilot tokens this month against the limit" />}
+        {latest && tokenLimit !== null && tokenLimit > 0 && <Meter value={latest.copilotTokens} max={tokenLimit} label="AI credits used this month against the allowance" />}
         <Secondary>
           {tokenLimit === 0 ? "No copilot on its plans" : latestMonth ? `tokens, ${latestMonth}` : "No usage recorded yet"}
           {plan.limits.copilotTokenOverride !== null && overriddenPill}

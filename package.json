@@ -165,6 +165,9 @@
     "check:data-reset": "tsx scripts/check-data-reset.ts",
     "check:maintenance": "tsx scripts/check-maintenance.ts",
     "check:copilot": "tsx scripts/check-copilot.ts",
+    "check:ai-gateway": "tsx scripts/check-ai-gateway.ts",
+    "check:ai-credits": "tsx scripts/check-ai-credits.ts",
+    "ai:announce": "tsx scripts/ai-announce.ts",
     "check:help": "tsx scripts/check-help.ts",
     "check:help-content": "tsx scripts/check-help-content.ts",
     "check:help-guides": "tsx scripts/check-help-guides.ts",
@@ -236,6 +239,7 @@
     "site:seed-pages": "tsx scripts/site-seed-pages.ts"
   },
   "dependencies": {
+    "@anthropic-ai/bedrock-sdk": "^0.35.0",
     "@anthropic-ai/sdk": "^0.128.0",
     "@google/genai": "^2.24.0",
     "@hookform/resolvers": "^5.9.1",

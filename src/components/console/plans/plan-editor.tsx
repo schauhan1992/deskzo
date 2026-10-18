@@ -211,7 +211,7 @@ function problemsOf(d: Draft, mode: Mode, takenKeys: readonly string[], byKey: M
   if (d.sortOrder.trim() !== "" && !Number.isInteger(Number(d.sortOrder.trim()))) out.push({ section: "basics", field: "order", message: "Order is a whole number." });
   const badLimit = (n: number | null) => n !== null && !(Number.isInteger(n) && n >= 0 && n <= MAX_LIMIT);
   if (badLimit(input.seats)) out.push({ section: "limits", field: "seats", message: "Users per unit is a whole number, 0 or more — or empty for no limit." });
-  if (badLimit(input.copilotTokens)) out.push({ section: "limits", field: "copilot", message: "Copilot tokens is a whole number, 0 or more — or empty for no limit." });
+  if (badLimit(input.copilotTokens)) out.push({ section: "limits", field: "copilot", message: "AI credits is a whole number, 0 or more — or empty for no limit." });
   if (badLimit(input.customDomains ?? null)) out.push({ section: "limits", field: "domains", message: "Custom domains is a whole number, 0 or more — or empty for no limit." });
   const automation = input.automation!;
   if (badLimit(automation.workflows)) out.push({ section: "limits", field: "autoWorkflows", message: "Workflows switched on is a whole number, 0 or more — or empty for no limit." });
@@ -843,7 +843,7 @@ function LimitsSection({ draft, update, readOnly, errors }: { draft: Draft; upda
         <DefinitionList
           items={[
             { term: "Users per unit", value: <span className="tabular-nums">{limitText(seats)}</span> },
-            { term: "Copilot tokens a month", value: <span className="tabular-nums">{copilot === 0 ? "None" : limitText(copilot)}</span> },
+            { term: "AI credits a month", value: <span className="tabular-nums">{copilot === 0 ? "None" : limitText(copilot)}</span> },
             { term: "Custom domains", value: <span className="tabular-nums">{domains === 0 ? "None" : limitText(domains)}</span> },
             { term: "Automate: workflows switched on", value: <span className="tabular-nums">{automationText(automation.workflows, addOn)}</span> },
             { term: "Automate: steps a month", value: <span className="tabular-nums">{automationText(automation.steps, addOn)}</span> },
@@ -881,7 +881,7 @@ function LimitsSection({ draft, update, readOnly, errors }: { draft: Draft; upda
           )}
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor={copilotId}>Copilot tokens a month</Label>
+          <Label htmlFor={copilotId}>AI credits a month</Label>
           <Input
             id={copilotId}
             data-plan-field="copilot"
@@ -1309,7 +1309,7 @@ function SaveImpact({ mode, preview, sent, before }: { mode: Mode; preview: Plan
     const product = change(productName(before.productKey), productName(sent.productKey));
     if (product) items.push({ label: "Product", value: product, tone: "brand" });
     if (seats) items.push({ label: "Users per unit", value: seats });
-    if (copilot) items.push({ label: "Copilot tokens a month", value: copilot });
+    if (copilot) items.push({ label: "AI credits a month", value: copilot });
     if (domains) items.push({ label: "Custom domains", value: domains });
     const addOn = sent.kind === "ADDON" || sent.kind === "BUNDLE";
     for (const line of automationLines(preview.automation[0], preview.automation[1], addOn)) items.push(line);
@@ -1320,7 +1320,7 @@ function SaveImpact({ mode, preview, sent, before }: { mode: Mode; preview: Plan
     items.push({ label: "Kind", value: planKindLabel(sent.kind) });
     if (sent.kind === "EDITION") items.push({ label: "Product", value: productName(sent.productKey) });
     items.push({ label: "Users per unit", value: limitText(sent.seats) });
-    items.push({ label: "Copilot tokens a month", value: sent.copilotTokens === 0 ? "None" : limitText(sent.copilotTokens) });
+    items.push({ label: "AI credits a month", value: sent.copilotTokens === 0 ? "None" : limitText(sent.copilotTokens) });
     items.push({ label: "Custom domains", value: preview.customDomains[1] === 0 ? "None" : limitText(preview.customDomains[1]) });
     for (const line of automationLines(null, preview.automation[1], sent.kind === "ADDON" || sent.kind === "BUNDLE")) items.push(line);
     items.push({ label: "Sold in", value: sent.countries.join(", ") || "Everywhere" });

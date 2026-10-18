@@ -282,7 +282,7 @@ type LimitKey = "seats" | "copilotTokens" | "customDomains" | "workflows" | "ste
 /** The overrides, in the dialog's order; Deskzo Automate's four under their own heading. */
 const LIMIT_FIELDS: { key: LimitKey; label: string; hint: string; automate?: true; max?: number }[] = [
   { key: "seats", label: "Seats", hint: "People who may hold an active account." },
-  { key: "copilotTokens", label: "Copilot tokens a month", hint: "Across everybody; 0 switches the copilot off." },
+  { key: "copilotTokens", label: "AI credits a month", hint: "Deskzo AI credits across everybody, in place of the plans'; 0 leaves only the packs it buys." },
   { key: "customDomains", label: "Custom domains", hint: "Addresses of its own, waiting or live; 0 allows none." },
   { key: "workflows", label: "Workflows switched on", hint: "At once; 0 allows none.", automate: true },
   { key: "steps", label: "Steps a month", hint: "Across everybody; 0 starts no run.", automate: true },
@@ -300,7 +300,7 @@ const LIMIT_KEYS = LIMIT_FIELDS.map((f) => f.key);
 const NO_TEXT = Object.fromEntries(LIMIT_KEYS.map((k) => [k, ""])) as Record<LimitKey, string>;
 
 /**
- * Seats, copilot tokens, custom domains and Deskzo Automate's limits for this workspace alone, in place
+ * Seats, AI credits, custom domains and Deskzo Automate's limits for this workspace alone, in place
  * of what its plans add up to — empty lets the plans decide again. The preview follows the typing
  * (after a short pause).
  */

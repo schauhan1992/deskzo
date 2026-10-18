@@ -251,6 +251,9 @@ const NOT_YET_EVERYWHERE = {
   automationWebhook: { requireSignature: true },
   // 20261116100000_automate_advanced_steps. Read by name in src/lib/automate/engine.ts.
   automationRun: { parentRunId: true, parentStepKey: true },
+  // 20261117100000_deskzo_ai_credits. Read by name in src/lib/copilot/settings.ts, which treats a workspace
+  // without them as drafting wherever the copilot is on, with no daily cap.
+  copilotSettings: { draftingEnabled: true, dailyCreditLimit: true },
   // 20261013100000_deskzo_updates_seen. Read by name in src/actions/help.ts only.
   user: { deskzoUpdatesSeenAt: true, reminderSounds: true },
   // 20261014100000_custom_fields. Read by name (`select` or `omit: { customFields: false }`) through

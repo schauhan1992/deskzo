@@ -90,7 +90,16 @@ async function main() {
     const tenant = (await registry.tenantBySlug("zzeval-a"))!;
     const inA = <T,>(work: () => Promise<T>) => runAsTenant(tenant, work);
     const owner = await inA(() => db.user.create({ data: { name: "Eval Owner", email: "eval-owner@zzeval.invalid", passwordHash: "!", role: "ADMIN", isSuperAdmin: true }, select: { id: true } }));
-    copilotSettings.setTestSettings({ config: { enabled: true, provider, model, dailyTokenLimit: 100_000_000, hasKey: { ANTHROPIC: provider === "ANTHROPIC", OPENAI: provider === "OPENAI", GEMINI: provider === "GEMINI" } }, keys: { [provider]: key } });
+    // Drafting goes through Deskzo AI's gateway: a route to the provider and model asked for, on the key from the shell.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const aiAccounts = require("../src/lib/ai/accounts") as typeof import("../src/lib/ai/accounts");
+    aiAccounts.setTestRoute((feature) => ({
+      feature,
+      model: { key: `eval-${model}`, label: model, providerModel: model, inputRate: 0, outputRate: 0, inputCost: null, outputCost: null },
+      account: { id: "eval", name: "eval", kind: provider, residency: "eval", noTraining: false },
+      connection: () => ({ kind: provider, apiKey: key }),
+    }));
+    copilotSettings.setTestSettings({ enabled: false, draftingEnabled: true, dailyCreditLimit: null });
 
     console.log(`\nDrafting ${DESCRIPTIONS.length} descriptions with ${provider} (${model})\n`);
     let good = 0;

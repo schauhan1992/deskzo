@@ -13,7 +13,7 @@ import type { UsagePanel, UsagePoint } from "@/lib/platform/workspace-data";
 import { ALL_CONNECTORS, connectorLevelText } from "@/lib/automate/limits";
 
 /**
- * Workspace 360 › Usage: seats in use against the seat limit and copilot tokens against theirs, as
+ * Workspace 360 › Usage: seats in use against the seat limit and AI credits against theirs, as
  * the platform tick snapshots them once a day — the latest reading, 90 days of seats, copilot use by
  * month, and the last 30 days as numbers. Read-only for every role.
  */
@@ -68,11 +68,11 @@ export function UsageTab({ usage }: { usage: UsagePanel }) {
           }
         />
         <KpiTile
-          label={`Copilot tokens, ${latestMonth}`}
+          label={`AI credits, ${latestMonth}`}
           icon={<Sparkles className="h-4 w-4" />}
           tone={tokenTone}
           value={compactNumber(latest.copilotTokens)}
-          meter={limits.copilotTokens === 0 ? undefined : { value: latest.copilotTokens, max: limits.copilotTokens, label: "Copilot tokens this month against the limit" }}
+          meter={limits.copilotTokens === 0 ? undefined : { value: latest.copilotTokens, max: limits.copilotTokens, label: "AI credits used this month against the allowance" }}
           secondary={
             <span className="inline-flex flex-wrap items-center gap-1.5">
               {limits.copilotTokens === null ? "No token limit" : limits.copilotTokens === 0 ? "The copilot is off" : `of ${compactNumber(limits.copilotTokens)} a month`}
@@ -156,12 +156,12 @@ export function UsageTab({ usage }: { usage: UsagePanel }) {
               </ChartFrame>
             </div>
             <ChartFrame
-              title="Copilot tokens by month"
+              title="AI credits by month"
               description="Each month's highest reading — the count runs up through the month."
               table={<ChartTable columns={["Month", "Tokens"]} rows={copilotByMonth.map((m) => [monthLabel(m.month), m.tokens])} />}
             >
               <ColumnChart
-                label="Copilot tokens by month"
+                label="AI credits by month"
                 format="tokens"
                 tone="chart-5"
                 columns={copilotByMonth.map((m) => ({ key: m.month, label: monthLabel(m.month), value: m.tokens }))}
@@ -169,13 +169,13 @@ export function UsageTab({ usage }: { usage: UsagePanel }) {
             </ChartFrame>
           </div>
 
-          <Panel title="Last 30 days" description="The daily snapshots, newest first. Copilot tokens count up through each month." padded={false}>
+          <Panel title="Last 30 days" description="The daily snapshots, newest first. AI credits count up through each month." padded={false}>
             <DataTable caption="Usage over the last 30 days" minWidth={560}>
               <THead>
                 <Th>Day</Th>
                 <Th numeric>Seats in use</Th>
                 <Th numeric>Seat limit</Th>
-                <Th numeric>Copilot tokens this month</Th>
+                <Th numeric>AI credits used this month</Th>
               </THead>
               <TBody>
                 {lastThirty.map((p) => {

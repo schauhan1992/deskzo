@@ -29,7 +29,7 @@ import { cn } from "@/lib/utils";
  * The plans a workspace is on, as a checklist it can be changed in (Workspace 360 › Plan & modules).
  *
  * Nothing is saved blind: "Save plans" asks the server what the change would do — the modules it
- * gains and loses, seats and copilot tokens before and after, the billing standing it lands in —
+ * gains and loses, seats and AI credits before and after, the billing standing it lands in —
  * and the save's own refusal, word for word, when it would refuse. The confirmation stays off
  * until that preview is in and says yes.
  *
@@ -401,7 +401,7 @@ export function EntitlementImpact({
         <ImpactList
           items={[
             { label: "Seats", value: seats.value, tone: seats.tone },
-            { label: "Copilot tokens a month", value: tokens.value, tone: tokens.tone },
+            { label: "AI credits a month", value: tokens.value, tone: tokens.tone },
             { label: "Custom domains", value: domains.value, tone: domains.tone },
             ...automationChanges(preview.diff.automation),
             ...(scope === "all" ? [{ label: "Billing standing after", value: <StatusPill tone={standing.tone}>{standing.label}</StatusPill> }] : []),

@@ -8,6 +8,7 @@ import { platformGstIn } from "@/lib/billing/platform-gst";
 import { priceOfGatewayId } from "@/lib/billing/prices";
 import { finishScheduledChange } from "@/lib/billing/checkout";
 import { creditRefunds, issueTaxInvoice } from "@/lib/billing/tax-invoice";
+import { revokeRefundedPack } from "@/lib/ai/packs";
 
 /**
  * A gateway's word, written into the control plane: its subscriptions and invoices as ours, and then
@@ -258,5 +259,7 @@ export async function applyRazorpayRefund(payment: RazorpayPayment, now = new Da
   // What was refunded, credited against its tax invoice — each refund once.
   const invoice = tenantId ? await controlDb().invoice.findUnique({ where: { gateway_externalId: { gateway: "RAZORPAY", externalId: payment.invoice_id ?? payment.id } }, select: { id: true } }) : null;
   if (invoice) await creditRefunds(invoice.id);
+  // A Deskzo AI credit pack's payment: the refunded share of its credits goes too.
+  if (invoice) await revokeRefundedPack(invoice.id);
   return tenantId;
 }

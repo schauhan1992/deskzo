@@ -86,7 +86,8 @@ export function platformKeyConfigured(): boolean {
 }
 
 /** "partner-totp": a partner portal user's authenticator secret (src/lib/partners/session.ts). */
-export type PlatformSealPurpose = "reference-sync-key" | "warm-db-url" | "staff-totp" | "platform-setting" | "cms-totp" | "partner-totp" | "mail-connection";
+/** "ai-account": a Deskzo AI provider account's key (src/lib/ai/accounts.ts). */
+export type PlatformSealPurpose = "reference-sync-key" | "warm-db-url" | "staff-totp" | "platform-setting" | "cms-totp" | "partner-totp" | "mail-connection" | "ai-account";
 
 /**
  * Sealing for something that belongs to no workspace — the data.gov.in key that refreshes the shared

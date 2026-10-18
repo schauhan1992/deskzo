@@ -1,26 +1,28 @@
 "use server";
 
-import type { AiProvider, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireUser, viewAsContext } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
 import { mayAttachTo } from "@/lib/authz/attachments";
 import { recordAudit } from "@/lib/audit";
-import { encryptSecret } from "@/lib/crypto";
 import { toPlain } from "@/lib/serialize";
 import { isModuleEnabled } from "@/actions/module";
 import { createTask } from "@/actions/task";
 import { createNote } from "@/actions/note";
-import { adapterFor, PROVIDERS } from "@/lib/copilot/providers";
-import { CIPHER_FIELD, copilotConfig, providerKey, usageDay, usedToday } from "@/lib/copilot/settings";
+import { AI_FEATURES, MILLI, type AiFeature } from "@/lib/ai/catalogue";
+import { creditStanding, monthOf, usageBreakdown, usedTodayBy } from "@/lib/ai/credits";
+import { aiService } from "@/lib/ai/gateway";
+import { copilotConfig } from "@/lib/copilot/settings";
 import { unavailableBecause } from "@/lib/copilot/agent";
+import { currentTenant } from "@/lib/tenancy/resolve";
 import { workspaceClock } from "@/lib/time/workspace";
 import type { DisplayBlock, ProposalBlock } from "@/lib/copilot/types";
 import type { ActionResult } from "@/actions/company";
 
 /**
  * The copilot's screens: the person's own conversations and the drafts they confirm, and the admin's
- * settings. The chat itself streams from src/app/api/copilot/chat/route.ts.
+ * Deskzo AI settings — the switches, a daily cap, and who used how many credits. The chat itself streams
+ * from src/app/api/copilot/chat/route.ts; the models, where they run and their rates are Deskzo's (src/lib/ai).
  *
  * Conversations are private — every read here is filtered to the person's own — and none of it
  * works while "viewing as" somebody, which would otherwise open their chats.
@@ -34,10 +36,12 @@ async function me() {
 export type CopilotAvailability = {
   available: boolean;
   reason: string | null;
+  /** Who runs it and where, in words: "Deskzo AI · India (Mumbai and Hyderabad)". */
   provider: string;
   model: string;
+  /** Credits the person used today, and their daily cap (null: none), in thousandths. */
   usedToday: number;
-  limit: number;
+  limit: number | null;
 };
 
 /** Whether the copilot button shows, and what it says underneath. */
@@ -46,8 +50,15 @@ export async function getCopilotAvailability(): Promise<CopilotAvailability | nu
   if (!user || !(await can(user.id, "copilot.use"))) return null;
   const config = await copilotConfig();
   if (!config.enabled) return null;
-  const reason = await unavailableBecause(user.id);
-  return { available: !reason, reason, provider: PROVIDERS[config.provider].label, model: config.model, usedToday: await usedToday(user.id), limit: config.dailyTokenLimit };
+  const [reason, service, usedToday] = await Promise.all([unavailableBecause(user.id), aiService("copilot.chat"), usedTodayBy(user.id)]);
+  return {
+    available: !reason,
+    reason,
+    provider: service ? `Deskzo AI · ${service.residency}` : "Deskzo AI",
+    model: service?.model ?? "",
+    usedToday,
+    limit: config.dailyCreditLimit === null ? null : config.dailyCreditLimit * MILLI,
+  };
 }
 
 export async function listCopilotConversations() {
@@ -158,100 +169,85 @@ export async function cancelCopilotProposal(id: string): Promise<ActionResult<nu
 
 // ─── Settings (admins) ───────────────────────────────────────────────────────
 
-const PROVIDER_KEYS: AiProvider[] = ["ANTHROPIC", "OPENAI", "GEMINI"];
+export type DeskzoAiSettings = {
+  enabled: boolean;
+  draftingEnabled: boolean;
+  dailyCreditLimit: number | null;
+  /** Each feature: what it sends, the model it runs on and where — null when Deskzo hasn't set it up. */
+  services: { feature: AiFeature; label: string; sends: string; model: string | null; residency: string | null; noTraining: boolean }[];
+  /** This month's credits, in thousandths. `metered` false: no limit, and no ledger. */
+  credits: { metered: boolean; allowance: number | null; allowanceUsed: number; packsUsed: number; packsRemaining: number; available: number | null; renewsAt: string };
+  /** Whether this admin may buy credits (`billing.manage`) — the page then links to billing. */
+  canBuy: boolean;
+  /** This month, by person: credits for each feature, all together, and today. Thousandths. */
+  usage: { userId: string; name: string; byFeature: Record<string, number>; month: number; today: number; turns: number }[];
+};
 
-export async function getCopilotSettings() {
+export async function getCopilotSettings(): Promise<DeskzoAiSettings | null> {
   const user = await requireUser();
   if (!(await can(user.id, "settings.manage"))) return null;
-  const config = await copilotConfig();
-  // The workspace's days, which the allowance is counted in.
-  const today = usageDay(new Date(), await workspaceClock());
-  const since = new Date(today.getTime() - 29 * 86_400_000);
-  const rows = await db.copilotUsage.findMany({ where: { day: { gte: since } }, select: { userId: true, day: true, inputTokens: true, outputTokens: true, requests: true, user: { select: { name: true } } } });
-  const byUser = new Map<string, { name: string; today: number; month: number; requests: number }>();
-  for (const r of rows) {
-    const u = byUser.get(r.userId) ?? { name: r.user.name, today: 0, month: 0, requests: 0 };
-    const tokens = r.inputTokens + r.outputTokens;
-    u.month += tokens;
-    u.requests += r.requests;
-    if (r.day.getTime() === today.getTime()) u.today += tokens;
-    byUser.set(r.userId, u);
+  const tenant = await currentTenant();
+  const now = new Date();
+  const month = monthOf(tenant, now);
+  const clock = await workspaceClock();
+  const todayFrom = clock.startOfDay(clock.dateKey(now))!;
+  const [config, standing, services, canBuy] = await Promise.all([
+    copilotConfig(),
+    creditStanding(tenant, now),
+    Promise.all(AI_FEATURES.map(async (f) => ({ f, service: await aiService(f.key) }))),
+    can(user.id, "billing.manage"),
+  ]);
+  // A workspace without a ledger (no control plane) has nobody's charges to show.
+  const [monthRows, todayRows] = standing.metered ? await Promise.all([usageBreakdown(tenant.id, month.from, month.to), usageBreakdown(tenant.id, todayFrom, month.to)]) : [[], []];
+  const people = new Map<string, DeskzoAiSettings["usage"][number]>();
+  for (const r of monthRows) {
+    const u = people.get(r.userId) ?? { userId: r.userId, name: "", byFeature: {}, month: 0, today: 0, turns: 0 };
+    u.byFeature[r.feature] = (u.byFeature[r.feature] ?? 0) + r.credits;
+    u.month += r.credits;
+    u.turns += r.turns;
+    people.set(r.userId, u);
   }
+  for (const r of todayRows) {
+    const u = people.get(r.userId);
+    if (u) u.today += r.credits;
+  }
+  const names = people.size ? await db.user.findMany({ where: { id: { in: [...people.keys()] } }, select: { id: true, name: true } }) : [];
+  for (const n of names) people.get(n.id)!.name = n.name;
   return {
-    ...config,
-    providers: PROVIDER_KEYS.map((k) => ({ key: k, label: PROVIDERS[k].label, defaultModel: PROVIDERS[k].defaultModel, keyHint: PROVIDERS[k].keyHint })),
-    usage: [...byUser.values()].sort((a, b) => b.month - a.month),
+    enabled: config.enabled,
+    draftingEnabled: config.draftingEnabled,
+    dailyCreditLimit: config.dailyCreditLimit,
+    services: services.map(({ f, service }) => ({ feature: f.key, label: f.label, sends: f.sends, model: service?.model ?? null, residency: service?.residency ?? null, noTraining: service?.noTraining ?? false })),
+    credits: {
+      metered: standing.metered,
+      allowance: standing.allowance,
+      allowanceUsed: standing.allowanceUsed,
+      packsUsed: standing.packsUsed,
+      packsRemaining: standing.packsRemaining,
+      available: standing.available,
+      renewsAt: standing.renewsAt.toISOString(),
+    },
+    canBuy,
+    usage: [...people.values()].map((u) => ({ ...u, name: u.name || "Somebody no longer here" })).sort((a, b) => b.month - a.month),
   };
 }
 
 export type CopilotSettingsInput = {
   enabled: boolean;
-  provider: AiProvider;
-  model: string;
-  dailyTokenLimit: number;
-  /** New keys typed in; a provider left out keeps the one it has. */
-  keys?: Partial<Record<AiProvider, string>>;
-  removeKeys?: AiProvider[];
+  draftingEnabled: boolean;
+  /** Whole credits a person may use in a day; null or 0: no cap of the workspace's own. */
+  dailyCreditLimit: number | null;
 };
 
 export async function saveCopilotSettings(input: CopilotSettingsInput): Promise<ActionResult<null>> {
   const user = await requireUser();
-  if (!(await can(user.id, "settings.manage"))) return { ok: false, error: "You can't change the copilot's settings." };
-  if (!PROVIDER_KEYS.includes(input?.provider)) return { ok: false, error: "Choose a provider." };
-  const model = String(input.model ?? "").trim();
-  if (model && !/^[\w.\-:/@]{2,100}$/.test(model)) return { ok: false, error: "That doesn't look like a model name." };
-  const limit = Math.round(Number(input.dailyTokenLimit));
-  if (!Number.isFinite(limit) || limit < 1_000 || limit > 50_000_000) return { ok: false, error: "Set a daily limit between 1,000 and 5 crore tokens." };
-
-  const data: Prisma.CopilotSettingsUncheckedUpdateInput = { enabled: input.enabled === true, provider: input.provider, model, dailyTokenLimit: limit, updatedById: user.id };
-  const changedKeys: string[] = [];
-  for (const provider of PROVIDER_KEYS) {
-    const typed = input.keys?.[provider]?.trim();
-    if (typed) {
-      if (typed.length < 10 || typed.length > 500 || /\s/.test(typed)) return { ok: false, error: `That ${PROVIDERS[provider].label} key doesn't look right.` };
-      data[CIPHER_FIELD[provider]] = await encryptSecret(typed);
-      changedKeys.push(`${PROVIDERS[provider].label} key replaced`);
-    } else if (input.removeKeys?.includes(provider)) {
-      data[CIPHER_FIELD[provider]] = null;
-      changedKeys.push(`${PROVIDERS[provider].label} key removed`);
-    }
-  }
-
-  const current = await copilotConfig();
-  const willHaveKey = input.keys?.[input.provider]?.trim() ? true : input.removeKeys?.includes(input.provider) ? false : current.hasKey[input.provider];
-  if (data.enabled && !willHaveKey) return { ok: false, error: `Add a ${PROVIDERS[input.provider].label} key before switching the copilot on.` };
-  if (data.enabled && !model) return { ok: false, error: "Choose a model before switching the copilot on." };
-
-  await db.copilotSettings.upsert({
-    where: { id: "global" },
-    create: { id: "global", ...(data as Prisma.CopilotSettingsUncheckedCreateInput) },
-    update: data,
-  });
-  await recordAudit({
-    userId: user.id,
-    action: "UPDATE",
-    entityType: "CopilotSettings",
-    entityId: "global",
-    entityLabel: `AI copilot ${data.enabled ? "on" : "off"} — ${PROVIDERS[input.provider].label}, ${model || "no model"}, ${limit.toLocaleString("en-IN")} tokens a day${changedKeys.length ? `; ${changedKeys.join(", ")}` : ""}`,
-  });
+  if (!(await can(user.id, "settings.manage"))) return { ok: false, error: "You can't change Deskzo AI's settings." };
+  const raw = input?.dailyCreditLimit;
+  const limit = raw === null || raw === undefined || Number(raw) === 0 ? null : Math.round(Number(raw));
+  if (limit !== null && (!Number.isFinite(limit) || limit < 1 || limit > 100_000)) return { ok: false, error: "Set a daily cap between 1 and 1,00,000 credits, or none." };
+  const data = { enabled: input.enabled === true, draftingEnabled: input.draftingEnabled === true, dailyCreditLimit: limit, updatedById: user.id };
+  await db.copilotSettings.upsert({ where: { id: "global" }, create: { id: "global", ...data }, update: data });
+  const said = [`copilot ${data.enabled ? "on" : "off"}`, `drafting with AI ${data.draftingEnabled ? "on" : "off"}`, limit === null ? "no daily cap" : `${limit.toLocaleString("en-IN")} credits a person a day`];
+  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "CopilotSettings", entityId: "global", entityLabel: `Deskzo AI — ${said.join(", ")}` });
   return { ok: true, data: null };
-}
-
-/**
- * The models a key can use, straight from the provider — so an admin picks a real one rather than
- * typing a name from memory. Uses the key just typed, or the saved one.
- */
-export async function listCopilotModels(provider: AiProvider, typedKey?: string): Promise<ActionResult<string[]>> {
-  const user = await requireUser();
-  if (!(await can(user.id, "settings.manage"))) return { ok: false, error: "You can't change the copilot's settings." };
-  if (!PROVIDER_KEYS.includes(provider)) return { ok: false, error: "Choose a provider." };
-  const key = typedKey?.trim() || (await providerKey(provider));
-  if (!key) return { ok: false, error: `Add a ${PROVIDERS[provider].label} key first.` };
-  try {
-    const models = await adapterFor(provider).listModels(key);
-    return { ok: true, data: models.sort() };
-  } catch (err) {
-    const status = typeof err === "object" && err !== null && "status" in err ? Number((err as { status: unknown }).status) : null;
-    return { ok: false, error: status === 401 || status === 403 ? "The provider refused that key." : "Couldn't reach the provider — check the key and try again." };
-  }
 }

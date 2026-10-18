@@ -220,7 +220,7 @@ const FIT_PEOPLE: RichInline = withLink("People in the same workspace: attendanc
 const FIT_REVENUE: RichInline = withLink("Revenue recognised as it is earned (Ind AS 115), and a month-end close that checks itself, with the ", "Revenue & Close add-on", "/product/revenue-close", ".");
 const FIT_BRANCHES: RichInline = withLink("Several GSTINs as branches of one company, with GST returns prepared for each. See ", "multi-branch GST", "/product/multi-branch-gst", ".");
 const FIT_DATABASE: RichInline = withLink("Each company in a workspace and a database of its own. See ", "security", "/security", ".");
-const FIT_COPILOT: RichInline = withLink("A copilot that answers from your data with the asking person's own permissions, on the AI provider and key you choose. See ", "the copilot", "/product/ai-copilot", ".");
+const FIT_COPILOT: RichInline = withLink("A copilot that answers from your data with the asking person's own permissions, on {siteName} AI, processed in India. See ", "the copilot", "/product/ai-copilot", ".");
 
 const REL_HUB: Link = { label: "Every comparison", href: "/compare", description: "{siteName} beside Zoho One, TallyPrime, Odoo, Salesforce, HubSpot and Freshworks." };
 const REL_IMPORT: Link = { label: "Import and migration", href: "/product/import-migration", description: "Bring your records in from spreadsheets, with a dry run before anything is written." };
@@ -361,7 +361,7 @@ const HUBSPOT = comparePage({
       feature: "AI assistant",
       us: "yes",
       them: "yes",
-      note: "HubSpot: Breeze, whose agents use HubSpot Credits. {siteName}: a copilot that answers from your data with the person's own permissions, on the AI provider and key you choose.",
+      note: "HubSpot: Breeze, whose agents use HubSpot Credits. {siteName}: a copilot that answers from your data with the person's own permissions, on {siteName} AI, processed in India.",
       source: "https://www.hubspot.com/products/artificial-intelligence",
     },
     {
@@ -597,7 +597,7 @@ const ZOHO_ONE = comparePage({
       feature: "AI assistant",
       us: "yes",
       them: "yes",
-      note: "Zoho: Zia, across its apps. {siteName}: a copilot that answers from your data with the person's own permissions, on the AI provider and key you choose.",
+      note: "Zoho: Zia, across its apps. {siteName}: a copilot that answers from your data with the person's own permissions, on {siteName} AI, processed in India.",
       source: "https://www.zoho.com/zia/",
     },
     {
@@ -791,7 +791,7 @@ const TALLY = comparePage({
       feature: "AI assistant",
       us: "yes",
       them: "yes",
-      note: "TallyPrime: Tally Ira reads invoices and prepares entries for review. {siteName}: a copilot that answers questions from your data, on the AI provider and key you choose.",
+      note: "TallyPrime: Tally Ira reads invoices and prepares entries for review. {siteName}: a copilot that answers questions from your data, on {siteName} AI, processed in India.",
       source: "https://tallysolutions.com/tally-ira/",
     },
     {
@@ -1027,7 +1027,7 @@ const ODOO = comparePage({
       feature: "AI assistant",
       us: "yes",
       them: "yes",
-      note: "Odoo: AI agents that answer questions and complete tasks inside its apps. {siteName}: a copilot that answers from your data with the person's own permissions, on the AI provider and key you choose.",
+      note: "Odoo: AI agents that answer questions and complete tasks inside its apps. {siteName}: a copilot that answers from your data with the person's own permissions, on {siteName} AI, processed in India.",
       source: "https://www.odoo.com/app/artificial-intelligence",
     },
     {
@@ -1206,7 +1206,7 @@ const SALESFORCE = comparePage({
       feature: "AI assistant",
       us: "yes",
       them: "yes",
-      note: "Salesforce: Agentforce, for building AI agents. {siteName}: a copilot that answers from your data with the person's own permissions, on the AI provider and key you choose.",
+      note: "Salesforce: Agentforce, for building AI agents. {siteName}: a copilot that answers from your data with the person's own permissions, on {siteName} AI, processed in India.",
       source: "https://www.salesforce.com/in/agentforce/",
     },
     {
@@ -1372,7 +1372,7 @@ const FRESHWORKS = comparePage({
       feature: "AI assistant",
       us: "yes",
       them: "yes",
-      note: "Freshworks: Freddy AI. {siteName}: a copilot that answers from your data with the person's own permissions, on the AI provider and key you choose.",
+      note: "Freshworks: Freddy AI. {siteName}: a copilot that answers from your data with the person's own permissions, on {siteName} AI, processed in India.",
       source: "https://www.freshworks.com/freshdesk/omni/freddy-ai-copilot/",
     },
     {

@@ -4,7 +4,7 @@ import { controlDb } from "@/lib/platform/control-db";
 
 /**
  * What workspaces use, as the platform tick snapshots it once a day (src/lib/billing/reconcile.ts,
- * `snapshotUsage`): active accounts against the seat limit at the time, and copilot tokens used so
+ * `snapshotUsage`): active accounts against the seat limit at the time, and AI credits used so
  * far that month. Read from the control plane only — never from a workspace's own database.
  */
 
@@ -80,7 +80,7 @@ const bySlug = (a: LeaderRow, b: LeaderRow) => a.tenant.slug.localeCompare(b.ten
 
 /**
  * The open workspaces that use the most — by seats in use, by how full their seats are, or by
- * copilot tokens this month. Only those with something to rank: none with nothing used.
+ * AI credits this month. Only those with something to rank: none with nothing used.
  */
 export async function usageLeaders(opts: { by: "seats" | "utilisation" | "copilot"; limit?: number }): Promise<LeaderRow[]> {
   const limit = Math.min(Math.max(Math.trunc(Number(opts.limit ?? 10)) || 10, 1), 100);

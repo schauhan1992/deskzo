@@ -13,10 +13,11 @@
  *     or names what Deskzo doesn't have, says where it would send, and lands as a draft; a round trip
  *     gives back what went out;
  *   · company templates: saved cleared, listed, used, removed;
- *   · drafting: the copilot's gates; marker strings planted in every kind of record never reach the
- *     model; a draft saved as a draft of the person's, notes on its steps, invented people cleared;
- *     one repair round with the problems listed; a reply in words asked once more; a draft never
- *     usable refused; never a version; tokens counted.
+ *   · drafting: its own switch and Deskzo AI's gateway (a stand-in route: "automate.draft" on a model
+ *     that goes nowhere); marker strings planted in every kind of record never reach the model; a draft
+ *     saved as a draft of the person's, notes on its steps, invented people cleared; one repair round
+ *     with the problems listed; a reply in words asked once more; a draft never usable refused; never a
+ *     version. What a turn costs in credits is check:ai-credits'.
  *
  *   npm run check:automate-drafting
  */
@@ -95,14 +96,15 @@ let script: Answer[] = [];
 const standInProvider = {
   runTurn: async (req: TurnRequest): Promise<TurnOutcome> => {
     requests.push({ system: req.system, history: req.history, tools: req.tools, text: JSON.stringify({ system: req.system, history: req.history, tools: req.tools }) });
+    asked.push(req.model);
     const next = script.shift();
     if (!next) throw Object.assign(new Error("the script ran out"), { status: 500 });
     const out = next(req);
     if (out instanceof Error) throw out;
     return { text: "", toolCalls: [], native: null, usage: { input: 1000, output: 400 }, stop: "tools", model: "zz-model", ...out };
   },
-  listModels: async () => ["zz-model"],
 };
+const asked: string[] = [];
 let callSeq = 0;
 const propose = (input: Record<string, unknown>): Answer => () => ({ toolCalls: [{ id: `call_${++callSeq}`, name: "propose_workflow", input } satisfies ToolCall], stop: "tools" });
 
@@ -299,30 +301,41 @@ async function main() {
     ok("removing it takes it out of the list; twice is refused", removed.ok && !again.ok && (await inA(() => actions.listAutomationCompanyTemplates()))?.length === 0);
 
     // ─── Drafting ───────────────────────────────────────────────────────────────────────────────
-    section("Drafting with AI: the copilot's gates");
+    section("Drafting with AI: its switch and Deskzo AI's gateway");
     copilotProviders.setTestProvider(standInProvider);
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const aiAccounts = require("../src/lib/ai/accounts") as typeof import("../src/lib/ai/accounts");
+    let routed = true;
+    aiAccounts.setTestRoute((feature) =>
+      routed && feature === "automate.draft"
+        ? {
+            feature,
+            model: { key: "zz-draft-model", label: "Zz Model", providerModel: "zz-provider-model", inputRate: 100, outputRate: 500, inputCost: null, outputCost: null },
+            account: { id: "zz-account", name: "Zz Account", kind: "BEDROCK", residency: "Zzland", noTraining: true },
+            connection: () => ({ kind: "BEDROCK", region: "ap-south-1", accessKeyId: null, secret: "zz-not-a-key" }),
+          }
+        : null,
+    );
     const config = (over: Partial<import("../src/lib/copilot/settings").CopilotConfig> = {}) =>
-      copilotSettings.setTestSettings({ config: { enabled: true, provider: "ANTHROPIC", model: "zz-model", dailyTokenLimit: 1_000_000, hasKey: { ANTHROPIC: true, OPENAI: false, GEMINI: false }, ...over }, keys: { ANTHROPIC: "zz-not-a-real-key" } });
+      copilotSettings.setTestSettings({ enabled: false, draftingEnabled: true, dailyCreditLimit: null, ...over });
     const DESCRIPTION = "When a new lead comes in from the website, let the assignment rules give it to someone, tell the sales manager, and after 3 days remind the owner to call if it's still new.";
     const workflowsNow = () => inA(() => db.automationWorkflow.count());
 
-    config({ enabled: false });
+    config({ draftingEnabled: false, enabled: true });
     let count = await workflowsNow();
     const off = await inA(() => actions.draftWorkflowWithAI(DESCRIPTION));
-    ok("with the copilot switched off: refused, saying so; nothing sent, nothing made", !off.ok && off.error.includes("switched off") && requests.length === 0 && (await workflowsNow()) === count, off.ok ? "" : off.error);
+    ok("with drafting switched off (the copilot on): refused, saying so; nothing sent, nothing made", !off.ok && off.error.includes("switched off") && requests.length === 0 && (await workflowsNow()) === count, off.ok ? "" : off.error);
     const availability = await inA(() => actions.getDraftingAvailability());
     ok("  and 'Describe it' says why it can't", !availability.available && !!availability.reason?.includes("switched off"));
-    config({ hasKey: { ANTHROPIC: false, OPENAI: false, GEMINI: false } });
-    const noKey = await inA(() => actions.draftWorkflowWithAI(DESCRIPTION));
-    ok("without a key: refused", !noKey.ok && noKey.error.includes("API key") && requests.length === 0);
-    config({ dailyTokenLimit: 1 });
-    await inA(() => copilotSettings.recordUsage(owner, { input: 5, output: 5 }));
-    const spent = await inA(() => actions.draftWorkflowWithAI(DESCRIPTION));
-    ok("with today's allowance used: refused", !spent.ok && spent.error.includes("allowance") && requests.length === 0, spent.ok ? "" : spent.error);
     config();
+    routed = false;
+    const unrouted = await inA(() => actions.draftWorkflowWithAI(DESCRIPTION));
+    ok("with Deskzo AI not set up for drafting: refused, saying so; nothing sent", !unrouted.ok && unrouted.error.includes("isn't available") && requests.length === 0, unrouted.ok ? "" : unrouted.error);
+    routed = true;
     const short = await inA(() => actions.draftWorkflowWithAI("a flow"));
     ok("a description too short to draft from: asked for more, nothing sent", !short.ok && short.error.includes("Say a little more") && requests.length === 0);
-    ok("'Describe it' is available, naming the AI service the words go to", (await inA(() => actions.getDraftingAvailability())).provider === "Claude (Anthropic)");
+    const shown = (await inA(() => actions.getDraftingAvailability())).provider;
+    ok("'Describe it' is available with the copilot off, naming where the words go", shown === "Deskzo AI (Zz Model, processed in Zzland, never used for training)", shown);
 
     section("Drafting with AI: a draft");
     const goodDefinition = {
@@ -350,8 +363,7 @@ async function main() {
     ok("  a person it made up ('the sales manager') is emptied, for the person to choose", (madeDraft.steps[1] as { input: Record<string, unknown> }).input.to === "");
     ok("  and the answer says what to choose and what it asked", drafted.data.steps === 6 && drafted.data.blanks.includes("Choose who to tell.") && drafted.data.questions[0] === "Who is the sales manager? I left it for you to choose." && drafted.data.others === 0, JSON.stringify(drafted.data));
     ok("  it opens in the builder", /^\/automate\/workflows\/WF-\d{4}$/.test(drafted.data.path));
-    const usage = await inA(() => db.copilotUsage.findMany({ where: { userId: owner }, select: { inputTokens: true, outputTokens: true, requests: true } }));
-    ok("its tokens are counted to the person, as the copilot's are", usage.reduce((n, u) => n + u.inputTokens, 0) >= 1000 && usage.reduce((n, u) => n + u.outputTokens, 0) >= 400);
+    ok("it ran through the gateway, on the model Deskzo routed drafting to", asked.length >= 1 && asked.every((m) => m === "zz-provider-model"), asked.join(", "));
 
     section("What the model was sent");
     const sent = requests[0]!;
@@ -391,7 +403,7 @@ async function main() {
     ok("the provider declining: said so", !declined.ok && declined.error.includes("declined"));
     script = [() => Object.assign(new Error("401"), { status: 401 })];
     const badKey = await inA(() => actions.draftWorkflowWithAI(DESCRIPTION));
-    ok("the provider refusing the key: said in words for an admin", !badKey.ok && badKey.error.includes("refused the API key"), badKey.ok ? "" : badKey.error);
+    ok("the provider refusing Deskzo's key: Deskzo AI's problem, said plainly — nobody in the workspace is asked for a key", !badKey.ok && badKey.error === "Deskzo AI couldn't answer just now. Try again in a minute.", badKey.ok ? "" : badKey.error);
     const long = { ...goodDefinition, steps: goodDefinition.steps.map((s) => ({ ...s, name: `${s.name} `.repeat(20), note: "word ".repeat(100) })) };
     script = [propose({ name: "Long words", definition: long })];
     const trimmed = await inA(() => actions.draftWorkflowWithAI(DESCRIPTION));
@@ -434,6 +446,10 @@ async function main() {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const providers = require("../src/lib/copilot/providers") as typeof import("../src/lib/copilot/providers");
     providers.setTestProvider(null);
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    (require("../src/lib/ai/accounts") as typeof import("../src/lib/ai/accounts")).setTestRoute(null);
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    (require("../src/lib/copilot/settings") as typeof import("../src/lib/copilot/settings")).setTestSettings(null);
     if (close) await close().catch(() => undefined);
     for (const name of Object.values(names)) await admin.$executeRawUnsafe(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`).catch((err) => console.error(`could not drop ${name}`, err));
     const left = await admin.$queryRawUnsafe<{ n: bigint }[]>(`SELECT count(*)::bigint AS n FROM pg_database WHERE datname IN (${Object.values(names).map((n) => `'${n}'`).join(", ")})`);

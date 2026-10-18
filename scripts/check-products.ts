@@ -232,7 +232,8 @@ async function main() {
       one.kind === "EDITION" && one.allModules && one.productKey === "one" && one.isDefault && one.active && one.modules.length === 0 && one.name === product("one").name && one.description === product("one").tagline,
       one,
     );
-    ok("  sold everywhere, no limit on people, no copilot (the add-on sells it), no custom domain, no price", one.countries.length === 0 && one.seats === null && one.copilotTokens === 0 && one.customDomains === 0 && one.prices.length === 0);
+    ok("  sold everywhere, no limit on people, 100 AI credits a person a month, no custom domain, no price", one.countries.length === 0 && one.seats === null && one.copilotTokens === 100 && one.customDomains === 0 && one.prices.length === 0);
+    ok("  every other product's edition: 50 AI credits a person a month (owner, 17 Oct 2026)", (await control.plan.count({ where: { key: { in: products.PRODUCTS.filter((x) => x.key !== "one").map((x) => `deskzo-${x.key}`) }, NOT: { copilotTokens: 50 } } })) === 0);
     const crm = await row("deskzo-crm");
     const crmWanted = [...new Set([...products.BASE_MODULES, ...product("crm").modules])].sort();
     ok("deskzo-crm: the basics and the product's modules, product crm", crm.kind === "EDITION" && crm.productKey === "crm" && !crm.allModules && crm.modules.map((m) => m.moduleKey).sort().join() === crmWanted.join() && crm.name === "Deskzo CRM", crm.modules.map((m) => m.moduleKey).sort().join());
@@ -251,7 +252,7 @@ async function main() {
     const copilot = await row("addon-ai-copilot");
     const seats = await row("addon-more-people");
     ok("Revenue & Close: an add-on of its module, India only, no product", rc.kind === "ADDON" && rc.productKey === null && rc.modules.map((m) => m.moduleKey).join() === "revenue_close" && rc.countries.join() === "IN" && rc.name === "Revenue & Close");
-    ok("AI Copilot: an add-on of 1,000,000 tokens a month for each unit", copilot.kind === "ADDON" && copilot.copilotTokens === 1_000_000 && copilot.modules.length === 0 && copilot.name === "AI Copilot");
+    ok("AI Plus: an add-on of 750 AI credits a month for each unit", copilot.kind === "ADDON" && copilot.copilotTokens === 750 && copilot.modules.length === 0 && copilot.name === "AI Plus");
     ok("More people: an add-on of one seat for each unit", seats.kind === "ADDON" && seats.seats === 1 && seats.modules.length === 0 && seats.name === "More people");
     const internalAfter = await control.plan.findUniqueOrThrow({ where: { key: plans.INTERNAL_PLAN_KEY } });
     ok("the internal plan is left alone", internalAfter.updatedAt.getTime() === internalBefore.updatedAt.getTime() && !internalAfter.isDefault && internalAfter.productKey === null);
@@ -472,7 +473,7 @@ async function main() {
     const booksWanted = [...products.BASE_MODULES, ...product("books").modules];
     ok("CRM and Books: both products' modules", e2.modules.join() === expected([...crmWanted, ...booksWanted], "IN").join() && ["calls", "accounting", "sales_documents", "receivables"].every((m) => e2.modules.includes(m)), e2.modules.join());
     ok("  the basics once", new Set(e2.modules).size === e2.modules.length && products.BASE_MODULES.every((m) => e2.modules.filter((x) => x === m).length === 1));
-    ok("  no limit on people; the copilot only as bought", e2.seats === null && e2.copilotTokens === 2 * 250_000 && e2.plans.join() === "addon-ai-copilot,deskzo-books,deskzo-crm", e2);
+    ok("  no limit on people; AI credits: each product's, and the add-on's as bought", e2.seats === null && e2.copilotTokens === 50 + 50 + 2 * 250_000 && e2.inCredits === true && e2.plans.join() === "addon-ai-copilot,deskzo-books,deskzo-crm", e2);
     const E3 = await makeTenant("zzprod-e3", "IN", "INR");
     await plans.setWorkspacePlans(E3, [{ planKey: "deskzo-one", quantity: 1 }], ACTOR);
     const e3 = await ent.computeEntitlements(E3);

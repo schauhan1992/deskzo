@@ -75,7 +75,7 @@ export const PRODUCT_GROUPS: CatalogGroup[] = [
     title: "Advanced",
     entries: [
       entry("/product/revenue-close", "Revenue & close", "Ind AS 115 revenue recognition and a month-end close", "Revenue recognised as it is earned, deferred revenue and its waterfall, prepaid and accrual schedules, and a month-end close checklist."),
-      entry("/product/ai-copilot", "AI copilot", "Questions about your data, with the AI provider you choose", "Ask questions of your own records in plain language, with the AI provider and key your company chooses."),
+      entry("/product/ai-copilot", "AI copilot", "Questions about your data, answered by {siteName} AI in India", "Ask questions of your own records in plain language — {siteName} AI, processed in India, with credits in every plan."),
       entry("/product/security", "Security & access", "Roles, two-factor sign-in, data-loss controls and a vault", "Roles and permissions, two-factor sign-in, device and network rules, data-loss controls, a credential vault and audit logs."),
       entry("/product/multi-branch-gst", "Multi-branch GST", "Branches with their own GSTINs, numbering and returns", "Each branch with its own GSTIN, address and document numbering, and GST worked out from the branch that supplies."),
       entry("/product/linked-workspaces", "Linked workspaces", "Switch between your group companies' workspaces in one click", "Group companies each keep a workspace of their own; people who work in several link their accounts and switch in one click."),

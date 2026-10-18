@@ -18,6 +18,7 @@ import {
 } from "@/actions/copilot";
 import type { ChatEvent, ProposalBlock } from "@/lib/copilot/types";
 import { COPILOT_OPEN_EVENT } from "@/lib/side-rail";
+import { creditsText } from "@/lib/ai/catalogue";
 
 const STARTERS = [
   "Which subscriptions come up for renewal in the next 30 days?",
@@ -63,7 +64,7 @@ function CopilotPanel({ availability, onClose }: { availability: CopilotAvailabi
   const [showHistory, setShowHistory] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [usage, setUsage] = useState({ used: availability.usedToday, limit: availability.limit });
+  const [usage, setUsage] = useState<{ used: number; limit: number | null }>({ used: availability.usedToday, limit: availability.limit });
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -189,7 +190,8 @@ function CopilotPanel({ availability, onClose }: { availability: CopilotAvailabi
     );
   }
 
-  const percent = Math.min(100, Math.round((usage.used / Math.max(1, usage.limit)) * 100));
+  // In credits since 17 Oct 2026 (src/lib/ai): the person's daily cap when the workspace sets one.
+  const percent = usage.limit === null ? null : Math.min(100, Math.round((usage.used / Math.max(1, usage.limit)) * 100));
 
   return createPortal(
     <div className={`fixed inset-0 ${LAYER_MODAL}`}>
@@ -322,10 +324,16 @@ function CopilotPanel({ availability, onClose }: { availability: CopilotAvailabi
             )}
           </div>
           <div className="flex items-center gap-2 text-[10px] text-subtle">
-            <div className="h-1 flex-1 overflow-hidden rounded bg-surface-sunken" title={`${usage.used.toLocaleString("en-IN")} of ${usage.limit.toLocaleString("en-IN")} tokens today`}>
-              <div className={`h-full ${percent > 85 ? "bg-danger" : "bg-brand"}`} style={{ width: `${percent}%` }} />
-            </div>
-            <span>{percent}% of today&apos;s allowance · {availability.provider}</span>
+            {percent !== null && usage.limit !== null ? (
+              <>
+                <div className="h-1 flex-1 overflow-hidden rounded bg-surface-sunken" title={`${creditsText(usage.used)} of ${creditsText(usage.limit)} credits today`}>
+                  <div className={`h-full ${percent > 85 ? "bg-danger" : "bg-brand"}`} style={{ width: `${percent}%` }} />
+                </div>
+                <span>{percent}% of today&apos;s credits · {availability.provider}</span>
+              </>
+            ) : (
+              <span className="ml-auto">{creditsText(usage.used)} credits today · {availability.provider}</span>
+            )}
           </div>
         </form>
       </div>

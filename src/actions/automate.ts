@@ -709,7 +709,7 @@ export type DraftingAvailability = { available: boolean; reason: string | null; 
 export async function getDraftingAvailability(): Promise<DraftingAvailability> {
   const user = await admin();
   const reason = await draftingUnavailable(user.id);
-  return { available: !reason, reason, provider: (await copilotConfig()).enabled ? await draftingProvider() : null };
+  return { available: !reason, reason, provider: (await copilotConfig()).draftingEnabled ? await draftingProvider() : null };
 }
 
 export type DraftResult = { path: string; name: string; steps: number; questions: string[]; blanks: string[]; others: number };

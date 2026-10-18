@@ -9,6 +9,7 @@
  *   · credentials in a URL — `postgresql://user:password@host/db` keeps its scheme and host;
  *   · `password=…` / `pwd=…` pairs, as libpq and query strings write them;
  *   · Stripe secret, restricted and webhook-signing keys; Razorpay key ids;
+ *   · AI providers' keys — Anthropic and OpenAI (sk-…), Google (AIza…), AWS access key ids (AKIA…);
  *   · `Bearer …` and `Basic …` credentials;
  *   · environment assignments of PLATFORM_* and anything named *_SECRET, *_KEY, *_TOKEN, *_PASSWORD.
  */
@@ -22,6 +23,10 @@ const RULES: [RegExp, string][] = [
   [/\b(sk|rk)_(live|test)_[A-Za-z0-9]+/g, `$1_$2_${MASK}`],
   [/\bwhsec_[A-Za-z0-9+/=]+/g, `whsec_${MASK}`],
   [/\brzp_(live|test)_[A-Za-z0-9]+/g, `rzp_$1_${MASK}`],
+  // Deskzo AI's provider keys (src/lib/ai/accounts.ts): Anthropic's and OpenAI's, Google's, AWS access key ids.
+  [/\bsk-(ant-|proj-)?[A-Za-z0-9_-]{16,}/g, `sk-$1${MASK}`],
+  [/\bAIza[0-9A-Za-z_-]{20,}/g, `AIza${MASK}`],
+  [/\b(AKIA|ASIA)[A-Z0-9]{12,20}\b/g, `$1${MASK}`],
   [/\b(Bearer)\s+[A-Za-z0-9._~+/=-]+/gi, `$1 ${MASK}`],
   [/\b(Basic)\s+[A-Za-z0-9+/=]{8,}/g, `$1 ${MASK}`],
   [/\b(PLATFORM_[A-Z0-9_]+|[A-Z0-9_]*_(?:SECRET|KEY|TOKEN|PASSWORD))(\s*=\s*)("[^"]*"|'[^']*'|\S+)/g, `$1$2${MASK}`],

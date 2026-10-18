@@ -10,7 +10,8 @@ import { billingStanding, applyStanding, type Standing } from "@/lib/billing/lif
 import { CheckoutRefused, billingPortal, cancelAtPeriodEnd, offerFor, pendingAuthorisations, scheduleRazorpayChange, startCheckout, type CheckoutStart, type OfferPlan, type Selection } from "@/lib/billing/checkout";
 import { ProformaRefused, bankTransferOpen, proformasOf, requestProforma } from "@/lib/billing/proforma";
 import { getRazorpaySubscription } from "@/lib/billing/razorpay";
-import { usedThisMonth } from "@/lib/copilot/settings";
+import { creditStanding } from "@/lib/ai/credits";
+import { PackRefused, packOffer, startPackCheckout } from "@/lib/ai/packs";
 import { controlDb } from "@/lib/platform/control-db";
 import { documentUrl } from "@/lib/billing/tax-invoice";
 import { GST_STATE_CODES } from "@/lib/gst-engine";
@@ -36,7 +37,7 @@ async function manager(): Promise<{ ok: true; me: { id: string; name: string; em
 }
 
 const refusal = (err: unknown): { ok: false; error: string } | null =>
-  err instanceof CheckoutRefused || err instanceof GatewayError || err instanceof ProformaRefused ? { ok: false, error: err.message } : null;
+  err instanceof CheckoutRefused || err instanceof GatewayError || err instanceof ProformaRefused || err instanceof PackRefused ? { ok: false, error: err.message } : null;
 
 type Iso<T> = T extends Date ? string : T extends object ? { [K in keyof T]: Iso<T[K]> } : T;
 const iso = (standing: Standing): Iso<Standing> => JSON.parse(JSON.stringify(standing)) as Iso<Standing>;
@@ -77,7 +78,20 @@ export type BillingView = {
     taxUrl: string | null;
     creditNotes: { number: string; url: string }[];
   }[];
-  usage: { seatsUsed: number; seatsLimit: number | null; copilotUsed: number; copilotLimit: number | null };
+  usage: { seatsUsed: number; seatsLimit: number | null };
+  /**
+   * Deskzo AI credits (src/lib/ai): this month's, in thousandths — `allowance` null is no limit — the
+   * packs with credits left, and the packs on sale here.
+   */
+  aiCredits: {
+    metered: boolean;
+    allowance: number | null;
+    allowanceUsed: number;
+    available: number | null;
+    renewsAt: string;
+    packs: { credits: number; remaining: number; expiresAt: string; source: string }[];
+    offer: { open: boolean; reason: string | null; packs: { key: string; credits: number; amount: number; total: number }[] };
+  };
   offer: OfferPlan[];
   canManageAtStripe: boolean;
   billingEmail: string | null;
@@ -93,7 +107,7 @@ export async function getBilling(): Promise<BillingView | null> {
   if (!a.ok) return null;
   const tenant = await currentTenant();
   const control = controlDb();
-  const [row, standing, subs, invoices, offer, pending, seatsUsed, copilotUsed] = await Promise.all([
+  const [row, standing, subs, invoices, offer, pending, seatsUsed, credits, packs] = await Promise.all([
     control.tenant.findUniqueOrThrow({ where: { id: tenant.id }, select: { status: true, suspendedFor: true, billingEmail: true, taxId: true, billingName: true, billingAddress: true, billingState: true, stripeCustomerId: true } }),
     billingStanding(tenant.id),
     control.subscription.findMany({
@@ -105,7 +119,8 @@ export async function getBilling(): Promise<BillingView | null> {
     offerFor(tenant.id),
     pendingAuthorisations(tenant.id),
     seatsInUse(),
-    usedThisMonth(),
+    creditStanding(tenant),
+    packOffer(tenant),
   ]);
   const india = tenant.country === "IN";
   const [bankTransfer, proformas] = india ? await Promise.all([bankTransferOpen(), proformasOf(tenant.id, { take: 5 })]) : [false, []];
@@ -147,7 +162,16 @@ export async function getBilling(): Promise<BillingView | null> {
       taxUrl: i.taxNumber ? documentUrl("i", i.id) : null,
       creditNotes: i.creditNotes.map((c) => ({ number: c.number, url: documentUrl("c", c.id) })),
     })),
-    usage: { seatsUsed, seatsLimit: tenant.entitlements.seats, copilotUsed, copilotLimit: tenant.entitlements.copilotTokens },
+    usage: { seatsUsed, seatsLimit: tenant.entitlements.seats },
+    aiCredits: {
+      metered: credits.metered,
+      allowance: credits.allowance,
+      allowanceUsed: credits.allowanceUsed,
+      available: credits.available,
+      renewsAt: credits.renewsAt.toISOString(),
+      packs: credits.packs.map((p) => ({ credits: p.credits, remaining: p.remaining, expiresAt: p.expiresAt.toISOString(), source: p.source })),
+      offer: packs,
+    },
     offer: offer.plans,
     canManageAtStripe: !!row.stripeCustomerId,
     billingEmail: row.billingEmail,
@@ -188,6 +212,22 @@ export async function checkoutPlan(selection: Selection): Promise<ActionResult<C
   try {
     const started = await startCheckout(tenant.id, selection, `${await tenantOrigin()}/settings/billing`, { seatsInUse: await seatsInUse() });
     await recordAudit({ userId: a.me.id, action: "CREATE", entityType: "Subscription", entityId: tenant.id, entityLabel: `Checkout started: ${(selection.items ?? []).map((i) => i.planKey).join(", ")}` });
+    return { ok: true, data: started };
+  } catch (err) {
+    const r = refusal(err);
+    if (r) return r;
+    throw err;
+  }
+}
+
+/** A Deskzo AI credit pack (src/lib/ai/packs.ts): the page to pay on, in India through Razorpay. */
+export async function buyCreditPack(packKey: string): Promise<ActionResult<{ url: string }>> {
+  const a = await manager();
+  if (!a.ok) return a;
+  const tenant = await currentTenant();
+  try {
+    const started = await startPackCheckout(tenant.id, String(packKey ?? ""), `${await tenantOrigin()}/settings/billing?credits=done#ai-credits`);
+    await recordAudit({ userId: a.me.id, action: "CREATE", entityType: "AiCreditPack", entityId: tenant.id, entityLabel: `Credit pack checkout started: ${String(packKey)}` });
     return { ok: true, data: started };
   } catch (err) {
     const r = refusal(err);

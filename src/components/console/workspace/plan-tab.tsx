@@ -24,7 +24,7 @@ import { PlansEditor } from "./plans-editor";
  *              order, each edition with the product it sells (src/lib/products.ts).
  *   Modules    the catalogue with this workspace's standing on each.
  *   Overrides  managers add and remove them.
- *   Limits     sellers override seats, copilot tokens and custom domains.
+ *   Limits     sellers override seats, AI credits and custom domains.
  *
  * A closed workspace shows all of it read-only.
  */
@@ -98,7 +98,7 @@ export function PlanTab({ header, plan, caps }: { header: WorkspaceHeader; plan:
             <dl className="divide-y divide-line">
               <LimitRow term="Seats" value={plan.limits.seats === null ? "No limit" : INTEGER.format(plan.limits.seats)} overridden={plan.limits.seatOverride !== null} />
               <LimitRow
-                term="Copilot tokens a month"
+                term="AI credits a month"
                 value={plan.limits.copilotTokens === null ? "No limit" : plan.limits.copilotTokens === 0 ? "None" : INTEGER.format(plan.limits.copilotTokens)}
                 overridden={plan.limits.copilotTokenOverride !== null}
               />

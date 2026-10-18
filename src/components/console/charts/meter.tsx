@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils";
 import { CHART_TONE_CLASS, finiteValue, formatChartValue, type ChartFormat, type ChartTone } from "./chart-utils";
 
 /**
- * How full something is against its limit — seats, copilot tokens, schema versions, the warm pool.
+ * How full something is against its limit — seats, AI credits, schema versions, the warm pool.
  *
  * `tone="auto"` (the default) colours by how close the value is to the limit: brand below 90%,
  * warning from 90%, danger at 100% and over. An over-limit value fills the bar and says "over the

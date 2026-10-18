@@ -624,7 +624,7 @@ export type UsagePanel = {
   series: UsagePoint[];
   /** The newest snapshot, even when it is older than the window. */
   latest: UsagePoint | null;
-  /** Copilot tokens per calendar month of the snapshots' days ("2026-09"), oldest first: each month's highest snapshot — they count up through the month. */
+  /** AI credits per calendar month of the snapshots' days ("2026-09"), oldest first: each month's highest snapshot — they count up through the month. */
   copilotByMonth: { month: string; tokens: number }[];
   limits: {
     seats: number | null;

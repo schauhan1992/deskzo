@@ -96,6 +96,7 @@ export const NOTIFICATION_CATALOGUE: NotificationDefinition[] = [
   { type: "PAYMENT_PROMISES_SUMMARY", label: "Broken promises to pay, once a day", when: "Clients' promised dates passed without the money — one summary a day, for whoever records payments.", group: "money" },
   { type: "RECURRING_DRAFTS_RAISED", label: "Recurring billing raised drafts, once a day", when: "Subscriptions renewed or instalments fell due, and their invoices are waiting as drafts — one notice a day, for whoever issues documents.", group: "money" },
   { type: "PAYMENT_FOLLOW_UP_DUE", label: "A payment follow-up is due", when: "The day you planned to chase a client's payment again arrives, when no task reminds you.", group: "money" },
+  { type: "AI_CREDITS", label: "Deskzo AI credits run low", when: "Four fifths of this month's AI credits are used, or none are left — for whoever manages the plan and billing. Emailed too.", group: "money" },
 
   // ─── People ─────────────────────────────────────────────────────────────────────────────────
   { type: "LEAVE_REQUESTED", label: "Leave needs my approval", when: "Somebody who reports to you asks for leave.", group: "people" },

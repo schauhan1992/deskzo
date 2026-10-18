@@ -1,11 +1,12 @@
-import OpenAI from "openai";
+import OpenAI, { AzureOpenAI } from "openai";
 import type { ChatCompletionMessageParam, ChatCompletionTool } from "openai/resources/chat/completions";
-import type { ProviderAdapter, ToolCall, Turn, TurnOutcome, TurnRequest } from "@/lib/copilot/types";
+import type { Connection, ProviderAdapter, ToolCall, Turn, TurnOutcome, TurnRequest } from "@/lib/copilot/types";
 
 /**
- * ChatGPT, through OpenAI's official SDK: a streamed Chat Completions turn with our tools as
- * functions. Arguments arrive as a JSON string; they are parsed here and checked against the tool's
- * schema before anything runs (src/lib/copilot/tools.ts), like every provider's.
+ * OpenAI's Chat Completions, through its official SDK — from OpenAI, an Azure OpenAI resource (the model
+ * named is the deployment), or any server that speaks the same API: vLLM, Ollama, Deskzo's own GPU. A
+ * streamed turn with our tools as functions. Arguments arrive as a JSON string; they are parsed here and
+ * checked against the tool's schema before anything runs (src/lib/copilot/tools.ts), like every provider's.
  */
 
 export function messagesFor(system: string, history: Turn[]): ChatCompletionMessageParam[] {
@@ -43,8 +44,22 @@ function parseArguments(raw: string): unknown {
   }
 }
 
+export function openaiClient(connection: Connection): OpenAI {
+  switch (connection.kind) {
+    case "OPENAI":
+      return new OpenAI({ apiKey: connection.apiKey, maxRetries: 2 });
+    case "AZURE_OPENAI":
+      return new AzureOpenAI({ endpoint: connection.endpoint, apiKey: connection.apiKey, apiVersion: connection.apiVersion, maxRetries: 2 });
+    case "OPENAI_COMPATIBLE":
+      // The SDK wants a key; a server that takes none ignores the header.
+      return new OpenAI({ baseURL: connection.baseURL, apiKey: connection.apiKey ?? "none", maxRetries: 2 });
+    default:
+      throw new Error(`A ${connection.kind} account doesn't speak OpenAI's API.`);
+  }
+}
+
 async function runTurn(request: TurnRequest): Promise<TurnOutcome> {
-  const client = new OpenAI({ apiKey: request.apiKey, maxRetries: 2 });
+  const client = openaiClient(request.connection);
   const tools: ChatCompletionTool[] = request.tools.map((t) => ({
     type: "function",
     function: { name: t.name, description: t.description, parameters: t.parameters },
@@ -55,7 +70,7 @@ async function runTurn(request: TurnRequest): Promise<TurnOutcome> {
       model: request.model,
       messages: messagesFor(request.system, request.history),
       tools,
-      max_completion_tokens: 16000,
+      max_completion_tokens: request.maxTokens ?? 16000,
       stream_options: { include_usage: true },
     },
     { signal: request.signal },
@@ -88,11 +103,4 @@ async function runTurn(request: TurnRequest): Promise<TurnOutcome> {
   };
 }
 
-async function listModels(apiKey: string): Promise<string[]> {
-  const client = new OpenAI({ apiKey, maxRetries: 1 });
-  const ids: string[] = [];
-  for await (const model of client.models.list()) ids.push(model.id);
-  return ids;
-}
-
-export const openai: ProviderAdapter = { runTurn, listModels };
+export const openai: ProviderAdapter = { runTurn };

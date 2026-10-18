@@ -282,7 +282,13 @@ function storedLines(raw: unknown): TaxLine[] | null {
   if (!Array.isArray(raw) || !raw.length) return null;
   const lines: TaxLine[] = [];
   for (const item of raw as Record<string, unknown>[]) {
-    const { name, quantity, amount, perSeat, periods, interval } = item ?? {};
+    const { name, quantity, amount, perSeat, periods, interval, description } = item ?? {};
+    // A line in its own words — a Deskzo AI credit pack (src/lib/ai/packs.ts), bought once, not for a period.
+    if (typeof description === "string" && description && Number.isSafeInteger(amount) && Number.isSafeInteger(quantity) && (quantity as number) >= 1) {
+      const q = quantity as number;
+      lines.push({ description, quantity: q, unitPrice: Math.round((amount as number) / q), taxable: amount as number });
+      continue;
+    }
     if (typeof name !== "string" || !Number.isSafeInteger(quantity) || !Number.isSafeInteger(amount) || !Number.isSafeInteger(periods)) return null;
     const q = quantity as number;
     if (q < 1 || (periods as number) < 1) return null;

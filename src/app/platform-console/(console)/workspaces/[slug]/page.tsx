@@ -20,6 +20,8 @@ import { PlanTab } from "@/components/console/workspace/plan-tab";
 import { SummaryStrip } from "@/components/console/workspace/summary-strip";
 import { SupportTab } from "@/components/console/workspace/support-tab";
 import { UsageTab } from "@/components/console/workspace/usage-tab";
+import { AiCreditsPanel } from "@/components/console/workspace/ai-credits-panel";
+import { consoleCreditView } from "@/lib/ai/credits";
 import { WORKSPACE_TAB_LABELS } from "@/lib/console-shared/labels";
 import { PAGE_ROLES } from "@/lib/console-shared/nav";
 import { WORKSPACE_TABS, parseWorkspaceTab, type WorkspaceTab } from "@/lib/console-shared/params";
@@ -58,7 +60,7 @@ export default async function ConsoleWorkspacePage({ params, searchParams }: Pag
 
   const { tenant } = header;
   const id = tenant.id;
-  const [plan, billing, usage, support, ops, notes, timeline, alerts, supportRequests, attribution] = await Promise.all([
+  const [plan, billing, usage, support, ops, notes, timeline, alerts, supportRequests, attribution, aiCredits] = await Promise.all([
     workspacePlan(id),
     workspaceBilling(id),
     workspaceUsage(id, 90),
@@ -71,6 +73,8 @@ export default async function ConsoleWorkspacePage({ params, searchParams }: Pag
     caps.viewSupport ? supportRequestsForTenant(id) : null,
     // Its partner (spec §9.2): every staff member reads it; SELLERS change it.
     workspaceAttribution(id),
+    // Its Deskzo AI credits (src/lib/ai); null until the release's migration has made the tables.
+    consoleCreditView(id).catch(() => null),
   ]);
   const tab = parseWorkspaceTab(await searchParams);
 
@@ -159,7 +163,10 @@ export default async function ConsoleWorkspacePage({ params, searchParams }: Pag
               <BillingTab header={header} billing={billing} caps={caps} />
             </TabPanel>
             <TabPanel idPrefix={TABS_ID} tabKey="usage" active={tab === "usage"}>
-              <UsageTab usage={usage} />
+              <div className="space-y-6">
+                <UsageTab usage={usage} />
+                {aiCredits && <AiCreditsPanel tenantId={id} view={aiCredits} canGrant={caps.sell} />}
+              </div>
             </TabPanel>
             <TabPanel idPrefix={TABS_ID} tabKey="support" active={tab === "support"}>
               <div className="space-y-6">

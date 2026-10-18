@@ -3,7 +3,8 @@ import { applyStanding } from "@/lib/billing/lifecycle";
 import { getRazorpaySubscription } from "@/lib/billing/razorpay";
 import { getStripeSubscription } from "@/lib/billing/stripe";
 import { applyRazorpaySubscription, applyStripeSubscription } from "@/lib/billing/sync";
-import { usedThisMonth, usageDay } from "@/lib/copilot/settings";
+import { usageDay } from "@/lib/copilot/settings";
+import { creditsUsedThisMonth } from "@/lib/ai/credits";
 import { consoleClock } from "@/lib/platform/console-clock";
 import { controlDb } from "@/lib/platform/control-db";
 import { forEachTenant } from "@/lib/platform/fanout";
@@ -17,8 +18,8 @@ import { activeTenants } from "@/lib/tenancy/registry";
  *
  *   · Reconcile: every subscription at a gateway read back and written again, so a webhook that
  *     never arrived is made good within a day. One that was read in the last twenty hours is left.
- *   · Usage: each open workspace's people with an account and copilot tokens this month, a row a day
- *     — what the console shows beside its limits.
+ *   · Usage: each open workspace's people with an account and Deskzo AI credits used this month (in
+ *     the `copilotTokens` column, an older name), a row a day — what the console shows beside its limits.
  *
  * And one subscription at a time, when staff ask from the console (`resyncSubscription`).
  */
@@ -74,7 +75,7 @@ export async function snapshotUsage(now = new Date()) {
     // Workspaces in the control plane: one from the environment has no row to record against.
     (await activeTenants()).filter((t) => t.source === "control"),
     async (tenant) => {
-      const [seatsUsed, copilotTokens] = await Promise.all([seatsInUse(), usedThisMonth(now)]);
+      const [seatsUsed, copilotTokens] = await Promise.all([seatsInUse(), creditsUsedThisMonth(tenant, now)]);
       // Deskzo Automate: steps this month against its allowance, and workflows switched on.
       const automation = await automationSnapshot(tenant, now);
       const row = { seatsUsed, seatsLimit: tenant.entitlements.seats, copilotTokens, ...automation, recordedAt: now };

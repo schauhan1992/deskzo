@@ -482,6 +482,8 @@ enum NotificationType {
   WORKFLOW_PAUSED
   /// Four fifths of this month's Deskzo Automate steps are used, or all of them (src/lib/automate/usage.ts).
   AUTOMATE_STEPS
+  /// Four fifths of this month's Deskzo AI credits are used, or none are left (src/lib/ai/credits.ts).
+  AI_CREDITS
 }
 
 model User {
@@ -12252,27 +12254,23 @@ enum AiProvider {
 }
 
 /**
- * Which AI provider and model the copilot uses, and the keys for each. One row, `id = "global"`.
+ * Deskzo AI in this workspace (src/lib/copilot/settings.ts): whether the copilot and Automate's drafting
+ * are on, and how many credits one person may use in a day. One row, `id = "global"`.
  *
- * The keys are encrypted with `encryptSecret` like every other provider secret, and never leave the
- * server: the settings screen is told only whether one is saved. Each provider keeps its own key so
- * switching between them doesn't mean pasting a key again.
+ * Since 17 Oct 2026 a workspace brings no AI key: the models and where they run are Deskzo's (console ›
+ * Settings › AI), paid for in credits (src/lib/ai). The keys once saved here were erased with their columns.
  */
 model CopilotSettings {
-  id                 String     @id @default("global")
-  enabled            Boolean    @default(false)
-  provider           AiProvider @default(ANTHROPIC)
-  model              String     @default("claude-opus-5")
-  anthropicKeyCipher String?
-  openaiKeyCipher    String?
-  geminiKeyCipher    String?
-  /**
-   * Tokens one person may use in a day, input and output together. Resets at midnight India time.
-   */
-  dailyTokenLimit    Int        @default(300000)
-  updatedById        String?
-  updatedBy          User?      @relation("CopilotSettingsUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
-  updatedAt          DateTime   @updatedAt
+  id               String   @id @default("global")
+  enabled          Boolean  @default(false)
+  /// Automate's "Draft with AI" (src/lib/automate/ai), switched on and off apart from the copilot.
+  draftingEnabled  Boolean  @default(false)
+  /// Credits one person may use in a day, every AI feature together; resets at the workspace's midnight.
+  /// Null: no cap of its own, only the workspace's credits.
+  dailyCreditLimit Int?
+  updatedById      String?
+  updatedBy        User?    @relation("CopilotSettingsUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  updatedAt        DateTime @updatedAt
 
   @@map("copilot_settings")
 }
@@ -12319,7 +12317,8 @@ model CopilotMessage {
 }
 
 /**
- * Tokens used per person per day — what the daily limit is checked against, and the usage screen.
+ * Tokens used per person per day while workspaces brought their own AI key. Not written since 17 Oct
+ * 2026: Deskzo AI's charges are kept in the control plane (`AiUsage`, src/lib/ai/credits.ts).
  */
 model CopilotUsage {
   id           String   @id @default(cuid())

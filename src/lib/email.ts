@@ -11,7 +11,13 @@ import { tenantOrigin } from "@/lib/tenancy/resolve";
  * Every other kind stays in the app only, whatever its email preference says: switching email on for
  * all of them at once would bury people. A kind is added here when somebody asks for it by email.
  */
-export const EMAILED_NOTIFICATIONS: ReadonlySet<NotificationType> = new Set<NotificationType>(["PROFORMA_ISSUED"]);
+export const EMAILED_NOTIFICATIONS: ReadonlySet<NotificationType> = new Set<NotificationType>(["PROFORMA_ISSUED", "AI_CREDITS"]);
+
+/** Why the person is getting it, at the foot of the email. AI_CREDITS: running low or used up (owner, 17 Oct 2026). */
+const BECAUSE: Partial<Record<NotificationType, string>> = {
+  PROFORMA_ISSUED: "You're getting this because it's one of your deals.",
+  AI_CREDITS: "You're getting this because you manage this workspace's plan and billing.",
+};
 
 export async function sendEmailNotification(params: { userId: string; type: NotificationType; subject: string; body: string; link?: string | null }) {
   if (!EMAILED_NOTIFICATIONS.has(params.type)) return;
@@ -23,7 +29,7 @@ export async function sendEmailNotification(params: { userId: string; type: Noti
       type: "ALERTS",
       to: user.email,
       subject: params.subject,
-      text: [`Hello ${user.name},`, "", params.body, ...(url ? ["", `Open it: ${url}`] : []), "", "— Deskzo", "", "You're getting this because it's one of your deals. Turn these emails off under Notifications › Preferences."].join("\n"),
+      text: [`Hello ${user.name},`, "", params.body, ...(url ? ["", `Open it: ${url}`] : []), "", "— Deskzo", "", `${BECAUSE[params.type] ?? "You're getting this from your workspace."} Turn these emails off under Notifications › Preferences.`].join("\n"),
     });
   } catch (err) {
     // A notification never fails the work that raised it — the in-app one is already there.

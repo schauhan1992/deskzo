@@ -70,12 +70,26 @@ export type RazorpayPayment = {
   refund_status?: string | null;
 };
 
+/** A one-off payment page — what a Deskzo AI credit pack is bought through (src/lib/ai/packs.ts). */
+export type RazorpayPaymentLink = {
+  id: string;
+  entity?: "payment_link";
+  status: string;
+  amount: number;
+  amount_paid?: number;
+  currency: string;
+  short_url?: string | null;
+  reference_id?: string | null;
+  notes?: Record<string, string> | unknown[];
+};
+
 export type RazorpayEvent = {
   entity: "event";
   event: string;
   created_at?: number;
   payload: {
     subscription?: { entity: RazorpaySubscription };
+    payment_link?: { entity: RazorpayPaymentLink };
     payment?: { entity: RazorpayPayment };
     /** One refund (`refund.processed`): its own amount, not the payment's total refunded. */
     refund?: { entity: { id: string; payment_id: string; amount: number } };
@@ -83,7 +97,7 @@ export type RazorpayEvent = {
 };
 
 /** Razorpay sends `notes` as an object, or as an empty array when there are none. */
-export const noteOf = (notes: RazorpaySubscription["notes"], key: string): string | null =>
+export const noteOf = (notes: RazorpaySubscription["notes"] | RazorpayPaymentLink["notes"], key: string): string | null =>
   notes && !Array.isArray(notes) && typeof notes[key] === "string" ? notes[key] : null;
 
 export function razorpayStatus(status: string): "INCOMPLETE" | "ACTIVE" | "PAST_DUE" | "CANCELLED" {
@@ -135,6 +149,31 @@ export function getRazorpaySubscription(id: string) {
 /** At the end of the period it is in, or now. */
 export function cancelRazorpaySubscription(id: string, atCycleEnd: boolean) {
   return call<RazorpaySubscription>("POST", `/subscriptions/${encodeURIComponent(id)}/cancel`, { cancel_at_cycle_end: atCycleEnd ? 1 : 0 });
+}
+
+/**
+ * A page that takes one payment of `amount` (paise, GST included) — `short_url` is where the customer goes,
+ * and they come back to `callbackUrl`. Razorpay mails and texts nobody: the customer is sent there from here.
+ */
+export function createRazorpayPaymentLink(input: { amount: number; description: string; reference: string; customer: { name: string; email: string | null }; notes: Record<string, string>; callbackUrl: string; expiresAt: Date }) {
+  return call<RazorpayPaymentLink>("POST", "/payment_links", {
+    amount: input.amount,
+    currency: "INR",
+    accept_partial: false,
+    description: input.description,
+    reference_id: input.reference,
+    customer: { name: input.customer.name, ...(input.customer.email ? { email: input.customer.email } : {}) },
+    notify: { sms: false, email: false },
+    reminder_enable: false,
+    notes: input.notes,
+    callback_url: input.callbackUrl,
+    callback_method: "get",
+    expire_by: Math.floor(input.expiresAt.getTime() / 1000),
+  });
+}
+
+export function getRazorpayPaymentLink(id: string) {
+  return call<RazorpayPaymentLink>("GET", `/payment_links/${encodeURIComponent(id)}`);
 }
 
 // ─── Webhooks ──────────────────────────────────────────────────────────────────────────────────

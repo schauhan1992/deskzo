@@ -73,7 +73,7 @@ export const INDIA_LAUNCH_PRICES: readonly PriceBookEntry[] = [
   { planKey: "deskzo-signatures", month: 59, year: 590, perSeat: true },
   // Add-ons, for the workspace rather than a person. Revenue & Close: Ind AS 115 revenue and the month-end close, with Books.
   { planKey: "addon-revenue-close", month: 2499, year: 24990, perSeat: false },
-  // A million copilot tokens a month on the workspace's own AI provider key — the provider bills its own use.
+  // AI Plus: 750 Deskzo AI credits a month on top of the plan's own (owner, 17 Oct 2026). Credits are ₹1 each.
   { planKey: "addon-ai-copilot", month: 499, year: 4990, perSeat: false },
   // Automate Plus: Deskzo Automate's limits raised for the whole workspace (owner, 17 Oct 2026).
   { planKey: "addon-automate-plus", month: 999, year: 9990, perSeat: false },

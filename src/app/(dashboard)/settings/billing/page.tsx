@@ -10,6 +10,7 @@ import type { Clock } from "@/lib/time/zone";
 import { partnerShownToCustomer } from "@/lib/partners/customer-facing";
 import { COMPANY_NAME } from "@/lib/brand-names";
 import { currentTenant } from "@/lib/tenancy/resolve";
+import { AiCreditsCard } from "@/components/settings/ai-credit-packs";
 
 /** Where this workspace stands, in a sentence — its dates on the workspace's own clock. */
 function standingText(view: BillingView, clock: Clock): { tone: "green" | "amber" | "red" | "blue" | "default"; text: string } {
@@ -42,10 +43,11 @@ function standingText(view: BillingView, clock: Clock): { tone: "green" | "amber
  * for billing, so it can be paid for and opened again (src/proxy.ts). Paying through Razorpay, the plans
  * or people change from the next renewal; in India, a proforma can be asked for to pay by bank transfer.
  */
-export default async function BillingPage({ searchParams }: { searchParams: Promise<{ checkout?: string }> }) {
+export default async function BillingPage({ searchParams }: { searchParams: Promise<{ checkout?: string; credits?: string }> }) {
   const view = await getBilling();
   if (!view) notFound();
-  const justPaid = (await searchParams).checkout === "done";
+  const search = await searchParams;
+  const justPaid = search.checkout === "done";
   const tenant = await currentTenant();
   const { id: tenantId, country } = tenant;
   const clock = clockOfTenant(tenant);
@@ -128,11 +130,12 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
           {partner && <p className="text-muted">Sold and supported by {partner.displayName}.</p>}
           <p className="text-xs text-muted">
             People with an account: {view.usage.seatsUsed}
-            {view.usage.seatsLimit !== null && !view.held ? ` of ${view.usage.seatsLimit}` : ""} · AI copilot this month: {view.usage.copilotUsed.toLocaleString("en-IN")} tokens
-            {view.usage.copilotLimit !== null ? ` of ${view.usage.copilotLimit.toLocaleString("en-IN")}` : ""}
+            {view.usage.seatsLimit !== null && !view.held ? ` of ${view.usage.seatsLimit}` : ""}
           </p>
         </CardContent>
       </Card>
+
+      {!view.held && <AiCreditsCard credits={view.aiCredits} justBought={search.credits === "done"} />}
 
       {mayBuy && (
         <Card>

@@ -16,6 +16,7 @@ import {
   type StripeSubscription,
 } from "@/lib/billing/stripe";
 import { applyRazorpayCharge, applyRazorpayRefund, applyRazorpaySubscription, applyStripeInvoice, applyStripeRefund, applyStripeSubscription } from "@/lib/billing/sync";
+import { applyRazorpayPackPaid } from "@/lib/ai/packs";
 import { controlDb } from "@/lib/platform/control-db";
 import { ConsoleRefused } from "@/lib/platform/refused";
 import { getSecret } from "@/lib/platform/settings";
@@ -126,6 +127,8 @@ export async function dispatchStripeEvent(event: StripeEvent, now?: Date): Promi
 /** What a Razorpay event changes here; the workspace it concerned, or null. */
 export async function dispatchRazorpayEvent(event: RazorpayEvent, now?: Date): Promise<string | null> {
   const payment = event.payload.payment?.entity;
+  // A Deskzo AI credit pack, paid once through a payment link (src/lib/ai/packs.ts).
+  if (event.event === "payment_link.paid" && event.payload.payment_link?.entity) return applyRazorpayPackPaid(event.payload.payment_link.entity, payment ?? null, now);
   if ((event.event === "payment.refunded" || event.event === "refund.processed") && payment) {
     // The payment's running total refunded; failing that, at least the one refund this event is about.
     const refund = event.payload.refund?.entity;

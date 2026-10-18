@@ -200,7 +200,8 @@ export const PRODUCTS: readonly Product[] = [
 
 export const ADD_ONS: readonly AddOn[] = [
   { key: "revenue_close", name: "Revenue & Close", tagline: "Ind AS 115 revenue recognition and a month-end close", modules: ["revenue_close"], onProduct: "books", includedIn: ["one"] },
-  { key: "copilot", name: "AI Copilot", tagline: "Questions about your data, answered by the AI provider you choose", modules: [], onProduct: null, includedIn: [] },
+  // Deskzo AI credits on top of every plan's own (owner, 17 Oct 2026). The key is older than the name.
+  { key: "copilot", name: "AI Plus", tagline: "More AI credits every month, on top of what your plan includes", modules: [], onProduct: null, includedIn: [] },
   { key: "seats", name: "More people", tagline: "Seats beyond what a plan includes", modules: [], onProduct: null, includedIn: [] },
   // Deskzo Automate's bigger limits (owner, 17 Oct 2026: ₹999 a month for the workspace). An allowance, never "included".
   {

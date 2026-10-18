@@ -1,17 +1,21 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { ProviderAdapter, ToolCall, Turn, TurnOutcome, TurnRequest } from "@/lib/copilot/types";
+import { AnthropicBedrock } from "@anthropic-ai/bedrock-sdk";
+import type { Connection, ProviderAdapter, ToolCall, Turn, TurnOutcome, TurnRequest } from "@/lib/copilot/types";
 
 /**
- * Claude, through the official SDK: a streamed turn with our tools, the answer handed out as it is
- * written, and the complete message collected with `finalMessage()`.
+ * Claude, through the official SDKs: Anthropic's own API, or Amazon Bedrock from one AWS region (Deskzo
+ * AI's first provider, owner 17 Oct 2026: India's inference profiles keep requests in Mumbai and
+ * Hyderabad). A streamed turn with our tools, the answer handed out as it is written, and the complete
+ * message collected with `finalMessage()`.
  *
- *   · Tool inputs stream as they are generated (`eager_input_streaming`), so the server no longer
- *     validates them — every input is checked against its schema in src/lib/copilot/tools.ts before
- *     anything runs, and an unparseable one re-issues the turn rather than running.
- *   · The system prompt and tools never change within a conversation, so the request is cached
- *     automatically (`cache_control` on the request) and each follow-up reads the history from cache.
- *   · On Claude Opus 5 and Fable 5, a refusal is retried on a suitable model server-side
- *     (`fallbacks: "default"`), so a harmless question tripped by a classifier still gets answered.
+ *   · Anthropic's API: tool inputs stream as they are generated (`eager_input_streaming`), so the server
+ *     no longer validates them. Every input is checked against its schema in src/lib/copilot/tools.ts
+ *     before anything runs, and an unparseable one re-issues the turn rather than running. The request
+ *     is cached automatically (`cache_control` on the request). On Claude Opus 5 and Fable 5 a refusal is
+ *     retried server-side on a suitable model (`fallbacks: "default"`).
+ *   · Bedrock: neither fallbacks nor eager input streaming are offered everywhere, and older models there
+ *     refuse a request-level `cache_control`, so the cache is marked on the system prompt and the newest
+ *     message instead (`bedrockBreakpoints`). A refusal is reported as one.
  */
 
 const toolUseId = (id: string) => id.replace(/[^a-zA-Z0-9_-]/g, "_") || "call";
@@ -39,31 +43,72 @@ export function messagesFor(history: Turn[]): Anthropic.Beta.BetaMessageParam[] 
   return out;
 }
 
+/**
+ * Bedrock's cache marks: the system prompt (which, rendered after the tools, caches them too) and the
+ * newest message, so each follow-up reads the conversation so far from cache. Two of the four allowed.
+ */
+export function bedrockBreakpoints(system: string, messages: Anthropic.Beta.BetaMessageParam[]) {
+  const mark = { type: "ephemeral" as const };
+  const marked = messages.map((m, i) => {
+    if (i !== messages.length - 1) return m;
+    const blocks: Anthropic.Beta.BetaContentBlockParam[] = typeof m.content === "string" ? [{ type: "text", text: m.content }] : [...m.content];
+    const last = blocks.length - 1;
+    if (last >= 0) blocks[last] = { ...blocks[last], cache_control: mark } as Anthropic.Beta.BetaContentBlockParam;
+    return { ...m, content: blocks };
+  });
+  return { system: [{ type: "text" as const, text: system, cache_control: mark }], messages: marked };
+}
+
 const refusalFallback = (model: string) => /^claude-(opus-5|fable-5)/.test(model);
 
-async function runTurn(request: TurnRequest): Promise<TurnOutcome> {
-  const client = new Anthropic({ apiKey: request.apiKey, maxRetries: 2 });
+type Messages = Anthropic["beta"]["messages"];
+
+/** The client for a connection. Bedrock's has the same `beta.messages` as Anthropic's, less batches and counting. */
+export function claudeClient(connection: Connection): { messages: Pick<Messages, "stream">; bedrock: boolean } {
+  if (connection.kind === "ANTHROPIC") return { messages: new Anthropic({ apiKey: connection.apiKey, maxRetries: 2 }).beta.messages, bedrock: false };
+  if (connection.kind === "BEDROCK") {
+    const client = connection.accessKeyId
+      ? new AnthropicBedrock({ awsRegion: connection.region, awsAccessKey: connection.accessKeyId, awsSecretKey: connection.secret, maxRetries: 2 })
+      : new AnthropicBedrock({ awsRegion: connection.region, apiKey: connection.secret, maxRetries: 2 });
+    return { messages: client.beta.messages as unknown as Pick<Messages, "stream">, bedrock: true };
+  }
+  throw new Error(`A ${connection.kind} account doesn't speak Claude's API.`);
+}
+
+/** The request for one turn — apart from the client, so check:ai-gateway can read what each provider is sent. */
+export type ClaudeParams = Parameters<Messages["stream"]>[0];
+
+export function claudeParams(request: TurnRequest, bedrock: boolean): ClaudeParams {
+  const messages = messagesFor(request.history);
   const tools: Anthropic.Beta.BetaTool[] = request.tools.map((t) => ({
     name: t.name,
     description: t.description,
     input_schema: t.parameters as Anthropic.Beta.BetaTool.InputSchema,
-    eager_input_streaming: true,
+    ...(bedrock ? {} : { eager_input_streaming: true }),
   }));
+  const maxTokens = request.maxTokens ?? 32000;
+  if (bedrock) {
+    const cached = bedrockBreakpoints(request.system, messages);
+    return { model: request.model, max_tokens: maxTokens, system: cached.system, messages: cached.messages, tools };
+  }
+  return {
+    model: request.model,
+    max_tokens: maxTokens,
+    system: request.system,
+    messages,
+    tools,
+    cache_control: { type: "ephemeral" },
+    ...(refusalFallback(request.model) ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
+  } as ClaudeParams;
+}
+
+async function runTurn(request: TurnRequest): Promise<TurnOutcome> {
+  const { messages, bedrock } = claudeClient(request.connection);
+  const params = claudeParams(request, bedrock);
 
   for (let attempt = 0; ; attempt++) {
     let written = "";
-    const stream = client.beta.messages.stream(
-      {
-        model: request.model,
-        max_tokens: 32000,
-        system: request.system,
-        messages: messagesFor(request.history),
-        tools,
-        cache_control: { type: "ephemeral" },
-        ...(refusalFallback(request.model) ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
-      },
-      { signal: request.signal },
-    );
+    const stream = messages.stream(params, { signal: request.signal });
     stream.on("text", (delta) => {
       written += delta;
       request.onText(delta);
@@ -104,11 +149,4 @@ async function runTurn(request: TurnRequest): Promise<TurnOutcome> {
   }
 }
 
-async function listModels(apiKey: string): Promise<string[]> {
-  const client = new Anthropic({ apiKey, maxRetries: 1 });
-  const ids: string[] = [];
-  for await (const model of client.models.list()) ids.push(model.id);
-  return ids;
-}
-
-export const anthropic: ProviderAdapter = { runTurn, listModels };
+export const anthropic: ProviderAdapter = { runTurn };

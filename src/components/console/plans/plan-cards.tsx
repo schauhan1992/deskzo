@@ -47,7 +47,7 @@ export function seatsText(seats: number | null): string {
 export function copilotText(tokens: number | null): string {
   if (tokens === null) return "Unlimited copilot";
   if (tokens === 0) return "No copilot";
-  return `${compactNumber(tokens)} copilot tokens a month`;
+  return `${compactNumber(tokens)} AI credits a month`;
 }
 
 /** The product a plan sells, by name — or what it is without one. */

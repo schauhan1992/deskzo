@@ -3,6 +3,7 @@ import { controlDb } from "@/lib/platform/control-db";
 import { PlanRefused, checkPlanInput, savePlan, type PlanInput } from "@/lib/platform/plans";
 import { ADD_ONS, BASE_MODULES, PRODUCTS, productPlanKey, type AddOnKey, type ProductKey } from "@/lib/products";
 import { NO_LIMITS, PLAN_LIMITS } from "@/lib/automate/limits";
+import { PLAN_CREDITS } from "@/lib/ai/catalogue";
 
 /**
  * The products (src/lib/products.ts) as plans in the control plane — `npm run platform:plans --
@@ -14,7 +15,7 @@ import { NO_LIMITS, PLAN_LIMITS } from "@/lib/automate/limits";
  *   deskzo-<product>     an edition for each other product: the basics every product comes with
  *                        (`BASE_MODULES`) and the product's own modules
  *   addon-revenue-close  Revenue & Close, India only (its module is), bought with Books or One
- *   addon-ai-copilot     copilot tokens a month for each unit (1,000,000 to start with)
+ *   addon-ai-copilot     AI Plus: Deskzo AI credits a month for each unit (750 to start with)
  *   addon-more-people    one seat for each unit
  *   addon-automate-plus  Automate Plus: Deskzo Automate's limits raised (src/lib/automate/limits.ts)
  *
@@ -26,7 +27,7 @@ import { NO_LIMITS, PLAN_LIMITS } from "@/lib/automate/limits";
  * Running it again is safe. The catalogue owns what a plan *is* — its kind, its product, and its
  * modules (every module, for Deskzo One) — and writes those whenever they differ from products.ts.
  * Everything else belongs to staff once the plan exists: its name and description, where it is sold,
- * seats, copilot tokens, custom domains, order, whether it is on sale, whether it is the default, its
+ * seats, AI credits, custom domains, order, whether it is on sale, whether it is the default, its
  * prices. Those are written only when the plan is made. A run that finds every plan as the catalogue
  * has it writes nothing at all. Taking a module off a plan that workspaces are on would take it from
  * them, so that waits for `allowRemovals`; an internal plan with one of these keys is left alone.
@@ -45,8 +46,11 @@ export const ADD_ON_PLAN_KEYS: Record<AddOnKey, string> = {
   automate_plus: "addon-automate-plus",
 };
 
-/** Copilot tokens a month for each unit of the AI Copilot add-on, until staff say otherwise. */
-export const COPILOT_TOKENS_PER_UNIT = 1_000_000;
+/**
+ * Deskzo AI credits a month for each unit (`Plan.copilotTokens`, an older name), until staff say otherwise —
+ * the owner's numbers (17 Oct 2026): Deskzo One 100 a person, every other product 50, AI Plus 750.
+ */
+export const COPILOT_TOKENS_PER_UNIT = PLAN_CREDITS.aiPlus;
 
 /** A product's own trial, or why a signup can't start on it: not sold where the business is (with where it is), or not offered alone. */
 export type ProductTrial = { ok: true; planKey: string } | { ok: false; reason: "country"; soldIn: string[] } | { ok: false; reason: "unavailable" };
@@ -94,9 +98,9 @@ export function productCatalogue(): CataloguePlan[] {
       modules: suite ? [] : [...new Set([...BASE_MODULES, ...product.modules])],
       // Sold only where products.ts says (Books and People: India).
       countries: [...(product.soldOnlyIn ?? [])],
-      // No limit on people until staff price the plans; the copilot is bought as an add-on.
+      // No limit on people until staff price the plans. Deskzo AI credits in every plan, per person on a per-person price.
       seats: null,
-      copilotTokens: 0,
+      copilotTokens: suite ? PLAN_CREDITS.one : PLAN_CREDITS.product,
       automation: { ...(suite ? PLAN_LIMITS.one : PLAN_LIMITS.edition) },
       isDefault: suite,
       active: true,
@@ -200,7 +204,7 @@ export async function syncProductPlans(opts: { actor: string; dryRun?: boolean; 
       const changes = [`${kind}${plan.productKey ? ` of ${plan.productKey}` : ""}`];
       if (plan.allModules) changes.push("every module");
       else if (plan.modules.length) changes.push(`${plan.modules.length} module${plan.modules.length === 1 ? "" : "s"}`);
-      if (plan.kind === "ADDON" && plan.copilotTokens) changes.push(`${plan.copilotTokens.toLocaleString("en-IN")} copilot tokens a month a unit`);
+      if (plan.kind === "ADDON" && plan.copilotTokens) changes.push(`${plan.copilotTokens.toLocaleString("en-IN")} AI credits a month a unit`);
       if (plan.kind === "ADDON" && plan.seats) changes.push(`${plan.seats} seat${plan.seats === 1 ? "" : "s"} a unit`);
       if (plan.kind === "ADDON" && plan.automation.steps) changes.push(`${plan.automation.steps.toLocaleString("en-IN")} Automate steps a month a unit`);
       if (plan.countries.length) changes.push(`sold in ${plan.countries.join(", ")}`);

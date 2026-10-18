@@ -214,7 +214,7 @@ export function checkPlanInput(input: PlanInput, existing?: { productKey: string
   if (allModules && input.kind !== "INTERNAL" && productKey !== "one") throw new PlanRefused(PLAN_REFUSALS.everyModule);
   if (productKey === "one" && !allModules) throw new PlanRefused(PLAN_REFUSALS.suiteIsEverything);
   const seats = limitOf(input.seats, "Seats");
-  const copilotTokens = limitOf(input.copilotTokens, "Copilot tokens");
+  const copilotTokens = limitOf(input.copilotTokens, "AI credits");
   const customDomains = input.customDomains === undefined ? undefined : limitOf(input.customDomains, "Custom domains");
   const automation = input.automation === undefined ? undefined : automationLimitsOf(input.automation);
   const isDefault = !!input.isDefault;
@@ -494,7 +494,7 @@ export const automationOverrideColumns = (limits: AutomationLimits) => ({
 });
 
 /**
- * Seats, copilot tokens, custom domains and Automate's limits for one workspace, in place of what its
+ * Seats, AI credits, custom domains and Automate's limits for one workspace, in place of what its
  * plans add up to (null: the plans). `customDomains` or `automation` left out (undefined) keeps the
  * override it has.
  */
@@ -504,7 +504,7 @@ export async function setLimitOverrides(
   actor: string,
 ): Promise<void> {
   const seatOverride = limitOf(input.seats, "Seats");
-  const copilotTokenOverride = limitOf(input.copilotTokens, "Copilot tokens");
+  const copilotTokenOverride = limitOf(input.copilotTokens, "AI credits");
   const keepDomains = input.customDomains === undefined;
   const customDomainOverride = keepDomains ? undefined : limitOf(input.customDomains, "Custom domains");
   const automation = input.automation === undefined ? undefined : automationLimitsOf(input.automation);

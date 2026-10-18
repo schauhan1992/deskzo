@@ -1,8 +1,9 @@
 import { GoogleGenAI, type Content, type Part } from "@google/genai";
-import type { ProviderAdapter, ToolCall, Turn, TurnOutcome, TurnRequest } from "@/lib/copilot/types";
+import type { Connection, ProviderAdapter, ToolCall, Turn, TurnOutcome, TurnRequest } from "@/lib/copilot/types";
 
 /**
- * Gemini, through Google's official SDK: a streamed `generateContent` turn with our tools as
+ * Gemini, through Google's official SDK — from Google AI Studio, or Vertex AI in one location (Mumbai
+ * keeps processing in India) as a service account: a streamed `generateContent` turn with our tools as
  * function declarations.
  *
  * The model's parts are kept exactly as they came — every chunk's, in order — and replayed as they
@@ -35,15 +36,23 @@ export function contentsFor(history: Turn[]): Content[] {
 
 const REFUSED = new Set(["SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "RECITATION", "IMAGE_SAFETY"]);
 
+export function geminiClient(connection: Connection): GoogleGenAI {
+  if (connection.kind === "GEMINI") return new GoogleGenAI({ apiKey: connection.apiKey });
+  if (connection.kind === "VERTEX") {
+    return new GoogleGenAI({ vertexai: true, project: connection.project, location: connection.location, googleAuthOptions: { credentials: connection.credentials } });
+  }
+  throw new Error(`A ${connection.kind} account doesn't speak Gemini's API.`);
+}
+
 async function runTurn(request: TurnRequest): Promise<TurnOutcome> {
-  const ai = new GoogleGenAI({ apiKey: request.apiKey });
+  const ai = geminiClient(request.connection);
   const stream = await ai.models.generateContentStream({
     model: request.model,
     contents: contentsFor(request.history),
     config: {
       systemInstruction: request.system,
       tools: [{ functionDeclarations: request.tools.map((t) => ({ name: t.name, description: t.description, parametersJsonSchema: t.parameters })) }],
-      maxOutputTokens: 16000,
+      maxOutputTokens: request.maxTokens ?? 16000,
       abortSignal: request.signal,
     },
   });
@@ -81,15 +90,4 @@ async function runTurn(request: TurnRequest): Promise<TurnOutcome> {
   return { text, toolCalls: stop === "tools" ? toolCalls : [], native: parts, usage, stop, model: request.model };
 }
 
-async function listModels(apiKey: string): Promise<string[]> {
-  const ai = new GoogleGenAI({ apiKey });
-  const names: string[] = [];
-  const pager = await ai.models.list();
-  for await (const model of pager) {
-    if (!model.name || (model.supportedActions && !model.supportedActions.includes("generateContent"))) continue;
-    names.push(model.name.replace(/^models\//, ""));
-  }
-  return names;
-}
-
-export const gemini: ProviderAdapter = { runTurn, listModels };
+export const gemini: ProviderAdapter = { runTurn };

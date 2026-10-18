@@ -2,9 +2,9 @@ import type { AiProvider } from "@prisma/client";
 import type { ReportResult } from "@/lib/analytics/run";
 
 /**
- * The shapes the copilot keeps a conversation in — belonging to no one provider, so a chat can carry
- * on after an admin switches from Claude to ChatGPT or Gemini. Each adapter in ./providers turns
- * these into its own API's messages and back.
+ * The shapes the copilot keeps a conversation in — belonging to no one provider, so a chat carries on
+ * when Deskzo moves a feature to another model (console › Settings › AI). Each adapter in ./providers
+ * turns these into its own API's messages and back.
  */
 
 export type ToolCall = { id: string; name: string; input: unknown };
@@ -29,14 +29,30 @@ export type Turn =
 /** A tool as every provider is told about it: a name, what it does, and a JSON Schema for its input. */
 export type ToolSpec = { name: string; description: string; parameters: Record<string, unknown> };
 
+/**
+ * How to reach a provider: one of Deskzo AI's accounts, its secret opened (src/lib/ai/accounts.ts).
+ * Built on the server for one call and never kept, logged or handed to a browser.
+ */
+export type Connection =
+  | { kind: "ANTHROPIC"; apiKey: string }
+  /** `accessKeyId` null: `secret` is a Bedrock API key rather than an IAM user's secret key. */
+  | { kind: "BEDROCK"; region: string; accessKeyId: string | null; secret: string }
+  | { kind: "OPENAI"; apiKey: string }
+  | { kind: "AZURE_OPENAI"; endpoint: string; apiVersion: string; apiKey: string }
+  | { kind: "OPENAI_COMPATIBLE"; baseURL: string; apiKey: string | null }
+  | { kind: "GEMINI"; apiKey: string }
+  | { kind: "VERTEX"; project: string; location: string; credentials: Record<string, unknown> };
+
 export type TurnRequest = {
-  apiKey: string;
+  connection: Connection;
   model: string;
   system: string;
   history: Turn[];
   tools: ToolSpec[];
   /** Each piece of the answer as it is written. */
   onText: (delta: string) => void;
+  /** The longest answer allowed; the adapter's own when absent. A test of an account asks for a few. */
+  maxTokens?: number;
   signal?: AbortSignal;
 };
 
@@ -54,8 +70,6 @@ export type TurnOutcome = {
 
 export type ProviderAdapter = {
   runTurn(request: TurnRequest): Promise<TurnOutcome>;
-  /** The models this key can use, for the settings screen. */
-  listModels(apiKey: string): Promise<string[]>;
 };
 
 // ─── What the chat shows besides text ────────────────────────────────────────
@@ -90,5 +104,6 @@ export type ChatEvent =
   | { type: "text"; delta: string }
   | { type: "block"; block: DisplayBlock }
   | { type: "step" }
-  | { type: "done"; usedToday: number; limit: number }
+  /** Credits the person has used today, and their daily cap (null: none), in thousandths. */
+  | { type: "done"; usedToday: number; limit: number | null }
   | { type: "error"; message: string };

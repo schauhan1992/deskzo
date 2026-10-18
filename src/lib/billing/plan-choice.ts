@@ -114,7 +114,7 @@ function neededGroups(extra: ChoicePlan, chosen: readonly ChoicePlan[]): string[
 /**
  * Why an add-on or a bundle would be bought twice, or null: the editions chosen already hold every
  * module it brings — Deskzo One holds them all. An add-on that brings an allowance rather than a
- * module (AI Copilot, More people) is never "included".
+ * module (AI Plus, More people) is never "included".
  */
 export function includedRefusal(extra: ChoicePlan, chosen: readonly ChoicePlan[]): string | null {
   if (isEdition(extra) || extra.kind === "INTERNAL" || everything(extra) || !extra.modules.length) return null;
@@ -130,7 +130,7 @@ export function includedRefusal(extra: ChoicePlan, chosen: readonly ChoicePlan[]
 /**
  * What the pricing page says of an add-on or a bundle before anybody chooses: the products it is an
  * add-on to, and that Deskzo One already includes it — "Revenue & Close is an add-on to Deskzo Books,
- * and included in Deskzo One." Null when any product will do (AI Copilot, More people).
+ * and included in Deskzo One." Null when any product will do (AI Plus, More people).
  */
 export function needsOfExtra(extra: ChoicePlan): string | null {
   const list = neededGroups(extra, [{ key: "", name: "", kind: "EDITION", productKey: null, modules: BASE_MODULES }]);

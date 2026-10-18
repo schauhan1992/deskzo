@@ -539,6 +539,18 @@ export const ACTION_LABELS: Record<string, string> = {
   "mail.test": "Test mail sent",
   "mail.documentLimits": "Limits on documents sent for workspaces changed",
   "mail.helpdeskFrom": "Address helpdesk replies go from changed",
+  "ai.paused": "Deskzo AI paused or resumed",
+  "ai.account.add": "AI account added",
+  "ai.account.change": "AI account changed",
+  "ai.account.remove": "AI account removed",
+  "ai.account.test": "AI account tested",
+  "ai.model.add": "AI model added",
+  "ai.model.change": "AI model changed",
+  "ai.model.remove": "AI model removed",
+  "ai.routes": "AI routing changed",
+  "ai.packs": "AI credit packs changed",
+  "ai.trial": "A trial's AI credits changed",
+  "ai.credits.grant": "AI credits added to a workspace",
   "bulk.apply-standing": "Billing rules applied to a batch",
   "bulk.trial-extend": "Trials extended in bulk",
   "export.invoices": "Invoices exported",
@@ -698,6 +710,10 @@ export function categoryOf(action: string): AuditCategoryKey | null {
 }
 
 const ACTION_TONES: Record<string, Tone> = {
+  "ai.paused": "warning",
+  "ai.account.remove": "warning",
+  "ai.routes": "warning",
+  "ai.credits.grant": "info",
   "mail.account.change": "warning",
   "mail.account.remove": "warning",
   "mail.routes": "warning",
@@ -890,7 +906,7 @@ export function auditSummary(action: string, detail: unknown, clock: Clock): str
     case "tenant.module-override":
       return join([text(d.module), d.granted === true ? "added" : d.granted === false ? "taken away" : "override removed", quote(d.reason)]);
     case "tenant.limit-override":
-      return join([`seats ${limitText(d.seats)}`, `copilot tokens ${limitText(d.copilotTokens)}`, "customDomains" in d ? `custom domains ${limitText(d.customDomains)}` : null]);
+      return join([`seats ${limitText(d.seats)}`, `AI credits ${limitText(d.copilotTokens)}`, "customDomains" in d ? `custom domains ${limitText(d.customDomains)}` : null]);
     case "tenant.domain.add":
     case "tenant.domain.verified":
     case "tenant.domain.broken":
@@ -918,6 +934,28 @@ export function auditSummary(action: string, detail: unknown, clock: Clock): str
       return join([text(d.name), mailProviderText(d.provider), action === "mail.account.remove" && Array.isArray(d.streams) && d.streams.length ? `its mail now goes through the default (${d.streams.map(mailStreamText).join(", ")})` : null]);
     case "mail.account.change":
       return join([text(d.name), list(d.changed)]);
+    case "ai.paused":
+      return d.paused === true ? "paused everywhere" : d.paused === false ? "running again" : null;
+    case "ai.account.add":
+    case "ai.account.remove":
+      return join([text(d.name), text(d.kind)]);
+    case "ai.account.change":
+      return join([text(d.name), list(d.changed)]);
+    case "ai.account.test":
+      return join([text(d.model), d.ok === true ? "answered" : d.ok === false ? "failed" : null]);
+    case "ai.model.add":
+    case "ai.model.remove":
+      return text(d.key);
+    case "ai.model.change":
+      return join([text(d.key), list(d.changed)]);
+    case "ai.routes":
+      return list(d.changed);
+    case "ai.packs":
+      return list(d.packs);
+    case "ai.trial":
+      return typeof d.credits === "number" ? `${d.credits} credits` : null;
+    case "ai.credits.grant":
+      return join([typeof d.credits === "number" ? `${d.credits.toLocaleString("en-IN")} credits` : null, d.paid === true ? "paid by bank transfer" : "given", quote(d.reason)]);
     case "mail.routes":
       return Array.isArray(d.changed) ? d.changed.map(mailStreamText).join(", ") || null : null;
     case "mail.documentLimits":

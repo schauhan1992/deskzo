@@ -1,8 +1,10 @@
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { can } from "@/lib/authz/resolve";
-import { adapterFor } from "@/lib/copilot/providers";
-import { copilotConfig, providerKey, recordUsage, usedToday, planStopsCopilot } from "@/lib/copilot/settings";
+import { MILLI } from "@/lib/ai/catalogue";
+import { usedTodayBy } from "@/lib/ai/credits";
+import { AiRefusal, aiShouldStop, aiTurn, aiUnavailable, type AiTurnOutcome } from "@/lib/ai/gateway";
+import { copilotConfig } from "@/lib/copilot/settings";
 import { outputText, runTool, toolSpec, toolsFor } from "@/lib/copilot/tools";
 import { workspaceClock } from "@/lib/time/workspace";
 import { systemPrompt } from "@/lib/copilot/prompt";
@@ -12,15 +14,16 @@ import type { ChatEvent, DisplayBlock, ToolCall, ToolResult, Turn } from "@/lib/
  * One exchange with the copilot: the person's message in, the answer streamed out, with as many
  * tool calls in between as it takes (up to MAX_STEPS).
  *
- *   1. Refused before anything is spent if the copilot is off, has no key, the person lacks
- *      `copilot.use`, or they have used today's allowance.
- *   2. The conversation so far is read back, provider-neutral, and handed to whichever provider is
- *      configured now — see ./types.ts.
+ *   1. Refused before anything is spent if the copilot is off here, the person lacks `copilot.use`, or
+ *      Deskzo AI says no (src/lib/ai/gateway.ts): paused, not set up, the workspace's credits used up,
+ *      or the person's daily cap reached.
+ *   2. The conversation so far is read back, provider-neutral, and handed to the gateway, which runs it
+ *      on the model Deskzo chose for the copilot — see ./types.ts.
  *   3. Each model turn streams its text out as it is written. Tool calls are checked and run as the
  *      person (./tools.ts), and their results — plus any chart or confirmation card — go back to the
  *      model and out to the screen.
- *   4. Every turn is saved as it completes, and its tokens counted against the day, so a request
- *      that fails half way has still been paid for and is still on the record.
+ *   4. Every turn is saved as it completes, and charged in credits as it ends, so a request that fails
+ *      half way has still been paid for and is still on the record.
  */
 
 export const MAX_STEPS = 8;
@@ -43,14 +46,9 @@ export class CopilotRefusal extends Error {}
 /** Why the copilot won't run for this person right now, or null when it will. */
 export async function unavailableBecause(userId: string): Promise<string | null> {
   const config = await copilotConfig();
-  if (!config.enabled) return "The copilot is switched off. An admin can switch it on in Settings → AI copilot.";
-  if (!config.hasKey[config.provider]) return "The copilot has no API key for its provider yet — an admin adds it in Settings → AI copilot.";
-  if (!config.model.trim()) return "No model is chosen for the copilot yet — an admin picks one in Settings → AI copilot.";
+  if (!config.enabled) return "The copilot is switched off. An admin can switch it on in Settings → Deskzo AI.";
   if (!(await can(userId, "copilot.use"))) return "You don't have access to the AI copilot.";
-  const planned = await planStopsCopilot();
-  if (planned) return planned;
-  if ((await usedToday(userId)) >= config.dailyTokenLimit) return "You've used today's copilot allowance. It resets at midnight.";
-  return null;
+  return aiUnavailable(userId, "copilot.chat");
 }
 
 function turnOf(role: string, content: Prisma.JsonValue): Turn | null {
@@ -82,26 +80,12 @@ async function history(conversationId: string): Promise<Turn[]> {
   return turns;
 }
 
-/** What to tell a person when the provider call fails — also used by Automate's AI drafting. */
-export function friendlyError(err: unknown): string {
-  const status = typeof err === "object" && err !== null && "status" in err ? Number((err as { status: unknown }).status) : null;
-  if (status === 401 || status === 403) return "The AI provider refused the API key. An admin should check it in Settings → AI copilot.";
-  if (status === 404) return "The AI provider doesn't recognise the chosen model. An admin should pick another in Settings → AI copilot.";
-  if (status === 429) return "The AI provider is busy or the account's limit is reached. Try again in a minute.";
-  if (status !== null && status >= 500) return "The AI provider had a problem answering. Try again in a minute.";
-  return "The copilot couldn't reach the AI provider. Try again in a minute.";
-}
-
 export async function runCopilot(input: RunInput): Promise<void> {
   const refusal = await unavailableBecause(input.userId);
   if (refusal) throw new CopilotRefusal(refusal);
   const text = input.text.trim();
   if (!text) throw new CopilotRefusal("Type a question first.");
   if (text.length > 4000) throw new CopilotRefusal("That's too long for one message — keep it under 4,000 characters.");
-
-  const config = await copilotConfig();
-  const apiKey = (await providerKey(config.provider))!;
-  const adapter = adapterFor(config.provider);
 
   // The conversation — only ever the person's own.
   let conversation = input.conversationId
@@ -128,9 +112,9 @@ export async function runCopilot(input: RunInput): Promise<void> {
   try {
     for (let step = 0; step < MAX_STEPS; step++) {
       if (step > 0) {
-        // The workspace's month runs out the same way as a person's day: between steps, never mid-answer.
-        if ((await planStopsCopilot()) || (await usedToday(input.userId)) >= config.dailyTokenLimit) {
-          const note = "\n\n_(Stopped: the copilot allowance is used up.)_";
+        // The workspace's credits run out the same way as a person's day: between steps, never mid-answer.
+        if (await aiShouldStop(input.userId, "copilot.chat")) {
+          const note = "\n\n_(Stopped: the Deskzo AI credits are used up.)_";
           input.emit({ type: "text", delta: note });
           await save("assistant", { text: note.trim(), toolCalls: [] });
           break;
@@ -139,11 +123,11 @@ export async function runCopilot(input: RunInput): Promise<void> {
       }
 
       let written = "";
-      let outcome;
+      let outcome: AiTurnOutcome;
       try {
-        outcome = await adapter.runTurn({
-          apiKey,
-          model: config.model,
+        outcome = await aiTurn({
+          userId: input.userId,
+          feature: "copilot.chat",
           system,
           history: await history(conversation.id),
           tools: specs,
@@ -158,24 +142,23 @@ export async function runCopilot(input: RunInput): Promise<void> {
           if (written) await save("assistant", { text: written, toolCalls: [] });
           return;
         }
-        console.error("copilot provider call failed", err);
         if (written) await save("assistant", { text: written, toolCalls: [] });
-        throw new CopilotRefusal(friendlyError(err));
+        if (err instanceof AiRefusal) throw new CopilotRefusal(err.message);
+        throw err;
       }
 
-      await recordUsage(input.userId, outcome.usage);
       await save(
         "assistant",
         {
           text: outcome.text,
           toolCalls: outcome.toolCalls,
-          ...(outcome.native ? { native: { provider: config.provider, model: outcome.model, content: outcome.native } } : {}),
+          ...(outcome.native ? { native: { provider: outcome.family, model: outcome.model, content: outcome.native } } : {}),
         },
-        { provider: config.provider, model: outcome.model, inputTokens: outcome.usage.input, outputTokens: outcome.usage.output },
+        { provider: outcome.family, model: outcome.modelKey, inputTokens: outcome.usage.input, outputTokens: outcome.usage.output },
       );
 
       if (outcome.stop === "refused") {
-        const note = "The AI provider declined to answer that one. Try asking it differently.";
+        const note = "Deskzo AI declined to answer that one. Try asking it differently.";
         input.emit({ type: "text", delta: (written ? "\n\n" : "") + note });
         await save("note", { text: note });
         break;
@@ -196,5 +179,6 @@ export async function runCopilot(input: RunInput): Promise<void> {
   } finally {
     await db.copilotConversation.update({ where: { id: conversation.id }, data: { updatedAt: new Date() } }).catch(() => undefined);
   }
-  input.emit({ type: "done", usedToday: await usedToday(input.userId), limit: config.dailyTokenLimit });
+  const { dailyCreditLimit } = await copilotConfig();
+  input.emit({ type: "done", usedToday: await usedTodayBy(input.userId), limit: dailyCreditLimit === null ? null : dailyCreditLimit * MILLI });
 }
