@@ -1,10 +1,11 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Upload, AlertTriangle, Check, FileDown, X } from "lucide-react";
 import { previewImport, commitImport, importTemplate } from "@/actions/data-import";
 import type { ImportPlan } from "@/lib/portability/import";
+import type { ActionResult } from "@/actions/company";
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -31,7 +32,39 @@ function rowList(lines: number[]): string {
   return `${lines.length === 1 ? "Row" : "Rows"} ${lines.slice(0, 10).join(", ")}${more}.`;
 }
 
-export function ImportDialog({ areaKey, areaLabel }: { areaKey: string; areaLabel: string }) {
+type Applied = { created: number; updated: number; skipped: number; failed: { line: number; error: string }[] };
+
+/**
+ * The three calls behind the dialog. An area on the import screen uses src/actions/data-import.ts; the
+ * payroll migration import passes its own (src/actions/payroll-import.ts), which only payroll may run.
+ */
+export type ImportActions = {
+  preview: (file: { filename: string; base64: string }) => Promise<ActionResult<ImportPlan>>;
+  commit: (file: { filename: string; base64: string }) => Promise<ActionResult<Applied>>;
+  template: () => Promise<ActionResult<{ filename: string; csv: string }>>;
+};
+
+export function ImportDialog({
+  areaKey,
+  areaLabel,
+  actions,
+  buttonLabel = "Import",
+  title,
+  intro,
+}: {
+  areaKey: string;
+  areaLabel: string;
+  actions?: ImportActions;
+  buttonLabel?: string;
+  title?: string;
+  /** Said above the file picker, before the usual line about nothing being written yet. */
+  intro?: ReactNode;
+}) {
+  const calls: ImportActions = actions ?? {
+    preview: (file) => previewImport({ area: areaKey, ...file }),
+    commit: (file) => commitImport({ area: areaKey, ...file }),
+    template: () => importTemplate(areaKey),
+  };
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [open, setOpen] = useState(false);
@@ -40,7 +73,7 @@ export function ImportDialog({ areaKey, areaLabel }: { areaKey: string; areaLabe
   const [file, setFile] = useState<{ name: string; base64: string } | null>(null);
   const [plan, setPlan] = useState<ImportPlan | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<{ created: number; updated: number; skipped: number; failed: { line: number; error: string }[] } | null>(null);
+  const [done, setDone] = useState<Applied | null>(null);
 
   const reset = () => {
     setFile(null);
@@ -56,7 +89,7 @@ export function ImportDialog({ areaKey, areaLabel }: { areaKey: string; areaLabe
       const base64 = String(reader.result).split(",")[1] ?? "";
       setFile({ name: f.name, base64 });
       startTransition(async () => {
-        const result = await previewImport({ area: areaKey, filename: f.name, base64 });
+        const result = await calls.preview({ filename: f.name, base64 });
         if (!result.ok) {
           setError(result.error);
           return;
@@ -72,7 +105,7 @@ export function ImportDialog({ areaKey, areaLabel }: { areaKey: string; areaLabe
     if (!file) return;
     setError(null);
     startTransition(async () => {
-      const result = await commitImport({ area: areaKey, filename: file.name, base64: file.base64 });
+      const result = await calls.commit({ filename: file.name, base64: file.base64 });
       if (!result.ok) {
         setError(result.error);
         return;
@@ -85,7 +118,7 @@ export function ImportDialog({ areaKey, areaLabel }: { areaKey: string; areaLabe
 
   const template = () => {
     startTransition(async () => {
-      const result = await importTemplate(areaKey);
+      const result = await calls.template();
       if (!result.ok) {
         setError(result.error);
         return;
@@ -105,7 +138,7 @@ export function ImportDialog({ areaKey, areaLabel }: { areaKey: string; areaLabe
     <>
       <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>
         <Upload className="h-3.5 w-3.5" />
-        Import
+        {buttonLabel}
       </Button>
 
       <Dialog
@@ -114,7 +147,7 @@ export function ImportDialog({ areaKey, areaLabel }: { areaKey: string; areaLabe
           setOpen(false);
           reset();
         }}
-        title={`Import ${areaLabel.toLowerCase()}`}
+        title={title ?? `Import ${areaLabel.toLowerCase()}`}
       >
         <div className="max-h-[70vh] space-y-4 overflow-y-auto pr-1">
           {error && <p className="rounded-md bg-danger-bg px-3 py-2 text-sm text-danger">{error}</p>}
@@ -151,6 +184,7 @@ export function ImportDialog({ areaKey, areaLabel }: { areaKey: string; areaLabe
             </div>
           ) : !plan ? (
             <div className="space-y-3">
+              {intro}
               <p className="text-sm text-muted">
                 A CSV or Excel file. Nothing is written until you have seen what it would do.
               </p>
@@ -178,6 +212,12 @@ export function ImportDialog({ areaKey, areaLabel }: { areaKey: string; areaLabe
                 {plan.errors > 0 && <Badge tone="red">{plan.errors} unusable</Badge>}
                 <span className="text-muted">from {plan.totalRows} rows in {file?.name}</span>
               </div>
+
+              {plan.readAs.length > 0 && (
+                <p className="rounded-md bg-surface-sunken px-3 py-2 text-xs text-muted">
+                  Read {plan.readAs.map((r) => `“${r.from}” as ${r.to}`).join(", ")}.
+                </p>
+              )}
 
               {plan.unknownColumns.length > 0 && (
                 <p className="flex items-start gap-1.5 rounded-md bg-warning-bg px-3 py-2 text-xs text-warning">

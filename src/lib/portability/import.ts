@@ -3,7 +3,7 @@ import ExcelJS from "exceljs";
 import { desanitizeCsvCell } from "@/lib/csv";
 import { customSheetFor } from "@/lib/custom-fields/sheets";
 import { getImporter, IMPLEMENTED_IMPORTS } from "./importers";
-import type { PlannedRow } from "./importers/types";
+import type { Importer, PlannedRow } from "./importers/types";
 
 /**
  * Bringing data in.
@@ -53,7 +53,42 @@ export type ImportPlan = {
   unknownColumns: string[];
   /** The rows' notices (`PlannedRow.notice`), one per wording, with the lines each applies to. */
   notices: { text: string; lines: number[] }[];
+  /** Headings read as a template column by the importer's `headerAliases` — "Basic Salary" as "Basic". */
+  readAs: { from: string; to: string }[];
 };
+
+/** A heading as compared with the aliases: "A/c No." and "a c no" are the same. */
+const headingKey = (h: string) => h.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/**
+ * The rows with their headings renamed to the template's, through the importer's `headerAliases`, and
+ * what was read as what. Two headings that would land in one column refuse the file: which of them to
+ * believe is the uploader's call, not ours.
+ */
+export function readHeadings(importer: Importer, rows: Record<string, string>[]): { rows: Record<string, string>[]; readAs: { from: string; to: string }[] } {
+  if (!importer.headerAliases) return { rows, readAs: [] };
+  const byKey = new Map<string, string>();
+  for (const column of importer.templateColumns) byKey.set(headingKey(column), column);
+  for (const [column, aliases] of Object.entries(importer.headerAliases)) for (const a of aliases) byKey.set(headingKey(a), column);
+
+  const headings = [...new Set(rows.flatMap((r) => Object.keys(r)))];
+  const rename = new Map<string, string>();
+  const claimed = new Map<string, string>();
+  for (const h of headings) {
+    const column = byKey.get(headingKey(h));
+    if (!column) continue;
+    const earlier = claimed.get(column);
+    if (earlier) throw new Error(`"${earlier}" and "${h}" would both be read as ${column} — keep one of them.`);
+    claimed.set(column, h);
+    rename.set(h, column);
+  }
+  const readAs = [...rename].filter(([from, to]) => from !== to).map(([from, to]) => ({ from, to }));
+  if (readAs.length === 0 && [...rename].every(([from, to]) => from === to)) return { rows, readAs };
+  return {
+    rows: rows.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [rename.get(k) ?? k, v]))),
+    readAs,
+  };
+}
 
 /** Parses CSV or XLSX into plain rows keyed by header. */
 export async function parseFile(base64: string, filename: string): Promise<Record<string, string>[]> {
@@ -146,6 +181,20 @@ export async function plan(
 ): Promise<ImportPlan> {
   const importer = getImporter(area);
   if (!importer) throw new Error(`No importer for ${area}`);
+  return planWith(importer, area, rows, actorUserId);
+}
+
+/**
+ * `plan` for an importer that isn't an export area — the payroll migration import, which only
+ * payroll may run and which has nothing to export (src/actions/payroll-import.ts).
+ */
+export async function planWith(
+  importer: Importer,
+  area: string,
+  fileRows: Record<string, string>[],
+  actorUserId: string,
+): Promise<ImportPlan> {
+  const { rows, readAs } = readHeadings(importer, fileRows);
 
   // Grown as the file is read, so a row may reference a key an earlier row will create. See the
   // note on ImportContext — without it an exported chart of accounts cannot be loaded back in one
@@ -175,6 +224,7 @@ export async function plan(
     rows: planned,
     unknownColumns,
     notices: [...notices].map(([text, lines]) => ({ text, lines })),
+    readAs,
   };
 }
 
@@ -193,9 +243,19 @@ export async function apply(
 ): Promise<{ created: number; updated: number; skipped: number; failed: { line: number; error: string }[] }> {
   const importer = getImporter(area);
   if (!importer) throw new Error(`No importer for ${area}`);
+  return applyWith(importer, area, rows, actorUserId);
+}
 
+/** `apply` for an importer that isn't an export area — see `planWith`. */
+export async function applyWith(
+  importer: Importer,
+  area: string,
+  fileRows: Record<string, string>[],
+  actorUserId: string,
+): Promise<{ created: number; updated: number; skipped: number; failed: { line: number; error: string }[] }> {
+  const { rows } = readHeadings(importer, fileRows);
   const ctx = { actorUserId, area, pendingKeys: new Set<string>(), custom: await customFor(importer, actorUserId) };
-  const planned = await plan(area, rows, actorUserId);
+  const planned = await planWith(importer, area, rows, actorUserId);
   let created = 0;
   let updated = 0;
   let skipped = 0;

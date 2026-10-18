@@ -61,9 +61,10 @@ type ResolvedEmployee = {
 /** Date-only columns compare as the day they stand for; a Date's own string carries a timezone. */
 const day = (v: Date | null | undefined) => (v ? v.toISOString().slice(0, 10) : "");
 
-type EmployeeUser = { id: string; name: string; userSeq: number };
+export type EmployeeUser = { id: string; name: string; userSeq: number };
 
-async function resolveUser(column: string, raw: string): Promise<Resolved<EmployeeUser>> {
+/** The person a "User" cell names. The payroll migration import (./payroll.ts) finds people the same way. */
+export async function resolveUser(column: string, raw: string): Promise<Resolved<EmployeeUser>> {
   const seq = seqFromKey("USR", raw);
   if (seq !== null) {
     // A person's account only: never platform support's or the Automation account (src/lib/people.ts).

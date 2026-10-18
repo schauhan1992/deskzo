@@ -77,6 +77,12 @@ export type Importer = {
   /** Columns the template offers, and what the unknown-column warning is checked against. */
   templateColumns: string[];
   /**
+   * Other headings each template column is read from — another system's export as it comes
+   * ("Basic Salary" for "Basic"). Matched ignoring case, spaces and punctuation; the preview says which
+   * heading was read as which (`ImportPlan.readAs`).
+   */
+  headerAliases?: Record<string, string[]>;
+  /**
    * The record type whose custom fields (src/lib/custom-fields) this import also carries — their
    * columns join the template, and `ctx.custom` reads them.
    */

@@ -22,6 +22,7 @@ import { GST_STATE_CODES } from "@/lib/gst-engine";
 import { branchIdentity } from "@/lib/branches/identity";
 import { payrollRunSchema, payslipAdjustSchema, salaryStructureSchema, taxDeclarationSchema } from "@/lib/validation/hr";
 import { TAX_YEARS, taxYearOf } from "@/lib/hr/income-tax";
+import { lockedRunFrom } from "@/lib/hr/salary-locks";
 import { workspaceClock } from "@/lib/time/workspace";
 import type { ActionResult } from "@/actions/company";
 
@@ -106,17 +107,7 @@ export async function saveSalaryStructure(input: unknown): Promise<ActionResult<
 
   // Refused rather than silently ignored: changing pay for a month already locked would make the
   // payslip disagree with the structure it claims to come from.
-  const locked = await db.payrollRun.findFirst({
-    where: {
-      status: { in: ["LOCKED", "PAID"] },
-      OR: [
-        { year: { gt: effectiveFrom.getUTCFullYear() } },
-        { year: effectiveFrom.getUTCFullYear(), month: { gte: effectiveFrom.getUTCMonth() + 1 } },
-      ],
-    },
-    orderBy: [{ year: "desc" }, { month: "desc" }],
-    select: { month: true, year: true },
-  });
+  const locked = await lockedRunFrom(effectiveFrom);
   if (locked) {
     return {
       ok: false,

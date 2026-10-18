@@ -5,6 +5,7 @@ import { listPayrollRuns, myPayslips } from "@/actions/payroll";
 import { Card } from "@/components/ui/card";
 import { PayrollRuns } from "@/components/hr/payroll-runs";
 import { MyPayslips } from "@/components/hr/my-payslips";
+import { PayrollImport } from "@/components/hr/payroll-import";
 
 export default async function PayrollPage() {
   const enabled = await isModuleEnabled("payroll");
@@ -15,13 +16,17 @@ export default async function PayrollPage() {
 
   return (
     <div className="animate-fade-rise">
-      <div>
-        <h1 className="text-xl font-semibold text-text">Payroll</h1>
-        <p className="mt-1 text-sm text-muted">
-          {caps.payroll
-            ? "PF, ESI and professional tax are computed from the Indian rules. Income tax is entered by you."
-            : "Your payslips. Only payroll can see anybody else's."}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold text-text">Payroll</h1>
+          <p className="mt-1 text-sm text-muted">
+            {caps.payroll
+              ? "PF, ESI and professional tax are computed from the Indian rules. Income tax is entered by you."
+              : "Your payslips. Only payroll can see anybody else's."}
+          </p>
+        </div>
+        {/* Moving from another HRMS: salaries, bank and statutory numbers, pay so far (owner, 18 Oct 2026). */}
+        {caps.payroll && <PayrollImport />}
       </div>
 
       {caps.payroll ? (

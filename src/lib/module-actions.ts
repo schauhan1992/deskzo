@@ -189,6 +189,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "vendor-credit.ts": ["payables"],
   "payment.ts": ["payments"],
   "payroll.ts": ["payroll"],
+  // Bringing pay across from another HRMS, for payroll only (src/lib/portability/importers/payroll.ts).
+  "payroll-import.ts": ["payroll"],
   "performance.ts": "core",
   "permission.ts": "core",
   "portal-public.ts": "public",
