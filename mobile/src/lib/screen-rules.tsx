@@ -19,7 +19,7 @@ import { useSession } from "@/lib/session";
 type Answer = { allowed: boolean; remaining: number | null; enforced: boolean; message: string };
 
 /** The screens with customers' details on them, for a watermark kept to those (as src/lib/security/watermark-pages.ts). */
-const CUSTOMER_SCREENS = new Set(["today", "calls", "review", "tasks", "approvals"]);
+const CUSTOMER_SCREENS = new Set(["today", "chat", "conversation", "calls", "review", "tasks", "approvals"]);
 /** Never watermarked: signing in, and the Deskzo tab, whose pages draw the website's own. */
 const NEVER = new Set(["pair", "signed-in", "web"]);
 

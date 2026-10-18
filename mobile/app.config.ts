@@ -12,14 +12,14 @@ const dev = process.env.DESKZO_APP_DEV === "1";
 const config: ExpoConfig = {
   name: "Deskzo",
   slug: "deskzo",
-  version: "0.1.0",
+  version: "0.2.0",
   orientation: "portrait",
   icon: "./assets/icon.png",
   scheme: "deskzo",
   userInterfaceStyle: "light",
   android: {
     package: "com.deskzo.app",
-    versionCode: 1,
+    versionCode: 2,
     adaptiveIcon: {
       backgroundColor: "#4F46E5",
       foregroundImage: "./assets/android-icon-foreground.png",
@@ -51,7 +51,16 @@ const config: ExpoConfig = {
   },
   plugins: [
     "expo-router",
-    ["expo-camera", { recordAudioAndroid: false, barcodeScannerEnabled: true, cameraPermission: "Deskzo uses the camera to scan the code that pairs this phone." }],
+    ["expo-camera", { recordAudioAndroid: false, barcodeScannerEnabled: true, cameraPermission: "Deskzo uses the camera to scan the code that pairs this phone, and to take photos you send in chat." }],
+    // Photos for chat: Android's own photo picker (no permission), or the camera; never the microphone.
+    [
+      "expo-image-picker",
+      {
+        photosPermission: "Deskzo opens your photos only to send the ones you pick in chat.",
+        cameraPermission: "Deskzo uses the camera to scan the code that pairs this phone, and to take photos you send in chat.",
+        microphonePermission: false,
+      },
+    ],
     [
       "expo-location",
       {

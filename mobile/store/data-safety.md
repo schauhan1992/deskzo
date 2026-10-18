@@ -39,7 +39,7 @@ when the app sends it off the phone, and **shared** when it is passed to a third
 
 | Question | Answer |
 |---|---|
-| Collected | **Yes** — what the user writes on the after-call card (outcome, notes, callback time, the lead); clocking in and out; tasks they add or tick off; leave they ask for; their decisions on what waits for their approval. |
+| Collected | **Yes** — what the user writes on the after-call card (outcome, notes, callback time, the lead); clocking in and out; tasks they add or tick off; leave they ask for; their decisions on what waits for their approval; the messages they send in team chat. |
 | Shared | **No** |
 | Processed ephemerally | **No** |
 | Required or optional | **Optional** — the card is the user's choice. |
@@ -55,6 +55,16 @@ when the app sends it off the phone, and **shared** when it is passed to a third
 | Required or optional | **Required** where the company sets the limit. |
 | Purposes | **Fraud prevention, security, and compliance** |
 
+### Photos and videos → "Photos"; Files and docs
+
+| Question | Answer |
+|---|---|
+| Collected | **Yes** — only the photos and documents the user picks (or takes with the camera) to send in team chat. The app has no access to the photo library beyond Android's picker. |
+| Shared | **No** — they go to the user's company's Deskzo, to the people in that chat. |
+| Processed ephemerally | **No** — kept with the chat, as the company's retention setting says. |
+| Required or optional | **Optional** |
+| Purposes | **App functionality** |
+
 ### Device or other IDs
 
 | Question | Answer |
@@ -69,7 +79,6 @@ when the app sends it off the phone, and **shared** when it is passed to a third
 
 - **Personal info** — the user's name and email are shown from their Deskzo account; the app sends none.
 - **Location, at any other time** — read only when the user clocks in or out, or signs in where the company requires it (above). (The network address a phone connects from is kept with the device for the company's security log; it is not turned into a location.)
-- **Photos and videos** — the camera is used only to scan the pairing code; no image is taken or kept.
 - **Audio** — calls are not recorded.
 - **Messages, Calendar, Files and docs, Web browsing, App info and performance, Financial, Health** — none.
 

@@ -28,6 +28,9 @@ Everything here is what the app does today (Android: the day's work, calling, an
 > **Your day at a glance**
 > Clock in and out with a tap — where you were is saved with your attendance, if you allow it. See the tasks due today and tick them off. Approve or reject leave, expense claims, attendance corrections and other requests waiting for you. Check your leave balance, and ask for leave on a calendar — Deskzo works out the days, weekends and holidays left out.
 >
+> **Team chat**
+> Chat with your colleagues as you would on WhatsApp — one to one or in groups: replies, reactions, photos and files, read ticks, "typing…", who's online. It stays inside your company's Deskzo, under your company's rules.
+>
 > **All of Deskzo**
 > Everything else in your company's Deskzo opens in the app, already signed in.
 >

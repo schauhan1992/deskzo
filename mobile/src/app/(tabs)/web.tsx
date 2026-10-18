@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ForwardRefExoticComponent, type RefAttributes } from "react";
 import { ActivityIndicator, BackHandler, Linking, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useLocalSearchParams } from "expo-router";
 import { WebView as NativeWebView, type WebViewNavigation, type WebViewProps } from "react-native-webview";
 import { Button, Notice, colors, styles } from "@/components/ui";
 import { ApiError, api } from "@/lib/api";
@@ -61,6 +61,12 @@ export default function DeskzoPages() {
   useEffect(() => {
     if (origin) setSource({ uri: `${origin}/dashboard` });
   }, [origin]);
+
+  // Opened at a page from elsewhere in the app — a chat's file, say: `/web?path=/chat?c=…`. Only a page of this workspace.
+  const { path: openAt } = useLocalSearchParams<{ path?: string }>();
+  useEffect(() => {
+    if (origin && openAt && openAt.startsWith("/") && !openAt.startsWith("//")) setSource({ uri: `${origin}${openAt}` });
+  }, [origin, openAt]);
 
   // Android's back button goes back a page while there is one.
   useFocusEffect(

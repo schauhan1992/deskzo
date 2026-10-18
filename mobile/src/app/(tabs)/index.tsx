@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { Button, Card, Heading, Notice, colors, styles } from "@/components/ui";
 import { TaskRow } from "@/components/task-row";
 import { ApiError, api, type Attendance, type Today } from "@/lib/api";
@@ -67,13 +68,25 @@ export default function TodayScreen() {
 
       {today?.attendance && <ClockCard attendance={today.attendance} onChanged={(attendance) => setToday({ ...today, attendance })} />}
 
-      {today && today.approvals_waiting > 0 && (
-        <Pressable accessibilityRole="button" onPress={() => router.push("/approvals")}>
-          <Card style={[styles.row, { borderColor: colors.brand }]}>
-            <Text style={[styles.body, { flex: 1 }]}>
-              {today.approvals_waiting} {today.approvals_waiting === 1 ? "thing waits" : "things wait"} for your decision
-            </Text>
-            <Text style={{ color: colors.brand, fontWeight: "600" }}>Decide</Text>
+      {/* Always here — Approvals has no tab of its own, so this is the way in, with or without anything waiting. */}
+      {today && (
+        <Pressable accessibilityRole="button" accessibilityLabel="Approvals" onPress={() => router.push("/approvals")}>
+          <Card style={[styles.row, today.approvals_waiting > 0 && { borderColor: colors.brand }]}>
+            <Ionicons name="checkmark-done-circle-outline" size={26} color={today.approvals_waiting > 0 ? colors.brand : colors.muted} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.body, { fontWeight: "600" }]}>Approvals</Text>
+              <Text style={styles.small}>
+                {today.approvals_waiting > 0
+                  ? `${today.approvals_waiting} ${today.approvals_waiting === 1 ? "thing waits" : "things wait"} for your decision`
+                  : "Nothing waits for your decision"}
+              </Text>
+            </View>
+            {today.approvals_waiting > 0 ? (
+              <View style={{ minWidth: 24, height: 24, borderRadius: 12, backgroundColor: colors.brand, alignItems: "center", justifyContent: "center", paddingHorizontal: 7 }}>
+                <Text style={{ color: "#fff", fontWeight: "700", fontSize: 13 }}>{today.approvals_waiting}</Text>
+              </View>
+            ) : null}
+            <Ionicons name="chevron-forward" size={20} color={colors.muted} />
           </Card>
         </Pressable>
       )}

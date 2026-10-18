@@ -3,15 +3,18 @@ import { Tabs, useRouter } from "expo-router";
 import { Pressable } from "react-native";
 import { colors } from "@/components/ui";
 import { useWaiting } from "@/lib/badges";
+import { useChat } from "@/lib/chat";
 import { useSession } from "@/lib/session";
 
 /**
- * The app's places (owner, 18 Oct 2026): Today, Tasks, Approvals, Calls and all of Deskzo (its own pages) —
- * each for somebody whose workspace has it; Settings behind the gear.
+ * The app's places (owner, 18 Oct 2026): Today (with what waits for a decision), Chat, Tasks, Calls and all of
+ * Deskzo (its own pages) — five, as a phone's bar holds — each for somebody whose workspace has it; Settings behind
+ * the gear. A conversation opens over the bar, full screen (src/app/conversation/[id].tsx).
  */
 export default function TabsLayout() {
   const router = useRouter();
   const { me } = useSession();
+  const chat = useChat();
   const waiting = useWaiting();
   const can = me?.can;
   const gear = () => (
@@ -25,9 +28,18 @@ export default function TabsLayout() {
 
   return (
     <Tabs screenOptions={{ tabBarActiveTintColor: colors.brand, headerTitleStyle: { fontWeight: "600", color: colors.text }, headerRight: gear }}>
-      <Tabs.Screen name="index" options={{ title: "Today", tabBarIcon: icon("today-outline") }} />
+      <Tabs.Screen name="index" options={{ title: "Today", tabBarBadge: waiting > 0 ? waiting : undefined, tabBarIcon: icon("today-outline") }} />
+      <Tabs.Screen
+        name="chat"
+        options={{
+          title: "Chat",
+          href: can?.chat === false ? null : undefined,
+          tabBarBadge: chat.unread > 0 ? (chat.unread > 99 ? "99+" : chat.unread) : undefined,
+          tabBarBadgeStyle: { backgroundColor: "#16A34A" },
+          tabBarIcon: icon("chatbubbles-outline"),
+        }}
+      />
       <Tabs.Screen name="tasks" options={{ title: "Tasks", href: can?.tasks === false ? null : undefined, tabBarIcon: icon("checkbox-outline") }} />
-      <Tabs.Screen name="approvals" options={{ title: "Approvals", tabBarBadge: waiting > 0 ? waiting : undefined, tabBarIcon: icon("checkmark-done-outline") }} />
       <Tabs.Screen name="calls" options={{ title: "Calls", href: can?.calls === false ? null : undefined, tabBarIcon: icon("call-outline") }} />
       <Tabs.Screen name="web" options={{ title: "Deskzo", headerShown: false, tabBarIcon: icon("grid-outline") }} />
     </Tabs>

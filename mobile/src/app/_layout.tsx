@@ -2,12 +2,14 @@ import { useEffect } from "react";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { colors } from "@/components/ui";
+import { ChatBanner } from "@/components/chat/banner";
+import { ChatProvider } from "@/lib/chat";
 import { ScreenRules } from "@/lib/screen-rules";
 import { SessionProvider, useSession } from "@/lib/session";
 
 /**
- * The tabs — Today, Tasks, Approvals, Calls, Deskzo — and over them, leave, Settings, pairing, call sync and the
- * after-call card. Everything but pairing needs a paired phone; a paired phone has no business on the pairing
+ * The tabs — Today, Chat, Tasks, Calls, Deskzo — and over them a conversation (full screen), approvals, leave,
+ * Settings, signing in, call sync and the after-call card. Everything but pairing needs a paired phone; a paired phone has no business on the pairing
  * screen.
  */
 function Screens() {
@@ -31,11 +33,16 @@ function Screens() {
         <Stack.Screen name="signed-in" options={{ title: "Signing in", headerBackVisible: false }} />
         <Stack.Screen name="setup" options={{ title: "Call sync" }} />
         <Stack.Screen name="review/[id]" options={{ title: "How did it go?" }} />
+        <Stack.Screen name="conversation/[id]" options={{ headerShown: false }} />
+        <Stack.Screen name="new-chat" options={{ title: "New chat" }} />
+        <Stack.Screen name="approvals" options={{ title: "Approvals" }} />
         <Stack.Screen name="leave" options={{ title: "Leave" }} />
         <Stack.Screen name="settings" options={{ title: "Settings" }} />
       </Stack>
       {/* The workspace's screenshot allowance and watermark, over every screen. */}
       <ScreenRules />
+      {/* "New message" from a chat that isn't open — who, never what. */}
+      <ChatBanner />
     </>
   );
 }
@@ -43,8 +50,10 @@ function Screens() {
 export default function Layout() {
   return (
     <SessionProvider>
-      <StatusBar style="dark" />
-      <Screens />
+      <ChatProvider>
+        <StatusBar style="dark" />
+        <Screens />
+      </ChatProvider>
     </SessionProvider>
   );
 }

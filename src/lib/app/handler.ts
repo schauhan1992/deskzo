@@ -103,7 +103,11 @@ export async function phoneLockKey(ip: string | null): Promise<string> {
 }
 
 /** A /api/app route handler. The handler runs as the phone's person and returns `{ data }`, or throws an `ApiError`. */
-export function appRoute(options: RouteOptions, handler: (call: AppCall) => Promise<{ status?: number; data: unknown }>) {
+/**
+ * A handler answers JSON (`{ status?, data }`), or a Response of its own — the chat's live stream, a chat file — which
+ * goes out as it is, after the same checks.
+ */
+export function appRoute(options: RouteOptions, handler: (call: AppCall) => Promise<{ status?: number; data: unknown } | Response>) {
   return async (req: Request, context?: RouteContext): Promise<Response> => {
     try {
       const maintenance = await currentMaintenance();
@@ -169,6 +173,7 @@ export function appRoute(options: RouteOptions, handler: (call: AppCall) => Prom
           }
           return handler({ req, url, params, actor, device, body: () => readBody(req) });
         });
+        if (out instanceof Response) return out;
         return appAnswer(out.status ?? 200, { data: out.data });
       } catch (err) {
         return appErrorAnswer(err);

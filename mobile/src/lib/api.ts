@@ -60,6 +60,33 @@ export function api<T>(method: "GET" | "POST" | "PATCH" | "DELETE", path: string
   return request<T>(session, method, path, body);
 }
 
+/** The phone's own sign-in, for what fetch() doesn't carry: a picture in chat, the live stream. Null when not paired. */
+export function signedIn(): { baseUrl: string; headers: Record<string, string> } | null {
+  const session = calls.getSession();
+  if (!session) return null;
+  const headers: Record<string, string> = { authorization: `Bearer ${session.token}` };
+  if (session.host) headers.host = session.host;
+  return { baseUrl: session.baseUrl, headers };
+}
+
+/** A form with files, as this phone's person — React Native writes the multipart boundary itself. */
+export async function upload<T>(path: string, form: FormData): Promise<T> {
+  const where = signedIn();
+  if (!where) throw new ApiError(401, "signed_out", "This phone isn't paired.");
+  let res: Response;
+  try {
+    res = await fetch(`${where.baseUrl}${path}`, { method: "POST", headers: { accept: "application/json", ...where.headers }, body: form });
+  } catch {
+    throw new ApiError(0, "offline", "Can't reach Deskzo. Check the phone's internet connection.");
+  }
+  const json = (await res.json().catch(() => ({}))) as { data?: T; error?: { code: string; message: string } };
+  if (!res.ok) {
+    if (res.status === 401 && json.error?.code === "signed_out") signedOutListeners.forEach((l) => l());
+    throw new ApiError(res.status, json.error?.code ?? `http_${res.status}`, json.error?.message ?? "Deskzo didn't take that. Try again.");
+  }
+  return json.data as T;
+}
+
 // What the server answers (src/lib/app/calls.ts).
 
 export type Me = {
@@ -67,7 +94,7 @@ export type Me = {
   workspace: { name: string | null };
   phone: { id: string; name: string; platform: string; call_sync: boolean };
   /** Older servers answer only calls; the rest count as open there. */
-  can: { calls: boolean; attendance?: boolean; tasks?: boolean };
+  can: { calls: boolean; attendance?: boolean; tasks?: boolean; chat?: boolean };
   /** The workspace's screen rules for this person (src/lib/app/dlp.ts); none from an older server. */
   screen?: ScreenRulesFromServer;
 };
@@ -75,6 +102,7 @@ export type Me = {
 export type ScreenRulesFromServer = {
   screenshots: { limit: number; used: number } | null;
   watermark: { label: string; opacity: number; scope: "CUSTOMER_DATA" | "EVERY_PAGE" } | null;
+  copyBlocked?: boolean;
 };
 
 export type Outcome = "CONNECTED" | "NO_ANSWER" | "BUSY" | "SWITCHED_OFF" | "WRONG_NUMBER" | "LEFT_VOICEMAIL" | "CALLBACK_REQUESTED" | "NOT_INTERESTED";

@@ -11,7 +11,7 @@ group.
 | `READ_CALL_LOG` | Logging the user's calls with customers in their company's CRM; the ringing number for caller ID. | **Required** (below) |
 | `READ_PHONE_STATE` | Knowing when a call rings and ends, to look up the caller and send the call afterwards. | None |
 | `POST_NOTIFICATIONS` | Caller ID while a customer rings; "How did it go?" after a call. | None |
-| `CAMERA` | Scanning the pairing code. | None |
+| `CAMERA` | Scanning the pairing code; a photo the user takes to send in team chat. | None |
 | `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION` | Where the user is when they clock in or out, or sign in where their company requires it — asked then, with the app open. | None — foreground only; `ACCESS_BACKGROUND_LOCATION` and `FOREGROUND_SERVICE_LOCATION` are blocked, so there is no background-location declaration |
 | `DETECT_SCREEN_CAPTURE` | Told that a screenshot was taken in the app (Android 14+), for the user's company's screenshot allowance. Install-time; says only that one was taken. | None |
 | `INTERNET`, `ACCESS_NETWORK_STATE`, `WAKE_LOCK`, `RECEIVE_BOOT_COMPLETED`, `FOREGROUND_SERVICE`, `VIBRATE` | Sending calls in the background (Android's WorkManager). | None |
