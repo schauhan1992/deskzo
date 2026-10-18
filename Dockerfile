@@ -85,6 +85,7 @@ USER node
 EXPOSE 3000
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-# The web app: every workspace, the website, the console, the CMS and the partner portal.
-# The worker runs from this same image with the command: node_modules/.bin/tsx scripts/platform-worker.ts
-CMD ["node_modules/.bin/next", "start"]
+# The web app: every workspace, the website, the console, the CMS and the partner portal — and, with
+# DESKZO_WORKER=in-app (Coolify), the platform worker beside it, restarted when it stops (deploy/start.mjs).
+# The worker can also run from this same image on its own: node_modules/.bin/tsx scripts/platform-worker.ts
+CMD ["node", "deploy/start.mjs"]

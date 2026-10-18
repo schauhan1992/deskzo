@@ -103,7 +103,10 @@ PLATFORM_SMTP_URL=
 PLATFORM_MAIL_FROM=Deskzo One <no-reply@deskzo.com>
 PLATFORM_SALES_EMAIL=
 DNS_RESOLVERS=1.1.1.1,8.8.8.8
+DESKZO_WORKER=in-app
 ```
+
+`DESKZO_WORKER=in-app` runs the platform worker inside the application's container, beside the web app, for as long as the container runs: it sets new workspaces up, keeps the warm pool full and carries out Automate's workflows every couple of seconds. If it stops it is started again five seconds later, without touching the web app (deploy/start.mjs). It is in the same container rather than a second Coolify application so that it shares `/data`, where a workspace's restore lock lives: the worker must see it to leave a workspace alone while it is restored.
 
 Then add the secrets. In the application's **Terminal** (the container is already running from the first deploy), run:
 
@@ -149,16 +152,18 @@ bash -c 'read -rs -p "Password for deskzo.deskzo.com: " ADMIN_PASSWORD && echo &
 
 ### 5. Scheduled Tasks
 
-On the application, under **Scheduled Tasks**, add four:
+On the application, under **Scheduled Tasks**, add three:
 
 | Name | Command | Frequency |
 |---|---|---|
 | Marketing | `node deploy/scheduler.mjs once marketing` | `*/5 * * * *` |
 | Backups | `node deploy/scheduler.mjs once backup` | `*/15 * * * *` |
 | Platform | `node deploy/scheduler.mjs once platform` | `0 * * * *` |
-| Worker | `node_modules/.bin/tsx scripts/platform-worker.ts --once` | `*/5 * * * *` |
 
-Press **Execute Now** on each. The first three should log `200`. The worker sets up new workspaces and keeps the warm pool full. Signups don't wait for it, because the signup form starts one itself.
+
+Press **Execute Now** on each; each should log `200`. The platform worker isn't one of them: it runs all the time inside the application (`DESKZO_WORKER=in-app`, step 3). Look for `[worker]` lines in the application's logs after a deploy. Signups don't wait for it, because the signup form starts one itself.
+
+An installation set up before 18 Oct 2026 has a fourth Scheduled Task, **Worker** (`node_modules/.bin/tsx scripts/platform-worker.ts --once`, every five minutes). Add `DESKZO_WORKER=in-app` to the application's variables, redeploy, check the worker's lines in the logs, then delete that task: two workers do no harm (each workspace is worked under a lease), but one is enough.
 
 ### 6. Check
 

@@ -8,7 +8,7 @@ For whoever runs the platform: what runs where, what to back up, how to release,
 |---|---|---|
 | App server | `npm run build` then `npm start` — every workspace, the public site (`www.`), the staff console (`admin.`) and the website's CMS (`cms.`) | Behind a reverse proxy doing TLS, with `TRUST_PROXY=1`; `NODE_ENV=production` |
 | Partner portal | `partners.<domain>` — resellers' and distributors' own portal (§12), with its own accounts; served by the same app server, from `src/app/platform-partners` | Nothing more to run: `partners.<domain>` in DNS and the proxy's certificate (§8) |
-| Platform worker | `npm run platform:worker` — sets new workspaces up, keeps the warm pool full, runs Automate's workflows (§13) | Long-lived under pm2 or systemd; restarts on failure |
+| Platform worker | `npm run platform:worker` — sets new workspaces up, keeps the warm pool full, runs Automate's workflows (§13) | Long-lived: on Coolify inside the app's container (`DESKZO_WORKER=in-app`, deploy/start.mjs, restarted when it stops); under Compose its own service; elsewhere pm2 or systemd |
 | Schedulers | Plain HTTPS calls with a bearer secret | cron / systemd timers (below) |
 | PostgreSQL 16 | One database per workspace, plus the control plane and the reference database | With continuous archiving (point-in-time recovery) |
 | PgBouncer | Pools the app's connections to workspace databases | Transaction mode (§7) |
