@@ -16,6 +16,7 @@ import {
   House,
   LogIn,
   LogOut,
+  Timer,
   Umbrella,
   X,
   type LucideIcon,
@@ -55,6 +56,8 @@ const TIMING = {
   early: { icon: ClockArrowDown, className: "text-warning", label: "Left early" },
   overtime: { icon: ClockArrowUp, className: "text-info", label: "Overtime" },
 } as const;
+/** A short leave on the day (owner, 18 Oct 2026): solid once approved, faint while it waits. */
+const SHORT_LEAVE = { icon: Timer, approved: "text-brand", waiting: "text-subtle", label: "Short leave" } as const;
 const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 
 /** The day's main mark: its status, else its day off, else nothing (the future, or not recorded). */
@@ -104,6 +107,7 @@ export function AttendanceGrid({
       const Icon = t.icon;
       return { key: k, node: <Icon className={`h-3.5 w-3.5 ${t.className}`} aria-hidden />, label: t.label };
     }),
+    { key: "short", node: <SHORT_LEAVE.icon className={`h-3.5 w-3.5 ${SHORT_LEAVE.approved}`} aria-hidden />, label: SHORT_LEAVE.label },
   ];
 
   return (
@@ -207,6 +211,9 @@ function DayCell({ cell, canMark, time, onOpen }: { cell: Cell; canMark: boolean
     cell.checkInAt ? `in ${time(cell.checkInAt)}${cell.checkOutAt ? `, out ${time(cell.checkOutAt)}` : ""}` : null,
     ...timing.map((k) => TIMING[k].label.toLowerCase()),
     cell.pending ? "a correction is waiting" : null,
+    cell.shortLeave
+      ? `short leave ${cell.shortLeave.words}${cell.shortLeave.approved ? (cell.shortLeave.excused ? ", excused the mark" : "") : ", waiting for approval"}`
+      : null,
     cell.note,
     cell.regularised ? "corrected" : null,
   ]
@@ -236,7 +243,14 @@ function DayCell({ cell, canMark, time, onOpen }: { cell: Cell; canMark: boolean
           return <Icon key={k} className={`h-3 w-3 ${t.className}`} aria-hidden />;
         })}
       </span>
-      {cell.pending && <Hourglass className="h-3 w-3 text-subtle" aria-hidden />}
+      {(cell.pending || cell.shortLeave) && (
+        <span className="flex items-center gap-0.5">
+          {cell.pending && <Hourglass className="h-3 w-3 text-subtle" aria-hidden />}
+          {cell.shortLeave && (
+            <SHORT_LEAVE.icon className={`h-3 w-3 ${cell.shortLeave.approved ? SHORT_LEAVE.approved : SHORT_LEAVE.waiting}`} aria-hidden />
+          )}
+        </span>
+      )}
     </button>
   );
 }

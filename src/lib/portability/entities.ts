@@ -482,6 +482,8 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
   AssetMovement: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   AttendanceDay: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   AttendanceRegularisation: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
+  ShortLeaveRequest: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
+  ShortLeavePolicy: { disposition: "specification", reason: "Configuration rather than records: the company's short leave length and monthly count, two numbers to set again in whatever comes next." },
   EwayBill: {
     disposition: "archive",
     reason:

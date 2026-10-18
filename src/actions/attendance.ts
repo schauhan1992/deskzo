@@ -13,6 +13,8 @@ import { workspaceClock } from "@/lib/time/workspace";
 import { attendanceMarkSchema } from "@/lib/validation/hr";
 import { officeHours } from "@/lib/hr/office-hours";
 import { dayTiming, officeDayMinutes, officeHoursOrRefusal, workedMinutesOf, type OfficeHours } from "@/lib/hr/office-hours-rules";
+import { monthShortLeaves } from "@/lib/hr/short-leave";
+import { spanWords, timingWithShortLeave } from "@/lib/hr/short-leave-rules";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -188,6 +190,11 @@ export type MonthCell = {
   late: boolean;
   early: boolean;
   overtime: boolean;
+  /**
+   * The day's short leave, pending or approved (src/lib/hr/short-leave-rules.ts): its hours in words,
+   * and whether it cleared a Late or Left early mark.
+   */
+  shortLeave: { words: string; approved: boolean; excused: boolean } | null;
 };
 
 export type MonthRow = {
@@ -248,7 +255,7 @@ export async function attendanceMonth(params: {
     select: { id: true, userSeq: true, name: true, photoUpdatedAt: true, employeeProfile: { select: { designation: true } } },
   });
 
-  const [records, holidays, pendingRows, hours] = await Promise.all([
+  const [records, holidays, pendingRows, hours, shortLeaves] = await Promise.all([
     db.attendanceDay.findMany({
       where: { userId: { in: people.map((p) => p.id) }, date: { gte: from, lte: to } },
       select: { userId: true, date: true, status: true, workedMinutes: true, note: true, regularisedAt: true, checkInAt: true, checkOutAt: true },
@@ -259,6 +266,7 @@ export async function attendanceMonth(params: {
       select: { userId: true, date: true },
     }),
     officeHours(),
+    monthShortLeaves(people.map((p) => p.id), from, to),
   ]);
   const pending = new Set(pendingRows.map((r) => `${r.userId}:${toKey(r.date)}`));
 
@@ -305,6 +313,11 @@ export async function attendanceMonth(params: {
         unrecorded += 1;
       }
 
+      const asRecorded = record ?? { status: null, checkInAt: null, checkOutAt: null, workedMinutes: null };
+      // An approved short leave clears the Late or Left early mark it covers (owner, 18 Oct 2026).
+      const short = shortLeaves.get(`${person.id}:${key}`) ?? null;
+      const { excused, ...timing } = timingWithShortLeave(dayTiming(asRecorded, hours, minuteOf), asRecorded, short, hours, minuteOf);
+
       return {
         date: key,
         status: record?.status ?? null,
@@ -316,7 +329,8 @@ export async function attendanceMonth(params: {
         checkOutAt: record?.checkOutAt ? record.checkOutAt.toISOString() : null,
         future: day > today,
         pending: pending.has(`${person.id}:${key}`),
-        ...dayTiming(record ?? { status: null, checkInAt: null, checkOutAt: null, workedMinutes: null }, hours, minuteOf),
+        ...timing,
+        shortLeave: short ? { words: spanWords(short), approved: short.approved, excused } : null,
       };
     });
     // Hours worked against the hours the working days come to, less leave taken (owner, 16 Oct 2026).

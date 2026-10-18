@@ -222,6 +222,7 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "security-policy.ts": "core",
   "security.ts": "core",
   "settlement.ts": ["payroll"],
+  "short-leave.ts": ["hr"],
   "support-access.ts": "core",
   // Contact Support: asking the platform for help is part of every plan.
   "support.ts": "core",
@@ -251,6 +252,7 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "wishes.ts": ["hr"],
   "workspace.ts": ["workspace"],
   "platform/console-admin.ts": "platform",
+  "platform/console-ai.ts": "platform",
   "platform/console-automate.ts": "platform",
   "platform/console-alerts.ts": "platform",
   "platform/console-announcements.ts": "platform",

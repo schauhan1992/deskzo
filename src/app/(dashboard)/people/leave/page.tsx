@@ -4,7 +4,9 @@ import { ModuleDisabledNotice } from "@/components/settings/module-disabled-noti
 import { hrCapabilities, listLeaveTypes, listPeople } from "@/actions/hr";
 import { listDepartmentOptions } from "@/actions/department";
 import { allLeaveRequests, leaveApprovalQueue, leaveBalances, myLeaveRequests, upcomingLeave } from "@/actions/leave";
+import { shortLeaveOverview } from "@/actions/short-leave";
 import { LeaveWorkspace } from "@/components/hr/leave-workspace";
+import { ShortLeavePanel } from "@/components/hr/short-leave-panel";
 import { LeaveRegister } from "@/components/hr/leave-register";
 import { TabNav } from "@/components/ui/tab-nav";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
@@ -44,7 +46,7 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
     to: params.to,
   };
 
-  const [balances, mine, queue, upcoming, leaveTypes, departments, people, register] = await Promise.all([
+  const [balances, mine, queue, upcoming, leaveTypes, departments, people, register, shortLeave] = await Promise.all([
     leaveBalances(caps.userId),
     myLeaveRequests(view === "mine" ? filters : undefined),
     leaveApprovalQueue(view === "all" ? filters : undefined),
@@ -55,6 +57,7 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
     view === "all"
       ? allLeaveRequests({ ...filters, page, pageSize })
       : Promise.resolve({ rows: [], total: 0, pendingCount: 0 }),
+    view === "mine" ? shortLeaveOverview() : Promise.resolve(null),
   ]);
 
   // The leave year we are in, from the workspace's today — as leaveBalances reads it.
@@ -144,13 +147,17 @@ export default async function LeavePage({ searchParams }: { searchParams: Promis
             />
           </>
         ) : (
-          <LeaveWorkspace
-            balances={balances}
-            mine={mine}
-            queue={queue}
-            upcoming={upcoming}
-            leaveTypes={leaveTypes.map((t) => ({ id: t.id, name: t.name, code: t.code, paid: t.paid }))}
-          />
+          <div className="space-y-5">
+            <LeaveWorkspace
+              balances={balances}
+              mine={mine}
+              queue={queue}
+              upcoming={upcoming}
+              leaveTypes={leaveTypes.map((t) => ({ id: t.id, name: t.name, code: t.code, paid: t.paid }))}
+            />
+            {/* By the hour, beside leave by the day (owner, 18 Oct 2026); absent until the tables are there. */}
+            {shortLeave && <ShortLeavePanel overview={shortLeave} />}
+          </div>
         )}
       </div>
     </div>

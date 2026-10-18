@@ -686,6 +686,8 @@ model User {
   biometricPunches         BiometricPunch[]           @relation("UserBiometricPunches")
   regularisations          AttendanceRegularisation[] @relation("UserRegularisations")
   regularisationsToDecide  AttendanceRegularisation[] @relation("RegularisationApprover")
+  shortLeaves              ShortLeaveRequest[]        @relation("UserShortLeaves")
+  shortLeavesToDecide      ShortLeaveRequest[]        @relation("ShortLeaveApprover")
   documents                EmployeeDocument[]         @relation("UserDocuments")
   documentsUploaded        EmployeeDocument[]         @relation("DocumentUploadedBy")
   employmentHistory        EmploymentHistory[]        @relation("UserEmploymentHistory")
@@ -5727,6 +5729,49 @@ model AttendanceRegularisation {
   @@index([status])
   @@index([approverId, status])
   @@map("attendance_regularisations")
+}
+
+/**
+ * Short leave (owner, 18 Oct 2026): a couple of hours off on one working day — coming in late, leaving
+ * early, or out in between — approved by the reporting manager like leave. Free within the company's
+ * monthly limit, so it touches no leave balance; past the limit, a half-day leave is the way. Applied for
+ * in advance, or afterwards to clear a Late or Left early mark, while the day is in this month or later.
+ * The times are minutes from midnight on the workspace's clock, as office hours are. src/lib/hr/short-leave-rules.ts.
+ */
+model ShortLeaveRequest {
+  id           String      @id @default(cuid())
+  userId       String
+  user         User        @relation("UserShortLeaves", fields: [userId], references: [id], onDelete: Cascade)
+  date         DateTime    @db.Date
+  fromMinute   Int
+  toMinute     Int
+  reason       String
+  /// The same states as a leave request — the same shape of decision.
+  status       LeaveStatus @default(PENDING)
+  approverId   String?
+  approver     User?       @relation("ShortLeaveApprover", fields: [approverId], references: [id])
+  decidedAt    DateTime?
+  decisionNote String?
+  cancelledAt  DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([userId, date])
+  @@index([status])
+  @@index([approverId, status])
+  @@map("short_leave_requests")
+}
+
+/// The company's short-leave rules, changed by whoever manages HR. One row, `id = "global"`; without it,
+/// the owner's defaults: up to 2 hours each, 2 a month. A month's limit of 0 offers no short leave.
+model ShortLeavePolicy {
+  id          String   @id @default("global")
+  maxMinutes  Int      @default(120)
+  perMonth    Int      @default(2)
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("short_leave_policy")
 }
 
 // ─── Employee documents, history and letters ──────────────────────────────────
