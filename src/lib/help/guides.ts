@@ -201,12 +201,16 @@ const PRODUCT_NAMES = new Set([...PRODUCTS.map((p) => p.name), ...ADD_ONS.map((a
 const PRODUCT_MENTION = new RegExp(`(?:\\b${PRODUCT_FAMILY}|\\{siteName\\})\\s+([A-Z][A-Za-z]+)`, "g");
 /** "Deskzo Revenue" for the add-on "Revenue & Close" is a name somebody would type: an add-on's first word counts. */
 const ADD_ON_FIRST_WORDS = new Set(ADD_ONS.map((a) => `${PRODUCT_FAMILY} ${a.name.split(/\s+/)[0]}`));
-/** The rest of each add-on's name, by its first word: "Automate" → " Plus". */
-const ADD_ON_RESTS = new Map<string, string[]>();
-for (const a of ADD_ONS) {
-  const [first, ...rest] = a.name.split(/\s+/);
-  if (first && rest.length) ADD_ON_RESTS.set(first, [...(ADD_ON_RESTS.get(first) ?? []), ` ${rest.join(" ")}`]);
-}
+/** The rest of each add-on's name, by its first word: "Automate" → " Plus". Built once, read only. */
+const ADD_ON_RESTS: ReadonlyMap<string, string[]> = new Map(
+  Object.entries(
+    ADD_ONS.reduce<Record<string, string[]>>((byFirst, a) => {
+      const [first, ...rest] = a.name.split(/\s+/);
+      if (first && rest.length) byFirst[first] = [...(byFirst[first] ?? []), ` ${rest.join(" ")}`];
+      return byFirst;
+    }, {}),
+  ),
+);
 /** A module's own name: "Deskzo Automate" isn't the add-on Automate Plus cut short — it needs its whole name. */
 const MODULE_LABELS = new Set(MODULE_REGISTRY.map((m) => m.label));
 /** A word that may follow "{siteName}" without naming a product: a sentence going on ("{siteName} Help Center"…). */

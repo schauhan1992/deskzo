@@ -2,6 +2,7 @@ import type { WishKind } from "@prisma/client";
 import { db } from "@/lib/db";
 import { PEOPLE_ONLY } from "@/lib/people";
 import { wants } from "@/lib/notifications/catalogue";
+import { sendEmailNotification } from "@/lib/email";
 import { workspaceClock } from "@/lib/time/workspace";
 import { anniversaryKey, birthdayKey } from "@/lib/hr/celebrations";
 import { wishSummary } from "@/lib/hr/wish-words";
@@ -85,6 +86,9 @@ export async function sendWish(
  * Honours the person's preference for WISHES like every other notice (`notifyUser`), and never fails
  * the wish: it is the wish that matters, and the card shows it whatever happens here. Two wishes
  * landing at once can both find no row and both create; the loser of that race tries once more.
+ *
+ * Emailed when the workspace emails wishes (src/lib/notifications/email-settings.ts) — once for the
+ * occasion, with its first wish, as the bell has one notice for the day however many arrive.
  */
 async function foldIntoNotification(recipientId: string, occasionKey: string, kind: WishKind) {
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -93,7 +97,7 @@ async function foldIntoNotification(recipientId: string, occasionKey: string, ki
         where: { userId_type: { userId: recipientId, type: "WISHES" } },
         select: { inApp: true, email: true },
       });
-      if (!wants("WISHES", "inApp", preference)) return;
+      const shown = wants("WISHES", "inApp", preference);
       const wishes = await db.wish.findMany({
         where: { recipientId, occasionKey },
         orderBy: { createdAt: "desc" },
@@ -102,12 +106,15 @@ async function foldIntoNotification(recipientId: string, occasionKey: string, ki
       const title = wishSummary(wishes.map((w) => w.sender.name), kind);
       const message = wishes.length > 2 ? `${wishes.length} wishes today. Everyone who sent one is on the card.` : null;
       const dedupeKey = `wishes:${occasionKey}`;
-      await db.notification.upsert({
-        where: { userId_dedupeKey: { userId: recipientId, dedupeKey } },
-        create: { userId: recipientId, type: "WISHES", title, message, link: WISHES_LINK, dedupeKey },
-        // Back to the top of the bell, unread, as a new wish is news.
-        update: { title, message, read: false, readAt: null, archivedAt: null, createdAt: new Date() },
-      });
+      if (shown) {
+        await db.notification.upsert({
+          where: { userId_dedupeKey: { userId: recipientId, dedupeKey } },
+          create: { userId: recipientId, type: "WISHES", title, message, link: WISHES_LINK, dedupeKey },
+          // Back to the top of the bell, unread, as a new wish is news.
+          update: { title, message, read: false, readAt: null, archivedAt: null, createdAt: new Date() },
+        });
+      }
+      if (wishes.length === 1) await sendEmailNotification({ userId: recipientId, type: "WISHES", subject: title, body: message ?? "", link: WISHES_LINK });
       return;
     } catch (err) {
       if (attempt === 1) console.error("wish notification failed", err);

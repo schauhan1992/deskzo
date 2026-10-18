@@ -4033,8 +4033,8 @@ model NotificationPreference {
    */
   inApp Boolean @default(true)
   /**
-   * Email. Stored and honoured at the call site, but nothing sends yet — `sendEmailNotification`
-   * is still a stub, so this is a preference waiting for a transport rather than one in effect.
+   * No longer read: which notifications are emailed is the workspace's choice, made by an admin for
+   * everyone (`NotificationEmailType`). Kept so older rows and older code still load.
    */
   email Boolean @default(true)
 
@@ -4042,6 +4042,42 @@ model NotificationPreference {
 
   @@unique([userId, type])
   @@map("notification_preferences")
+}
+
+/**
+ * Which notifications this workspace emails, chosen by an admin for everyone (Settings › Email
+ * notifications). A row only where the admin has chosen; a type without one keeps its default —
+ * src/lib/notifications/email-settings.ts. The admin's choice is final: a person can't turn an
+ * email off, or on, for themselves.
+ */
+model NotificationEmailType {
+  type        NotificationType @id
+  email       Boolean
+  updatedById String?
+  updatedAt   DateTime         @updatedAt
+  /**
+   * When it was last switched on. A reminder the bell's sweep raises (a task overdue, a callback due) is
+   * emailed only if it fell due after this — switching one on doesn't email everything already pending.
+   */
+  onSince     DateTime?
+
+  @@map("notification_email_types")
+}
+
+/**
+ * A reminder the bell's sweep raises — a task overdue, a callback due, a meeting about to start —
+ * emailed by the scheduled sweep (src/lib/notifications/reminder-emails.ts): claimed before it's sent,
+ * so it goes once, whether or not the person has its notice in their bell. Kept a week, longer than
+ * any reminder is still emailed after it falls due.
+ */
+model NotificationEmailClaim {
+  userId    String
+  dedupeKey String
+  createdAt DateTime @default(now())
+
+  @@id([userId, dedupeKey])
+  @@index([createdAt])
+  @@map("notification_email_claims")
 }
 
 /**

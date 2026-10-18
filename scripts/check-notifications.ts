@@ -269,15 +269,15 @@ async function main() {
       ok("  with the stored mute reflected", all.ok && all.data.find((r) => r.type === "TASK_ASSIGNED")?.inApp === false);
       ok("  and an untouched type reading as on", all.ok && all.data.find((r) => r.type === "VISIT_SCHEDULED")?.inApp === true);
 
-      const refused = await setNotificationPreference({ type: "SECURITY_ALERT", inApp: false, email: false });
+      const refused = await setNotificationPreference({ type: "SECURITY_ALERT", inApp: false });
       // Refused rather than stored-and-ignored: a switch that shows off while the notifications keep
       // coming takes the credibility of every other switch with it.
       ok("an always-on type refuses to be switched off", !refused.ok, refused.ok ? "ACCEPTED IT" : refused.error);
 
-      const nonsense = await setNotificationPreference({ type: "NOT_A_TYPE", inApp: false, email: false });
+      const nonsense = await setNotificationPreference({ type: "NOT_A_TYPE", inApp: false });
       ok("an unknown type is refused", !nonsense.ok);
 
-      const good = await setNotificationPreference({ type: "VISIT_SCHEDULED", inApp: false, email: true });
+      const good = await setNotificationPreference({ type: "VISIT_SCHEDULED", inApp: false });
       ok("an ordinary type saves", good.ok, good.ok ? "" : good.error);
 
       const cleared = await resetNotificationPreferences();

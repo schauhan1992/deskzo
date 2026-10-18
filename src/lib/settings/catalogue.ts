@@ -6,6 +6,7 @@ import {
   SquareKanban,
   CreditCard,
   Banknote,
+  BellRing,
   BadgePercent,
   BookLock,
   Boxes,
@@ -404,6 +405,16 @@ export const SETTINGS: SettingsSection[] = [
             icon: Send,
             permission: "settings.manage",
             module: "marketing",
+          },
+          {
+            // Owner, 18 Oct 2026: which notifications go by email too, chosen for everyone (src/lib/notifications/email-settings.ts).
+            key: "notification-emails",
+            label: "Email notifications",
+            description: "Which notifications are emailed as well as shown in the app — the same for everyone — and where they're sent from.",
+            href: "/settings/notification-emails",
+            icon: BellRing,
+            permission: "settings.manage",
+            module: "notifications",
           },
           {
             key: "feedback",

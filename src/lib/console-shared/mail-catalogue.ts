@@ -178,7 +178,7 @@ export const MAIL_STREAMS: readonly MailStreamDef[] = [
     key: "ALERTS",
     label: "Alerts",
     description: "Notices for your team, and warnings to workspace owners.",
-    examples: "Website contact-form leads, partner applications, custom-domain warnings",
+    examples: "Website contact-form leads, partner applications, custom-domain warnings, a workspace's emailed notifications when it has no mail server of its own",
   },
   {
     key: "DOCUMENTS",

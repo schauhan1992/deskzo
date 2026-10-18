@@ -326,14 +326,23 @@ async function run(db: PrismaClient) {
     await as(seller, () => documents.issueTradeDocument({ id: own }));
     ok("a salesperson who issues their own proforma isn't told about it", (await db.notification.count({ where: { userId: seller.id, type: "PROFORMA_ISSUED" } })) === 1 && sent.length === 1);
 
+    // Which kinds are emailed is the workspace's choice, made by an admin for everyone (owner, 18 Oct 2026).
     await db.notificationPreference.create({ data: { userId: seller.id, type: "PROFORMA_ISSUED", inApp: true, email: false } });
+    const anyway = await draft(seller, "PROFORMA");
+    await as(accounts, () => documents.issueTradeDocument({ id: anyway }));
+    ok("a person's own old email switch doesn't stop it: the workspace's choice is final", (await db.notification.count({ where: { userId: seller.id, type: "PROFORMA_ISSUED" } })) === 2 && sent.length === 2, sent.length);
+
+    /* eslint-disable-next-line @typescript-eslint/no-require-imports */
+    const emailSettings = require("../src/lib/notifications/email-settings") as typeof import("../src/lib/notifications/email-settings");
+    await emailSettings.setEmailed("PROFORMA_ISSUED", false, accounts.id);
     const quiet = await draft(seller, "PROFORMA");
     await as(accounts, () => documents.issueTradeDocument({ id: quiet }));
-    ok("with its email switched off, they're told in the app only", (await db.notification.count({ where: { userId: seller.id, type: "PROFORMA_ISSUED" } })) === 2 && sent.length === 1);
+    ok("with the workspace no longer emailing it, they're told in the app only", (await db.notification.count({ where: { userId: seller.id, type: "PROFORMA_ISSUED" } })) === 3 && sent.length === 2, sent.length);
+    await emailSettings.setEmailed("PROFORMA_ISSUED", true, accounts.id);
 
     const invoice = await draft(seller, "INVOICE");
     await as(accounts, () => documents.issueTradeDocument({ id: invoice }));
-    ok("an invoice issued by accounts sends no such email", sent.length === 1);
+    ok("an invoice issued by accounts sends no such email", sent.length === 2);
   } finally {
     setTestPlatformMailer(null);
   }

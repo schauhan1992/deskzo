@@ -74,7 +74,7 @@ export const NOTIFICATION_CATALOGUE: NotificationDefinition[] = [
   { type: "ORDER_STATUS_CHANGED", label: "An order changes status", when: "An order you raised or watch is approved, processed or fulfilled.", group: "sales" },
   { type: "ORDER_WATCHER_ADDED", label: "I am added to an order", when: "Somebody adds you as a watcher.", group: "sales" },
   { type: "DOCUMENT_APPROVAL_REQUESTED", label: "A document needs my approval", when: "Somebody submits a quotation or invoice you are an approver for. Never for your own — nobody approves what they submitted.", group: "sales" },
-  { type: "PROFORMA_ISSUED", label: "A proforma on my deal is issued", when: "Somebody else — usually accounts — issues a proforma invoice you're the salesperson on, ready to send to the client. Emailed too.", group: "sales" },
+  { type: "PROFORMA_ISSUED", label: "A proforma on my deal is issued", when: "Somebody else — usually accounts — issues a proforma invoice you're the salesperson on, ready to send to the client.", group: "sales" },
   { type: "DOCUMENT_APPROVAL_DECIDED", label: "My document was approved or sent back", when: "An approver signs off something you submitted, or sends it back with a reason.", group: "sales" },
   { type: "RENEWAL_EXPIRING", label: "A renewal is coming up", when: "A subscription on your accounts enters its expiry window.", group: "sales" },
   { type: "VISIT_SCHEDULED", label: "A visit is scheduled", when: "A field visit is booked in your name.", group: "sales" },
@@ -96,7 +96,7 @@ export const NOTIFICATION_CATALOGUE: NotificationDefinition[] = [
   { type: "PAYMENT_PROMISES_SUMMARY", label: "Broken promises to pay, once a day", when: "Clients' promised dates passed without the money — one summary a day, for whoever records payments.", group: "money" },
   { type: "RECURRING_DRAFTS_RAISED", label: "Recurring billing raised drafts, once a day", when: "Subscriptions renewed or instalments fell due, and their invoices are waiting as drafts — one notice a day, for whoever issues documents.", group: "money" },
   { type: "PAYMENT_FOLLOW_UP_DUE", label: "A payment follow-up is due", when: "The day you planned to chase a client's payment again arrives, when no task reminds you.", group: "money" },
-  { type: "AI_CREDITS", label: "Deskzo AI credits run low", when: "Four fifths of this month's AI credits are used, or none are left — for whoever manages the plan and billing. Emailed too.", group: "money" },
+  { type: "AI_CREDITS", label: "Deskzo AI credits run low", when: "Four fifths of this month's AI credits are used, or none are left — for whoever manages the plan and billing.", group: "money" },
 
   // ─── People ─────────────────────────────────────────────────────────────────────────────────
   { type: "LEAVE_REQUESTED", label: "Leave needs my approval", when: "Somebody who reports to you asks for leave.", group: "people" },
@@ -168,6 +168,9 @@ export type Channel = "inApp" | "email";
 
 /**
  * Whether one notification should be delivered down one channel.
+ *
+ * Only the bell asks now: email is the workspace's choice, not the person's
+ * (src/lib/notifications/email-settings.ts), so the stored `email` is no longer read.
  *
  * The rules, in order:
  *

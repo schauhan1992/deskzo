@@ -61,11 +61,28 @@ export type PlatformMail = {
 };
 type Sender = (mail: PlatformMail) => Promise<void>;
 
-let testSender: Sender | null = null;
+let testSender: { send: Sender; companyMail: boolean } | null = null;
 
-/** Set only by check scripts. */
-export function setTestPlatformMailer(sender: Sender | null) {
-  testSender = sender;
+/**
+ * Set only by check scripts. `companyMail`: a notification may still go through the workspace's own
+ * mail server while this one is replaced — for a check whose server is a fake (check:notification-emails).
+ */
+export function setTestPlatformMailer(sender: Sender | null, options: { companyMail?: boolean } = {}) {
+  testSender = sender ? { send: sender, companyMail: options.companyMail === true } : null;
+}
+
+/** Whether a check has replaced the sender. */
+export function platformMailerReplaced(): boolean {
+  return testSender !== null;
+}
+
+/**
+ * Whether a notification email may go through the company's own mail server (src/lib/email.ts):
+ * always, except while a check has replaced this sender without saying so — so a check run against a
+ * workspace with a real mail server set up never sends through it.
+ */
+export function companyMailAllowed(): boolean {
+  return testSender === null || testSender.companyMail;
 }
 
 /** A From header: the address under a name, the name stripped of anything that could break the header. */
@@ -77,7 +94,7 @@ function fromHeader(from: MailFrom): string {
 /** Sends it as its type says. Gives back the address it went from — null from a check's stand-in. */
 export async function sendPlatformMail(mail: PlatformMail): Promise<string | null> {
   if (testSender) {
-    await testSender(mail);
+    await testSender.send(mail);
     return null;
   }
   return (await deliverMail(mail)).fromAddress;

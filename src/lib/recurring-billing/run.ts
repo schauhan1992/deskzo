@@ -5,6 +5,7 @@ import { automationUserId } from "@/lib/automation-user";
 import { workspaceClock } from "@/lib/time/workspace";
 import { recordAudit } from "@/lib/audit";
 import { wants } from "@/lib/notifications/catalogue";
+import { sendEmailNotification } from "@/lib/email";
 import { peopleHolding } from "@/lib/orders/handoff";
 import { resellerOrderRefusal } from "@/lib/orders/reseller-gate";
 import { partyDetails } from "@/lib/proposals/party";
@@ -403,7 +404,10 @@ async function draftFor(
   return createDraftDocument({ id: actorId, branchFor: order.addedByUserId }, parsed.data, "RECURRING_BILLING");
 }
 
-/** One notice a day to whoever issues documents: how many drafts are waiting, and where. */
+/**
+ * One notice a day to whoever issues documents: how many drafts are waiting, and where. Emailed too
+ * when the workspace emails the kind — once, with the row, or by the day's claim for somebody who muted it.
+ */
 async function tellIssuers(report: RecurringBillingReport, today: Date): Promise<number> {
   const type = "RECURRING_DRAFTS_RAISED" as const;
   let told = 0;
@@ -412,20 +416,19 @@ async function tellIssuers(report: RecurringBillingReport, today: Date): Promise
       where: { userId_type: { userId, type } },
       select: { inApp: true, email: true },
     });
-    if (!wants(type, "inApp", preference)) continue;
-    const { count } = await db.notification.createMany({
-      data: [
-        {
-          userId,
-          type,
-          title: `${report.drafts} draft invoice${report.drafts === 1 ? "" : "s"} from recurring billing`,
-          message: `${report.renewals > 0 ? `${report.renewals} subscription${report.renewals === 1 ? "" : "s"} renewed and ` : ""}instalments due today are waiting as drafts — check them, then issue them.`,
-          link: "/sales/invoices?status=DRAFT&origin=RECURRING_BILLING",
-          dedupeKey: `${RECURRING_BILLING_JOB}:${isoDay(today)}`,
-        },
-      ],
-      skipDuplicates: true,
-    });
+    const shown = wants(type, "inApp", preference);
+    const title = `${report.drafts} draft invoice${report.drafts === 1 ? "" : "s"} from recurring billing`;
+    const message = `${report.renewals > 0 ? `${report.renewals} subscription${report.renewals === 1 ? "" : "s"} renewed and ` : ""}instalments due today are waiting as drafts — check them, then issue them.`;
+    const link = "/sales/invoices?status=DRAFT&origin=RECURRING_BILLING";
+    const count = shown
+      ? (
+          await db.notification.createMany({
+            data: [{ userId, type, title, message, link, dedupeKey: `${RECURRING_BILLING_JOB}:${isoDay(today)}` }],
+            skipDuplicates: true,
+          })
+        ).count
+      : 0;
+    if (count === 1 || !shown) await sendEmailNotification({ userId, type, subject: title, body: message, link });
     told += count;
   }
   return told;

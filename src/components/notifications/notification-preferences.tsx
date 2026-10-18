@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Info, Lock, RotateCcw } from "lucide-react";
+import { Info, Lock, Mail, RotateCcw } from "lucide-react";
 import type { NotificationType } from "@prisma/client";
 import {
   resetNotificationPreferences,
@@ -22,6 +22,9 @@ import { Button } from "@/components/ui/button";
  * Saved on the switch rather than behind a Save button. There is no coherent half-state to protect
  * against, and a page of forty toggles with one Save at the bottom is a page people leave without
  * pressing it.
+ *
+ * The bell only. Which kinds are emailed is the workspace's choice, made by its admins for everyone
+ * (Settings › Email notifications), so it is shown here as a mark rather than offered as a switch.
  */
 
 export function NotificationPreferences({ preferences }: { preferences: PreferenceRow[] }) {
@@ -32,18 +35,18 @@ export function NotificationPreferences({ preferences }: { preferences: Preferen
 
   const byType = new Map(rows.map((r) => [r.type, r]));
 
-  const set = (type: NotificationType, channel: "inApp" | "email", value: boolean) => {
+  const set = (type: NotificationType, value: boolean) => {
     const current = byType.get(type);
     if (!current || current.alwaysOn) return;
 
-    const next = { ...current, [channel]: value };
+    const next = { ...current, inApp: value };
     // Moved at once so the switch responds, and put back if the server disagrees.
     setRows((prev) => prev.map((r) => (r.type === type ? next : r)));
     setBusy(type);
     setError(null);
 
     startTransition(async () => {
-      const result = await setNotificationPreference({ type, inApp: next.inApp, email: next.email });
+      const result = await setNotificationPreference({ type, inApp: next.inApp });
       setBusy(null);
       if (!result.ok) {
         setRows((prev) => prev.map((r) => (r.type === type ? current : r)));
@@ -56,12 +59,13 @@ export function NotificationPreferences({ preferences }: { preferences: Preferen
     setBusy("__all__");
     startTransition(async () => {
       await resetNotificationPreferences();
-      setRows((prev) => prev.map((r) => ({ ...r, inApp: true, email: true })));
+      setRows((prev) => prev.map((r) => ({ ...r, inApp: true })));
       setBusy(null);
     });
   };
 
-  const muted = rows.filter((r) => !r.alwaysOn && (!r.inApp || !r.email)).length;
+  const muted = rows.filter((r) => !r.alwaysOn && !r.inApp).length;
+  const emailed = rows.filter((r) => r.emailed).length;
 
   return (
     <div className="space-y-4">
@@ -76,8 +80,14 @@ export function NotificationPreferences({ preferences }: { preferences: Preferen
             <span>
               Everything is on until you say otherwise, so a new kind of notification reaches you without your
               having to find it here.{" "}
-              <span className="font-medium text-text">Email goes out for a proforma issued on your deal</span>; for
-              the rest, the email column is kept for when they&apos;re sent too.
+              {emailed > 0 ? (
+                <>
+                  The ones marked <span className="font-medium text-text">Emailed</span> are also sent to your inbox —
+                  your workspace&apos;s admins choose which, for everyone, and switching one off here doesn&apos;t stop its email.
+                </>
+              ) : (
+                <>Your workspace doesn&apos;t email any of them — its admins choose which, for everyone.</>
+              )}
             </span>
           </div>
           {muted > 0 && (
@@ -105,7 +115,6 @@ export function NotificationPreferences({ preferences }: { preferences: Preferen
                   <tr className="border-b border-line text-left text-xs text-muted">
                     <th className="px-5 py-2 font-medium">Tell me when…</th>
                     <th className="w-20 px-3 py-2 text-center font-medium">In app</th>
-                    <th className="w-20 px-3 py-2 text-center font-medium">Email</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -126,6 +135,15 @@ export function NotificationPreferences({ preferences }: { preferences: Preferen
                                 always on
                               </span>
                             )}
+                            {row.emailed && (
+                              <span
+                                className="inline-flex items-center gap-1 text-xs text-muted"
+                                title="Your workspace emails this one to everyone it's for. Its admins choose which, under Settings › Email notifications."
+                              >
+                                <Mail className="h-3 w-3" />
+                                Emailed
+                              </span>
+                            )}
                           </div>
                           <div className="mt-0.5 text-xs text-muted">{d.when}</div>
                         </td>
@@ -136,17 +154,7 @@ export function NotificationPreferences({ preferences }: { preferences: Preferen
                             checked={row.inApp}
                             disabled={row.alwaysOn || busy !== null}
                             aria-label={`${d.label} — in app`}
-                            onChange={(e) => set(d.type, "inApp", e.target.checked)}
-                          />
-                        </td>
-                        <td className="px-3 py-2.5 text-center">
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4"
-                            checked={row.email}
-                            disabled={row.alwaysOn || busy !== null}
-                            aria-label={`${d.label} — email`}
-                            onChange={(e) => set(d.type, "email", e.target.checked)}
+                            onChange={(e) => set(d.type, e.target.checked)}
                           />
                         </td>
                       </tr>

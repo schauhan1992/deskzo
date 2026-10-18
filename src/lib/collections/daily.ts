@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { can } from "@/lib/authz/resolve";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
 import { wants } from "@/lib/notifications/catalogue";
+import { sendEmailNotification } from "@/lib/email";
 import { PEOPLE_ONLY } from "@/lib/people";
 import { formatMoney } from "@/lib/currency";
 import { formatOrderId } from "@/lib/order-id";
@@ -58,17 +59,26 @@ export type CollectionsDailyReport = {
 /**
  * One notification, honouring what the person has asked not to be told about (as `notifyUser` does),
  * and never twice: the dedupe key is unique per person. True when it was written.
+ *
+ * Emailed too when the workspace emails its kind (src/lib/notifications/email-settings.ts) — whatever
+ * the person muted, as `notifyUser` does — once: with the row when it's new, and for somebody who muted
+ * it, once by the day's claim on this job.
  */
 async function notifyOnce(n: { userId: string; type: NotificationType; title: string; message: string; link: string; dedupeKey: string }) {
   const preference = await db.notificationPreference.findUnique({
     where: { userId_type: { userId: n.userId, type: n.type } },
     select: { inApp: true, email: true },
   });
-  if (!wants(n.type, "inApp", preference)) return false;
-  const { count } = await db.notification.createMany({
-    data: [{ userId: n.userId, type: n.type, title: n.title, message: n.message.slice(0, 1000), link: n.link, dedupeKey: n.dedupeKey }],
-    skipDuplicates: true,
-  });
+  const shown = wants(n.type, "inApp", preference);
+  const count = shown
+    ? (
+        await db.notification.createMany({
+          data: [{ userId: n.userId, type: n.type, title: n.title, message: n.message.slice(0, 1000), link: n.link, dedupeKey: n.dedupeKey }],
+          skipDuplicates: true,
+        })
+      ).count
+    : 0;
+  if (count === 1 || !shown) await sendEmailNotification({ userId: n.userId, type: n.type, subject: n.title, body: n.message, link: n.link });
   return count === 1;
 }
 

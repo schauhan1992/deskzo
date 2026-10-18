@@ -14,6 +14,7 @@ import { platformPausedForWorker } from "@/lib/automate/switches";
 import { signatureChores } from "@/lib/signatures/sync";
 import { purgeExpiredChat } from "@/lib/chat/retention";
 import { purgeOldDeskzoSends } from "@/lib/documents/deskzo-mail-allowance";
+import { emailReminders } from "@/lib/notifications/reminder-emails";
 import { tenantOrigin } from "@/lib/tenancy/resolve";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
 import type { TickResult } from "@/lib/marketing/tick";
@@ -124,6 +125,15 @@ export async function runHeartbeat() {
     return null;
   });
   /**
+   * Reminders by email: a task due or overdue, a callback, a meeting about to start… — the kinds the
+   * workspace emails (Settings › Email notifications), for everyone, as they fall due. Nothing at all
+   * where it emails none of them; as many people as a minute allows, the rest on the next beat.
+   */
+  const reminderEmails = await emailReminders({ budgetMs: 60_000 }).catch((err) => {
+    console.error("reminder emails failed", err);
+    return null;
+  });
+  /**
    * Chat: messages older than the workspace keeps them (Settings → Chat), deleted once a workspace day.
    * Kept for good unless an admin chose otherwise.
    */
@@ -159,6 +169,7 @@ export async function runHeartbeat() {
     meetingsHeld: calendars?.held ?? 0,
     signaturesSynced: signatures?.synced ?? 0,
     chatMessagesPurged: chatPurge?.deleted ?? 0,
+    remindersEmailed: reminderEmails?.emailed ?? 0,
     workflowRuns: automate?.runs ?? 0,
   };
 }

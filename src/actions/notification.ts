@@ -5,7 +5,12 @@ import { requireModuleUser } from "@/lib/modules-access";
 import { revalidatePath } from "next/cache";
 import type { NotificationType } from "@prisma/client";
 import { syncSystemNotifications } from "@/lib/notify";
-import { NOTIFICATION_CATALOGUE, describeNotification, wants } from "@/lib/notifications/catalogue";
+import { NOTIFICATION_CATALOGUE, describeNotification, notificationLabel, wants } from "@/lib/notifications/catalogue";
+import { canBeEmailed, emailChoices, emailedTypes, setEmailed, type EmailChoice } from "@/lib/notifications/email-settings";
+import { refuseWhileViewingAs } from "@/lib/session";
+import { can } from "@/lib/authz/resolve";
+import { recordAudit } from "@/lib/audit";
+import { notMigratedYet } from "@/lib/not-migrated";
 import { workspaceClock } from "@/lib/time/workspace";
 import type { ActionResult } from "@/actions/company";
 import { SOUND_FOR_TYPE, chimes, parseReminderSounds, type ReminderSounds } from "@/lib/reminder-sounds";
@@ -215,7 +220,8 @@ export async function emptyNotificationArchive(): Promise<ActionResult<{ deleted
   return { ok: true, data: { deleted: result.count } };
 }
 
-export type PreferenceRow = { type: NotificationType; inApp: boolean; email: boolean; alwaysOn: boolean };
+/** `emailed`: whether the workspace emails it — its admins' choice for everyone, shown, not changed, here. */
+export type PreferenceRow = { type: NotificationType; inApp: boolean; emailed: boolean; alwaysOn: boolean };
 
 /**
  * What this person has chosen, merged over the defaults.
@@ -225,10 +231,10 @@ export type PreferenceRow = { type: NotificationType; inApp: boolean; email: boo
  */
 export async function notificationPreferences(): Promise<ActionResult<PreferenceRow[]>> {
   const user = await requireModuleUser("notifications");
-  const stored = await db.notificationPreference.findMany({
-    where: { userId: user.id },
-    select: { type: true, inApp: true, email: true },
-  });
+  const [stored, emailed] = await Promise.all([
+    db.notificationPreference.findMany({ where: { userId: user.id }, select: { type: true, inApp: true, email: true } }),
+    emailedTypes(),
+  ]);
   const byType = new Map(stored.map((s) => [s.type, s]));
 
   return {
@@ -236,17 +242,14 @@ export async function notificationPreferences(): Promise<ActionResult<Preference
     data: NOTIFICATION_CATALOGUE.map((d) => ({
       type: d.type,
       inApp: wants(d.type, "inApp", byType.get(d.type)),
-      email: wants(d.type, "email", byType.get(d.type)),
+      emailed: emailed.has(d.type),
       alwaysOn: d.alwaysOn === true,
     })),
   };
 }
 
-export async function setNotificationPreference(input: {
-  type: string;
-  inApp: boolean;
-  email: boolean;
-}): Promise<ActionResult<{ type: string }>> {
+/** The bell only: whether a kind is emailed is the workspace's choice (Settings › Email notifications). */
+export async function setNotificationPreference(input: { type: string; inApp: boolean }): Promise<ActionResult<{ type: string }>> {
   const user = await requireModuleUser("notifications");
 
   const definition = describeNotification(input.type as NotificationType);
@@ -268,8 +271,8 @@ export async function setNotificationPreference(input: {
 
   await db.notificationPreference.upsert({
     where: { userId_type: { userId: user.id, type: definition.type } },
-    create: { userId: user.id, type: definition.type, inApp: input.inApp, email: input.email },
-    update: { inApp: input.inApp, email: input.email },
+    create: { userId: user.id, type: definition.type, inApp: input.inApp === true },
+    update: { inApp: input.inApp === true },
   });
 
   revalidatePath("/notifications");
@@ -280,6 +283,75 @@ export async function setNotificationPreference(input: {
 export async function resetNotificationPreferences(): Promise<ActionResult<{ cleared: number }>> {
   const user = await requireModuleUser("notifications");
   const result = await db.notificationPreference.deleteMany({ where: { userId: user.id } });
+  revalidatePath("/notifications");
+  return { ok: true, data: { cleared: result.count } };
+}
+
+/**
+ * Settings › Email notifications (owner, 18 Oct 2026): which kinds the workspace emails, chosen by
+ * whoever changes its settings, for everyone (src/lib/notifications/email-settings.ts).
+ */
+const NOT_AN_ADMIN = "Only somebody who can change the workspace's settings can choose which notifications are emailed.";
+const STILL_UPDATING = "This workspace is still being updated to offer this. Try again in a few minutes.";
+
+/** Who may choose: the module, then settings.manage — and never while viewing as somebody else. */
+async function emailAdmin(): Promise<{ id: string } | { error: string }> {
+  const user = await requireModuleUser("notifications");
+  const viewingAs = await refuseWhileViewingAs();
+  if (viewingAs) return { error: viewingAs };
+  if (!(await can(user.id, "settings.manage"))) return { error: NOT_AN_ADMIN };
+  return { id: user.id };
+}
+
+/** The admin's screen: every kind with what the workspace does with it. */
+export async function notificationEmailChoices(): Promise<ActionResult<EmailChoice[]>> {
+  const user = await requireModuleUser("notifications");
+  if (!(await can(user.id, "settings.manage"))) return { ok: false, error: NOT_AN_ADMIN };
+  return { ok: true, data: await emailChoices() };
+}
+
+export async function setNotificationEmail(input: { type: string; email: boolean }): Promise<ActionResult<{ type: NotificationType; email: boolean }>> {
+  const admin = await emailAdmin();
+  if ("error" in admin) return { ok: false, error: admin.error };
+  const definition = describeNotification(input.type as NotificationType);
+  if (!definition) return { ok: false, error: "That isn't a notification Deskzo sends." };
+  if (!canBeEmailed(definition.type)) {
+    return { ok: false, error: "This one goes to everyone in the company, so it stays in the bell rather than emailing every employee." };
+  }
+  const email = input.email === true;
+  try {
+    await setEmailed(definition.type, email, admin.id);
+  } catch (err) {
+    if (notMigratedYet(err)) return { ok: false, error: STILL_UPDATING };
+    throw err;
+  }
+  await recordAudit({
+    userId: admin.id,
+    action: "UPDATE",
+    entityType: "NotificationEmailType",
+    entityId: definition.type,
+    entityLabel: `"${notificationLabel(definition.type)}" ${email ? "is emailed" : "is no longer emailed"}`,
+  });
+  revalidatePath("/settings/notification-emails");
+  revalidatePath("/notifications");
+  return { ok: true, data: { type: definition.type, email } };
+}
+
+/** Back to how it came: the admins' choices forgotten, the two emailed from the start emailed again. */
+export async function resetNotificationEmails(): Promise<ActionResult<{ cleared: number }>> {
+  const admin = await emailAdmin();
+  if ("error" in admin) return { ok: false, error: admin.error };
+  let result: { count: number };
+  try {
+    result = await db.notificationEmailType.deleteMany({});
+  } catch (err) {
+    if (notMigratedYet(err)) return { ok: true, data: { cleared: 0 } };
+    throw err;
+  }
+  if (result.count > 0) {
+    await recordAudit({ userId: admin.id, action: "UPDATE", entityType: "NotificationEmailType", entityId: "all", entityLabel: "Email notifications back to the defaults" });
+  }
+  revalidatePath("/settings/notification-emails");
   revalidatePath("/notifications");
   return { ok: true, data: { cleared: result.count } };
 }

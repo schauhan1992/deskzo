@@ -2,9 +2,10 @@ import type { NotificationType } from "@prisma/client";
 import { db } from "@/lib/db";
 import { getWording } from "@/lib/terms/server";
 import { slot } from "@/lib/terms/dictionary";
-import { getTicketSlaStatus, formatTicketId } from "@/lib/tickets";
+import { SLA_HOURS, getTicketSlaStatus, formatTicketId } from "@/lib/tickets";
 import { addDays } from "@/lib/date-range-presets";
 import {
+  EXPIRY_NOTICE_EVERY_DAYS,
   EXPIRY_NOTICE_WINDOW_DAYS,
   daysUntilExpiry,
   expiryNoticeBucket,
@@ -42,22 +43,23 @@ export async function notifyUser(input: { userId: string; type: NotificationType
       select: { inApp: true, email: true },
     });
 
-    if (!wants(input.type, "inApp", preference)) return null;
-
-    const notification = await db.notification.create({
-      data: {
-        userId: input.userId,
-        type: input.type,
-        title: input.title,
-        message: input.message ?? null,
-        link: input.link ?? null,
-      },
-    });
-    // Only the kinds that go by email are sent (src/lib/email.ts); each honours the person's preference.
-    // Awaited, so it goes before the request ends; it never throws.
-    if (wants(input.type, "email", preference)) {
-      await sendEmailNotification({ userId: input.userId, type: input.type, subject: input.title, body: input.message ?? "", link: input.link });
-    }
+    const notification = wants(input.type, "inApp", preference)
+      ? await db.notification.create({
+          data: {
+            userId: input.userId,
+            type: input.type,
+            title: input.title,
+            message: input.message ?? null,
+            link: input.link ?? null,
+          },
+        })
+      : null;
+    /**
+     * The email is the workspace's choice, not the person's (src/lib/notifications/email-settings.ts):
+     * an admin's switch for everyone, so it goes whether or not they've muted the kind in their bell.
+     * Awaited, so it goes before the request ends; it never throws.
+     */
+    await sendEmailNotification({ userId: input.userId, type: input.type, subject: input.title, body: input.message ?? "", link: input.link });
     return notification;
   } catch (err) {
     // A notification is a side effect of the action that triggered it — it should never fail the action itself.
@@ -76,11 +78,27 @@ export async function notifyUser(input: { userId: string; type: NotificationType
 const MEETING_NOTICE_MS = 10 * 60 * 1000;
 
 /**
+ * One notice the sweep raises. `at`: when it fell due — the moment a task went overdue, a callback came
+ * due, a meeting came within ten minutes — so the scheduled sweep emails only what fell due after its
+ * kind was switched on (src/lib/notifications/reminder-emails.ts). Null for the notices about other
+ * people and the calendar, which aren't emailed.
+ */
+export type SystemCandidate = {
+  userId: string;
+  type: NotificationType;
+  title: string;
+  message: string | null;
+  link: string | null;
+  dedupeKey: string;
+  at: Date | null;
+};
+
+/**
  * A meeting in this person's calendar starting within ten minutes (owner, 8 Oct 2026) — as the bell
  * asks, every 45 seconds while Deskzo is open. Once per start time: a meeting moved is reminded again.
  * Their own calendar only, not all-day events, nothing cancelled.
  */
-async function meetingCandidates(userId: string, now: Date, clock: Awaited<ReturnType<typeof workspaceClock>>) {
+async function meetingCandidates(userId: string, now: Date, clock: Awaited<ReturnType<typeof workspaceClock>>): Promise<SystemCandidate[]> {
   const soon = await db.calendarEvent
     .findMany({
       where: { userId, allDay: false, status: { not: "CANCELLED" }, startsAt: { gt: now, lte: new Date(now.getTime() + MEETING_NOTICE_MS) } },
@@ -95,11 +113,21 @@ async function meetingCandidates(userId: string, now: Date, clock: Awaited<Retur
     message: m.joinUrl ? "Online — join from your calendar." : m.location,
     link: "/calendar",
     dedupeKey: `meeting-soon:${m.id}:${m.startsAt.toISOString()}`,
+    at: new Date(m.startsAt.getTime() - MEETING_NOTICE_MS),
   }));
 }
 
-export async function syncSystemNotifications(userId: string) {
-  const now = new Date();
+/**
+ * Also run every five minutes for everyone by the scheduled sweep (src/lib/notifications/reminder-emails.ts),
+ * asked only for the kinds the workspace emails (`kinds`). Gives back what it raised — the notices muted
+ * in the person's bell included, as the email is the workspace's choice, not theirs.
+ */
+export async function syncSystemNotifications(
+  userId: string,
+  options: { kinds?: ReadonlySet<NotificationType>; now?: Date } = {},
+): Promise<SystemCandidate[]> {
+  const now = options.now ?? new Date();
+  const wanted = (...types: NotificationType[]) => !options.kinds || types.some((t) => options.kinds!.has(t));
   /**
    * Today on the workspace's calendar, held as a day column holds it (midnight UTC) — a task's due
    * date and a renewal's end are typed days kept that way, and a holiday is a `@db.Date`. It was the
@@ -108,46 +136,58 @@ export async function syncSystemNotifications(userId: string) {
   const clock = await workspaceClock();
   const today = clock.calendarDate(now);
   const tomorrow = new Date(today.getTime() + DAY_MS);
+  /** The instant a typed day (midnight UTC) starts on the workspace's clock. */
+  const dayStart = (day: Date) => clock.startOfDay(day.toISOString().slice(0, 10)) ?? day;
 
   const [tasks, tickets, renewals, callbacks, noteReminders, expiringLogins] = await Promise.all([
-    db.task.findMany({
-      where: { assignedToUserId: userId, done: false, dueDate: { not: null }, callFollowUp: null },
-      select: { id: true, title: true, dueDate: true },
-    }),
-    db.ticket.findMany({
-      where: { assignedToUserId: userId, status: { notIn: ["RESOLVED", "CLOSED"] } },
-      select: { id: true, ticketSeq: true, title: true, priority: true, status: true, createdAt: true },
-    }),
-    db.companyProduct.findMany({
-      where: {
-        item: { type: "SUBSCRIPTION" },
-        // Typed days: one ending today is still expiring, not gone.
-        endDate: { not: null, gte: today, lte: new Date(today.getTime() + 30 * DAY_MS) },
-        company: { ownerUserId: userId },
-      },
-      select: { id: true, item: { select: { name: true } }, company: { select: { id: true, companySeq: true, name: true } } },
-    }),
+    !wanted("TASK_OVERDUE", "TASK_DUE")
+      ? []
+      : db.task.findMany({
+          where: { assignedToUserId: userId, done: false, dueDate: { not: null }, callFollowUp: null },
+          select: { id: true, title: true, dueDate: true },
+        }),
+    !wanted("TICKET_SLA_OVERDUE")
+      ? []
+      : db.ticket.findMany({
+          where: { assignedToUserId: userId, status: { notIn: ["RESOLVED", "CLOSED"] } },
+          select: { id: true, ticketSeq: true, title: true, priority: true, status: true, createdAt: true },
+        }),
+    !wanted("RENEWAL_EXPIRING")
+      ? []
+      : db.companyProduct.findMany({
+          where: {
+            item: { type: "SUBSCRIPTION" },
+            // Typed days: one ending today is still expiring, not gone.
+            endDate: { not: null, gte: today, lte: new Date(today.getTime() + 30 * DAY_MS) },
+            company: { ownerUserId: userId },
+          },
+          select: { id: true, endDate: true, item: { select: { name: true } }, company: { select: { id: true, companySeq: true, name: true } } },
+        }),
     // A promised callback, owed by whoever promised it, now due. Unlike the task sweep above this
     // works to the minute rather than the day — a callback agreed for 3pm is late at 3pm, not at
     // midnight.
-    db.callLog.findMany({
-      where: { userId, followUpDone: false, followUpAt: { not: null, lte: now } },
-      select: {
-        id: true,
-        followUpAt: true,
-        phoneNumber: true,
-        company: { select: { id: true, name: true } },
-        contact: { select: { name: true } },
-      },
-    }),
+    !wanted("CALLBACK_DUE")
+      ? []
+      : db.callLog.findMany({
+          where: { userId, followUpDone: false, followUpAt: { not: null, lte: now } },
+          select: {
+            id: true,
+            followUpAt: true,
+            phoneNumber: true,
+            company: { select: { id: true, name: true } },
+            contact: { select: { name: true } },
+          },
+        }),
     // A note the author asked to be shown again. Only their own: the reminder belongs to whoever
     // set it rather than to everyone who can read the note — see the schema comment on remindAt.
     // Archived notes are excluded, because clearing a note off the board is also the ordinary way
     // somebody says they are done with it.
-    db.stickyNote.findMany({
-      where: { ownerUserId: userId, archivedAt: null, remindAt: { not: null, lte: now } },
-      select: { id: true, title: true, body: true, remindAt: true },
-    }),
+    !wanted("NOTE_REMINDER")
+      ? []
+      : db.stickyNote.findMany({
+          where: { ownerUserId: userId, archivedAt: null, remindAt: { not: null, lte: now } },
+          select: { id: true, title: true, body: true, remindAt: true },
+        }),
     /**
      * Stored logins whose billing is about to lapse.
      *
@@ -159,23 +199,18 @@ export async function syncSystemNotifications(userId: string) {
      * urgent than one expiring next week, and going quiet on the day it mattered would be the
      * worst possible moment to stop talking.
      */
-    db.vaultCredential.findMany({
-      where: {
-        ownerId: userId,
-        billingExpiry: { not: null, lte: addDays(now, EXPIRY_NOTICE_WINDOW_DAYS) },
-      },
-      select: { id: true, loginName: true, billingExpiry: true },
-    }),
+    !wanted("RENEWAL_EXPIRING")
+      ? []
+      : db.vaultCredential.findMany({
+          where: {
+            ownerId: userId,
+            billingExpiry: { not: null, lte: addDays(now, EXPIRY_NOTICE_WINDOW_DAYS) },
+          },
+          select: { id: true, loginName: true, billingExpiry: true },
+        }),
   ]);
 
-  const candidates: {
-    userId: string;
-    type: NotificationType;
-    title: string;
-    message: string | null;
-    link: string | null;
-    dedupeKey: string;
-  }[] = [];
+  const candidates: SystemCandidate[] = [];
 
   for (const task of tasks) {
     if (!task.dueDate) continue;
@@ -187,6 +222,8 @@ export async function syncSystemNotifications(userId: string) {
         message: task.title,
         link: "/tasks",
         dedupeKey: `task-overdue:${task.id}`,
+        // Overdue from the start of the day after it was due.
+        at: dayStart(new Date(task.dueDate.getTime() + DAY_MS)),
       });
     } else if (task.dueDate < tomorrow) {
       candidates.push({
@@ -196,21 +233,23 @@ export async function syncSystemNotifications(userId: string) {
         message: task.title,
         link: "/tasks",
         dedupeKey: `task-due:${task.id}`,
+        at: dayStart(task.dueDate),
       });
     }
   }
 
-  const wording = await getWording();
+  const wording = tickets.length ? await getWording() : null;
   for (const ticket of tickets) {
     const sla = getTicketSlaStatus(ticket.priority, ticket.status, ticket.createdAt, clock, now);
     if (sla.key === "overdue") {
       candidates.push({
         userId,
         type: "TICKET_SLA_OVERDUE",
-        title: slot(wording, "Ticket past its SLA", "ticket", "{one} past its SLA"),
+        title: slot(wording!, "Ticket past its SLA", "ticket", "{one} past its SLA"),
         message: `${formatTicketId(ticket.ticketSeq)} — ${ticket.title}`,
         link: ticketPath(ticket.ticketSeq),
         dedupeKey: `ticket-sla:${ticket.id}`,
+        at: new Date(ticket.createdAt.getTime() + SLA_HOURS[ticket.priority] * 3_600_000),
       });
     }
   }
@@ -223,6 +262,8 @@ export async function syncSystemNotifications(userId: string) {
       message: `${r.company.name} — ${r.item.name}`,
       link: `${companyPath(r.company.companySeq)}?tab=renewals`,
       dedupeKey: `renewal-expiring:${r.id}`,
+      // Into the thirty-day window.
+      at: dayStart(new Date(r.endDate!.getTime() - 30 * DAY_MS)),
     });
   }
 
@@ -253,6 +294,11 @@ export async function syncSystemNotifications(userId: string) {
             : `${login.loginName} — billing expires in ${daysLeft} days`,
       link: "/vault",
       dedupeKey: `vault-expiry:${login.id}:${bucket}`,
+      // Into this bucket: lapsed at the expiry; bucket n once n × 5 days or fewer are left.
+      at:
+        bucket === "lapsed"
+          ? login.billingExpiry!
+          : new Date(login.billingExpiry!.getTime() - (Number(bucket) * EXPIRY_NOTICE_EVERY_DAYS + 1) * DAY_MS),
     });
   }
 
@@ -265,6 +311,7 @@ export async function syncSystemNotifications(userId: string) {
       link: "/calls?view=due",
       // Keyed on the call, so the reminder fires once however many times this sweep runs.
       dedupeKey: `callback-due:${call.id}`,
+      at: call.followUpAt!,
     });
   }
 
@@ -280,14 +327,17 @@ export async function syncSystemNotifications(userId: string) {
       // The time is part of the key, so moving a reminder re-arms it rather than being swallowed
       // as a duplicate of the one that already fired.
       dedupeKey: `note-reminder:${note.id}:${note.remindAt!.toISOString()}`,
+      at: note.remindAt!,
     });
   }
 
-  candidates.push(...(await taskReminderCandidates(userId, now)));
-  candidates.push(...(await peopleCandidates(userId, now, clock)));
-  candidates.push(...(await meetingCandidates(userId, now, clock)));
+  if (wanted("TASK_REMINDER")) candidates.push(...(await taskReminderCandidates(userId, now)));
+  if (wanted("BIRTHDAY_TODAY", "WORK_ANNIVERSARY", "HOLIDAY_UPCOMING")) candidates.push(...(await peopleCandidates(userId, now, clock)));
+  if (wanted("MEETING_SOON")) candidates.push(...(await meetingCandidates(userId, now, clock)));
 
-  if (candidates.length === 0) return;
+  // A query asked for more than one kind (a task: due or overdue) — only the kinds asked for.
+  const raised = options.kinds ? candidates.filter((c) => options.kinds!.has(c.type)) : candidates;
+  if (raised.length === 0) return raised;
 
   /**
    * The same preferences `notifyUser` applies, applied here too.
@@ -302,10 +352,15 @@ export async function syncSystemNotifications(userId: string) {
     select: { type: true, inApp: true, email: true },
   });
   const byType = new Map(preferences.map((p) => [p.type, p]));
-  const allowed = candidates.filter((c) => wants(c.type, "inApp", byType.get(c.type)));
+  const allowed = raised.filter((c) => wants(c.type, "inApp", byType.get(c.type)));
 
-  if (allowed.length === 0) return;
-  await db.notification.createMany({ data: allowed, skipDuplicates: true });
+  if (allowed.length > 0) {
+    await db.notification.createMany({
+      data: allowed.map((c) => ({ userId: c.userId, type: c.type, title: c.title, message: c.message, link: c.link, dedupeKey: c.dedupeKey })),
+      skipDuplicates: true,
+    });
+  }
+  return raised;
 }
 
 /**
@@ -315,10 +370,7 @@ export async function syncSystemNotifications(userId: string) {
  * in the key, as a note reminder's is, so two sweeps at once raise it once. A workspace still waiting for
  * 20261110170000_task_reminders has none.
  */
-async function taskReminderCandidates(
-  userId: string,
-  now: Date,
-): Promise<{ userId: string; type: NotificationType; title: string; message: string | null; link: string | null; dedupeKey: string }[]> {
+async function taskReminderCandidates(userId: string, now: Date): Promise<SystemCandidate[]> {
   const due = await db.taskReminder
     .findMany({
       where: { userId, nextAt: { lte: now } },
@@ -342,6 +394,7 @@ async function taskReminderCandidates(
       message: r.task.title,
       link: `/tasks?task=${r.task.id}`,
       dedupeKey: `task-reminder:${r.id}:${r.nextAt.toISOString()}`,
+      at: r.nextAt,
     });
   }
   return out;
@@ -358,13 +411,7 @@ async function taskReminderCandidates(
  * Only raised for people who have a birthday on file, which means somebody who left the field blank
  * is simply not announced rather than announced as unknown.
  */
-async function peopleCandidates(
-  userId: string,
-  now: Date,
-  clock: Clock,
-): Promise<
-  { userId: string; type: NotificationType; title: string; message: string | null; link: string | null; dedupeKey: string }[]
-> {
+async function peopleCandidates(userId: string, now: Date, clock: Clock): Promise<SystemCandidate[]> {
   if (!(await moduleAvailableForTenant("hr"))) return [];
 
   const out: Awaited<ReturnType<typeof peopleCandidates>> = [];
@@ -389,6 +436,7 @@ async function peopleCandidates(
           message: c.user.id === userId ? "From everyone at the company." : c.designation,
           link: personPath(c.user.userSeq),
           dedupeKey: `birthday:${c.user.id}:${yearKey}`,
+          at: null,
         });
       }
     }
@@ -406,6 +454,7 @@ async function peopleCandidates(
           message: c.designation,
           link: personPath(c.user.userSeq),
           dedupeKey: `anniversary:${c.user.id}:${yearKey}`,
+          at: null,
         });
       }
     }
@@ -428,6 +477,7 @@ async function peopleCandidates(
       message: holiday.date.toISOString().slice(0, 10),
       link: "/people/holidays",
       dedupeKey: `holiday:${holiday.id}`,
+      at: null,
     });
   }
 
