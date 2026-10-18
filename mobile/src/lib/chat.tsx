@@ -40,7 +40,7 @@ const byLatest = (a: ChatSummary, b: ChatSummary) => (b.lastMessageAt ?? "").loc
 
 export function ChatProvider({ children }: { children: ReactNode }) {
   const { paired, me: whoAmI } = useSession();
-  const available = paired && whoAmI?.can.chat !== false;
+  const available = paired && whoAmI?.can.chat === true;
   const [boot, setBoot] = useState<ChatBootstrap | null>(null);
   const [summaries, setSummaries] = useState<ChatSummary[]>([]);
   const [online, setOnline] = useState<Set<string>>(new Set());

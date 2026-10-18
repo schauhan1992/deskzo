@@ -12,14 +12,14 @@ const dev = process.env.DESKZO_APP_DEV === "1";
 const config: ExpoConfig = {
   name: "Deskzo",
   slug: "deskzo",
-  version: "0.2.0",
+  version: "0.2.1",
   orientation: "portrait",
   icon: "./assets/icon.png",
   scheme: "deskzo",
   userInterfaceStyle: "light",
   android: {
     package: "com.deskzo.app",
-    versionCode: 2,
+    versionCode: 3,
     adaptiveIcon: {
       backgroundColor: "#4F46E5",
       foregroundImage: "./assets/android-icon-foreground.png",
@@ -80,8 +80,10 @@ const config: ExpoConfig = {
         android: {
           usesCleartextTraffic: dev,
           // A release is shrunk (R8). Android's background jobs (WorkManager) open their database by a constructor
-          // nothing calls directly — kept, or the app crashes on launch; and the calling module, kept whole.
-          extraProguardRules: "-keep class * extends androidx.room.RoomDatabase { <init>(); }\n-keep class com.deskzo.calls.** { *; }",
+          // nothing calls directly — kept, or the app crashes on launch; the calling module, kept whole; and the
+          // pairing scanner's parts (ML Kit), which Google's component discovery makes by their constructors.
+          extraProguardRules:
+            "-keep class * extends androidx.room.RoomDatabase { <init>(); }\n-keep class com.deskzo.calls.** { *; }\n-keep class * implements com.google.firebase.components.ComponentRegistrar { <init>(); }",
         },
       },
     ],

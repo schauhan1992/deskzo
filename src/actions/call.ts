@@ -24,6 +24,7 @@ const callSelect = {
   startedAt: true,
   durationSeconds: true,
   notes: true,
+  source: true,
   followUpAt: true,
   followUpDone: true,
   createdAt: true,

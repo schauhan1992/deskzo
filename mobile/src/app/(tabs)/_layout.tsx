@@ -9,7 +9,8 @@ import { useSession } from "@/lib/session";
 /**
  * The app's places (owner, 18 Oct 2026): Today (with what waits for a decision), Chat, Tasks, Calls and all of
  * Deskzo (its own pages) — five, as a phone's bar holds — each for somebody whose workspace has it; Settings behind
- * the gear. A conversation opens over the bar, full screen (src/app/conversation/[id].tsx).
+ * the gear. A conversation opens over the bar, full screen (src/app/conversation/[id].tsx). A company whose Deskzo is
+ * older than the app doesn't name Chat or Tasks — it hasn't got them — so they don't show.
  */
 export default function TabsLayout() {
   const router = useRouter();
@@ -33,13 +34,13 @@ export default function TabsLayout() {
         name="chat"
         options={{
           title: "Chat",
-          href: can?.chat === false ? null : undefined,
+          href: can && can.chat !== true ? null : undefined,
           tabBarBadge: chat.unread > 0 ? (chat.unread > 99 ? "99+" : chat.unread) : undefined,
           tabBarBadgeStyle: { backgroundColor: "#16A34A" },
           tabBarIcon: icon("chatbubbles-outline"),
         }}
       />
-      <Tabs.Screen name="tasks" options={{ title: "Tasks", href: can?.tasks === false ? null : undefined, tabBarIcon: icon("checkbox-outline") }} />
+      <Tabs.Screen name="tasks" options={{ title: "Tasks", href: can && can.tasks !== true ? null : undefined, tabBarIcon: icon("checkbox-outline") }} />
       <Tabs.Screen name="calls" options={{ title: "Calls", href: can?.calls === false ? null : undefined, tabBarIcon: icon("call-outline") }} />
       <Tabs.Screen name="web" options={{ title: "Deskzo", headerShown: false, tabBarIcon: icon("grid-outline") }} />
     </Tabs>

@@ -22,6 +22,9 @@ export function onSignedOut(listener: Listener): () => void {
   return () => void signedOutListeners.delete(listener);
 }
 
+/** A page Deskzo itself answers 404 to, not in its own words: a company whose Deskzo is older than this app. */
+export const NOT_ON_SERVER = "Your company's Deskzo hasn't been updated for this part of the app yet — ask your administrator. Everything else is on the Deskzo tab.";
+
 export async function request<T>(
   where: { baseUrl: string; host: string | null; token?: string | null },
   method: "GET" | "POST" | "PATCH" | "DELETE",
@@ -46,7 +49,7 @@ export async function request<T>(
     // Not Deskzo answering — a captive portal, a proxy.
   }
   if (!res.ok) {
-    const err = json.error ?? { code: `http_${res.status}`, message: "Deskzo didn't answer as expected. Try again in a moment." };
+    const err = json.error ?? (res.status === 404 ? { code: "not_on_server", message: NOT_ON_SERVER } : { code: `http_${res.status}`, message: "Deskzo didn't answer as expected. Try again in a moment." });
     if (res.status === 401 && err.code === "signed_out") signedOutListeners.forEach((l) => l());
     throw new ApiError(res.status, err.code, err.message, err.fields);
   }
@@ -93,7 +96,7 @@ export type Me = {
   person: { id: string; name: string; email: string };
   workspace: { name: string | null };
   phone: { id: string; name: string; platform: string; call_sync: boolean };
-  /** Older servers answer only calls; the rest count as open there. */
+  /** Older servers answer only calls: a part they don't name, they don't have (src/app/(tabs)/_layout.tsx). */
   can: { calls: boolean; attendance?: boolean; tasks?: boolean; chat?: boolean };
   /** The workspace's screen rules for this person (src/lib/app/dlp.ts); none from an older server. */
   screen?: ScreenRulesFromServer;

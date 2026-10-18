@@ -69,7 +69,7 @@ import { CustomFieldsCard } from "@/components/custom-fields/custom-fields-card"
 import { EditCustomFields } from "@/components/custom-fields/edit-custom-fields";
 import { displayFields, formatMany, formSetup, valuesFor, valuesOf } from "@/lib/custom-fields/server";
 import { formValues } from "@/lib/custom-fields/rules";
-import { ActivityPanelButton } from "@/components/companies/activity-panel-button";
+import { ActivityPanelButton, type TimelineEntry } from "@/components/companies/activity-panel-button";
 import { CompanyProductsList } from "@/components/companies/company-products-list";
 import { LocationsManager } from "@/components/companies/locations-manager";
 import { AccountManagerButton } from "@/components/companies/account-manager-button";
@@ -85,6 +85,7 @@ import { listCustomerCategories } from "@/actions/customer-category";
 import { LeadStatusBadge } from "@/components/leads/lead-status-badge";
 import { leadStages, stagesOfLeads } from "@/lib/pipeline/server";
 import { readStageNote } from "@/lib/pipeline/rules";
+import { callOutcomeLabels, formatDuration } from "@/lib/calls";
 import { CallList } from "@/components/calls/call-list";
 import { DomainPanel } from "@/components/domains/domain-panel";
 import { getDomainBriefing } from "@/actions/domain";
@@ -421,17 +422,41 @@ export async function CompanyDetail({
 
   // The workspace's own stages (Settings → Pipeline, src/lib/pipeline): each lead's, and its moves in their names.
   const [{ stages: pipelineStages }, leadStage] = await Promise.all([leadStages(), stagesOfLeads(company.leads)]);
-  const timeline = company.leads
-    .flatMap((l) =>
-      l.activities.map((a) => ({
-        ...a,
-        notes: a.type === "STAGE_CHANGE" ? readStageNote(a.notes, pipelineStages) : a.notes,
-        leadId: l.id,
-        leadSeq: l.leadSeq,
-        leadTitle: l.title,
-      })),
-    )
-    .sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
+  const leadTimeline: TimelineEntry[] = canSeeLeads
+    ? company.leads.flatMap((l) =>
+        l.activities.map((a) => ({
+          id: a.id,
+          type: a.type,
+          notes: a.type === "STAGE_CHANGE" ? readStageNote(a.notes, pipelineStages) : a.notes,
+          occurredAt: a.occurredAt,
+          user: a.user,
+          link: { href: leadPath(l.leadSeq), label: l.title },
+          callOf: a.type === "CALL" ? `${l.id}|${a.user.id}|${new Date(a.occurredAt).getTime()}` : null,
+        })),
+      )
+    : [];
+  // The company's calls too (owner, 18 Oct 2026): one on none of its leads — most calls from the phone app, and
+  // one typed in without a lead — was only under Calls. One already on a lead's timeline (logged with the
+  // call's own start, by its caller) isn't listed twice.
+  const onLeads = new Set(leadTimeline.map((a) => a.callOf).filter(Boolean));
+  const callTimeline: TimelineEntry[] = companyCalls
+    .filter((c) => !c.lead || !onLeads.has(`${c.lead.id}|${c.user.id}|${new Date(c.startedAt).getTime()}`))
+    .map((c) => ({
+      id: `call-${c.id}`,
+      type: "CALL",
+      notes: [
+        `${c.direction === "INBOUND" ? "From" : "To"} ${c.contact?.name ?? c.phoneNumber} — ${callOutcomeLabels[c.outcome].toLowerCase()}`,
+        c.durationSeconds ? `, ${formatDuration(c.durationSeconds)}` : "",
+        c.source === "PHONE" ? ", from the phone" : "",
+        c.notes ? `. ${c.notes}` : "",
+      ].join(""),
+      occurredAt: c.startedAt,
+      user: c.user,
+      link: c.lead ? { href: leadPath(c.lead.leadSeq), label: c.lead.title } : { href: tabHref("calls"), label: "Calls" },
+      callOf: null,
+    }));
+  const timeline = [...leadTimeline, ...callTimeline].sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime());
+  const showActivity = !isVendor && (canSeeLeads || callsEnabled);
   const clock = await workspaceClock();
 
   return (
@@ -513,7 +538,7 @@ export async function CompanyDetail({
           {isVendor && <VendorCodeButton companyId={company.id} vendorCode={company.vendorCode} />}
           {/* Resellers need this for the PAN their onboarding KYC step checks. */}
           {payouts?.canManage && <PayoutDetailsButton companyId={company.id} panNumber={company.panNumber} />}
-          {!isVendor && canSeeLeads && <ActivityPanelButton timeline={timeline} />}
+          {showActivity && <ActivityPanelButton timeline={timeline} />}
           <Link href={`/companies/${company.id}/edit`}>
             <Button variant="secondary">Edit</Button>
           </Link>
@@ -641,7 +666,7 @@ export async function CompanyDetail({
               </Card>
             </Link>
           )}
-          {canSeeLeads && (
+          {showActivity && (
             <Card className="p-4">
               <div className="text-xs uppercase tracking-wide text-subtle">Last activity</div>
               <div className="mt-1 text-lg font-semibold text-text">{clock.date(timeline[0]?.occurredAt ?? null)}</div>

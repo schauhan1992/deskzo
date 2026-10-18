@@ -6,17 +6,18 @@ import { SidePane } from "@/components/ui/side-pane";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/card";
 import { useClock } from "@/components/time/clock-provider";
-import { leadPath } from "@/lib/record-links";
 
-type TimelineEntry = {
+/** One line on a company's timeline: something done on one of its leads, or a call (src/components/companies/company-detail.tsx). */
+export type TimelineEntry = {
   id: string;
   type: string;
   notes: string;
   occurredAt: Date | string;
-  leadId: string;
-  leadSeq: number;
-  leadTitle: string;
   user: { id: string; name: string };
+  /** Where it belongs: its lead, or the company's Calls tab for a call on none. */
+  link: { href: string; label: string };
+  /** A lead's call entry, keyed as its call is — so that call isn't listed a second time. Server side only. */
+  callOf?: string | null;
 };
 
 export function ActivityPanelButton({ timeline }: { timeline: TimelineEntry[] }) {
@@ -35,11 +36,11 @@ export function ActivityPanelButton({ timeline }: { timeline: TimelineEntry[] })
               <div className="flex flex-wrap items-center gap-2">
                 <Badge>{a.type.replaceAll("_", " ")}</Badge>
                 <Link
-                  href={leadPath(a.leadSeq)}
+                  href={a.link.href}
                   className="text-xs font-medium text-muted hover:underline"
                   onClick={() => setOpen(false)}
                 >
-                  {a.leadTitle}
+                  {a.link.label}
                 </Link>
               </div>
               <div className="mt-0.5 text-xs text-subtle">
@@ -49,7 +50,7 @@ export function ActivityPanelButton({ timeline }: { timeline: TimelineEntry[] })
             </div>
           ))}
           {timeline.length === 0 && (
-            <p className="text-sm text-subtle">No activity logged across this company&rsquo;s leads yet.</p>
+            <p className="text-sm text-subtle">No activity logged for this company yet — on its leads, or a call.</p>
           )}
         </div>
       </SidePane>
