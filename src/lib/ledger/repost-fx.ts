@@ -20,6 +20,7 @@
  *   npm run ledger:repost-fx                         (scripts/ledger-repost-fx.ts)
  */
 import type { Prisma, PrismaClient } from "@prisma/client";
+import { RAISED_IN_DESKZO } from "@/lib/documents/imported";
 import { BASE_CURRENCY, toBase } from "@/lib/currency";
 import { bookingRate } from "@/lib/ledger/posting";
 import { SYSTEM_ACCOUNTS } from "@/lib/ledger/chart";
@@ -110,6 +111,9 @@ export async function findFxMisposts(client: Tx | PrismaClient): Promise<FxMispo
       // re-posted without its deferred revenue.
       revenueSchedules: { none: {} },
       revenueAdjustments: { none: {} },
+      // One brought from the old system carries its opening balance, not total × rate (src/lib/portability/documents.ts):
+      // re-posting it would book a sale and its GST that were booked before Deskzo.
+      ...RAISED_IN_DESKZO,
     },
     orderBy: [{ issueDate: "asc" }, { docNumber: "asc" }],
     select: {
@@ -193,8 +197,8 @@ export async function repostFxDocument(
   documentId: string,
   userId: string,
 ): Promise<{ date: Date; reversal: { id: string; entryNumber: string }; repost: { id: string; entryNumber: string } } | null> {
-  const doc = await tx.tradeDocument.findUnique({ where: { id: documentId }, select: documentPostingSelect });
-  if (!doc) return null;
+  const doc = await tx.tradeDocument.findUnique({ where: { id: documentId }, select: { ...documentPostingSelect, origin: true } });
+  if (!doc || doc.origin === "IMPORTED") return null;
   const original = await tx.journalEntry.findFirst({
     where: { documentId, ...LIVE },
     orderBy: { createdAt: "desc" },

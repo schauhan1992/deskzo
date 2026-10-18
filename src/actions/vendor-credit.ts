@@ -52,6 +52,7 @@ const billSettlementSelect = {
   currency: true,
   status: true,
   total: true,
+  paidBefore: true,
   issueDate: true,
   dueDate: true,
   payments: { select: { amount: true } },
@@ -61,7 +62,7 @@ const billSettlementSelect = {
 
 function billBalance(bill: Prisma.TradeDocumentGetPayload<{ select: typeof billSettlementSelect }>) {
   const sum = (rows: { amount: Prisma.Decimal }[]) => rows.reduce((t, r) => t + Number(r.amount), 0);
-  return settleInvoice(Number(bill.total), sum(bill.payments), sum(bill.creditsReceived) + sum(bill.vendorCredits));
+  return settleInvoice(Number(bill.total), sum(bill.payments), sum(bill.creditsReceived) + sum(bill.vendorCredits), Number(bill.paidBefore));
 }
 
 /** A bill's status after what is set against it changed: paid, part paid, or issued again. */

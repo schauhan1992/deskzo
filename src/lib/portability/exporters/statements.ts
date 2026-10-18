@@ -47,7 +47,9 @@ export const statementsExporter: Exporter = async (scope) => {
   const documents = await db.tradeDocument.groupBy({
     by: ["companyId", "docType"],
     where: { AND: [{ companyId: { in: ids }, direction: "SALES", status: { in: [...COUNTED] }, docType: { in: ["INVOICE", "CREDIT_NOTE"] } }, documentScope] },
-    _sum: { total: true },
+    // What a document brought from the old system had settled there is taken off what it adds: it came
+    // across with what was left (src/lib/documents/imported.ts). Zero for everything raised here.
+    _sum: { total: true, paidBefore: true },
     _count: { _all: true },
   });
 
@@ -66,8 +68,10 @@ export const statementsExporter: Exporter = async (scope) => {
     _min: { issueDate: true },
   });
 
-  const sum = (companyId: string, docType: string) =>
-    Number(documents.find((d) => d.companyId === companyId && d.docType === docType)?._sum.total ?? 0);
+  const sum = (companyId: string, docType: string) => {
+    const row = documents.find((d) => d.companyId === companyId && d.docType === docType);
+    return Number(row?._sum.total ?? 0) - Number(row?._sum.paidBefore ?? 0);
+  };
   const count = (companyId: string, docType: string) =>
     documents.find((d) => d.companyId === companyId && d.docType === docType)?._count._all ?? 0;
 

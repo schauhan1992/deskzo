@@ -27,6 +27,7 @@ import { EWAY_DOC_TYPES, deliveryStateCode } from "@/lib/eway/documents";
 import { apportionLineValues, documentGoodsValue } from "@/lib/eway/value";
 import { subSupplyFor } from "@/lib/eway/sub-supply";
 import { uqcOfUnit } from "@/lib/uqc";
+import { RAISED_IN_DESKZO, isImported } from "@/lib/documents/imported";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -120,6 +121,8 @@ function thresholdsOnce(): (gstRegistrationId: string | null) => Promise<number>
  * is worse than no kill switch, because somebody believes it worked.
  */
 const DISABLED = "E-way bills are switched off for this organisation. An admin can turn them on under Settings.";
+/** A document brought from the old system: its goods moved, under whatever bill, before Deskzo (src/lib/documents/imported.ts). */
+const IMPORTED_REFUSAL = "This document was brought from your old system — its goods moved before Deskzo, so it takes no e-way bill here.";
 
 
 // ─── The list ─────────────────────────────────────────────────────────────────────────────────
@@ -185,8 +188,9 @@ export async function ewayDocuments(params: {
   const to = params.to ? endOfIndianDay(params.to) : null;
 
   const where: Prisma.TradeDocumentWhereInput = {
-    // The documents this person may open, under AND so the search below can't replace it.
-    AND: [await documentAccess(user.id, "view")],
+    // The documents this person may open, under AND so the search below can't replace it — and only
+    // those raised here: goods on one brought from the old system moved under its own bill.
+    AND: [await documentAccess(user.id, "view"), RAISED_IN_DESKZO],
     docType: { in: docType },
     direction: "SALES",
     // A draft is our workings; nothing has moved against it.
@@ -401,6 +405,7 @@ export async function ewayForDocument(documentId: string): Promise<ActionResult<
 
   const doc = await loadDocument(documentId);
   if (!doc || !(await reachesDocument(user.id, doc.id, "view"))) return { ok: false, error: "That document no longer exists." };
+  if (isImported(doc)) return { ok: false, error: IMPORTED_REFUSAL };
 
   const bill = doc.ewayBills[0] ?? null;
   const sellerState = await sellerStateOf(doc, headOfficeStateOnce());
@@ -526,8 +531,9 @@ export async function saveEwayDetails(input: {
 
   if (!(await ewayEnabled())) return { ok: false, error: DISABLED };
 
-  const doc = await db.tradeDocument.findUnique({ where: { id: input.documentId }, select: { id: true } });
+  const doc = await db.tradeDocument.findUnique({ where: { id: input.documentId }, select: { id: true, origin: true } });
   if (!doc || !(await reachesDocument(user.id, doc.id, "edit"))) return { ok: false, error: "That document no longer exists." };
+  if (isImported(doc)) return { ok: false, error: IMPORTED_REFUSAL };
 
   if (!Number.isFinite(input.declaredValue) || input.declaredValue < 0) {
     return { ok: false, error: "The value of the goods should be a positive number." };
@@ -653,6 +659,7 @@ export async function generateEwayBill(
 
   const doc = await loadDocument(documentId);
   if (!doc || !(await reachesDocument(user.id, doc.id, "edit"))) return { ok: false, error: "That document no longer exists." };
+  if (isImported(doc)) return { ok: false, error: IMPORTED_REFUSAL };
 
   // The login of the GSTIN the document was issued under; the refusal names that GSTIN.
   const connection = await eInvoiceConfigFor(doc.gstRegistrationId);
@@ -885,9 +892,11 @@ export async function associateEwayBill(input: {
       // would have flagged it.
       lines: { select: { quantity: true, unitPrice: true, taxableValue: true } },
       consignments: { select: { declaredValue: true, interstate: true } },
+      origin: true,
     },
   });
   if (!doc || !(await reachesDocument(user.id, doc.id, "edit"))) return { ok: false, error: "That document no longer exists." };
+  if (isImported(doc)) return { ok: false, error: IMPORTED_REFUSAL };
 
   const existing = await db.ewayBill.findFirst({
     where: { documentId: doc.id, status: { not: "CANCELLED" } },

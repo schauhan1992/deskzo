@@ -287,7 +287,7 @@ const NOT_YET_EVERYWHERE = {
   organisationSettings: { vendorCodePrefix: true },
   branch: { defaultBankAccountId: true },
   // and 20261029120000_document_cancel_reason_pi_issued: read by name in src/lib/documents/cancellation.ts.
-  tradeDocument: { bankAccountId: true, cancelReason: true, cancelledAt: true, cancelledById: true },
+  tradeDocument: { bankAccountId: true, cancelReason: true, cancelledAt: true, cancelledById: true, paidBefore: true },
   // 20261108100000_support_reply_from. Read by name in src/lib/support-mail/send.ts and
   // src/actions/support-mail.ts, which treat a workspace without them as replying through Deskzo.
   supportMailSettings: { replyFrom: true, companyFrom: true },

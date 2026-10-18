@@ -14,6 +14,7 @@ import { indiaClock } from "@/lib/time/zone";
 import { listRegistrationChoices } from "@/lib/branches/identity";
 import { knownHsnCodes } from "@/lib/platform/hsn-directory";
 import { normaliseHsn } from "@/lib/items/catalogue-import";
+import { RAISED_IN_DESKZO } from "@/lib/documents/imported";
 import type { RegistrationChoice } from "@/lib/branches/format";
 
 /**
@@ -185,6 +186,8 @@ export async function gstr1(params: { month: number; year: number; gstRegistrati
     where: {
       docType: { in: ["INVOICE", "CREDIT_NOTE"] },
       issueDate: { gte: from, lt: before },
+      // A document brought from the old system was reported from there (src/lib/documents/imported.ts).
+      ...RAISED_IN_DESKZO,
       ...(registration ? { gstRegistrationId: registration.id } : {}),
     },
     orderBy: { issueDate: "asc" },
@@ -227,11 +230,11 @@ export async function gstr3b(params: { month: number; year: number; gstRegistrat
   const ofRegistration = registration ? { gstRegistrationId: registration.id } : {};
   const [outward, inward, ledger] = await Promise.all([
     db.tradeDocument.findMany({
-      where: { docType: { in: ["INVOICE", "CREDIT_NOTE"] }, issueDate: { gte: from, lt: before }, ...ofRegistration },
+      where: { docType: { in: ["INVOICE", "CREDIT_NOTE"] }, issueDate: { gte: from, lt: before }, ...RAISED_IN_DESKZO, ...ofRegistration },
       select: documentSelect,
     }),
     db.tradeDocument.findMany({
-      where: { docType: "BILL", issueDate: { gte: from, lt: before }, ...ofRegistration },
+      where: { docType: "BILL", issueDate: { gte: from, lt: before }, ...RAISED_IN_DESKZO, ...ofRegistration },
       select: documentSelect,
     }),
     ledgerTaxTotals(from, before, registration?.id ?? null),
@@ -361,6 +364,7 @@ export async function tdsSummary(params: { month: number; year: number }) {
     where: {
       docType: { in: ["INVOICE", "BILL"] },
       issueDate: { gte: from, lt: before },
+      ...RAISED_IN_DESKZO,
       withholdingAmount: { not: 0 },
     },
     select: { ...documentSelect, withholdingAmount: true },

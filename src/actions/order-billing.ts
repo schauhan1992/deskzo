@@ -12,6 +12,7 @@ import { formatOrderId } from "@/lib/order-id";
 import { orderPath } from "@/lib/record-links";
 import { createOrderInvoiceDraft, loadOrders, type OrderForInvoice } from "@/lib/orders/invoice-draft";
 import { invoiceTogetherRefusal, type OrderBillingStatus } from "@/lib/orders/billing-rules";
+import { RAISED_IN_DESKZO, isImported } from "@/lib/documents/imported";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -179,7 +180,7 @@ export async function invoiceLinesToLink(orderId: string): Promise<LinkableInvoi
   const rows = await db.tradeDocumentLine.findMany({
     where: {
       companyProductId: null,
-      document: { AND: [{ companyId: order.companyId, docType: "INVOICE", status: { notIn: ["DRAFT", "CANCELLED", "REJECTED", "EXPIRED"] } }, await documentAccess(auth.user.id, "view")] },
+      document: { AND: [{ companyId: order.companyId, docType: "INVOICE", status: { notIn: ["DRAFT", "CANCELLED", "REJECTED", "EXPIRED"] } }, await documentAccess(auth.user.id, "view"), RAISED_IN_DESKZO] },
     },
     select: { id: true, name: true, quantity: true, lineTotal: true, itemId: true, document: { select: { id: true, docNumber: true, issueDate: true } } },
     orderBy: { document: { issueDate: "desc" } },
@@ -206,7 +207,7 @@ async function lineFor(userId: string, orderId: string, lineId: string) {
     db.companyProduct.findUnique({ where: { id: orderId }, select: { id: true, orderSeq: true, companyId: true } }),
     db.tradeDocumentLine.findUnique({
       where: { id: lineId },
-      select: { id: true, companyProductId: true, document: { select: { id: true, docNumber: true, docType: true, status: true, companyId: true } } },
+      select: { id: true, companyProductId: true, document: { select: { id: true, docNumber: true, docType: true, status: true, companyId: true, origin: true } } },
     }),
   ]);
   if (!order || !line) return null;
@@ -225,6 +226,8 @@ export async function linkInvoiceLine(orderId: string, lineId: string): Promise<
   if (!found) return { ok: false, error: "That invoice line isn't one you can link." };
   const { order, line } = found;
   if (line.document.docType !== "INVOICE" || line.document.companyId !== order.companyId) return { ok: false, error: "Only a tax invoice to this order's customer can be linked." };
+  // What one brought from the old system billed was billed there; linking it would mark this order invoiced again.
+  if (isImported(line.document)) return { ok: false, error: "That invoice was brought from your old system — it can't bill an order raised here." };
   if (["DRAFT", "CANCELLED", "REJECTED", "EXPIRED"].includes(line.document.status)) return { ok: false, error: "Only an issued invoice is linked here — a draft is linked from the invoice itself." };
   if (line.companyProductId === order.id) return { ok: true, data: null };
   if (line.companyProductId) return { ok: false, error: "That line already bills another order." };

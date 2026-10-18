@@ -28,6 +28,7 @@ import {
 import { spreadEvenlySetting } from "@/lib/revenue/deferral";
 import { MAX_PERIOD_DAYS, ScheduleRefusal } from "@/lib/revenue/schedules";
 import { NARRATION, tagKey } from "@/lib/revenue/state";
+import { RAISED_IN_DESKZO } from "@/lib/documents/imported";
 
 /**
  * "Open deferred revenue as at <month end>" (spec §3.7, owner decision D4).
@@ -84,6 +85,7 @@ function lookback(asAt: MonthKey) {
 const invoiceSelect = {
   ...documentPostingSelect,
   status: true,
+  origin: true,
   company: { select: { name: true } },
   lines: {
     orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
@@ -119,7 +121,8 @@ export async function openingCandidates(
   const invoices = await client.tradeDocument.findMany({
     where: {
       // Under AND, so a fragment of any shape narrows and none of the conditions below can replace it.
-      AND: [params.scope ?? {}],
+      // Raised here: one brought from the old system booked no revenue in Deskzo to defer (src/lib/documents/imported.ts).
+      AND: [params.scope ?? {}, RAISED_IN_DESKZO],
       docType: "INVOICE",
       status: { notIn: ["DRAFT", "CANCELLED"] },
       issueDate: { gte: window.from, lt: window.to },
@@ -227,6 +230,7 @@ export async function previewOpening(
     const problem = (why: string) => ({ ...base, problem: why });
     if (!doc || !line) return problem("That invoice line no longer exists.");
     if (doc.docType !== "INVOICE" || doc.status === "DRAFT" || doc.status === "CANCELLED") return problem(`${doc.docNumber} isn't an issued invoice.`);
+    if (doc.origin === "IMPORTED") return problem(`${doc.docNumber} was brought from your old system — its revenue was booked there.`);
     if (doc.issueDate < window.from || doc.issueDate >= window.to) {
       return problem(`${doc.docNumber} wasn't issued in the ${OPENING_LOOKBACK_MONTHS} months up to the end of ${params.asAt}.`);
     }

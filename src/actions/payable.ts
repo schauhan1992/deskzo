@@ -34,6 +34,7 @@ import type { ActionResult } from "@/actions/company";
  * invoice.
  */
 const billSettlementInclude = {
+  paidBefore: true,
   payments: { select: { amount: true } },
   creditsReceived: { select: { amount: true } },
   vendorCredits: { select: { amount: true } },
@@ -41,6 +42,8 @@ const billSettlementInclude = {
 
 function settlementOf(bill: {
   total: Prisma.Decimal | number;
+  /** What it had settled in the old system, when it was brought from there (src/lib/receivables.ts). */
+  paidBefore: Prisma.Decimal | number;
   payments: { amount: Prisma.Decimal | number }[];
   creditsReceived: { amount: Prisma.Decimal | number }[];
   vendorCredits: { amount: Prisma.Decimal | number }[];
@@ -49,6 +52,7 @@ function settlementOf(bill: {
     Number(bill.total),
     bill.payments.reduce((t, p) => t + Number(p.amount), 0),
     bill.creditsReceived.reduce((t, c) => t + Number(c.amount), 0) + bill.vendorCredits.reduce((t, c) => t + Number(c.amount), 0),
+    Number(bill.paidBefore),
   );
 }
 
@@ -157,6 +161,7 @@ export async function recordBillPayment(input: {
       Number(bill.total),
       bill.payments.reduce((t, p) => t + Number(p.amount), 0) + amount,
       bill.creditsReceived.reduce((t, c) => t + Number(c.amount), 0) + bill.vendorCredits.reduce((t, c) => t + Number(c.amount), 0),
+      Number(bill.paidBefore),
     );
     await tx.tradeDocument.update({
       where: { id: bill.id },
@@ -198,6 +203,7 @@ export async function getBillSettlement(billId: string) {
     select: {
       id: true,
       total: true,
+      paidBefore: true,
       currency: true,
       exchangeRate: true,
       payments: {
@@ -219,6 +225,8 @@ export async function getBillSettlement(billId: string) {
   if (!bill) return null;
   return toPlain({
     ...settlementOf(bill),
+    // Paid in the old system, before it came to Deskzo — part of "paid" above, shown on its own.
+    paidBefore: Number(bill.paidBefore),
     currency: bill.currency,
     exchangeRate: bookingRate(bill),
     payments: bill.payments,
@@ -306,7 +314,7 @@ export async function vendorStatement(companyId: string, opts?: { from?: string;
     db.tradeDocument.findMany({
       where: { AND: [{ companyId, docType: "BILL", status: { notIn: ["DRAFT", "CANCELLED"] }, ...(dateFilter ? { issueDate: dateFilter } : {}) }, billScope] },
       orderBy: { issueDate: "asc" },
-      select: { id: true, docNumber: true, issueDate: true, total: true, reference: true },
+      select: { id: true, docNumber: true, issueDate: true, total: true, paidBefore: true, reference: true },
     }),
     db.payment.findMany({
       where: { AND: [{ companyId, direction: "PAID", ...(dateFilter ? { paidOn: dateFilter } : {}) }, paymentScope] },
@@ -316,16 +324,18 @@ export async function vendorStatement(companyId: string, opts?: { from?: string;
   ]);
   if (!company) return null;
 
-  // A bill increases what we owe, so it's a credit to the vendor's account; paying it debits back.
+  // A bill increases what we owe, so it's a credit to the vendor's account; paying it debits back. One
+  // brought from the old system came across with what was left on it (src/lib/documents/imported.ts).
+  const across = (b: { total: Prisma.Decimal; paidBefore: Prisma.Decimal }) => Number(b.total) - Number(b.paidBefore);
   const entries: Omit<LedgerEntry, "balance">[] = [
     ...bills.map((b) => ({
       id: b.id,
       date: b.issueDate,
       kind: "INVOICE" as const,
       reference: b.docNumber,
-      description: b.reference ? `Bill · ref ${b.reference}` : "Bill",
+      description: (b.reference ? `Bill · ref ${b.reference}` : "Bill") + (Number(b.paidBefore) > 0 ? ` (${Number(b.paidBefore).toLocaleString("en-IN")} paid before Deskzo)` : ""),
       debit: 0,
-      credit: Number(b.total),
+      credit: across(b),
       href: `/documents/${b.id}`,
     })),
     ...payments.map((p) => ({
@@ -341,7 +351,7 @@ export async function vendorStatement(companyId: string, opts?: { from?: string;
   ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
   const ledger = withRunningBalance(entries);
-  const billed = bills.reduce((t, b) => t + Number(b.total), 0);
+  const billed = bills.reduce((t, b) => t + across(b), 0);
   const paid = payments.reduce((t, p) => t + Number(p.amount), 0);
 
   return toPlain({

@@ -53,11 +53,23 @@ const ok = (label: string, pass: boolean, detail: unknown = "") => {
   if (!pass) failures += 1;
 };
 const section = (t: string) => console.log(`\n— ${t} —\n`);
-const file = (rows: Record<string, string>[], name = "zoho-export.csv") => ({ filename: name, base64: Buffer.from(Papa.unparse(rows)).toString("base64") });
+// Every row's columns, not the first's: Papa takes the header from the first row unless told.
+const file = (rows: Record<string, string>[], name = "zoho-export.csv") => ({
+  filename: name,
+  base64: Buffer.from(Papa.unparse({ fields: [...new Set(rows.flatMap((r) => Object.keys(r)))], data: rows })).toString("base64"),
+});
 
 async function cleanup() {
-  await db.tradeDocument.deleteMany({ where: { docNumber: { startsWith: "ZZCM-" } } });
   const companies = (await db.company.findMany({ where: { name: { startsWith: TAG } }, select: { id: true } })).map((c) => c.id);
+  const docs = (await db.tradeDocument.findMany({ where: { docNumber: { startsWith: "ZZCM-" } }, select: { id: true } })).map((d) => d.id);
+  const payments = companies.length ? (await db.payment.findMany({ where: { companyId: { in: companies } }, select: { id: true } })).map((p) => p.id) : [];
+  // The entries the imports and payments wrote: reversals before what they reverse.
+  const entries = { OR: [{ documentId: { in: docs } }, { paymentId: { in: payments } }, { companyId: { in: companies } }] };
+  await db.journalEntry.deleteMany({ where: { reversesId: { not: null }, ...entries } });
+  await db.journalEntry.deleteMany({ where: entries });
+  await db.payment.deleteMany({ where: { id: { in: payments } } });
+  await db.tradeDocument.deleteMany({ where: { docNumber: { startsWith: "ZZCM-" }, docType: "CREDIT_NOTE" } });
+  await db.tradeDocument.deleteMany({ where: { docNumber: { startsWith: "ZZCM-" } } });
   if (companies.length) {
     await db.lead.deleteMany({ where: { companyId: { in: companies } } });
     await db.contact.deleteMany({ where: { companyId: { in: companies } } });
@@ -108,6 +120,10 @@ async function main() {
   /* eslint-disable @typescript-eslint/no-require-imports */
   const { plan } = require("../src/lib/portability/import") as typeof import("../src/lib/portability/import");
   const documents = require("../src/actions/document-import") as typeof import("../src/actions/document-import");
+  const receivable = require("../src/actions/receivable") as typeof import("../src/actions/receivable");
+  const tax = require("../src/actions/tax-reports") as typeof import("../src/actions/tax-reports");
+  const trade = require("../src/actions/trade-document") as typeof import("../src/actions/trade-document");
+  const tieout = require("../src/lib/close/tieout") as typeof import("../src/lib/close/tieout");
   /* eslint-enable @typescript-eslint/no-require-imports */
 
   await cleanup();
@@ -154,8 +170,8 @@ async function main() {
     const refused = await documents.previewDocumentImport({ type: "PROPOSAL", ...proposals });
     ok("somebody who may raise proposals but not import finance data can't", !refused.ok && refused.error.includes("import finance data"));
     actorId = admin.id;
-    const notYet = await documents.previewDocumentImport({ type: "INVOICE", ...proposals });
-    ok("invoices aren't importable in this step", !notYet.ok && notYet.error.includes("can't be imported yet"));
+    const notYet = await documents.previewDocumentImport({ type: "DELIVERY_CHALLAN", ...proposals });
+    ok("delivery challans aren't importable", !notYet.ok && notYet.error.includes("can't be imported yet"));
 
     section("Open documents: the preview");
 
@@ -197,6 +213,106 @@ async function main() {
     ok("a vendor PO comes in to its vendor; a customer on a PO is refused", po.ok && po.data.created === 1 && order?.docType === "PURCHASE_ORDER" && order.direction === "PURCHASE" && order.origin === "IMPORTED" && Number(order.total) === 247800 && po.data.failed[0]?.error.includes("isn't a vendor") === true, JSON.stringify(po.ok ? po.data : po));
     const audits = await db.auditLog.count({ where: { userId: admin.id, entityType: "TradeDocument", entityLabel: { endsWith: "(imported)" } } });
     ok("each document is audited as imported", audits === 3, audits);
+
+    section("Open invoices, bills and credit notes");
+
+    // The day the books start: the first of this month, or the day after a lock past it.
+    const lock = await db.ledgerLock.findUnique({ where: { id: "global" }, select: { lockedUntil: true } });
+    const firstOfMonth = `${new Date().toISOString().slice(0, 7)}-01`;
+    const startDay = lock?.lockedUntil && lock.lockedUntil.toISOString().slice(0, 10) >= firstOfMonth ? new Date(lock.lockedUntil.getTime() + 86_400_000).toISOString().slice(0, 10) : firstOfMonth;
+    const before = (days: number) => new Date(new Date(`${startDay}T00:00:00Z`).getTime() - days * 86_400_000).toISOString().slice(0, 10);
+    const after = new Date(new Date(`${startDay}T00:00:00Z`).getTime() + 5 * 86_400_000).toISOString().slice(0, 10);
+    const invoiceDay = before(20);
+    const valueBefore = (await trade.tradeDocumentSummary("INVOICE")).reduce((t, g) => t + g.total, 0);
+
+    const invoiceFile = file([
+      { "Invoice Number": "ZZCM-INV-1", "Invoice Date": invoiceDay, "Customer Name": `${TAG} Customer`, "Due Date": before(5), "Item Name": "Support", Quantity: "1", "Item Price": "100000", "Item Tax %": "18", Balance: "50,000", Total: "118000" },
+      { "Invoice Number": "ZZCM-INV-2", "Invoice Date": invoiceDay, "Customer Name": `${TAG} Customer`, "Item Name": "Training", Quantity: "1", "Item Price": "10000", "Item Tax %": "18" },
+      { "Invoice Number": "ZZCM-INV-3", "Invoice Date": after, "Customer Name": `${TAG} Customer`, "Item Name": "Later", Quantity: "1", "Item Price": "100", "Item Tax %": "18" },
+      { "Invoice Number": "ZZCM-INV-4", "Invoice Date": invoiceDay, "Customer Name": `${TAG} Customer`, "Item Name": "Paid", Quantity: "1", "Item Price": "100", "Item Tax %": "18", Balance: "0" },
+      { "Invoice Number": "ZZCM-INV-5", "Invoice Date": invoiceDay, "Customer Name": `${TAG} Customer`, "Item Name": "Too much", Quantity: "1", "Item Price": "100", "Item Tax %": "18", Balance: "999999" },
+    ]);
+    const noDay = await documents.previewDocumentImport({ type: "INVOICE", ...invoiceFile });
+    ok("invoices need the day the books start", !noDay.ok && noDay.error.includes("day your books start"));
+    const invPreview = await documents.previewDocumentImport({ type: "INVOICE", ...invoiceFile, openingDate: startDay });
+    if (!invPreview.ok) throw new Error(invPreview.error);
+    const inv = (n: string) => invPreview.data.rows.find((r) => r.key === n || r.label.startsWith(n));
+    const invFirst = Object.fromEntries((inv("ZZCM-INV-1")?.changes ?? []).map((c) => [c.field, c.to]));
+    ok("the balance due and what was paid before Deskzo", invFirst["Balance due"] === "₹50,000" && invFirst["Paid before Deskzo"] === "₹68,000", JSON.stringify(invFirst));
+    ok("  a blank balance is all of it", Object.fromEntries((inv("ZZCM-INV-2")?.changes ?? []).map((c) => [c.field, c.to]))["Balance due"] === "₹11,800");
+    ok("  and the preview says where the balances go", invPreview.data.notices.some((n) => n.text.includes(`on ${startDay}, against Opening Balance Equity`)));
+    ok("one dated after the books start is refused", inv("ZZCM-INV-3")?.action === "error" && (inv("ZZCM-INV-3")?.error ?? "").includes("dated after"));
+    ok("one settled in the old system is refused", inv("ZZCM-INV-4")?.action === "error" && (inv("ZZCM-INV-4")?.error ?? "").includes("stays there"));
+    ok("a balance over the total is refused", inv("ZZCM-INV-5")?.action === "error" && (inv("ZZCM-INV-5")?.error ?? "").includes("more than its total"));
+
+    const invDone = await documents.commitDocumentImport({ type: "INVOICE", ...invoiceFile, openingDate: startDay });
+    ok("the open ones go in", invDone.ok && invDone.data.created === 2 && invDone.data.failed.length === 3, JSON.stringify(invDone.ok ? invDone.data : invDone));
+    const invOne = await db.tradeDocument.findUniqueOrThrow({ where: { docNumber: "ZZCM-INV-1" }, select: { id: true, origin: true, status: true, paidBefore: true, einvoiceStatus: true, total: true } });
+    ok("part-paid, with what was paid before kept on it, and no e-invoice", invOne.origin === "IMPORTED" && invOne.status === "PARTIALLY_PAID" && Number(invOne.paidBefore) === 68000 && invOne.einvoiceStatus === "NOT_APPLICABLE");
+    const accounts = new Map((await db.ledgerAccount.findMany({ where: { systemKey: { in: ["AR", "AP", "OPENING_BALANCE_EQUITY"] } }, select: { id: true, systemKey: true } })).map((a) => [a.id, a.systemKey]));
+    const entriesOf = (documentId: string) =>
+      db.journalEntry.findMany({ where: { documentId }, orderBy: { createdAt: "asc" }, select: { source: true, date: true, reversesId: true, lines: { select: { accountId: true, debit: true, credit: true, companyId: true } } } });
+    const opening = await entriesOf(invOne.id);
+    const ar = opening[0]?.lines.find((l) => accounts.get(l.accountId) === "AR");
+    const obe = opening[0]?.lines.find((l) => accounts.get(l.accountId) === "OPENING_BALANCE_EQUITY");
+    ok("its balance is posted on the start day: receivable against Opening Balance Equity, as its own entry", opening.length === 1 && opening[0]!.source === "INVOICE" && opening[0]!.date.toISOString().startsWith(startDay) && Number(ar?.debit) === 50000 && ar?.companyId === customer.id && Number(obe?.credit) === 50000 && opening[0]!.lines.length === 2, JSON.stringify(opening));
+    const settlement = await receivable.getInvoiceSettlement(invOne.id);
+    ok("its settlement: ₹50,000 due, ₹68,000 of it paid before Deskzo", settlement?.balance === 50000 && settlement.paidBefore === 68000 && settlement.paid === 68000, JSON.stringify(settlement && { balance: settlement.balance, paid: settlement.paid, paidBefore: settlement.paidBefore }));
+    const gstr = await tax.gstr1({ month: Number(invoiceDay.slice(5, 7)), year: Number(invoiceDay.slice(0, 4)) });
+    ok("it isn't in that month's GSTR-1 — it was reported from the old system", !!gstr && !JSON.stringify(gstr).includes("ZZCM-INV-1"));
+    const valueAfter = (await trade.tradeDocumentSummary("INVOICE")).reduce((t, g) => t + g.total, 0);
+    ok("  nor in the invoices list's issued value", Math.abs(valueAfter - valueBefore) < 0.01, `${valueBefore} → ${valueAfter}`);
+    const septTie = await tieout.loadTieOut("AR", new Date(`${before(40)}T12:00:00Z`));
+    ok("the close's tie-out leaves it out before the books start", !septTie.documents.some((d) => d.docNumber.startsWith("ZZCM-")));
+    const paid = await receivable.recordInvoicePayment({ invoiceId: invOne.id, amount: "50000", paidOn: startDay, method: "BANK_TRANSFER" });
+    ok("the customer pays the rest in Deskzo, and it's paid", paid.ok && (await db.tradeDocument.findUniqueOrThrow({ where: { id: invOne.id }, select: { status: true } })).status === "PAID", paid.ok ? "" : paid.error);
+    const tie = await tieout.loadTieOut("AR", new Date(`${startDay}T12:00:00Z`));
+    const tied = (n: string) => tie.documents.find((d) => d.docNumber === n);
+    ok("from the start day the tie-out reads what came across, posted as it was", tied("ZZCM-INV-2")?.total === 11800 && tied("ZZCM-INV-2")?.posted === 11800 && tied("ZZCM-INV-1")?.total === 50000 && tied("ZZCM-INV-1")?.posted === 50000, JSON.stringify([tied("ZZCM-INV-1"), tied("ZZCM-INV-2")]));
+
+    const billDone = await documents.commitDocumentImport({
+      type: "BILL",
+      openingDate: startDay,
+      ...file([{ "Bill Number": "ZZCM-BILL-1", "Bill Date": invoiceDay, "Vendor Name": `${TAG} Vendor`, "Item Name": "Parts", Quantity: "1", Rate: "5000", "Tax %": "18" }]),
+    });
+    const bill = await db.tradeDocument.findUniqueOrThrow({ where: { docNumber: "ZZCM-BILL-1" }, select: { id: true, status: true } });
+    const billEntry = (await entriesOf(bill.id))[0];
+    const ap = billEntry?.lines.find((l) => accounts.get(l.accountId) === "AP");
+    ok("a bill posts what we owe: payable against Opening Balance Equity", billDone.ok && bill.status === "ISSUED" && billEntry?.source === "BILL" && Number(ap?.credit) === 5900 && billEntry.lines.some((l) => accounts.get(l.accountId) === "OPENING_BALANCE_EQUITY" && Number(l.debit) === 5900));
+
+    const creditFile = file([
+      { "Credit Note Number": "ZZCM-CN-1", "Credit Note Date": invoiceDay, "Customer Name": `${TAG} Customer`, "Invoice Number": "ZZCM-INV-2", "Item Name": "Discount", Quantity: "1", Rate: "1000", "Tax %": "18", Balance: "1000" },
+      { "Credit Note Number": "ZZCM-CN-2", "Credit Note Date": invoiceDay, "Customer Name": `${TAG} Customer`, "Invoice Number": "NOPE-1", "Item Name": "Discount", Quantity: "1", Rate: "1000", "Tax %": "18" },
+    ]);
+    const cnDone = await documents.commitDocumentImport({ type: "CREDIT_NOTE", ...creditFile, openingDate: startDay });
+    const cn = await db.tradeDocument.findUnique({ where: { docNumber: "ZZCM-CN-1" }, select: { id: true, paidBefore: true } });
+    const cnEntry = cn ? (await entriesOf(cn.id))[0] : null;
+    ok("a credit note against an imported invoice: its credit left posted off the receivable", cnDone.ok && cnDone.data.created === 1 && Number(cn?.paidBefore) === 180 && cnEntry?.lines.some((l) => accounts.get(l.accountId) === "AR" && Number(l.credit) === 1000) === true, JSON.stringify(cnDone.ok ? cnDone.data : cnDone));
+    ok("  against an invoice that isn't in Deskzo, refused", cnDone.ok && cnDone.data.failed.some((f) => f.error.includes("isn't in Deskzo")));
+    const credits = await receivable.listAvailableCredits(customer.id);
+    ok("  and ₹1,000 of it is there to use", credits.find((c) => c.docNumber === "ZZCM-CN-1")?.remaining === 1000, JSON.stringify(credits));
+
+    const two = await db.tradeDocument.findUniqueOrThrow({ where: { docNumber: "ZZCM-INV-2" }, select: { id: true } });
+    const cancelled = await trade.setTradeDocumentStatus(two.id, "CANCELLED", "Brought across in error");
+    // A reversal names the entry it reverses, not the document.
+    const twoOpening = await db.journalEntry.findFirst({ where: { documentId: two.id }, select: { id: true, reversedBy: { select: { id: true, lines: { select: { debit: true, credit: true } } } } } });
+    ok("cancelling an imported invoice reverses its opening entry", cancelled.ok && !!twoOpening?.reversedBy && twoOpening.reversedBy.lines.some((l) => Number(l.credit) === 11800), cancelled.ok ? JSON.stringify(twoOpening) : cancelled.error);
+    const againInv = await documents.previewDocumentImport({ type: "INVOICE", ...invoiceFile, openingDate: startDay });
+    ok("the same file again brings in nothing new", againInv.ok && againInv.data.creates === 0 && againInv.data.skips === 2);
+
+    section("Zoho's own headings on the other imports");
+
+    const asRows = (rows: Record<string, string>[]) => Papa.parse<Record<string, string>>(Papa.unparse(rows), { header: true, skipEmptyLines: true }).data;
+    const companies = await plan("companies", asRows([{ "Account Name": `${TAG} Zoho Co`, "Account Owner": admin.name, "Website URL": "https://zoho-co.test", Industry: "Retail", "Ticker Symbol": "ZZ" }]), admin.id);
+    ok("a Zoho CRM Accounts file: Account Name as the name, Account Owner as the manager", companies.creates === 1 && companies.readAs.some((r) => r.from === "Account Name" && r.to === "Name") && companies.readAs.some((r) => r.from === "Account Owner" && r.to === "Account manager") && companies.unknownColumns.includes("Ticker Symbol"), JSON.stringify(companies.readAs));
+    const contacts = await plan("contacts", asRows([{ "First Name": "Asha", "Last Name": "Rao", "Account Name": `${TAG} Customer`, Email: "asha@zzprobe-cm.invalid", Mobile: "9876500000" }]), admin.id);
+    ok("a Zoho CRM Contacts file: first and last name joined, Account Name as the company", contacts.creates === 1 && contacts.rows[0]?.label.startsWith("Asha Rao") === true && contacts.unknownColumns.includes("Mobile"), JSON.stringify({ label: contacts.rows[0]?.label, unknown: contacts.unknownColumns, err: contacts.rows[0]?.error }));
+    // Zoho's products carry no type, and a new item needs one: the file gains a Type column.
+    const items = await plan("items", asRows([{ "Product Name": `${TAG} Router`, "Product Code": "ZZCM-ZR1", "Unit Price": "4500", "Usage Unit": "Nos", Type: "GOOD" }]), admin.id);
+    ok("a Zoho CRM Products file (with a Type added): Product Code as the SKU, Unit Price as the price", items.creates === 1 && items.readAs.some((r) => r.from === "Product Code" && r.to === "SKU"), JSON.stringify({ readAs: items.readAs, row: items.rows[0] }));
+    let clashed = "";
+    await plan("companies", asRows([{ "Account Name": "A", "Company Name": "B" }]), admin.id).catch((e: Error) => (clashed = e.message));
+    ok("two headings for one column refuse the file", clashed.includes("would both be read as Name"), clashed);
   } finally {
     await cleanup();
   }

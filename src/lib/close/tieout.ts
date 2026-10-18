@@ -257,6 +257,7 @@ export async function loadTieOut(side: TieOutSide, month: Date): Promise<TieOutI
     },
     select: {
       id: true, docNumber: true, docType: true, status: true, companyId: true, currency: true, exchangeRate: true, total: true,
+      origin: true, paidBefore: true,
       company: { select: { name: true } },
       payments: { where: { payment: { paidOn: { lt: to } } }, select: { amount: true } },
       creditsReceived: { where: { createdAt: { lt: to }, creditNote: { issueDate: { lt: to }, status: { not: "DRAFT" } } }, select: { amount: true } },
@@ -299,6 +300,10 @@ export async function loadTieOut(side: TieOutSide, month: Date): Promise<TieOutI
     const posting = postings.get(d.id);
     // A cancelled document was still owed at the month end if its posting was standing then.
     if (d.status === "CANCELLED" && !posting) continue;
+    // One brought from the old system is in these books from its opening entry, on the day they start
+    // (src/lib/portability/documents.ts) — not from the day it was issued there. Before then, it isn't.
+    const imported = d.origin === "IMPORTED";
+    if (imported && !posting) continue;
     documents.push({
       id: d.id,
       docNumber: d.docNumber,
@@ -307,7 +312,8 @@ export async function loadTieOut(side: TieOutSide, month: Date): Promise<TieOutI
       companyName: d.company.name,
       currency: d.currency,
       rate: bookingRate(d),
-      total: Number(d.total),
+      // What came across: its opening entry posted what was left after what it had settled there.
+      total: imported ? Number(d.total) - Number(d.paidBefore) : Number(d.total),
       allocated: round2(sumOf(d.payments)),
       credited: round2(sumOf(d.creditsReceived) + sumOf(d.vendorCredits)),
       applied: round2(sumOf(d.creditsApplied)),

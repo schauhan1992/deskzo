@@ -143,7 +143,8 @@ export function DocumentActions({
               </Button>
             ))}
 
-            {eligible && einvoiceEnabled && !hasIrn && einvoiceStatus !== "CANCELLED" && (
+            {/* Not applicable: never reported — a document brought from the old system, for one. */}
+            {eligible && einvoiceEnabled && !hasIrn && einvoiceStatus !== "CANCELLED" && einvoiceStatus !== "NOT_APPLICABLE" && (
               <Button
                 variant="subtle"
                 disabled={pending}

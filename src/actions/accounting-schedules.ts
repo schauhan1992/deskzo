@@ -20,6 +20,7 @@ import {
   type ScheduleRunMonth,
 } from "@/lib/close/schedules";
 import type { ActionResult } from "@/actions/company";
+import { RAISED_IN_DESKZO } from "@/lib/documents/imported";
 
 /**
  * Prepaids and accruals (Revenue & Close, spec §4.3) — the screen's actions. The engine is
@@ -90,6 +91,8 @@ export async function billsForPrepaid(search?: string) {
     where: {
       docType: "BILL",
       status: { notIn: ["DRAFT", "CANCELLED"] },
+      // A bill brought from the old system was expensed there; spreading it again would expense it twice.
+      AND: [RAISED_IN_DESKZO],
       ...(q
         ? { OR: [{ docNumber: { contains: q, mode: "insensitive" } }, { reference: { contains: q, mode: "insensitive" } }, { company: { name: { contains: q, mode: "insensitive" } } }] }
         : {}),

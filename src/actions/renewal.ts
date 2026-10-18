@@ -15,6 +15,7 @@ import { bulkRenewalTasksSchema } from "@/lib/validation/task";
 import type { ActionResult } from "@/actions/company";
 import type { Prisma } from "@prisma/client";
 import { viewerHas } from "@/actions/permission";
+import { RAISED_IN_DESKZO } from "@/lib/documents/imported";
 
 export type RenewalWindow = "expired" | "30" | "60" | "90";
 
@@ -206,6 +207,7 @@ async function renewalStageSignals(rows: StageSource[]) {
         document: {
           docType: { in: ["PROPOSAL", "PROFORMA", "INVOICE"] },
           status: { notIn: ["CANCELLED", "REJECTED", "EXPIRED"] },
+          ...RAISED_IN_DESKZO,
         },
       },
       select: {

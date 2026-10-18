@@ -2,6 +2,7 @@ import type { JournalSource, Prisma, RevenueScheduleKind, RevenueScheduleStatus 
 import { SYSTEM_ACCOUNTS } from "@/lib/ledger/chart";
 import { documentPostingSelect, revenueInRupees } from "@/lib/ledger/journal";
 import { indiaClock } from "@/lib/time/zone";
+import { RAISED_IN_DESKZO } from "@/lib/documents/imported";
 import {
   addMonths,
   dayDate,
@@ -502,7 +503,8 @@ export type CustomerRevenue = {
 export async function customerRevenue(client: Client, params: { companyId: string; now?: Date }): Promise<CustomerRevenue> {
   const month = monthKeyAt(params.now ?? new Date());
   const horizon = addMonths(month, 11);
-  const issued = { companyId: params.companyId, status: { notIn: ["DRAFT", "CANCELLED"] as ("DRAFT" | "CANCELLED")[] } };
+  // Revenue booked here: one brought from the old system was booked there (src/lib/documents/imported.ts).
+  const issued = { companyId: params.companyId, status: { notIn: ["DRAFT", "CANCELLED"] as ("DRAFT" | "CANCELLED")[] }, ...RAISED_IN_DESKZO };
   const [invoices, credits, rows] = await Promise.all([
     client.tradeDocument.findMany({ where: { ...issued, docType: "INVOICE" }, select: documentPostingSelect }),
     client.tradeDocument.findMany({ where: { ...issued, docType: "CREDIT_NOTE" }, select: documentPostingSelect }),

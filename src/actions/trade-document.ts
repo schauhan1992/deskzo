@@ -56,6 +56,7 @@ import { findTradeDocumentFor } from "@/lib/documents/load";
 import { viewerHas } from "@/actions/permission";
 import { releaseBillingMilestones, syncBillingMilestones } from "@/lib/projects/billing-sync";
 import { moduleAccessFor } from "@/lib/modules-access";
+import { RAISED_IN_DESKZO, isImported } from "@/lib/documents/imported";
 import {
   bankAccountRefusal,
   branchWithRegistration,
@@ -645,10 +646,11 @@ export async function generateEInvoice(id: string): Promise<ActionResult<{ id: s
   if (!(await countryFeatureAvailable("einvoice"))) return { ok: false, error: "E-invoicing is India's, and this workspace is set up for another country." };
   const document = await db.tradeDocument.findUnique({
     where: { id },
-    select: { status: true, docType: true, irn: true, total: true },
+    select: { status: true, docType: true, irn: true, total: true, origin: true },
   });
   if (!document || !(await reachesDocument(user.id, id, "edit"))) return { ok: false, error: "That document no longer exists." };
   if (document.status === "DRAFT") return { ok: false, error: "Issue the document before reporting it to the portal." };
+  if (isImported(document)) return { ok: false, error: "This document was brought from your old system — its e-invoice, if it needed one, was reported from there." };
   if (document.irn) return { ok: false, error: "This document already has an IRN." };
   const org = await getOrganisation();
   if (org.einvoiceMinValue !== null && Number(document.total) < org.einvoiceMinValue) {
@@ -1116,8 +1118,9 @@ export async function tradeDocumentSummary(docType: TradeDocumentType) {
       where: { AND: [{ docType }, scope] },
       _count: { _all: true },
     }),
+    // The value is what was issued here: one brought from the old system was issued, and counted, there.
     db.tradeDocument.findMany({
-      where: { AND: [{ docType }, scope] },
+      where: { AND: [{ docType }, scope, RAISED_IN_DESKZO] },
       select: { status: true, total: true, exchangeRate: true },
     }),
   ]);

@@ -145,10 +145,13 @@ export async function createAccountingSchedule(
       if (input.sourceDocumentId) {
         const doc = await tx.tradeDocument.findUnique({
           where: { id: input.sourceDocumentId },
-          select: { id: true, docNumber: true, docType: true, status: true, issueDate: true, companyId: true },
+          select: { id: true, docNumber: true, docType: true, status: true, issueDate: true, companyId: true, origin: true },
         });
         if (!doc || doc.docType !== "BILL" || doc.status === "DRAFT" || doc.status === "CANCELLED") {
           return { ok: false as const, error: "A prepaid is made from an issued vendor bill." };
+        }
+        if (doc.origin === "IMPORTED") {
+          return { ok: false as const, error: `${doc.docNumber} was brought from your old system — it was expensed there, so a prepaid isn't made from it here.` };
         }
         bill = doc;
         vendorCompanyId ??= doc.companyId;

@@ -2300,6 +2300,13 @@ model TradeDocument {
 
   roundOff Decimal @default(0) @db.Decimal(6, 2)
   total    Decimal @default(0) @db.Decimal(14, 2)
+  /**
+   * What was settled before the document came to Deskzo (owner, 18 Oct 2026): on one brought from the
+   * old system (origin IMPORTED), the payments and credits it had there, so its balance due is what was
+   * left. Zero on everything raised here. Counted wherever a balance is worked out (src/lib/receivables.ts).
+   * Read by name — in NOT_YET_EVERYWHERE until every workspace has it.
+   */
+  paidBefore Decimal @default(0) @db.Decimal(14, 2)
 
   reference String?
   notes     String?

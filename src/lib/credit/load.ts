@@ -46,6 +46,7 @@ export async function loadCreditSubjects(companyIds: string[]): Promise<Map<stri
         issueDate: true,
         dueDate: true,
         total: true,
+        paidBefore: true,
         exchangeRate: true,
         payments: { select: { amount: true, payment: { select: { paidOn: true } } } },
         creditsReceived: { select: { amount: true, createdAt: true } },
@@ -94,7 +95,9 @@ export async function loadCreditSubjects(companyIds: string[]): Promise<Map<stri
     if (!subject) continue;
     // A foreign-currency invoice is weighed in rupees, at the rate it was raised at.
     const rate = Number(inv.exchangeRate) || 1;
-    const amount = Number(inv.total) * rate;
+    // One brought from the old system is weighed by what came across: what it settled there has no date
+    // here, so it neither helps nor hurts how promptly this customer pays (src/lib/documents/imported.ts).
+    const amount = (Number(inv.total) - Number(inv.paidBefore)) * rate;
     if (amount <= 0) continue;
     subject.bills.push({
       id: inv.id,

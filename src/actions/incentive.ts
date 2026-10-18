@@ -14,6 +14,7 @@ import { workspaceClock } from "@/lib/time/workspace";
 import { metricByKey } from "@/lib/targets/metrics";
 import { computeIncentive, payableState, validateScheme, type Scheme } from "@/lib/incentives/compute";
 import type { ActionResult } from "@/actions/company";
+import { RAISED_IN_DESKZO } from "@/lib/documents/imported";
 
 /**
  * Paying people for hitting their numbers.
@@ -275,6 +276,8 @@ function shareOf(invoices: { total: Prisma.Decimal; payments: { amount: Prisma.D
 const invoiceForCollection = {
   docType: "INVOICE",
   status: { notIn: ["DRAFT", "CANCELLED"] },
+  // What was sold here: one brought from the old system earned its commission there (src/lib/documents/imported.ts).
+  ...RAISED_IN_DESKZO,
 } satisfies Prisma.TradeDocumentWhereInput;
 
 /**

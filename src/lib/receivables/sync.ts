@@ -28,19 +28,21 @@ const settlementInclude = {
 
 type SettlementRow = {
   total: Prisma.Decimal | number;
+  /** What it had settled in the old system, when it was brought from there (src/lib/receivables.ts). */
+  paidBefore: Prisma.Decimal | number;
   payments: { amount: Prisma.Decimal | number }[];
   creditsReceived: { amount: Prisma.Decimal | number }[];
 };
 
 export function settlementOf(invoice: SettlementRow) {
   const sum = (rows: { amount: Prisma.Decimal | number }[]) => rows.reduce((t, r) => t + Number(r.amount), 0);
-  return settleInvoice(Number(invoice.total), sum(invoice.payments), sum(invoice.creditsReceived));
+  return settleInvoice(Number(invoice.total), sum(invoice.payments), sum(invoice.creditsReceived), Number(invoice.paidBefore));
 }
 
 export async function syncInvoiceStatus(invoiceId: string) {
   const invoice = await db.tradeDocument.findUnique({
     where: { id: invoiceId },
-    select: { id: true, status: true, total: true, ...settlementInclude },
+    select: { id: true, status: true, total: true, paidBefore: true, ...settlementInclude },
   });
   if (!invoice || invoice.status === "CANCELLED" || invoice.status === "DRAFT") return;
 

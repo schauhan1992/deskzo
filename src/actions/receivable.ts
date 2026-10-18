@@ -34,19 +34,26 @@ import type { ActionResult } from "@/actions/company";
 
 /** Everything needed to settle an invoice, in one shape the whole module reads. */
 const invoiceSettlementInclude = {
+  paidBefore: true,
   payments: { select: { amount: true } },
   creditsReceived: { select: { amount: true } },
 } as const;
 
+/** A credit note's credit still to apply: what it gave, less what it was used for here and before Deskzo. */
+const creditLeft = (note: { total: Prisma.Decimal | number; paidBefore: Prisma.Decimal | number; creditsApplied: { amount: Prisma.Decimal | number }[] }) =>
+  Math.max(Number(note.total) - Number(note.paidBefore) - note.creditsApplied.reduce((t, a) => t + Number(a.amount), 0), 0);
+
 type SettlementRow = {
   total: Prisma.Decimal | number;
+  /** What it had settled in the old system, when it was brought from there (src/lib/receivables.ts). */
+  paidBefore: Prisma.Decimal | number;
   payments: { amount: Prisma.Decimal | number }[];
   creditsReceived: { amount: Prisma.Decimal | number }[];
 };
 
 function settlementOf(invoice: SettlementRow) {
   const sum = (rows: { amount: Prisma.Decimal | number }[]) => rows.reduce((t, r) => t + Number(r.amount), 0);
-  return settleInvoice(Number(invoice.total), sum(invoice.payments), sum(invoice.creditsReceived));
+  return settleInvoice(Number(invoice.total), sum(invoice.payments), sum(invoice.creditsReceived), Number(invoice.paidBefore));
 }
 
 /**
@@ -329,7 +336,7 @@ export async function applyCreditNote(input: unknown): Promise<ActionResult<{ id
   const [creditNote, invoice] = await Promise.all([
     db.tradeDocument.findUnique({
       where: { id: creditNoteId },
-      select: { id: true, companyId: true, docType: true, status: true, total: true, docNumber: true, currency: true, creditsApplied: { select: { amount: true } } },
+      select: { id: true, companyId: true, docType: true, status: true, total: true, paidBefore: true, docNumber: true, currency: true, creditsApplied: { select: { amount: true } } },
     }),
     db.tradeDocument.findUnique({
       where: { id: invoiceId },
@@ -354,8 +361,7 @@ export async function applyCreditNote(input: unknown): Promise<ActionResult<{ id
     return { ok: false, error: `The credit note is in ${creditNote.currency} and the invoice in ${invoice.currency}; a credit note is applied to an invoice in its own currency.` };
   }
 
-  const creditRemaining =
-    Number(creditNote.total) - creditNote.creditsApplied.reduce((t, a) => t + Number(a.amount), 0);
+  const creditRemaining = creditLeft(creditNote);
   if (amount > creditRemaining + 0.001) {
     return { ok: false, error: `Only ${formatMoney(creditRemaining, creditNote.currency)} of this credit note is unapplied.` };
   }
@@ -439,6 +445,7 @@ export async function getInvoiceSettlement(invoiceId: string) {
     select: {
       id: true,
       total: true,
+      paidBefore: true,
       // Every figure below is in this currency; the panel shows them in it, and asks for the rate a
       // foreign receipt came in at against this one.
       currency: true,
@@ -471,7 +478,10 @@ export async function getInvoiceSettlement(invoiceId: string) {
       Number(invoice.total),
       invoice.payments.reduce((t, p) => t + Number(p.amount), 0),
       invoice.creditsReceived.reduce((t, c) => t + Number(c.amount), 0),
+      Number(invoice.paidBefore),
     ),
+    // Settled in the old system, before it came to Deskzo — part of "paid" above, shown on its own.
+    paidBefore: Number(invoice.paidBefore),
     currency: invoice.currency,
     exchangeRate: bookingRate(invoice),
     payments: invoice.payments,
@@ -487,6 +497,7 @@ export async function getCreditNoteBalance(creditNoteId: string) {
     where: { AND: [{ id: creditNoteId }, await documentAccess(user.id, "view")] },
     select: {
       total: true,
+      paidBefore: true,
       currency: true,
       creditsApplied: {
         orderBy: { createdAt: "desc" },
@@ -495,12 +506,12 @@ export async function getCreditNoteBalance(creditNoteId: string) {
     },
   });
   if (!creditNote) return null;
-  const applied = creditNote.creditsApplied.reduce((t, a) => t + Number(a.amount), 0);
+  const applied = creditNote.creditsApplied.reduce((t, a) => t + Number(a.amount), 0) + Number(creditNote.paidBefore);
   return toPlain({
     currency: creditNote.currency,
     total: Number(creditNote.total),
     applied,
-    remaining: Math.max(Number(creditNote.total) - applied, 0),
+    remaining: creditLeft(creditNote),
     applications: creditNote.creditsApplied,
   });
 }
@@ -565,9 +576,15 @@ export async function customerStatement(companyId: string, opts?: { from?: strin
     db.tradeDocument.findMany({
       where: { AND: [{ companyId, docType: "CREDIT_NOTE", status: { notIn: ["DRAFT", "CANCELLED"] } }, documentScope] },
       orderBy: { issueDate: "asc" },
-      select: { id: true, docNumber: true, issueDate: true, total: true },
+      select: { id: true, docNumber: true, issueDate: true, total: true, paidBefore: true },
     }),
   ]);
+
+  // A document brought from the old system came across with what was left on it: what it had settled
+  // there was settled before this statement's account began, so it counts what came across.
+  const across = (d: { total: Prisma.Decimal | number; paidBefore: Prisma.Decimal | number }) => Number(d.total) - Number(d.paidBefore);
+  const beforeNote = (d: { paidBefore: Prisma.Decimal | number }, what: string) =>
+    Number(d.paidBefore) > 0 ? ` (${formatMoney(Number(d.paidBefore), "INR")} ${what} before Deskzo)` : "";
 
   const entries = [
     ...invoices.map((i) => ({
@@ -575,8 +592,8 @@ export async function customerStatement(companyId: string, opts?: { from?: strin
       date: i.issueDate,
       kind: "INVOICE" as const,
       reference: i.docNumber,
-      description: "Tax invoice",
-      debit: Number(i.total),
+      description: `Tax invoice${beforeNote(i, "settled")}`,
+      debit: across(i),
       credit: 0,
       href: `/documents/${i.id}`,
     })),
@@ -595,9 +612,9 @@ export async function customerStatement(companyId: string, opts?: { from?: strin
       date: c.issueDate,
       kind: "CREDIT_NOTE" as const,
       reference: c.docNumber,
-      description: "Credit note",
+      description: `Credit note${beforeNote(c, "used")}`,
       debit: 0,
-      credit: Number(c.total),
+      credit: across(c),
       href: `/documents/${c.id}`,
     })),
   ];
@@ -642,9 +659,9 @@ export async function customerStatement(companyId: string, opts?: { from?: strin
     });
   }
 
-  const invoiced = invoices.reduce((t, i) => t + Number(i.total), 0);
+  const invoiced = invoices.reduce((t, i) => t + across(i), 0);
   const received = payments.reduce((t, p) => t + Number(p.amount), 0);
-  const credited = creditNotes.reduce((t, c) => t + Number(c.total), 0);
+  const credited = creditNotes.reduce((t, c) => t + across(c), 0);
 
   // Money received or credited that hasn't been set against an invoice yet. Without this the
   // statement reads as a contradiction: nothing outstanding, but a negative closing balance. They
@@ -784,17 +801,16 @@ export async function listAvailableCredits(companyId: string) {
   const creditNotes = await db.tradeDocument.findMany({
     where: { AND: [{ companyId, docType: "CREDIT_NOTE", status: { notIn: ["DRAFT", "CANCELLED"] } }, await documentAccess(user.id, "view")] },
     orderBy: { issueDate: "asc" },
-    select: { id: true, docNumber: true, total: true, currency: true, creditsApplied: { select: { amount: true } } },
+    select: { id: true, docNumber: true, total: true, paidBefore: true, currency: true, creditsApplied: { select: { amount: true } } },
   });
   return creditNotes
     .map((c) => {
-      const applied = c.creditsApplied.reduce((t, a) => t + Number(a.amount), 0);
       return {
         id: c.id,
         docNumber: c.docNumber,
         currency: c.currency,
         total: Number(c.total),
-        remaining: Math.max(Number(c.total) - applied, 0),
+        remaining: creditLeft(c),
       };
     })
     .filter((c) => c.remaining > 0.01);

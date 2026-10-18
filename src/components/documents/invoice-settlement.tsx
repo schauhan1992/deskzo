@@ -140,6 +140,9 @@ export function InvoiceSettlementPanel({
           <Figure label="Credited" value={money(settlement.credited)} tone="warning" />
           <Figure label="Balance" value={money(settlement.balance)} tone={settled ? undefined : "danger"} />
         </div>
+        {settlement.paidBefore > 0 && (
+          <p className="text-xs text-muted">Received includes {money(settlement.paidBefore)} paid in your old system, before this invoice came to Deskzo.</p>
+        )}
 
         {canRecord && !settled && (
           <div className="flex flex-wrap gap-2">

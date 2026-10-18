@@ -9,6 +9,9 @@ import { documentDirection, tradeDocumentLabels } from "@/lib/trade-documents";
 import { registeredTreatments, tradeDocumentSchema, type TradeDocumentInput } from "@/lib/validation/trade-document";
 import { isVendorRelationshipType } from "@/lib/validation/company";
 import { normalizeCompanyName } from "@/lib/company-name";
+import { resolveAccounts, writeEntry } from "@/lib/ledger/journal";
+import { bookingRate } from "@/lib/ledger/posting";
+import { settleInvoice, settledStatus } from "@/lib/receivables";
 import { workspaceClock } from "@/lib/time/workspace";
 import { readHeadings, type ImportPlan, type PlannedRow } from "./import";
 import { findUser } from "./importers/lookups";
@@ -16,8 +19,8 @@ import { RowReader, type FieldChange } from "./importers/types";
 
 /**
  * Open documents brought from the system a company used before Deskzo (owner, 18 Oct 2026: "open ones
- * only"): proposals, proformas and vendor POs still in play on the day it moved, with their own numbers,
- * dates and lines. Paid and closed history stays in the old system.
+ * only"): proposals, proformas, vendor POs, and the invoices, bills and credit notes still unsettled on
+ * the day it moved — with their own numbers, dates and lines. Paid and closed history stays there.
  *
  *   · **One row a line**, as Zoho Books and most systems export documents; rows sharing a Number are one
  *     document, and its header is read from its first row.
@@ -30,14 +33,27 @@ import { RowReader, type FieldChange } from "./importers/types";
  *   · **The party must exist** — import Companies or Vendors first. Lines are linked to the catalogue by
  *     SKU or name when they match, and take its HSN, unit and tax rate where the file leaves them blank.
  *   · **Quiet.** Marked IMPORTED and issued as they were there: no approval, no e-invoice, no notification,
- *     no workflow. None of these types posts to the ledger.
+ *     no workflow.
  *
- * Invoices, bills and credit notes are the second step: they need their balances in the opening entry.
+ * **Invoices, bills and credit notes** carry money, so three more things (owner: "the import does"):
+ *   · Each comes with its **balance due** — blank means all of it — and what was settled before is kept
+ *     on the document (`paidBefore`), so receivables, ageing and collections chase only what is left. One
+ *     fully settled is refused: it belongs in the old system.
+ *   · Its balance is posted on **the day the books start in Deskzo**, which the import asks for, against
+ *     the party's receivable or payable with Opening Balance Equity on the other side — never sales or
+ *     tax. It is the document's own entry, so cancelling the document reverses it like any other.
+ *   · It stays out of sales, GST returns, targets, commission and revenue: what was sold was sold before.
+ *
+ * A credit note names the invoice it reduces, which must be in Deskzo.
  */
 
-export const DOCUMENT_IMPORT_TYPES = ["PROPOSAL", "PROFORMA", "PURCHASE_ORDER"] as const satisfies readonly TradeDocumentType[];
+export const DOCUMENT_IMPORT_TYPES = ["PROPOSAL", "PROFORMA", "PURCHASE_ORDER", "INVOICE", "BILL", "CREDIT_NOTE"] as const satisfies readonly TradeDocumentType[];
 export type DocumentImportType = (typeof DOCUMENT_IMPORT_TYPES)[number];
 export const isDocumentImportType = (value: unknown): value is DocumentImportType => (DOCUMENT_IMPORT_TYPES as readonly unknown[]).includes(value);
+
+/** The types that carry a balance, and so an opening entry and a start day. */
+export const OPENING_TYPES: readonly TradeDocumentType[] = ["INVOICE", "BILL", "CREDIT_NOTE"];
+export const needsOpeningDate = (type: TradeDocumentType) => OPENING_TYPES.includes(type);
 
 const C = {
   number: "Number",
@@ -46,6 +62,8 @@ const C = {
   status: "Status",
   validUntil: "Valid until",
   due: "Due date",
+  balance: "Balance due",
+  against: "Against invoice",
   placeOfSupply: "Place of supply",
   gstin: "GSTIN",
   reference: "Reference",
@@ -63,38 +81,59 @@ const C = {
   total: "Total",
 } as const;
 
-/**
- * The usual headings in document exports (Zoho Books' estimates, purchase orders and invoices among
- * them), matched ignoring case and punctuation. To be tightened against real exports.
- */
-const ALIASES: Record<string, string[]> = {
-  [C.number]: ["Estimate Number", "Quote Number", "Quotation Number", "Proforma Number", "Purchase Order Number", "PO Number", "Document Number"],
-  [C.date]: ["Estimate Date", "Quote Date", "Quotation Date", "Proforma Date", "Purchase Order Date", "PO Date", "Document Date"],
-  [C.party]: ["Customer Name", "Vendor Name", "Customer", "Vendor", "Company Name", "Party Name", "Supplier Name", "Supplier"],
-  [C.status]: ["Estimate Status", "Quote Status", "Purchase Order Status", "Document Status"],
-  [C.validUntil]: ["Expiry Date", "Valid Till", "Quote Expiry Date", "Estimate Expiry Date"],
-  [C.due]: ["Payment Due Date"],
-  [C.placeOfSupply]: ["Place Of Supply(With State Code)", "Supply State"],
-  [C.gstin]: ["GST Identification Number (GSTIN)", "Customer GSTIN", "Vendor GSTIN", "GST Number", "GSTIN/UIN"],
-  [C.reference]: ["Reference#", "Reference Number", "Reference No"],
-  [C.salesperson]: ["Sales Person", "Salesperson Name"],
-  [C.notes]: ["Customer Notes", "Vendor Notes"],
-  [C.terms]: ["Terms & Conditions", "Terms and Conditions"],
-  [C.item]: ["Item Name", "Product", "Product Name"],
-  [C.description]: ["Item Desc", "Item Description", "Line Description"],
-  [C.hsn]: ["HSN Code", "SAC Code", "HSN/SAC Code"],
-  [C.quantity]: ["Qty"],
-  [C.unit]: ["Usage Unit", "UOM", "Unit of Measure"],
-  [C.rate]: ["Item Price", "Unit Price", "Price"],
-  [C.discount]: ["Discount(%)", "Discount Percent", "Item Discount %"],
-  [C.tax]: ["Item Tax %", "Tax Percentage", "GST %", "GST Rate", "Tax Rate"],
-  [C.total]: ["Document Total", "Total Amount", "Grand Total", "Estimate Total"],
+/** What each type's own export calls its number, date and party (Zoho Books' among them). */
+const OWN: Record<DocumentImportType, { number: string[]; date: string[]; party: string[]; against?: string[] }> = {
+  PROPOSAL: { number: ["Estimate Number", "Quote Number", "Quotation Number"], date: ["Estimate Date", "Quote Date", "Quotation Date"], party: ["Customer Name", "Customer"] },
+  PROFORMA: { number: ["Proforma Number", "Proforma Invoice Number"], date: ["Proforma Date", "Proforma Invoice Date"], party: ["Customer Name", "Customer"] },
+  PURCHASE_ORDER: { number: ["Purchase Order Number", "PO Number"], date: ["Purchase Order Date", "PO Date"], party: ["Vendor Name", "Vendor", "Supplier Name", "Supplier"] },
+  INVOICE: { number: ["Invoice Number", "Invoice No"], date: ["Invoice Date"], party: ["Customer Name", "Customer"] },
+  BILL: { number: ["Bill Number", "Bill No", "Vendor Invoice Number"], date: ["Bill Date"], party: ["Vendor Name", "Vendor", "Supplier Name", "Supplier"] },
+  CREDIT_NOTE: {
+    number: ["Credit Note Number", "Credit Note No", "CreditNote Number"],
+    date: ["Credit Note Date", "CreditNote Date"],
+    party: ["Customer Name", "Customer"],
+    against: ["Invoice Number", "Associated Invoice Number", "Reference Invoice Number", "Original Invoice Number"],
+  },
 };
 
-export const DOCUMENT_TEMPLATE_COLUMNS: string[] = Object.values(C);
-const headings = { templateColumns: DOCUMENT_TEMPLATE_COLUMNS, headerAliases: ALIASES };
+/** The usual headings, matched ignoring case and punctuation. To be tightened against real exports. */
+function aliasesFor(type: DocumentImportType): Record<string, string[]> {
+  const own = OWN[type];
+  return {
+    [C.number]: [...own.number, "Document Number"],
+    [C.date]: [...own.date, "Document Date"],
+    [C.party]: [...own.party, "Company Name", "Party Name"],
+    [C.status]: ["Estimate Status", "Quote Status", "Purchase Order Status", "Invoice Status", "Bill Status", "Credit Note Status", "Document Status"],
+    [C.validUntil]: ["Expiry Date", "Valid Till", "Quote Expiry Date", "Estimate Expiry Date"],
+    [C.due]: ["Payment Due Date"],
+    [C.balance]: ["Balance", "Balance Due", "Amount Due", "Outstanding", "Outstanding Amount", "Credits Remaining", "Balance Credits"],
+    ...(own.against ? { [C.against]: own.against } : {}),
+    [C.placeOfSupply]: ["Place Of Supply(With State Code)", "Supply State"],
+    [C.gstin]: ["GST Identification Number (GSTIN)", "Customer GSTIN", "Vendor GSTIN", "GST Number", "GSTIN/UIN"],
+    [C.reference]: ["Reference#", "Reference Number", "Reference No"],
+    [C.salesperson]: ["Sales Person", "Salesperson Name"],
+    [C.notes]: ["Customer Notes", "Vendor Notes"],
+    [C.terms]: ["Terms & Conditions", "Terms and Conditions"],
+    [C.item]: ["Item Name", "Product", "Product Name"],
+    [C.description]: ["Item Desc", "Item Description", "Line Description"],
+    [C.hsn]: ["HSN Code", "SAC Code", "HSN/SAC Code"],
+    [C.quantity]: ["Qty"],
+    [C.unit]: ["Usage Unit", "UOM", "Unit of Measure"],
+    [C.rate]: ["Item Price", "Unit Price", "Price"],
+    [C.discount]: ["Discount(%)", "Discount Percent", "Item Discount %"],
+    [C.tax]: ["Item Tax %", "Tax Percentage", "GST %", "GST Rate", "Tax Rate"],
+    [C.total]: ["Document Total", "Total Amount", "Grand Total", "Estimate Total", "Invoice Total", "Bill Total"],
+  };
+}
+
+/** The template's columns for a type: the balance and start-day ones only where they mean something. */
+export function documentTemplateColumns(type: DocumentImportType): string[] {
+  return Object.values(C).filter((c) => (c === C.balance ? needsOpeningDate(type) : c === C.against ? type === "CREDIT_NOTE" : c === C.validUntil ? type === "PROPOSAL" : true));
+}
+const headingsFor = (type: DocumentImportType) => ({ templateColumns: Object.values(C) as string[], headerAliases: aliasesFor(type) });
 
 type Applied = { created: number; updated: number; skipped: number; failed: { line: number; error: string }[] };
+export type DocumentImportOptions = { openingDate?: string | null };
 
 type Group = { number: string; firstLine: number; rows: { line: number; row: Record<string, string> }[] };
 
@@ -116,7 +155,7 @@ function groupRows(rows: Record<string, string>[]): Group[] {
   return groups;
 }
 
-/** A status word as one of a document's, for the types this import takes. Blank or unknown: issued. */
+/** A status word as one of a proposal's, proforma's or PO's. Blank or unknown: issued. */
 function statusOf(type: DocumentImportType, text: string): TradeDocumentStatus {
   const t = text.trim().toLowerCase();
   if (/draft/.test(t)) return "DRAFT";
@@ -124,18 +163,27 @@ function statusOf(type: DocumentImportType, text: string): TradeDocumentStatus {
   return "ISSUED";
 }
 
+const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const rupees = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 
-type Resolved =
-  | { error: string; line?: number }
-  | { skip: string }
-  | { input: TradeDocumentInput; status: TradeDocumentStatus; partyName: string; total: number; lineCount: number };
+type Opening = { day: string; at: Date } | null;
+type Ready = {
+  input: TradeDocumentInput;
+  status: TradeDocumentStatus;
+  partyName: string;
+  total: number;
+  lineCount: number;
+  /** For an invoice, bill or credit note: what is still due (or, on a credit note, still to use). */
+  balance: number | null;
+};
+type Resolved = { error: string; line?: number } | { skip: string } | Ready;
 
 /** What a group of rows makes: the form's input for it, or why it can't be made, or that it's already here. */
-async function resolveGroup(type: DocumentImportType, group: Group, clock: Awaited<ReturnType<typeof workspaceClock>>): Promise<Resolved> {
+async function resolveGroup(type: DocumentImportType, group: Group, clock: Awaited<ReturnType<typeof workspaceClock>>, opening: Opening): Promise<Resolved> {
   if (!group.number) return { error: `${C.number} is required — every document keeps the number it had.` };
   const head = new RowReader(group.rows[0]!.row, clock);
   const purchase = documentDirection[type] === "PURCHASE";
+  const label = tradeDocumentLabels[type].toLowerCase();
 
   const taken = await db.tradeDocument.findUnique({ where: { docNumber: group.number }, select: { docType: true, origin: true, company: { select: { name: true } } } });
   if (taken) {
@@ -151,14 +199,29 @@ async function resolveGroup(type: DocumentImportType, group: Group, clock: Await
   });
   if (!party) return { error: `No ${purchase ? "vendor" : "company"} named "${partyName}". Import ${purchase ? "Vendors" : "Companies"} first, or correct the spelling.` };
   const vendor = isVendorRelationshipType(party.relationshipType as CompanyRelationshipType);
-  if (purchase && !vendor) return { error: `${party.name} isn't a vendor — a purchase order goes to a vendor.` };
-  if (!purchase && vendor) return { error: `${party.name} is a vendor — a ${tradeDocumentLabels[type].toLowerCase()} goes to a customer.` };
+  if (purchase && !vendor) return { error: `${party.name} isn't a vendor — a ${label} is from a vendor.` };
+  if (!purchase && vendor) return { error: `${party.name} is a vendor — a ${label} goes to a customer.` };
 
   const issueDate = head.date(C.date);
   const validUntil = head.date(C.validUntil);
   const dueDate = head.date(C.due);
   if (head.error) return { error: head.error };
   if (!issueDate) return { error: `${C.date} is required — the day the document was raised.` };
+  if (opening && issueDate.toISOString().slice(0, 10) > opening.day) {
+    return { error: `It's dated after ${opening.day}, the day your books start in Deskzo — raise it in Deskzo instead.` };
+  }
+
+  // A credit note reduces an invoice, which has to be here for it to name.
+  let againstDocumentId = "";
+  if (type === "CREDIT_NOTE") {
+    const againstNumber = head.text(C.against);
+    if (!againstNumber) return { error: `A credit note names the invoice it reduces — give ${C.against}.` };
+    const invoice = await db.tradeDocument.findFirst({ where: { docNumber: againstNumber, docType: "INVOICE", companyId: party.id }, select: { id: true } });
+    if (!invoice) {
+      return { error: `Invoice ${againstNumber} for ${party.name} isn't in Deskzo. Import it first — or, if it was settled in the old system, put this credit in the customer's opening balance instead.` };
+    }
+    againstDocumentId = invoice.id;
+  }
 
   // The place of supply: a state code or name, else the party's location decides (as on the form).
   const posCell = head.text(C.placeOfSupply);
@@ -243,6 +306,7 @@ async function resolveGroup(type: DocumentImportType, group: Group, clock: Await
     salespersonId: salesperson?.id ?? "",
     notes: head.text(C.notes),
     terms: head.text(C.terms),
+    againstDocumentId,
     billing,
     shippingSameAsBilling: true,
     shipping: {},
@@ -254,36 +318,67 @@ async function resolveGroup(type: DocumentImportType, group: Group, clock: Await
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "This document can't be read." };
 
   // The tax split doesn't change the total, only how it is labelled; a rupee covers round-off and per-line paise.
-  const total = computeDocument(
-    lines.map((l) => ({ quantity: l.quantity, unitPrice: l.unitPrice, discountMode: l.discountMode, discountValue: l.discountValue, taxRatePercent: l.taxRatePercent })),
-    "INTER_STATE",
-    { roundOff: false },
-  ).total;
+  const total = round2(
+    computeDocument(
+      lines.map((l) => ({ quantity: l.quantity, unitPrice: l.unitPrice, discountMode: l.discountMode, discountValue: l.discountValue, taxRatePercent: l.taxRatePercent })),
+      "INTER_STATE",
+      { roundOff: false },
+    ).total,
+  );
   const stated = head.number(C.total);
   if (stated !== undefined && Math.abs(stated - total) > 1) {
     return { error: `Its lines come to ${rupees(total)}, but the file's ${C.total} is ${rupees(stated)}. Check the quantities, rates, discounts and tax rates.` };
   }
-  return { input: parsed.data, status: statusOf(type, head.text(C.status)), partyName: party.name, total: Math.round(total * 100) / 100, lineCount: lines.length };
+
+  // What is still to settle: blank means all of it; nothing left means it stays in the old system.
+  let balance: number | null = null;
+  if (needsOpeningDate(type)) {
+    const cell = head.number(C.balance);
+    if (head.error) return { error: head.error };
+    balance = cell === undefined ? total : round2(cell);
+    if (balance <= 0) return { error: `Nothing is left to settle on it — a ${label} settled in the old system stays there.` };
+    if (balance > total + 1) return { error: `Its ${C.balance} (${rupees(balance)}) is more than its total (${rupees(total)}).` };
+    balance = Math.min(balance, total);
+  }
+  return { input: parsed.data, status: statusOf(type, head.text(C.status)), partyName: party.name, total, lineCount: lines.length, balance };
+}
+
+/** The start day as typed (yyyy-mm-dd), checked against the books' lock; an error for a type that needs one. */
+async function openingOf(type: DocumentImportType, options: DocumentImportOptions): Promise<Opening | { error: string }> {
+  if (!needsOpeningDate(type)) return null;
+  const day = (options.openingDate ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return { error: "Give the day your books start in Deskzo — the opening balances are posted on it." };
+  const lock = await db.ledgerLock.findUnique({ where: { id: "global" }, select: { lockedUntil: true } });
+  if (lock?.lockedUntil && day <= lock.lockedUntil.toISOString().slice(0, 10)) {
+    return { error: `The books are closed to ${lock.lockedUntil.toISOString().slice(0, 10)}. Pick a start day after that.` };
+  }
+  // Midday UTC, as payroll and depreciation post: the same calendar day wherever the workspace is.
+  return { day, at: new Date(`${day}T12:00:00Z`) };
 }
 
 /** What the file would bring in, one row per document, writing nothing. */
-export async function planDocumentImport(type: DocumentImportType, fileRows: Record<string, string>[]): Promise<ImportPlan> {
-  const { rows, readAs } = readHeadings(headings, fileRows);
+export async function planDocumentImport(type: DocumentImportType, fileRows: Record<string, string>[], options: DocumentImportOptions = {}): Promise<ImportPlan> {
+  const opening = await openingOf(type, options);
+  if (opening && "error" in opening) throw new Error(opening.error);
+  const { rows, readAs } = readHeadings(headingsFor(type), fileRows);
   const clock = await workspaceClock();
   const planned: PlannedRow[] = [];
   for (const group of groupRows(rows)) {
-    const result = await resolveGroup(type, group, clock);
+    const result = await resolveGroup(type, group, clock, opening);
     const label = group.number || `Row ${group.firstLine}`;
     if ("error" in result) {
       planned.push({ line: result.line ?? group.firstLine, action: "error", key: "", label, changes: [], error: result.error });
     } else if ("skip" in result) {
       planned.push({ line: group.firstLine, action: "skip", key: group.number, label, changes: [] });
     } else {
+      const before = result.balance === null ? 0 : round2(result.total - result.balance);
       const changes: FieldChange[] = [
         { field: "Party", from: "(new)", to: result.partyName },
         { field: C.date, from: "(new)", to: result.input.issueDate },
         { field: "Lines", from: "(new)", to: String(result.lineCount) },
         { field: C.total, from: "(new)", to: rupees(result.total) },
+        ...(result.balance !== null ? [{ field: type === "CREDIT_NOTE" ? "Credit left" : C.balance, from: "(new)", to: rupees(result.balance) }] : []),
+        ...(before > 0 ? [{ field: type === "CREDIT_NOTE" ? "Used before Deskzo" : "Paid before Deskzo", from: "(new)", to: rupees(before) }] : []),
         ...(result.status !== "ISSUED" ? [{ field: C.status, from: "(new)", to: result.status.toLowerCase() }] : []),
         ...(result.input.validUntil ? [{ field: C.validUntil, from: "(new)", to: result.input.validUntil }] : []),
         ...(result.input.dueDate ? [{ field: C.due, from: "(new)", to: result.input.dueDate }] : []),
@@ -291,32 +386,88 @@ export async function planDocumentImport(type: DocumentImportType, fileRows: Rec
       planned.push({ line: group.firstLine, action: "create", key: group.number, label: `${group.number} · ${result.partyName}`, changes });
     }
   }
-  const known = new Set(DOCUMENT_TEMPLATE_COLUMNS);
+  const creates = planned.filter((r) => r.action === "create");
+  const notices =
+    opening && creates.length > 0
+      ? [
+          {
+            text: `Their balances are posted to Receivables or Payables on ${opening.day}, against Opening Balance Equity. Leave these customers' and vendors' balances out of the rest of your opening entry.`,
+            lines: creates.map((r) => r.line),
+          },
+        ]
+      : [];
+  const known = new Set(Object.values(C) as string[]);
   const present = new Set(rows.flatMap((r) => Object.keys(r)));
   return {
     area: `documents:${type}`,
     totalRows: planned.length,
-    creates: planned.filter((r) => r.action === "create").length,
+    creates: creates.length,
     updates: 0,
     skips: planned.filter((r) => r.action === "skip").length,
     errors: planned.filter((r) => r.action === "error").length,
     rows: planned,
     unknownColumns: [...present].filter((c) => c && !known.has(c)),
-    notices: [],
+    notices,
     readAs,
   };
 }
 
 /**
- * Brings the documents in, one at a time: a document that can't be made is named and the rest still
- * land, as every import does. Each is created as the form creates one, then marked as it was there.
+ * An invoice's, bill's or credit note's opening: what was settled before kept on it, its status from what
+ * is left, and its balance posted on the start day as its own entry — the party's receivable or payable
+ * against Opening Balance Equity, in rupees at the document's rate. Inside the caller's transaction.
  */
-export async function applyDocumentImport(type: DocumentImportType, fileRows: Record<string, string>[], actorUserId: string): Promise<Applied> {
-  const { rows } = readHeadings(headings, fileRows);
+async function postOpening(tx: Parameters<typeof writeEntry>[0], documentId: string, type: TradeDocumentType, balance: number, opening: { day: string; at: Date }, userId: string) {
+  const doc = await tx.tradeDocument.findUniqueOrThrow({
+    where: { id: documentId },
+    select: { docNumber: true, total: true, currency: true, exchangeRate: true, companyId: true, branchId: true, gstRegistrationId: true },
+  });
+  const total = Number(doc.total);
+  const paidBefore = Math.max(0, round2(total - balance));
+  const status = type === "CREDIT_NOTE" ? "ISSUED" : settledStatus(settleInvoice(total, paidBefore, 0));
+  await tx.tradeDocument.update({ where: { id: documentId }, data: { paidBefore, status } });
+
+  const accounts = await resolveAccounts(tx, ["AR", "AP", "OPENING_BALANCE_EQUITY"]);
+  // At the rate every other reading of the document uses (the close's tie-out among them): 1 for rupees.
+  const amount = round2(Math.min(balance, total) * bookingRate(doc));
+  const equity = accounts.get("OPENING_BALANCE_EQUITY")!;
+  const party = type === "BILL" ? accounts.get("AP")! : accounts.get("AR")!;
+  // An invoice is owed to us; a bill we owe; a credit note's credit is ours to give back.
+  const owedToUs = type === "INVOICE";
+  await writeEntry(tx, {
+    date: opening.at,
+    narration: `Opening balance — ${tradeDocumentLabels[type].toLowerCase()} ${doc.docNumber}, brought from the old system`,
+    source: type as "INVOICE" | "BILL" | "CREDIT_NOTE",
+    userId,
+    documentId,
+    companyId: doc.companyId,
+    branchId: doc.branchId,
+    gstRegistrationId: doc.gstRegistrationId,
+    lines: owedToUs
+      ? [
+          { accountId: party, debit: amount, credit: 0, companyId: doc.companyId },
+          { accountId: equity, debit: 0, credit: amount },
+        ]
+      : [
+          { accountId: equity, debit: amount, credit: 0 },
+          { accountId: party, debit: 0, credit: amount, companyId: doc.companyId },
+        ],
+  });
+}
+
+/**
+ * Brings the documents in, one at a time: a document that can't be made is named and the rest still
+ * land, as every import does. Each is created as the form creates one, then marked as it was there; an
+ * invoice, bill or credit note with its opening entry in the same step, or not at all.
+ */
+export async function applyDocumentImport(type: DocumentImportType, fileRows: Record<string, string>[], actorUserId: string, options: DocumentImportOptions = {}): Promise<Applied> {
+  const opening = await openingOf(type, options);
+  if (opening && "error" in opening) throw new Error(opening.error);
+  const { rows } = readHeadings(headingsFor(type), fileRows);
   const clock = await workspaceClock();
   const result: Applied = { created: 0, updated: 0, skipped: 0, failed: [] };
   for (const group of groupRows(rows)) {
-    const resolved = await resolveGroup(type, group, clock);
+    const resolved = await resolveGroup(type, group, clock, opening);
     if ("error" in resolved) {
       result.failed.push({ line: resolved.line ?? group.firstLine, error: resolved.error });
       continue;
@@ -325,28 +476,38 @@ export async function applyDocumentImport(type: DocumentImportType, fileRows: Re
       result.skipped += 1;
       continue;
     }
+    // A document whose opening couldn't be posted goes again, rather than staying with no balance in the books.
+    let unposted: string | null = null;
     try {
       const made = await createDraftDocument({ id: actorUserId }, resolved.input, "IMPORTED");
       if (!made.ok) {
         result.failed.push({ line: group.firstLine, error: made.error });
         continue;
       }
+      const id = made.data.id;
       // Issued as it was there, on the day it was raised — and nothing that issuing sets off.
-      if (resolved.status !== "DRAFT") {
-        await db.tradeDocument.update({
-          where: { id: made.data.id },
-          data: { status: resolved.status, issuedAt: new Date(`${resolved.input.issueDate}T00:00:00Z`), einvoiceStatus: "NOT_APPLICABLE" },
+      const issued = { issuedAt: new Date(`${resolved.input.issueDate}T00:00:00Z`), einvoiceStatus: "NOT_APPLICABLE" as const };
+      if (opening && resolved.balance !== null) {
+        const balance = resolved.balance;
+        unposted = id;
+        await db.$transaction(async (tx) => {
+          await tx.tradeDocument.update({ where: { id }, data: { ...issued, status: "ISSUED" } });
+          await postOpening(tx, id, type, balance, opening, actorUserId);
         });
+        unposted = null;
+      } else if (resolved.status !== "DRAFT") {
+        await db.tradeDocument.update({ where: { id }, data: { ...issued, status: resolved.status } });
       }
       await recordAudit({
         userId: actorUserId,
         action: "CREATE",
         entityType: "TradeDocument",
-        entityId: made.data.id,
+        entityId: id,
         entityLabel: `${tradeDocumentLabels[type]} ${group.number} for ${resolved.partyName} (imported)`,
       });
       result.created += 1;
     } catch (err) {
+      if (unposted) await db.tradeDocument.delete({ where: { id: unposted } }).catch(() => {});
       result.failed.push({ line: group.firstLine, error: err instanceof Error ? err.message : "Failed to write." });
     }
   }

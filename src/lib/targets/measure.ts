@@ -21,6 +21,7 @@
  * does not is handled separately and says so.
  */
 import type { PrismaClient, TargetScope } from "@prisma/client";
+import { RAISED_IN_DESKZO } from "@/lib/documents/imported";
 import { Prisma } from "@prisma/client";
 import { toBase } from "@/lib/currency";
 import { workspaceClock } from "@/lib/time/workspace";
@@ -145,6 +146,8 @@ async function splitByUser(
           status: { notIn: ["DRAFT", "CANCELLED"] },
           issueDate: calendarRangeOf(range, clock),
           salespersonId: { in: userIds },
+          // Sold here: one brought from the old system was sold, and counted, there (src/lib/documents/imported.ts).
+          ...RAISED_IN_DESKZO,
         },
         _sum: { total: true },
       });

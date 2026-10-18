@@ -42,6 +42,8 @@ export type BillSettlement = {
   exchangeRate?: number;
   total: number;
   paid: number;
+  /** Of `paid`, what was paid in the old system before the bill came to Deskzo. Absent reads as none. */
+  paidBefore?: number;
   credited: number;
   balance: number;
   payments: {
@@ -136,6 +138,9 @@ export function BillSettlementPanel({
             <dd className="tabular-nums font-medium text-text">{money(settlement.balance)}</dd>
           </div>
         </dl>
+        {!!settlement.paidBefore && settlement.paidBefore > 0 && (
+          <p className="text-xs text-muted">Paid includes {money(settlement.paidBefore)} paid in your old system, before this bill came to Deskzo.</p>
+        )}
 
         {settlement.payments.length > 0 && (
           <ul className="divide-y divide-line border-t border-line pt-1 text-sm">

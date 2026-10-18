@@ -6,7 +6,7 @@ import { can } from "@/lib/authz/resolve";
 import { logActivity } from "@/lib/activity";
 import { recordAudit } from "@/lib/audit";
 import { parseFile, type ImportPlan } from "@/lib/portability/import";
-import { applyDocumentImport, DOCUMENT_TEMPLATE_COLUMNS, isDocumentImportType, planDocumentImport, type DocumentImportType } from "@/lib/portability/documents";
+import { applyDocumentImport, documentTemplateColumns, isDocumentImportType, planDocumentImport, type DocumentImportType } from "@/lib/portability/documents";
 import { documentWriteKey, documentWriteRefusal } from "@/lib/documents/write-permission";
 import { documentDirection, tradeDocumentLabels } from "@/lib/trade-documents";
 import { csvRow } from "@/lib/csv";
@@ -42,7 +42,10 @@ function fileRefusal(input: { filename: string; base64: string }) {
   return null;
 }
 
-export async function previewDocumentImport(input: { type: string; filename: string; base64: string }): Promise<ActionResult<ImportPlan>> {
+/** `openingDate`: the day the books start in Deskzo, for invoices, bills and credit notes (yyyy-mm-dd). */
+type DocumentFile = { type: string; filename: string; base64: string; openingDate?: string | null };
+
+export async function previewDocumentImport(input: DocumentFile): Promise<ActionResult<ImportPlan>> {
   const gated = await gate(input.type);
   if ("error" in gated) return { ok: false, error: gated.error };
   const refusal = fileRefusal(input);
@@ -50,13 +53,13 @@ export async function previewDocumentImport(input: { type: string; filename: str
   try {
     const rows = await parseFile(input.base64, input.filename);
     if (rows.length === 0) return { ok: false, error: "That file has no rows." };
-    return { ok: true, data: await planDocumentImport(gated.type, rows) };
+    return { ok: true, data: await planDocumentImport(gated.type, rows, { openingDate: input.openingDate }) };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? `Couldn't read that file: ${err.message}` : "Couldn't read that file." };
   }
 }
 
-export async function commitDocumentImport(input: { type: string; filename: string; base64: string }): Promise<ActionResult<Applied>> {
+export async function commitDocumentImport(input: DocumentFile): Promise<ActionResult<Applied>> {
   const gated = await gate(input.type);
   if ("error" in gated) return { ok: false, error: gated.error };
   const refusal = fileRefusal(input);
@@ -65,7 +68,7 @@ export async function commitDocumentImport(input: { type: string; filename: stri
   try {
     const rows = await parseFile(input.base64, input.filename);
     if (rows.length === 0) return { ok: false, error: "That file has no rows." };
-    const result = await applyDocumentImport(type, rows, user.id);
+    const result = await applyDocumentImport(type, rows, user.id, { openingDate: input.openingDate });
     const label = tradeDocumentLabels[type].toLowerCase();
     const summary =
       `${user.name} brought open ${label}s across from ${input.filename}: ${result.created} imported, ${result.skipped} already here` +
@@ -90,5 +93,5 @@ export async function documentImportTemplate(type: string): Promise<ActionResult
   const gated = await gate(type);
   if ("error" in gated) return { ok: false, error: gated.error };
   const slug = tradeDocumentLabels[gated.type].toLowerCase().replace(/\s+/g, "-");
-  return { ok: true, data: { filename: `${slug}-import-template.csv`, csv: csvRow(DOCUMENT_TEMPLATE_COLUMNS) + "\n" } };
+  return { ok: true, data: { filename: `${slug}-import-template.csv`, csv: csvRow(documentTemplateColumns(gated.type)) + "\n" } };
 }

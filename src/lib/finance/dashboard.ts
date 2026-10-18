@@ -281,6 +281,7 @@ async function outstandingOf(docType: "INVOICE" | "BILL", direction: "SALES" | "
     where: { docType, direction, status: { notIn: ["DRAFT", "CANCELLED", "PAID"] } },
     select: {
       total: true,
+      paidBefore: true,
       dueDate: true,
       issueDate: true,
       payments: { select: { amount: true } },
@@ -298,6 +299,7 @@ async function outstandingOf(docType: "INVOICE" | "BILL", direction: "SALES" | "
       money(row.total),
       row.payments.reduce((t, p) => t + money(p.amount), 0),
       row.creditsReceived.reduce((t, c) => t + money(c.amount), 0) + row.vendorCredits.reduce((t, c) => t + money(c.amount), 0),
+      money(row.paidBefore),
     );
     if (balance <= 0) continue;
     count += 1;

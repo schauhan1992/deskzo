@@ -25,12 +25,14 @@ const invoiceSelect = {
   docType: true,
   status: true,
   total: true,
+  paidBefore: true,
   payments: { select: { amount: true, createdAt: true, payment: { select: { paidOn: true } } } },
   creditsReceived: { select: { amount: true, createdAt: true } },
 } as const;
 
 type InvoiceRow = {
   total: unknown;
+  paidBefore: unknown;
   payments: { amount: unknown; createdAt: Date; payment: { paidOn: Date } }[];
   creditsReceived: { amount: unknown; createdAt: Date }[];
 };
@@ -59,7 +61,8 @@ async function loadTarget(kind: "doc" | "order", id: string, cache: Map<string, 
     target =
       !invoice || invoice.docType !== "INVOICE" || invoice.status === "CANCELLED" || invoice.status === "DRAFT"
         ? { gone: true }
-        : { gone: false, total: Number(invoice.total), events: invoiceEvents(invoice) };
+        // What was left on it when it came across from the old system, if it did (src/lib/documents/imported.ts).
+        : { gone: false, total: Number(invoice.total) - Number(invoice.paidBefore), events: invoiceEvents(invoice) };
   } else {
     const order = await db.companyProduct.findUnique({
       where: { id },

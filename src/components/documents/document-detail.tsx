@@ -135,7 +135,8 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
    * invoice but not despatch against it has no use for a panel of portal buttons. Nothing is
    * fetched at all for a proposal or a proforma, which move no goods.
    */
-  const eway = carriesGoods(document.docType, document.status) ? await ewayForDocument(document.id) : null;
+  // Not for one brought from the old system: its goods moved before Deskzo.
+  const eway = carriesGoods(document.docType, document.status) && document.origin !== "IMPORTED" ? await ewayForDocument(document.id) : null;
   const transporters = eway?.ok ? await transporterOptions() : null;
 
   const qrDataUrl = document.signedQrCode
@@ -152,7 +153,8 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
     validUntil: document.validUntil,
     balance: settlement?.balance ?? null,
     creditRemaining: creditBalance?.remaining ?? null,
-    needsIrn: eligible && org.einvoiceEnabled && document.status !== "DRAFT" && !document.irn && document.einvoiceStatus !== "CANCELLED",
+    // Not applicable: never reported — a document brought from the old system (src/lib/documents/imported.ts).
+    needsIrn: eligible && org.einvoiceEnabled && document.status !== "DRAFT" && !document.irn && document.einvoiceStatus !== "CANCELLED" && document.einvoiceStatus !== "NOT_APPLICABLE",
     asOf: new Date(),
   });
 

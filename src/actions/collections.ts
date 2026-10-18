@@ -160,6 +160,7 @@ export async function logFollowUp(input: unknown): Promise<ActionResult<{ id: st
         companyId: true,
         currency: true,
         total: true,
+        paidBefore: true,
         company: { select: { name: true } },
         payments: { select: { amount: true } },
         creditsReceived: { select: { amount: true } },
@@ -172,6 +173,7 @@ export async function logFollowUp(input: unknown): Promise<ActionResult<{ id: st
       Number(invoice.total),
       invoice.payments.reduce((t, p) => t + Number(p.amount), 0),
       invoice.creditsReceived.reduce((t, c) => t + Number(c.amount), 0),
+      Number(invoice.paidBefore),
     );
     target = { companyId: invoice.companyId, companyName: invoice.company.name, label: invoice.docNumber, balance: settlement.balance, currency: invoice.currency };
   } else {
@@ -310,6 +312,7 @@ export async function followUpPanel(
         docNumber: true,
         currency: true,
         total: true,
+        paidBefore: true,
         company: { select: { name: true, ownerUserId: true, relationshipType: true } },
         payments: { select: { amount: true } },
         creditsReceived: { select: { amount: true } },
@@ -323,6 +326,7 @@ export async function followUpPanel(
       Number(invoice.total),
       invoice.payments.reduce((t, p) => t + Number(p.amount), 0),
       invoice.creditsReceived.reduce((t, c) => t + Number(c.amount), 0),
+      Number(invoice.paidBefore),
     ).balance;
     const chaseable = invoice.status !== "DRAFT" && invoice.status !== "CANCELLED" && balance >= 0.01;
     return {

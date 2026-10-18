@@ -262,6 +262,7 @@ export async function loadDues(userId: string, opts: { search?: string; now?: Da
         issueDate: true,
         dueDate: true,
         total: true,
+        paidBefore: true,
         currency: true,
         exchangeRate: true,
         company: { select: { id: true, companySeq: true, name: true, ownerUserId: true, owner: { select: { name: true } } } },
@@ -306,6 +307,7 @@ export async function loadDues(userId: string, opts: { search?: string; now?: Da
       Number(inv.total),
       inv.payments.reduce((t, p) => t + Number(p.amount), 0),
       inv.creditsReceived.reduce((t, c) => t + Number(c.amount), 0),
+      Number(inv.paidBefore),
     );
     if (settlement.balance < 0.01) continue;
     const rate = bookingRate(inv);

@@ -16,14 +16,18 @@ export type InvoiceSettlement = {
 
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
-export function settleInvoice(total: number, paid: number, credited: number): InvoiceSettlement {
+/**
+ * `paidBefore`: what a document brought from the old system had settled there (`TradeDocument.paidBefore`,
+ * owner 18 Oct 2026) — counted as paid, so only what was left is chased. Zero for everything raised here.
+ */
+export function settleInvoice(total: number, paid: number, credited: number, paidBefore = 0): InvoiceSettlement {
   return {
     total: round2(total),
-    paid: round2(paid),
+    paid: round2(paid + paidBefore),
     credited: round2(credited),
     // Never negative: an overpayment is a credit on the account, not a negative debt, and letting
     // it go below zero would quietly cancel out genuinely overdue invoices in the aging total.
-    balance: Math.max(round2(total - paid - credited), 0),
+    balance: Math.max(round2(total - paid - paidBefore - credited), 0),
   };
 }
 
