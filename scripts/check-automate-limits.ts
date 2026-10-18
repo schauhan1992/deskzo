@@ -309,6 +309,10 @@ async function main() {
     const moreRoom = await inA(() => store.startManualRun(three.id, owner));
     await drain();
     ok("a bigger allowance (Plus bought): runs start again, no new notice until the next month", moreRoom.ok && (await month())?.steps === 9 && (await notices(owner)).length === 2);
+    setLimits({ steps: 9 });
+    ok("exactly at the allowance — nine of nine — no new run starts", !!(await inA(() => usage.stepsRefusal(india))));
+    setLimits({ steps: 10 });
+    ok("  one short of it, one may", (await inA(() => usage.stepsRefusal(india))) === null);
     setLimits(null);
     ok("worked out before the limits: nothing refused", !(await inA(() => usage.stepsRefusal(india))) && (await inA(() => store.startManualRun(three.id, owner))).ok);
     await drain();

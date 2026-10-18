@@ -249,6 +249,8 @@ async function main() {
     if (!r3.ok) throw new Error(r3.error);
     await inA(() => db.automationRun.update({ where: { id: r3.data.runId }, data: { status: "RUNNING", lockedBy: "an-old-worker:1:zz", lockedUntil: new Date(Date.now() + 60 * 60_000) } }));
     await backup();
+    // None on the list before: the one after is the restore's own.
+    await controlDb().automationWake.deleteMany({ where: { tenantId: A.id } });
     const released = await restore();
     const r3restored = await runOf(r3.data.runId);
     ok("restored: let go and queued now, not left held for the old worker's lease", released.released >= 1 && r3restored.status === "QUEUED" && r3restored.lockedBy === null && r3restored.runAfter.getTime() <= Date.now(), { released, r3restored });
@@ -382,6 +384,28 @@ async function main() {
     const deep = await callHook(token, "[".repeat(100) + "]".repeat(100));
     const nul = await callHook(token, JSON.stringify({ name: "a\u0000b" }));
     ok("  a body nested past 64, or holding a NUL, is refused 400 — not a 500 that senders retry", deep.status === 400 && nul.status === 400, [deep.status, nul.status]);
+
+    // Whatever the cause: a malformed wait no rule can read, a step whose record can't be written.
+    const someRun = (await inA(() => db.automationRun.findFirstOrThrow({ select: { id: true } }))).id;
+    await inA(() => db.automationEventWait.create({ data: { runId: someRun, stepKey: "zz-odd", eventType: "zz.odd", rules: "not a list of rules", expiresAt: new Date(Date.now() + 3_600_000), createdAt: new Date(Date.now() - 60_000) } }));
+    await inA(() => db.automationEvent.create({ data: { type: "zz.odd", payload: {} } }));
+    const besideOdd = await inA(() => store.startManualRun(alongside, owner));
+    if (!besideOdd.ok) throw new Error(besideOdd.error);
+    let oddThrew = false;
+    await inA(() => engine.workTenant({ budgetMs: 5_000 })).catch(() => {
+      oddThrew = true;
+    });
+    ok("an event that can't be matched, whatever the reason, is passed over — and the turn goes on", !oddThrew && (await inA(() => db.automationEvent.count({ where: { type: "zz.odd", matchedAt: null } }))) === 0 && (await runOf(besideOdd.data.runId)).status === "SUCCEEDED");
+    const nulChar = String.fromCharCode(0);
+    const unwritable = await publish("ZZ an unwritable step", manual([{ id: "say", type: "action", action: "notify.person", input: { to: "owner", title: "ZZ {{trigger.data.x}}" } }]));
+    const unwritableRun = await inA(() => store.startManualRun(unwritable, owner, { x: `a${nulChar}b` }));
+    if (!unwritableRun.ok) throw new Error(unwritableRun.error);
+    let stepThrewOut = false;
+    await inA(() => engine.workTenant({ budgetMs: 5_000 })).catch(() => {
+      stepThrewOut = true;
+    });
+    const held = await runOf(unwritableRun.data.runId);
+    ok("  a step that throws (its record can't be written) fails or waits to retry — never left held", !stepThrewOut && held.status !== "RUNNING" && held.lockedBy === null, held);
 
     section("Answers from outside can't hang or break a run");
     const before = calls.length;
