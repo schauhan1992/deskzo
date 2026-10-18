@@ -181,6 +181,21 @@ export const itemsImporter: Importer = {
   // own is no longer read. Offering the column made the template promise a field the import drops; a
   // file that still has one is now told it's ignored.
   templateColumns: ["Key", "Name", "SKU", "Type", "Brand", "Family", "Unit", "Price", "Tax %"],
+  /**
+   * Another system's export as it comes (owner, 18 Oct 2026), from each vendor's own field lists:
+   *   · Zoho CRM Products — https://help.zoho.com/portal/kb/articles/standard-fields-products
+   *   · Zoho Books Items — https://zoho.com/books/help/migration/quickbooks-online.html
+   *   · HubSpot Products — https://knowledge.hubspot.com/properties/hubspots-default-product-properties
+   * Left out on purpose: "Product Type"/"Item Type" (their values aren't Deskzo's types, and would refuse
+   * the row), "Purchase Rate" (Rate is the selling price), and tax names like GST18, which aren't a rate.
+   */
+  headerAliases: {
+    Name: ["Product Name", "Item Name"],
+    SKU: ["Product Code"],
+    Brand: ["Manufacturer"],
+    Unit: ["Usage Unit"],
+    Price: ["Unit Price", "Rate"],
+  },
   customEntity: "ITEM",
 
   async plan(row, line, ctx) {

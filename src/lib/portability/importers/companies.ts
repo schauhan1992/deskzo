@@ -80,6 +80,26 @@ async function resolve(row: Record<string, string>): Promise<Resolved<ResolvedCo
 
 export const companiesImporter: Importer = {
   templateColumns: ["Name", "Stage", "Source", "Industry", "Website", "Account manager"],
+  /**
+   * Another system's export as it comes (owner, 18 Oct 2026), from each vendor's own field lists:
+   *   · Zoho CRM Accounts and Vendors — https://help.zoho.com/portal/kb/articles/standard-fields-accounts,
+   *     https://help.zoho.com/portal/en/kb/crm-nextgen/manage-inventory/vendors/articles/nextgen-standard-fields-vendors
+   *   · Salesforce Accounts — https://help.salesforce.com/s/articleView?id=sales.account_fields.htm&type=5
+   *   · HubSpot Companies — https://knowledge.hubspot.com/properties/hubspot-crm-default-company-properties
+   *   · Pipedrive Organizations — the field reference in its sample import sheet, linked from
+   *     https://support.pipedrive.com/en/article/importing-sample-import-spreadsheets
+   *   · Zoho Books Customers — https://zoho.com/books/help/migration/quickbooks-online.html
+   * Left out on purpose: Zoho Books' "Display Name" and "Vendor Display Name" (each export also has
+   * "Company Name", and two headings can't fill one column); HubSpot's "Company domain name" (its export
+   * also has "Website URL"); a bare "Owner" or "Type" (they mean different things across systems); and
+   * Stage and Source, whose other systems' values aren't Deskzo's and would refuse the row rather than
+   * be ignored.
+   */
+  headerAliases: {
+    Name: ["Account Name", "Company name", "Company Name", "Vendor Name", "Organization - Name"],
+    Website: ["Website URL"],
+    "Account manager": ["Account Owner", "Company owner", "Vendor Owner", "Organization - Owner"],
+  },
   customEntity: "COMPANY",
 
   async plan(row, line, ctx) {

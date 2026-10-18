@@ -54,7 +54,8 @@ type ResolvedContact = {
 
 async function resolve(row: Record<string, string>): Promise<Resolved<ResolvedContact>> {
   const r = new RowReader(row);
-  const name = r.text("Name");
+  // A whole name, or another system's two halves of one (`extraColumns`).
+  const name = r.text("Name") || [r.text("First name"), r.text("Last name")].filter(Boolean).join(" ");
   if (!name) return { error: "Name is required." };
 
   const company = await requireCompany("Company", r.text("Company"));
@@ -91,6 +92,27 @@ async function resolve(row: Record<string, string>): Promise<Resolved<ResolvedCo
 
 export const contactsImporter: Importer = {
   templateColumns: ["Key", "Name", "Company", "Designation", "Email", "Phone"],
+  /**
+   * Another system's export as it comes (owner, 18 Oct 2026), from each vendor's own field lists:
+   *   · Zoho CRM Contacts — https://help.zoho.com/portal/kb/articles/standard-fields-contacts
+   *   · Salesforce Contacts — https://help.salesforce.com/s/articleView?id=sales.contacts_fields.htm&type=5
+   *   · HubSpot Contacts — https://knowledge.hubspot.com/properties/hubspots-default-contact-properties
+   *   · Pipedrive People — the field reference in its sample import sheet, linked from
+   *     https://support.pipedrive.com/en/article/importing-sample-import-spreadsheets
+   *   · Zoho Books — https://zoho.com/books/help/migration/quickbooks-online.html
+   * Left out on purpose: "Title"/"Job title" (Designation is Deskzo's own list, and a free-text title would
+   * refuse the row); "Mobile" and the other phones (each export also has "Phone"); "Secondary Email".
+   */
+  headerAliases: {
+    Name: ["Full Name", "Person - Name"],
+    Company: ["Account Name", "Company name", "Organization"],
+    Email: ["Email ID", "Person - Email"],
+    Phone: ["Phone number"],
+    "First name": ["Person - First name"],
+    "Last name": ["Person - Last name"],
+  },
+  // Most systems split a person's name; a Deskzo file holds it whole, so these aren't exported.
+  extraColumns: ["First name", "Last name"],
   customEntity: "CONTACT",
 
   async plan(row, line, ctx) {
