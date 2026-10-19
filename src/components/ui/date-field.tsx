@@ -254,6 +254,8 @@ export const DateField = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLIn
         readOnly={readOnly}
         tabIndex={-1}
         aria-hidden
+        // Named for whatever reads the page's markup; assistive technology reads the button instead.
+        aria-label={rest["aria-label"] ?? (type === "month" ? "Month" : type === "datetime-local" ? "Date and time" : "Date")}
         onFocus={() => buttonRef.current?.focus()}
         className="pointer-events-none absolute h-px w-px opacity-0"
       />
