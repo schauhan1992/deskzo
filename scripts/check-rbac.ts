@@ -93,12 +93,24 @@ eq("The application names thirteen roles of its own — the eight it shipped wit
  * its starting menu with the sections it leaves ticked.
  */
 {
+  /**
+   * What a role starts with: its rows, and — for a key the migration wrote no row for — the role's
+   * default (`rolePermits`), which is how a permission added after it reaches the role (Approve expense
+   * claims (HR), 19 Oct 2026, held by HR and HR head by default). A preset key that is neither written
+   * nor held by default is still drift, and still fails.
+   */
+  const startsWith = (role: string, rows: { role: string; key: string; allowed: boolean }[], preset: readonly string[]) => {
+    const written = new Set(rows.filter((r) => r.role === role).map((r) => r.key));
+    const granted = rows.filter((r) => r.role === role && r.allowed).map((r) => r.key);
+    const defaulted = preset.filter((k) => !written.has(k) && heldByDefaultKey(k, role));
+    return [...new Set([...granted, ...defaulted])].sort();
+  };
   const sql = readFileSync(join(__dirname, "..", "prisma", "migrations", "20261030110000_built_in_hr_recruiter_renewal_roles", "migration.sql"), "utf8");
   const rows = [...sql.matchAll(/\('([A-Z_]+)', '([a-zA-Z.]+)', (true|false)\)/g)].map((m) => ({ role: m[1]!, key: m[2]!, allowed: m[3] === "true" }));
   for (const [role, preset] of [["HR", "hr-executive"], ["RECRUITER", "recruiter"], ["RENEWAL_SPECIALIST", "renewal-specialist"]] as const) {
-    const granted = rows.filter((r) => r.role === role && r.allowed).map((r) => r.key).sort();
     const wanted = [...(getPreset(preset)?.permissions ?? [])].map(String).sort();
-    ok(`${role} starts as the ${preset} preset`, granted.join() === wanted.join(), `migration ${granted.length}, preset ${wanted.length}`);
+    const granted = startsWith(role, rows, wanted);
+    ok(`${role} starts as the ${preset} preset`, granted.join() === wanted.join(), `migration and defaults ${granted.length}, preset ${wanted.length}`);
     const unticked = rows.filter((r) => r.role === role && !r.allowed).map((r) => r.key);
     ok(`  and only unticks sections`, unticked.length > 0 && unticked.every((k) => k.startsWith("section.")), unticked.filter((k) => !k.startsWith("section.")).join(", "));
     ok(`  keeping everybody's own HR self-service`, !unticked.includes("section.hr"));
@@ -118,9 +130,9 @@ eq("The application names thirteen roles of its own — the eight it shipped wit
   // HR head (9 Oct 2026): the preset, and HR's starting menu with the vault the preset uses.
   const headSql = readFileSync(join(__dirname, "..", "prisma", "migrations", "20261030130000_built_in_hr_head_role", "migration.sql"), "utf8");
   const headRows = [...headSql.matchAll(/\('([A-Z_]+)', '([a-zA-Z.]+)', (true|false)\)/g)].map((m) => ({ role: m[1]!, key: m[2]!, allowed: m[3] === "true" }));
-  const headGranted = headRows.filter((r) => r.role === "HR_HEAD" && r.allowed).map((r) => r.key).sort();
   const headWanted = [...(getPreset("hr-head")?.permissions ?? [])].map(String).sort();
-  ok("HR_HEAD starts as the hr-head preset", headRows.every((r) => r.role === "HR_HEAD") && headGranted.join() === headWanted.join(), `migration ${headGranted.length}, preset ${headWanted.length}`);
+  const headGranted = startsWith("HR_HEAD", headRows, headWanted);
+  ok("HR_HEAD starts as the hr-head preset", headRows.every((r) => r.role === "HR_HEAD") && headGranted.join() === headWanted.join(), `migration and defaults ${headGranted.length}, preset ${headWanted.length}`);
   const headUnticked = headRows.filter((r) => !r.allowed).map((r) => r.key).sort();
   const hrUnticked = rows.filter((r) => r.role === "HR" && !r.allowed).map((r) => r.key).filter((k) => k !== "section.vault").sort();
   ok("  with HR's starting menu, the credential vault kept", headUnticked.join() === hrUnticked.join() && !headUnticked.includes("section.vault"), `${headUnticked.length} unticked`);
