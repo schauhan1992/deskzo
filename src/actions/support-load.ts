@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
 import { canSeeCompany, companyScope } from "@/lib/authz/company-scope";
 import { viewerHas } from "@/actions/permission";
-import { isCustomerRelationshipType } from "@/lib/validation/company";
+import { isCustomerSide } from "@/lib/companies/roles";
 import { compareToPeers, summariseSupport, type SupportFacts } from "@/lib/support/load";
 import { companiesWithSupport, loadSupportFacts, supportPeers, supportWindow } from "@/lib/support/data";
 import { workspaceClock } from "@/lib/time/workspace";
@@ -52,8 +52,8 @@ export async function getSupportLoad(companyId: string, months = 12) {
   const parts = await viewerParts();
   if (!parts.tickets) return null;
   const company = await db.company.findUnique({ where: { id: companyId }, select: { ownerUserId: true, relationshipType: true } });
-  if (!company || !isCustomerRelationshipType(company.relationshipType)) return null;
-  if (!(await canSeeCompany(user.id, company))) return null;
+  if (!company || !(await isCustomerSide({ id: companyId, relationshipType: company.relationshipType }))) return null;
+  if (!(await canSeeCompany(user.id, { ...company, id: companyId }))) return null;
 
   const window = supportWindow(await workspaceClock(), months);
   const facts = (await loadSupportFacts([companyId], window)).get(companyId)!;

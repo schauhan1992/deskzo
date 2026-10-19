@@ -11,14 +11,13 @@ import { toDomain } from "@/lib/domain-intel/signatures";
 import { inspectDomain } from "@/lib/domain-intel/lookup";
 import { opportunitiesFrom, rankOpportunities } from "@/lib/domain-intel/opportunities";
 import type { ActionResult } from "@/actions/company";
-import { customerRelationshipTypeValues, isCustomerRelationshipType } from "@/lib/validation/company";
+import { customerSide, isCustomerSide } from "@/lib/companies/roles";
 
 /**
  * Domain Intel is for the companies we sell to (owner, 8 Oct 2026: "not required for vendor
  * companies"). A vendor's mail provider and DMARC record are no sales opening, so vendors, OEMs,
  * distributors, partners and commission parties are left out of the lists, the counts and the panel.
  */
-const SOLD_TO = { relationshipType: { in: [...customerRelationshipTypeValues] } } satisfies Prisma.CompanyWhereInput;
 const NOT_SOLD_TO = "Domain lookups are for customers and resellers — not vendors or partners.";
 const GONE = "That company no longer exists.";
 
@@ -28,7 +27,8 @@ const GONE = "That company no longer exists.";
  * can never replace the account rule's.
  */
 async function visibleSoldTo(userId: string): Promise<Prisma.CompanyWhereInput> {
-  return { AND: [SOLD_TO, await companyScope(userId)] };
+  // Customers — a vendor that's also a customer too (src/lib/companies/roles.ts).
+  return { AND: [await customerSide(), await companyScope(userId)] };
 }
 
 /** One company, when it is a customer this person may see — anything else answers as if it weren't there. */
@@ -82,7 +82,7 @@ export async function refreshDomainProfile(companyId: string): Promise<ActionRes
     select: { id: true, name: true, website: true, relationshipType: true, ownerUserId: true },
   });
   if (!company || !(await canSeeCompany(user.id, company))) return { ok: false, error: GONE };
-  if (!isCustomerRelationshipType(company.relationshipType)) return { ok: false, error: NOT_SOLD_TO };
+  if (!(await isCustomerSide(company))) return { ok: false, error: NOT_SOLD_TO };
 
   const domain = toDomain(company.website);
   if (!domain) {
@@ -181,7 +181,7 @@ export async function getDomainBriefing(companyId: string) {
       },
     }),
   ]);
-  if (!company || !isCustomerRelationshipType(company.relationshipType) || !(await canSeeCompany(user.id, company))) return null;
+  if (!company || !(await isCustomerSide({ id: companyId, relationshipType: company.relationshipType })) || !(await canSeeCompany(user.id, { ...company, id: companyId }))) return null;
 
   const opportunities = profile
     ? rankOpportunities(

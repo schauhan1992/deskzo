@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { Prisma, type CompanyStage, type CompanySource, type CompanyRelationshipType, type VendorStatus } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { refuseWhileViewingAs, requireUser } from "@/lib/session";
+import { STILL_THERE } from "@/lib/contacts/left";
 import { canSeeCompany, companyScope } from "@/lib/authz/company-scope";
 import { accessLevel, leadAccess, mayAccess, mayAccessContactsOf, mayAddTo, orderAccess, timelineAccess } from "@/lib/authz/access";
 import { mayChangeAccountManager, mayChangeCaller, mayLeaveUnassigned, reassignRights } from "@/lib/authz/reassign";
@@ -30,7 +31,6 @@ import {
   normalizeCompanyName,
   payoutDetailsSchema,
   vendorRelationshipTypeValues,
-  customerRelationshipTypeValues,
   isVendorRelationshipType,
   isCustomerRelationshipType,
   companyFieldEntity,
@@ -57,6 +57,7 @@ import {
 } from "@/lib/custom-fields/server";
 import { customFilterWhere, type CustomFilterInputs } from "@/lib/custom-fields/filters";
 import { assignVendorCodes, vendorCodeHolder } from "@/lib/companies/vendor-code";
+import { clientSide, customerSide, isVendorSide, rolesOf, setCompanyRole, setSideOwner, twoRolesHere, vendorListSide, vendorSide, type CompanySide } from "@/lib/companies/roles";
 import { hasLeft } from "@/lib/contacts/left";
 import { designationData } from "@/lib/contacts/designations";
 import { listLeadMasker, maskLeads } from "@/lib/leads/masking";
@@ -124,7 +125,7 @@ export type CompanyMatches = {
    * but is assigned to somebody else: saying so is no more than `createCompany` itself says on the
    * way out, and it is said before the rest of the form has been filled in rather than after.
    */
-  duplicate: { visible: true; match: CompanyMatch } | { visible: false } | null;
+  duplicate: { visible: true; match: CompanyMatch; customer: boolean; vendor: boolean } | { visible: false } | null;
 };
 
 /**
@@ -137,31 +138,46 @@ export type CompanyMatches = {
  * Scoped like every other company read: a rep sees their own accounts. The duplicate check is not,
  * because `normalizedName` is unique across the whole table and the save will be refused whoever
  * owns the other row — so the form says a duplicate exists without saying anything else about it.
+ *
+ * `adding`: the kind a form is creating (owner, 19 Oct 2026). Similar names are then only of its side —
+ * a customer, reseller or commission party isn't offered a vendor, and a vendor only vendors — while the
+ * same name is still said whatever its kind, as saving would be refused all the same. Without it (the
+ * merge wizard, the copilot) every kind is searched.
  */
-export async function findCompanyMatches(query: string): Promise<CompanyMatches> {
+export async function findCompanyMatches(query: string, adding?: CompanyRelationshipType): Promise<CompanyMatches> {
   const user = await requireUser();
   const typed = String(query ?? "").trim().slice(0, 120);
   if (!typed) return { matches: [], duplicate: null };
   const normalizedName = normalizeCompanyName(typed);
+  const scope = await companyScope(user.id);
+  const side: Prisma.CompanyWhereInput = !adding
+    ? {}
+    : isVendorRelationshipType(adding)
+      ? await vendorSide()
+      : // Anything but a vendor alone: a vendor that's also a customer is offered.
+        { NOT: { AND: [{ relationshipType: { in: [...vendorRelationshipTypeValues] } }, ...((await twoRolesHere()) ? [{ alsoCustomer: false }] : [])] } };
+  const select = {
+    id: true,
+    companySeq: true,
+    name: true,
+    normalizedName: true,
+    relationshipType: true,
+    owner: { select: { name: true } },
+    locations: { select: { city: true }, take: 1, orderBy: { createdAt: "asc" as const } },
+  } satisfies Prisma.CompanySelect;
 
-  const [found, exact] = await Promise.all([
+  const [found, exact, sameNameHere] = await Promise.all([
     db.company.findMany({
       // By the normalised name, the one the duplicate rule uses — searching the raw text let "acme   ltd"
       // (extra spaces) miss "Acme Ltd", and the exact match was then reported as somebody else's.
-      where: { AND: [await companyScope(user.id), { normalizedName: { contains: normalizedName } }] },
-      select: {
-        id: true,
-        companySeq: true,
-        name: true,
-        normalizedName: true,
-        relationshipType: true,
-        owner: { select: { name: true } },
-        locations: { select: { city: true }, take: 1, orderBy: { createdAt: "asc" } },
-      },
+      where: { AND: [scope, { normalizedName: { contains: normalizedName } }, side] },
+      select,
       orderBy: { name: "asc" },
       take: 40,
     }),
     db.company.findUnique({ where: { normalizedName }, select: { id: true } }),
+    // The same name, of any kind, where this person can see it — what the warning opens.
+    db.company.findFirst({ where: { AND: [scope, { normalizedName }] }, select }),
   ]);
 
   // The same name first, then names that start with what was typed, then the rest — which is the
@@ -177,11 +193,16 @@ export async function findCompanyMatches(query: string): Promise<CompanyMatches>
     owner: c.owner?.name ?? null,
   });
   const ranked = [...found].sort((a, b) => rank(a) - rank(b));
-  const visibleDuplicate = exact ? ranked.find((c) => c.id === exact.id) : undefined;
+  const visibleDuplicate = exact && sameNameHere?.id === exact.id ? sameNameHere : undefined;
 
   return {
     matches: ranked.filter((c) => c.id !== exact?.id).slice(0, 8).map(toMatch),
-    duplicate: exact ? (visibleDuplicate ? { visible: true, match: toMatch(visibleDuplicate) } : { visible: false }) : null,
+    // With its roles (src/lib/companies/roles.ts): a vendor of that name may be made a customer too, rather than refused.
+    duplicate: exact
+      ? visibleDuplicate
+        ? { visible: true, match: toMatch(visibleDuplicate), ...(({ customer, vendor }) => ({ customer, vendor }))(await rolesOf({ id: visibleDuplicate.id, relationshipType: visibleDuplicate.relationshipType })) }
+        : { visible: false }
+      : null,
   };
 }
 
@@ -935,7 +956,8 @@ export async function setVendorCode(companyId: string, code: string): Promise<Ac
   if (!company || !(await canSeeCompany(user.id, company))) {
     return { ok: false, error: "Company not found." };
   }
-  if (isCustomerRelationshipType(company.relationshipType)) {
+  // A customer that's also a vendor has one too (src/lib/companies/roles.ts).
+  if (isCustomerRelationshipType(company.relationshipType) && !(await isVendorSide({ id: companyId, relationshipType: company.relationshipType }))) {
     return { ok: false, error: "Only vendors and commission parties have a vendor code." };
   }
   const value = code.trim().toUpperCase();
@@ -1060,10 +1082,17 @@ async function companyCustom(
  * server's: on a server in UTC a company added at 1 am in India was filed under the day before, and
  * one added late on the To day fell outside it.
  */
+/**
+ * Which companies a list is of (src/lib/companies/roles.ts): a kind asked for, or the Companies module's
+ * own — clients, and a vendor that's also a customer.
+ */
+async function companyListSide(params?: CompanyListParams): Promise<Prisma.CompanyWhereInput> {
+  return params?.relationshipType ? { relationshipType: params.relationshipType } : clientSide();
+}
+
 function companyListWhere(clock: Clock, params?: CompanyListParams, custom: CompanyCustom = NO_CUSTOM): Prisma.CompanyWhereInput {
   const createdAt = clock.dayRange(params?.createdFrom, params?.createdTo);
   return {
-    relationshipType: params?.relationshipType ?? "CLIENT",
     // A reseller's end customer is theirs to call, not ours — keep them out of the sourcing pool.
     managedByResellerId: null,
     ...(params?.stage ? { stage: params.stage } : {}),
@@ -1109,7 +1138,7 @@ const companyListInclude = {
 export async function listCompanies(params?: CompanyListParams) {
   const user = await requireUser();
   return db.company.findMany({
-    where: { AND: [companyListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), await companyScope(user.id)] },
+    where: { AND: [await companyListSide(params), companyListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), await companyScope(user.id)] },
     orderBy: { createdAt: "desc" },
     include: companyListInclude,
   });
@@ -1120,7 +1149,7 @@ export async function listCompaniesPaged(params: CompanyListParams & { page: num
   const user = await requireUser();
   // One `where` for both queries below: a pager whose count outran its rows would offer page 9 of
   // a list that ends at page 2.
-  const where = { AND: [companyListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), await companyScope(user.id)] };
+  const where = { AND: [await companyListSide(params), companyListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), await companyScope(user.id)] };
   const [rows, total] = await Promise.all([
     db.company.findMany({
       where,
@@ -1157,8 +1186,8 @@ type CustomerListParams = {
 
 function customerListWhere(clock: Clock, params?: CustomerListParams, custom: CompanyCustom = NO_CUSTOM): Prisma.CompanyWhereInput {
   const createdAt = clock.dayRange(params?.createdFrom, params?.createdTo);
+  // Clients, and a vendor that's also a customer — `clientSide()`, ANDed in by the callers.
   return {
-    relationshipType: "CLIENT",
     // Resellers have their own module, and their end customers are never our customer — the
     // reseller is who bought from us.
     managedByResellerId: null,
@@ -1179,7 +1208,7 @@ function customerListWhere(clock: Clock, params?: CustomerListParams, custom: Co
 export async function listCustomers(params?: CustomerListParams) {
   const user = await requireUser();
   return db.company.findMany({
-    where: { AND: [customerListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), await companyScope(user.id)] },
+    where: { AND: [await clientSide(), customerListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), await companyScope(user.id)] },
     orderBy: { createdAt: "desc" },
     include: companyListInclude,
   });
@@ -1187,7 +1216,7 @@ export async function listCustomers(params?: CustomerListParams) {
 
 export async function listCustomersPaged(params: CustomerListParams & { page: number; pageSize: number }) {
   const user = await requireUser();
-  const where = { AND: [customerListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), await companyScope(user.id)] };
+  const where = { AND: [await clientSide(), customerListWhere(await workspaceClock(), params, await companyCustom(user.id, params)), await companyScope(user.id)] };
   const [rows, total] = await Promise.all([
     db.company.findMany({
       where,
@@ -1227,8 +1256,8 @@ function vendorListFields(params?: VendorListParams): "COMPANY" | "VENDOR" {
 
 function vendorListWhere(clock: Clock, params?: VendorListParams, custom: CompanyCustom = NO_CUSTOM): Prisma.CompanyWhereInput {
   const createdAt = clock.dayRange(params?.createdFrom, params?.createdTo);
+  // The kind, or the vendor side with a customer that's also a vendor — `vendorListSide()`, ANDed in by the callers.
   return {
-    relationshipType: params?.relationshipType ?? { in: vendorRelationshipTypeValues },
     ...(params?.vendorStatus ? { vendorStatus: params.vendorStatus } : {}),
     ...companyNarrowing(params?.search, custom),
     ...(params?.assignedToUserId
@@ -1272,7 +1301,7 @@ const vendorListInclude = {
 export async function listVendors(params?: VendorListParams) {
   const user = await requireUser();
   return db.company.findMany({
-    where: { AND: [vendorListWhere(await workspaceClock(), params, await companyCustom(user.id, params, vendorListFields(params))), await companyScope(user.id)] },
+    where: { AND: [await vendorListSide(params?.relationshipType), vendorListWhere(await workspaceClock(), params, await companyCustom(user.id, params, vendorListFields(params))), await companyScope(user.id)] },
     orderBy: { createdAt: "desc" },
     include: vendorListInclude,
   });
@@ -1281,7 +1310,7 @@ export async function listVendors(params?: VendorListParams) {
 /** One page of the Vendors / Commission Parties lists. */
 export async function listVendorsPaged(params: VendorListParams & { page: number; pageSize: number }) {
   const user = await requireUser();
-  const where = { AND: [vendorListWhere(await workspaceClock(), params, await companyCustom(user.id, params, vendorListFields(params))), await companyScope(user.id)] };
+  const where = { AND: [await vendorListSide(params?.relationshipType), vendorListWhere(await workspaceClock(), params, await companyCustom(user.id, params, vendorListFields(params))), await companyScope(user.id)] };
   const [rows, total] = await Promise.all([
     db.company.findMany({
       where,
@@ -1302,7 +1331,10 @@ export async function listVendorsPaged(params: VendorListParams & { page: number
 async function companyOptionsWhere(
   userId: string,
   relationshipTypes?: readonly CompanyRelationshipType[],
+  /** A side rather than kinds (src/lib/companies/roles.ts): a company with that side as a second role is offered too. */
+  side?: CompanySide,
 ): Promise<Prisma.CompanyWhereInput> {
+  const sideWhere = side === "customer" ? await customerSide() : side === "vendor" ? await vendorSide() : null;
   return {
     /**
      * Scoped to the accounts this person manages, or their team's.
@@ -1313,7 +1345,7 @@ async function companyOptionsWhere(
      * presets already grant that to the functions that genuinely serve every account: support,
      * purchasing and accounts.
      */
-    AND: [await companyScope(userId)],
+    AND: [await companyScope(userId), ...(sideWhere ? [sideWhere] : [])],
     stage: { not: "DISQUALIFIED" },
     // A reseller's end customer can never be the party we deal with directly — the reseller is.
     managedByResellerId: null,
@@ -1345,11 +1377,13 @@ function rowLimit(take: unknown): { take?: number } {
  */
 export async function listCompanyOptions(params?: {
   relationshipTypes?: CompanyRelationshipType[];
+  /** Customers or vendors — by kind or as a second role (src/lib/companies/roles.ts). */
+  side?: CompanySide;
   withContacts?: boolean;
   take?: number;
 }) {
   const user = await requireUser();
-  const where = await companyOptionsWhere(user.id, params?.relationshipTypes);
+  const where = await companyOptionsWhere(user.id, params?.relationshipTypes, params?.side);
   if (params?.withContacts === false) {
     return db.company.findMany({ where, orderBy: { name: "asc" }, ...rowLimit(params.take), select: COMPANY_OPTION_SELECT });
   }
@@ -1381,7 +1415,7 @@ export async function searchCustomerOptions(query: string) {
   if (typed.length < 2) return [];
   return db.company.findMany({
     where: {
-      ...(await companyOptionsWhere(user.id, customerRelationshipTypeValues)),
+      ...(await companyOptionsWhere(user.id, undefined, "customer")),
       name: { contains: typed, mode: "insensitive" },
     },
     orderBy: { name: "asc" },
@@ -1516,8 +1550,7 @@ export async function listClientCompanyNameOptions() {
   const user = await requireUser();
   return db.company.findMany({
     where: {
-      AND: [await companyScope(user.id)],
-      relationshipType: "CLIENT",
+      AND: [await companyScope(user.id), await clientSide()],
       stage: { not: "DISQUALIFIED" },
       managedByResellerId: null,
     },
@@ -1530,7 +1563,8 @@ export async function listClientCompanyNameOptions() {
 export async function listVendorOptions() {
   await requireUser();
   return db.company.findMany({
-    where: { relationshipType: { in: vendorRelationshipTypeValues } },
+    // And a customer that's also a vendor (src/lib/companies/roles.ts).
+    where: await vendorSide(),
     orderBy: { name: "asc" },
     select: { id: true, name: true, relationshipType: true, paymentTerms: true },
   });
@@ -1736,7 +1770,7 @@ export async function addCompanyProduct(input: unknown): Promise<ActionResult<{ 
     return { ok: false, error: "That location does not belong to this company." };
   }
   const vendor = await db.company.findUnique({ where: { id: vendorId } });
-  if (!vendor || !isVendorRelationshipType(vendor.relationshipType)) {
+  if (!vendor || !(await isVendorSide(vendor))) {
     return { ok: false, error: "That's not a valid vendor." };
   }
 
@@ -1968,6 +2002,58 @@ export async function countVendorsOnboarding(params?: VendorListParams) {
   // Scoped to match `listVendorsPaged`, or the badge would advertise a number of vendors larger
   // than the list underneath it can account for.
   return db.company.count({
-    where: { AND: [vendorListWhere(await workspaceClock(), params, await companyCustom(user.id, params, vendorListFields(params))), await companyScope(user.id), { vendorStatus: "ONBOARDING" }] },
+    where: { AND: [await vendorListSide(params?.relationshipType), vendorListWhere(await workspaceClock(), params, await companyCustom(user.id, params, vendorListFields(params))), await companyScope(user.id), { vendorStatus: "ONBOARDING" }] },
   });
+}
+
+/**
+ * One company, two roles (src/lib/companies/roles.ts — owner, 19 Oct 2026): adds or takes off the side a
+ * company has besides its main kind — a vendor that also buys from us, a customer we also buy from. Whoever
+ * may change the company may, while that side's module is on; never while viewing as somebody else.
+ */
+export async function setCompanySecondRole(input: {
+  companyId: string;
+  side: string;
+  on: boolean;
+}): Promise<ActionResult<{ added: CompanySide | null; company: { id: string; name: string; contacts: { id: string; name: string; designation: string }[] } }>> {
+  const user = await requireUser();
+  const viewingAs = await refuseWhileViewingAs();
+  if (viewingAs) return { ok: false, error: viewingAs };
+  const side: CompanySide | null = input?.side === "customer" || input?.side === "vendor" ? input.side : null;
+  if (!side) return { ok: false, error: "Choose customer or vendor." };
+  const company = await db.company.findUnique({ where: { id: String(input.companyId ?? "") }, select: { id: true, name: true } });
+  if (!company || !(await mayAccess(user.id, "companies", "edit", company.id))) return { ok: false, error: "Company not found." };
+  const on = input.on === true;
+  if (on && !(await isModuleEnabled(side === "vendor" ? "vendors" : "companies"))) {
+    return { ok: false, error: side === "vendor" ? "Vendors aren't on in this workspace." : "Companies aren't on in this workspace." };
+  }
+  const changed = await setCompanyRole(company.id, side, on);
+  if (!changed.ok) return changed;
+  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Company", entityId: company.id, entityLabel: `${company.name} — ${on ? "also" : "no longer"} a ${side}` });
+  revalidatePath("/companies");
+  revalidatePath("/vendors");
+  // What a form that wanted a new company of this name needs to use this one instead — the lead form's picker.
+  const contacts = await db.contact.findMany({ where: { companyId: company.id, ...STILL_THERE }, orderBy: { isPrimary: "desc" }, select: { id: true, name: true, designation: true } });
+  return { ok: true, data: { added: on ? side : null, company: { id: company.id, name: company.name, contacts } } };
+}
+
+/** Who looks after a company's second role's side — a vendor manager, or an account manager — or nobody (null). */
+export async function setCompanySideOwner(input: { companyId: string; userId: string | null }): Promise<ActionResult<null>> {
+  const user = await requireUser();
+  const viewingAs = await refuseWhileViewingAs();
+  if (viewingAs) return { ok: false, error: viewingAs };
+  const company = await db.company.findUnique({ where: { id: String(input?.companyId ?? "") }, select: { id: true, name: true, relationshipType: true } });
+  if (!company || !(await mayAccess(user.id, "companies", "edit", company.id))) return { ok: false, error: "Company not found." };
+  const roles = await rolesOf(company);
+  if (!roles.added) return { ok: false, error: "It has one role only — add the other first." };
+  const userId = input?.userId ? String(input.userId) : null;
+  if (userId) {
+    const person = await db.user.findFirst({ where: { id: userId, active: true, kind: "MEMBER" }, select: { id: true } });
+    if (!person) return { ok: false, error: "Choose somebody active in the workspace." };
+  }
+  await setSideOwner(company.id, userId);
+  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Company", entityId: company.id, entityLabel: `${company.name} — ${roles.added === "vendor" ? "vendor manager" : "account manager"} changed` });
+  revalidatePath("/companies");
+  revalidatePath("/vendors");
+  return { ok: true, data: null };
 }

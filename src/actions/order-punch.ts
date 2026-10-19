@@ -9,7 +9,7 @@ import { leadAccess } from "@/lib/authz/access";
 import { viewerHas } from "@/actions/permission";
 import type { getCreditSnapshot } from "@/actions/credit";
 import { toPlain } from "@/lib/serialize";
-import { isCustomerRelationshipType } from "@/lib/validation/company";
+import { isCustomerSide } from "@/lib/companies/roles";
 import { termsExceed } from "@/lib/credit/engine";
 import { assessCompany } from "@/lib/credit/load";
 import { describePriceSource, resolveResellerPrice } from "@/lib/reseller-pricing";
@@ -52,7 +52,7 @@ async function creditFor(company: {
   paymentTerms: PaymentTerms;
 }): Promise<CreditSnapshot | null> {
   if (!(await isModuleEntitled("receivables"))) return null;
-  if (!isCustomerRelationshipType(company.relationshipType)) return null;
+  if (!(await isCustomerSide(company))) return null;
   if (!(await viewerHas("payments.view"))) return null;
   const [assessment, canOverride] = await Promise.all([assessCompany(company.id), viewerHas("credit.override")]);
   if (!assessment) return null;

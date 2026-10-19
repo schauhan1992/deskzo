@@ -211,6 +211,11 @@ export const guide: SeedGuide = {
         p("Company names are unique across the whole workspace — vendors, resellers and commission parties included. The one that exists belongs to somebody else's accounts. Ask an admin to give you access to it rather than creating a second one."),
       ),
       qa(
+        "One of our vendors also buys from us. Do I add them again?",
+        p(runs("No — one company can have both roles. When the name you type is already a vendor, select ", { b: "Add as a customer too" }, "; or open the vendor and use ", { b: "Add as a customer too" }, " under Roles on its Details tab. It then appears among your companies and your vendors, can have leads and orders, and keeps one set of contacts, addresses and GSTIN.")),
+        p("Under Roles you choose its Account manager for the customer side, who reaches it as they reach their own customers; whoever looks after it as a vendor carries on. Its Statement shows what they owe you, what you owe them, and the net. A customer you also buy from works the same way, with Add as a vendor too."),
+      ),
+      qa(
         "Why does a company we won say Awaiting Order?",
         p("A won deal only counts as a customer once an order is on file. Until then it stays on the Companies list as Awaiting Order. Once its first order is placed it moves to the Customer list."),
       ),

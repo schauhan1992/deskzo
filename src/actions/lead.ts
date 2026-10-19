@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import Papa from "papaparse";
 import { Prisma, type LeadSource, type LeadStatus } from "@prisma/client";
 import { db } from "@/lib/db";
+import { isCustomerSide } from "@/lib/companies/roles";
 import { CATEGORY_SELECT } from "@/lib/customers/categories";
 // Leads are a module of their own (owner, 14 Oct 2026): sold with Deskzo Pipeline, CRM and One.
 import { requireModuleUser } from "@/lib/modules-access";
@@ -139,6 +140,10 @@ export async function createLead(input: unknown): Promise<ActionResult<{ id: str
   // Scoped: a lead can only be opened on an account this person could open.
   if (!company || !(await canSeeCompany(user.id, company))) {
     return { ok: false, error: "Company not found." };
+  }
+  // A lead is with a customer — a client, a reseller, or a vendor that's also a customer — never a vendor alone (owner, 19 Oct 2026).
+  if (!(await isCustomerSide(company))) {
+    return { ok: false, error: "A lead is with a customer — choose a client or a reseller, not a vendor." };
   }
   /**
    * The contact has to work at the company. The form only offers that company's people, but the

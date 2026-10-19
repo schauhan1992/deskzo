@@ -32,7 +32,7 @@ import { progressOf, METRICS } from "@/lib/targets/metrics";
 import { releaseDueOrders } from "@/lib/orders/handoff";
 import { scopeUserIds } from "@/lib/authz/scope";
 import { salesLeads } from "@/lib/pipeline/server";
-import { vendorRelationshipTypeValues } from "@/lib/validation/company";
+import { clientSide, vendorSide } from "@/lib/companies/roles";
 import type { ActionResult } from "@/actions/company";
 import { listLeadMasker, maskLeads } from "@/lib/leads/masking";
 
@@ -191,10 +191,10 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
     ordersOffered,
   ] = await Promise.all([
     offers("companies", "customers")
-      ? db.company.groupBy({ by: ["stage"], where: { AND: [{ relationshipType: "CLIENT" }, accounts] }, _count: true })
+      ? db.company.groupBy({ by: ["stage"], where: { AND: [await clientSide(), accounts] }, _count: true })
       : Promise.resolve(null),
     offers("companies", "customers")
-      ? db.company.count({ where: { AND: [{ relationshipType: "CLIENT", stage: "CUSTOMER", products: { some: {} } }, accounts] } })
+      ? db.company.count({ where: { AND: [await clientSide(), { stage: "CUSTOMER", products: { some: {} } }, accounts] } })
       : Promise.resolve(0),
     canSeeLeads ? db.lead.groupBy({ by: ["status"], where: salesScope, _count: true }) : Promise.resolve([]),
     canSeeLeads
@@ -255,7 +255,7 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   if (vendorsOffered) {
     const vendorGroups = await db.company.groupBy({
       by: ["vendorStatus"],
-      where: { AND: [{ relationshipType: { in: vendorRelationshipTypeValues } }, accounts] },
+      where: { AND: [await vendorSide(), accounts] },
       _count: true,
     });
     vendors = {

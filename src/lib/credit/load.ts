@@ -1,4 +1,5 @@
 import type { PaymentTerms } from "@prisma/client";
+import { customerSide } from "@/lib/companies/roles";
 import { db } from "@/lib/db";
 import { calculateOrderAmount } from "@/lib/gst";
 import { formatOrderId } from "@/lib/order-id";
@@ -191,7 +192,7 @@ export async function refreshStaleCreditRatings(opts: { limit: number; olderThan
   const cutoff = new Date(Date.now() - (opts.olderThanHours ?? 12) * 3_600_000);
   const due = await db.company.findMany({
     where: {
-      relationshipType: { in: ["CLIENT", "RESELLER"] },
+      AND: [await customerSide()],
       OR: [{ creditScoredAt: null }, { creditScoredAt: { lt: cutoff } }],
     },
     orderBy: [{ creditScoredAt: { sort: "asc", nulls: "first" } }],

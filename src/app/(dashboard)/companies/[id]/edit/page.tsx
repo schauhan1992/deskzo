@@ -6,7 +6,7 @@ import { requireUser } from "@/lib/session";
 import { canSeeCompany } from "@/lib/authz/company-scope";
 import { EditCompanyForm } from "@/components/companies/edit-company-form";
 import { customerTermsAdvice } from "@/actions/credit";
-import { isCustomerRelationshipType } from "@/lib/validation/company";
+import { isCustomerSide } from "@/lib/companies/roles";
 import { isModuleEntitled } from "@/lib/modules-access";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
@@ -37,7 +37,7 @@ export default async function EditCompanyPage({ params }: { params: Promise<{ id
           company={company}
           industries={industries}
           // A vendor isn't a customer — nothing to categorise.
-          categories={isCustomerRelationshipType(company.relationshipType) ? categories : undefined}
+          categories={(await isCustomerSide(company)) ? categories : undefined}
           termsAdvice={termsAdvice}
         />
       </div>

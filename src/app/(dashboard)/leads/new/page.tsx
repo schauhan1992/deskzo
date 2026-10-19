@@ -26,7 +26,8 @@ export default async function NewLeadPage({
   if (!canViewLeads) notFound();
   const [{ companyId, pipeline }, companies, items, industries, canAssign, people, customFields, pipelines] = await Promise.all([
     searchParams,
-    listCompanyOptions(),
+    // A lead is with a customer: a client or a reseller, or a vendor that's also a customer — never a vendor alone (owner, 19 Oct 2026).
+    listCompanyOptions({ side: "customer" }),
     itemsEnabled ? listItemOptions() : Promise.resolve([]),
     listIndustries(),
     // Either permission that assigns may choose the owner — matching `resolveOwner` in actions/lead.ts.

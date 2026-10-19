@@ -3,6 +3,7 @@
 import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
+import { customerSide } from "@/lib/companies/roles";
 import { hasLeft } from "@/lib/contacts/left";
 import { requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
@@ -632,7 +633,7 @@ export async function portalRoster(search?: string): Promise<ActionResult<Portal
     settings.enabled && settings.access === "ALL"
       ? await db.company.count({
           where: {
-            relationshipType: { in: ["CLIENT", "RESELLER"] },
+            AND: [await customerSide()],
             managedByResellerId: null,
             portalEnabled: { not: false },
             portalLogins: { none: {} },

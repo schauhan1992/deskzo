@@ -101,7 +101,12 @@ export const guide: SeedGuide = {
     ],
     faq: [
       qa("I can't find a vendor a colleague added.", p("Without See every account, not just your own, you see only the vendors you're account manager for and your reports'. Ask an admin to widen your access, or the colleague to reassign it.")),
-      qa("Why does a vendor's page have fewer tabs than a customer's?", p("You don't sell to a vendor, so the sales tabs — Products & Subscriptions, Payments, Leads, Renewals and the like — aren't shown. Its Documents tab holds purchase documents instead.")),
+      qa("Why does a vendor's page have fewer tabs than a customer's?", p("You don't sell to a vendor, so the sales tabs — Products & Subscriptions, Payments, Leads, Renewals and the like — aren't shown. Its Documents tab holds purchase documents instead. A vendor that also buys from you has both sides' tabs.")),
+      qa(
+        "A customer of ours is also a vendor. Do I add them again?",
+        p(runs("No — one company can have both roles. Open the customer and select ", { b: "Add as a vendor too" }, " under Roles on its Details tab, or the same from the name you type when adding a vendor. It gets a vendor code and starts Onboarding, appears in Vendors and the vendor pickers, and stays among your companies.")),
+        p("Choose its Vendor manager there: purchasing reach it through them, as they reach their own vendors. Its Statement shows what you owe them beside what they owe you, and the net."),
+      ),
       qa("The bank account number is masked.", p("Full numbers show only to people who manage finance records or record payments.")),
       qa("It says the code is already another vendor's.", p("Every vendor code is unique. Pick another, or correct the other vendor's code first.")),
       qa("Where do I see what we owe a vendor?", p(runs("In Payables, which ages each vendor's bills — see ", ["Payables", "/help/payables"], "."))),

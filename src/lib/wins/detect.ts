@@ -1,5 +1,6 @@
 import type { CelebrationSource, Prisma, SalesCelebrationSettings, SplashScope, TargetMetric } from "@prisma/client";
 import { db, getTenantDb } from "@/lib/db";
+import { customerSide } from "@/lib/companies/roles";
 import { addDays } from "@/lib/hr/calendar";
 import { workspaceClock } from "@/lib/time/workspace";
 import { measureMany, subjectUserIdsMany } from "@/lib/targets/measure";
@@ -177,7 +178,7 @@ async function firstOrders(s: WinsSettings, now: Date): Promise<NewWin[]> {
       orderStatus: { in: [...BOOKED] },
       bookedAt: { not: null },
       OR: [{ accountsApprovedAt: { gte: since } }, { bookedAt: { gte: since } }],
-      company: { relationshipType: { in: ["CLIENT", "RESELLER"] } },
+      company: await customerSide(),
     },
     select: { companyId: true },
   });

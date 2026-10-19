@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
 import { hasEffectivePermission } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
-import { vendorRelationshipTypeValues } from "@/lib/validation/company";
+import { vendorSide } from "@/lib/companies/roles";
 import {
   VENDOR_CODE_PREFIX_PATTERN,
   assignVendorCodes,
@@ -43,7 +43,7 @@ export async function getVendorCodeSettings(): Promise<VendorCodeSettings | null
   const prefix = await vendorCodePrefix(db);
   const [taken, withoutCode] = await Promise.all([
     db.company.findMany({ where: { vendorCode: { startsWith: prefix, mode: "insensitive" } }, select: { vendorCode: true } }),
-    db.company.count({ where: { relationshipType: { in: vendorRelationshipTypeValues }, vendorCode: null } }),
+    db.company.count({ where: { AND: [await vendorSide(), { vendorCode: null }] } }),
   ]);
   const highest = Math.max(0, ...taken.map((c) => (c.vendorCode ? vendorCodeNumber(c.vendorCode, prefix) ?? 0 : 0)));
   return { prefix, nextCode: formatVendorCode(prefix, highest + 1), withoutCode };
@@ -73,7 +73,7 @@ export async function giveVendorsCodes(): Promise<ActionResult<{ given: number }
   const user = await manager();
   if (!user) return { ok: false, error: NO_RIGHT };
   const waiting = await db.company.findMany({
-    where: { relationshipType: { in: vendorRelationshipTypeValues }, vendorCode: null },
+    where: { AND: [await vendorSide(), { vendorCode: null }] },
     select: { id: true },
   });
   const given = await assignVendorCodes(waiting.map((c) => c.id));

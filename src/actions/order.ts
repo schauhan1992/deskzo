@@ -34,7 +34,7 @@ import {
 import { peopleHolding, releaseDueOrders, tellPurchase } from "@/lib/orders/handoff";
 import { workspaceClock } from "@/lib/time/workspace";
 import type { Clock } from "@/lib/time/zone";
-import { isCustomerRelationshipType, isVendorRelationshipType } from "@/lib/validation/company";
+import { isCustomerSide, isVendorSide } from "@/lib/companies/roles";
 import { resellerOrderRefusal } from "@/lib/orders/reseller-gate";
 import { inStepWhere, orderSteps } from "@/lib/pipeline/order-steps-server";
 import { toPlain } from "@/lib/serialize";
@@ -177,8 +177,8 @@ async function resolveQuote(data: QuoteData, now: Date, clock: Clock) {
   if (data.quotedPurchasePrice === undefined) return { ok: true as const, quote: null };
   const quoteVendorId = data.quoteVendorId || null;
   if (quoteVendorId) {
-    const vendor = await db.company.findUnique({ where: { id: quoteVendorId }, select: { relationshipType: true } });
-    if (!vendor || !isVendorRelationshipType(vendor.relationshipType)) {
+    const vendor = await db.company.findUnique({ where: { id: quoteVendorId }, select: { id: true, relationshipType: true } });
+    if (!vendor || !(await isVendorSide(vendor))) {
       return { ok: false as const, error: "That distributor isn't a vendor in the CRM — pick one, or type their name." };
     }
   }
@@ -446,7 +446,7 @@ export async function approveOrder(input: unknown): Promise<ActionResult<{ id: s
    * need `credit.override` and a reason. Rejecting never does.
    */
   let creditDecision: { assessment: CreditAssessment; detail: string; reason: string } | null = null;
-  if (approved && isCustomerRelationshipType(order.company.relationshipType)) {
+  if (approved && (await isCustomerSide(order.company))) {
     const position = await orderCreditPosition(order.id);
     const concerns = position ? position.concerns.map((c) => c.text) : [];
     if (position && concerns.length > 0) {
@@ -590,7 +590,7 @@ export async function processOrder(input: unknown): Promise<ActionResult<{ id: s
     };
   }
   const vendor = await db.company.findUnique({ where: { id: vendorId } });
-  if (!vendor || !isVendorRelationshipType(vendor.relationshipType)) {
+  if (!vendor || !(await isVendorSide(vendor))) {
     return { ok: false, error: "That's not a valid vendor." };
   }
 

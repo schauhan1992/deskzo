@@ -624,6 +624,7 @@ model User {
 
   companiesCreated           Company[]                @relation("CompanyCreatedBy")
   companiesOwned             Company[]                @relation("CompanyOwner")
+  companySidesOwned          Company[]                @relation("CompanySideOwner")
   companiesAssigned          Company[]                @relation("CompanyAssignedTo")
   companiesHandedOut         Company[]                @relation("CompanyAssignedBy")
   leadsSourced               Lead[]                   @relation("LeadSourcedBy")
@@ -985,6 +986,21 @@ model Company {
   customerCategory    CustomerCategory?       @relation("CompanyCustomerCategory", fields: [customerCategoryId], references: [id], onDelete: SetNull)
   companyType         CompanyType?
   relationshipType    CompanyRelationshipType @default(CLIENT)
+  /**
+   * A vendor who also buys from us, or a customer we also buy from (owner, 19 Oct 2026): one company,
+   * two roles — its main kind stays `relationshipType`, and this adds the other side. It's then in both
+   * lists and both sides' pickers, one record with one set of contacts, addresses and GSTIN
+   * (src/lib/companies/roles.ts). Read by name — in NOT_YET_EVERYWHERE until every workspace has them.
+   */
+  alsoCustomer        Boolean                 @default(false)
+  alsoVendor          Boolean                 @default(false)
+  /**
+   * Who looks after the side that was added — the vendor manager of a customer that's also a vendor, the
+   * account manager of a vendor that's also a customer. `ownerUserId` stays the main side's. Null: only
+   * those who see every company of that side reach it through that side.
+   */
+  sideOwnerUserId     String?
+  sideOwner           User?                   @relation("CompanySideOwner", fields: [sideOwnerUserId], references: [id], onDelete: SetNull)
   vendorStatus        VendorStatus?
   vendorCode          String?
   /**
@@ -1138,6 +1154,7 @@ model Company {
   // `ownerUserId: { in: [...] }`, which puts this column on the hot path of every scoped list.
   // `assignedToUserId` was already indexed; this one was not, and both are filtered the same way.
   @@index([ownerUserId])
+  @@index([sideOwnerUserId])
   @@index([managedByResellerId])
   @@index([creditRating])
   @@index([customerCategoryId])

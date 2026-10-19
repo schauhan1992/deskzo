@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { vendorKindsSide } from "@/lib/companies/roles";
 import { requireModuleUser } from "@/lib/modules-access";
 import { can } from "@/lib/authz/resolve";
 import { recordAudit } from "@/lib/audit";
@@ -528,7 +529,7 @@ export async function reconcilableVendors(): Promise<ActionResult<{ id: string; 
   if (error) return { ok: false, error };
 
   const vendors = await db.company.findMany({
-    where: { relationshipType: { in: ["VENDOR", "OEM", "DISTRIBUTOR"] } },
+    where: await vendorKindsSide(["VENDOR", "OEM", "DISTRIBUTOR"]),
     select: { id: true, name: true },
     orderBy: { name: "asc" },
   });

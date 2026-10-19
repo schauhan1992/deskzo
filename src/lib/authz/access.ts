@@ -8,6 +8,7 @@ import { SUPPORT_READONLY_ROLE } from "@/lib/roles";
 import { notMigratedYet } from "@/lib/not-migrated";
 import { HEAD_OFFICE_ID } from "@/lib/branches/identity";
 import { vendorRelationshipTypeValues } from "@/lib/validation/company";
+import { rolesOf, twoRolesInUse } from "@/lib/companies/roles";
 
 /**
  * How far somebody reaches over a kind of record — the second of the three questions in
@@ -468,10 +469,10 @@ export function accountRecord(relationshipType: CompanyRelationshipType): "compa
   return VENDOR_TYPES.includes(relationshipType) ? "vendors" : "companies";
 }
 
-async function ownerClause(person: Person | null, level: AccessLevel): Promise<Prisma.CompanyWhereInput> {
+async function ownerClause(person: Person | null, level: AccessLevel, field: "ownerUserId" | "sideOwnerUserId" = "ownerUserId"): Promise<Prisma.CompanyWhereInput> {
   if (level === "NONE") return NOTHING;
   const ids = await reachedPeople(person, level);
-  return ids === null ? {} : { ownerUserId: { in: ids } };
+  return ids === null ? {} : { [field]: { in: ids } };
 }
 
 /** The companies this person reaches for one action, before the actions it sits under. */
@@ -479,13 +480,27 @@ async function accountClause(userId: string, action: AccessAction): Promise<Pris
   const { person, levels } = await resolveAccess(userId);
   const customers = levels.get(slot("companies", action))!.level;
   const vendors = levels.get(slot("vendors", action))!.level;
-  if (customers === vendors) return ownerClause(person, customers);
-  return {
-    OR: [
-      { AND: [{ relationshipType: { in: VENDOR_TYPES } }, await ownerClause(person, vendors)] },
-      { AND: [{ relationshipType: { notIn: VENDOR_TYPES } }, await ownerClause(person, customers)] },
-    ],
-  };
+  const main: Prisma.CompanyWhereInput =
+    customers === vendors
+      ? await ownerClause(person, customers)
+      : {
+          OR: [
+            { AND: [{ relationshipType: { in: VENDOR_TYPES } }, await ownerClause(person, vendors)] },
+            { AND: [{ relationshipType: { notIn: VENDOR_TYPES } }, await ownerClause(person, customers)] },
+          ],
+        };
+  /**
+   * One company, two roles (src/lib/companies/roles.ts — owner, 19 Oct 2026; for Himanshu to review): the
+   * side a company was given besides its kind is reached as that side's companies are — a vendor that's
+   * also a customer through customer access, a customer that's also a vendor through vendor access — by
+   * whoever looks after that side (`sideOwnerUserId`). The main side is reached as before.
+   */
+  // Only once some company here has a second role: a workspace without one keeps the query it always had.
+  if (Object.keys(main).length === 0 || !(await twoRolesInUse())) return main;
+  const added: Prisma.CompanyWhereInput[] = [];
+  if (vendors !== "NONE") added.push({ AND: [{ alsoVendor: true }, await ownerClause(person, vendors, "sideOwnerUserId")] });
+  if (customers !== "NONE") added.push({ AND: [{ alsoCustomer: true }, await ownerClause(person, customers, "sideOwnerUserId")] });
+  return added.length ? { OR: [main, ...added] } : main;
 }
 
 /** The AND of a fragment and the fragments of the actions it sits under, collapsed when they agree. */
@@ -540,16 +555,27 @@ export async function throughAccount(userId: string, action: AccessAction = "vie
   return Object.keys(where).length === 0 ? {} : { company: where };
 }
 
-/** The facts a single-company check needs. */
-export type AccountFacts = { ownerUserId: string | null; relationshipType: CompanyRelationshipType };
+/**
+ * The facts a single-company check needs. `id`, when the caller has it, lets a company with a second role
+ * be reached through that side too (src/lib/companies/roles.ts); without it, by its main kind only.
+ */
+export type AccountFacts = { ownerUserId: string | null; relationshipType: CompanyRelationshipType; id?: string };
 
-async function reachesAccountFor(userId: string, action: AccessAction, account: AccountFacts): Promise<boolean> {
-  const { person, levels } = await resolveAccess(userId);
-  const level = levels.get(slot(accountRecord(account.relationshipType), action))!.level;
+async function reachesThrough(person: Person | null, level: AccessLevel, ownerUserId: string | null): Promise<boolean> {
   if (level === "NONE") return false;
   const ids = await reachedPeople(person, level);
   if (ids === null) return true;
-  return account.ownerUserId !== null && ids.includes(account.ownerUserId);
+  return ownerUserId !== null && ids.includes(ownerUserId);
+}
+
+async function reachesAccountFor(userId: string, action: AccessAction, account: AccountFacts): Promise<boolean> {
+  const { person, levels } = await resolveAccess(userId);
+  if (await reachesThrough(person, levels.get(slot(accountRecord(account.relationshipType), action))!.level, account.ownerUserId)) return true;
+  // Its second role's side, through whoever looks after it — as `accountClause` reaches it (for Himanshu to review).
+  if (!account.id) return false;
+  const roles = await rolesOf({ id: account.id, relationshipType: account.relationshipType });
+  if (!roles.added) return false;
+  return reachesThrough(person, levels.get(slot(roles.added === "vendor" ? "vendors" : "companies", action))!.level, roles.sideOwnerUserId);
 }
 
 /** Whether this person may act this way on one company — the single-record twin of `companyAccess`. */

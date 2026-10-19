@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { formatOrderId } from "@/lib/order-id";
 import { partyDetails, type DocumentAddress } from "@/lib/proposals/party";
 import { tradeDocumentSchema } from "@/lib/validation/trade-document";
-import { isVendorRelationshipType } from "@/lib/validation/company";
+import { isVendorSide } from "@/lib/companies/roles";
 import { createDraftDocument, resolveDocumentBranch } from "@/lib/documents/create-draft";
 import { branchIdentity } from "@/lib/branches/identity";
 import { workspaceClock } from "@/lib/time/workspace";
@@ -112,7 +112,7 @@ export async function createVendorPoDraft(orderId: string, actorId: string): Pro
       },
     },
   });
-  if (!vendor || !isVendorRelationshipType(vendor.relationshipType)) return { ok: false, error: "The vendor saved on this order is no longer a vendor." };
+  if (!vendor || !(await isVendorSide(vendor))) return { ok: false, error: "The vendor saved on this order is no longer a vendor." };
   const party = partyDetails(vendor.locations[0] ?? null, vendor.name);
   if (!party.ok) return party;
 

@@ -11,7 +11,7 @@ import { toPlain } from "@/lib/serialize";
 import { formatOrderId } from "@/lib/order-id";
 import { calendarDay } from "@/lib/orders/handoff-rules";
 import { workspaceClock } from "@/lib/time/workspace";
-import { isVendorRelationshipType } from "@/lib/validation/company";
+import { isVendorSide, vendorKindsSide } from "@/lib/companies/roles";
 import { cancelVendorCreditSchema, settleVendorCreditSchema, vendorCreditSchema } from "@/lib/validation/rebate";
 import { postVendorCreditToLedger, reverseVendorCreditPosting } from "@/lib/ledger/journal";
 import { settleInvoice, settledStatus } from "@/lib/receivables";
@@ -303,11 +303,12 @@ export async function vendorCreditIssuers() {
   const user = await creditUser("view");
   if (!user) return [];
   const companies = await db.company.findMany({
-    where: { AND: [{ relationshipType: { in: ["VENDOR", "OEM", "DISTRIBUTOR"] } }, await companyAccess(user.id, "view")] },
+    // And a customer that's also a vendor (src/lib/companies/roles.ts).
+    where: { AND: [await vendorKindsSide(["VENDOR", "OEM", "DISTRIBUTOR"]), await companyAccess(user.id, "view")] },
     orderBy: { name: "asc" },
     select: { id: true, name: true, relationshipType: true },
   });
-  return toPlain(companies.filter((c) => isVendorRelationshipType(c.relationshipType)));
+  return toPlain(companies);
 }
 
 // ─── Writes ──────────────────────────────────────────────────────────────────────────────────────
@@ -320,7 +321,7 @@ export async function createVendorCredit(input: unknown): Promise<ActionResult<{
   const data = parsed.data;
 
   const vendor = await db.company.findUnique({ where: { id: data.vendorId }, select: { id: true, name: true, relationshipType: true } });
-  if (!vendor || !isVendorRelationshipType(vendor.relationshipType)) return { ok: false, error: "Choose a distributor or an OEM from your vendors." };
+  if (!vendor || !(await isVendorSide(vendor))) return { ok: false, error: "Choose a distributor or an OEM from your vendors." };
   const unreachable = await outOfReach(user.id, vendor.id, data);
   if (unreachable) return { ok: false, error: unreachable };
   const date = calendarDay(data.date);
