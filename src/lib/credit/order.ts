@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { calculateOrderAmount } from "@/lib/gst";
-import { isCustomerRelationshipType } from "@/lib/validation/company";
+import { isCustomerSide } from "@/lib/companies/roles";
 import { creditConcerns, type CreditAssessment, type CreditConcern, type TermsKey } from "@/lib/credit/engine";
 import { assessCompany } from "@/lib/credit/load";
 
@@ -38,7 +38,7 @@ export async function orderCreditPosition(orderId: string): Promise<OrderCreditP
       company: { select: { paymentTerms: true, relationshipType: true } },
     },
   });
-  if (!order || !isCustomerRelationshipType(order.company.relationshipType)) return null;
+  if (!order || !(await isCustomerSide({ id: order.companyId, relationshipType: order.company.relationshipType }))) return null;
 
   const assessment = await assessCompany(order.companyId);
   if (!assessment) return null;

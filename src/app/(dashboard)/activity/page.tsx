@@ -10,6 +10,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { SearchParamInput } from "@/components/ui/search-param-input";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
 import { ActivityTable } from "@/components/security/activity-table";
+import Link from "next/link";
 
 /**
  * The activity log.
@@ -95,6 +96,9 @@ export default async function ActivityPage({
               : "Everything your account has done. Worth a look if you ever see a sign-in you don't recognise."}
           </p>
         </div>
+        <Link href="/activity/work" className="text-sm text-muted underline-offset-2 hover:text-text hover:underline">
+          Work activity
+        </Link>
       </div>
 
       <Card className="mt-4">

@@ -30,7 +30,7 @@ export const guide: SeedGuide = {
     access: [
       p("Anybody whose role can view leads can open the pipeline, add leads, move them through the stages, edit them and log activity. By default that's the Profiling, Calling, Sales, Support, Management, Accounts and Purchase roles."),
       p("Which leads you see follows the accounts you can see: leads on the companies you manage and those of the people who report to you — or every company's, if you can see every account. An admin can set a different reach for leads."),
-      p("On a lead's timeline you see the activity you and your team logged; somebody who can see everyone's calls, notes and meetings sees it all."),
+      p("A lead's Activity lists everything that happened to it, each line with who did it and when. You see only the kinds you may see elsewhere — no invoice lines without access to documents — and of the calls, notes and meetings people logged, yours and your team's; somebody who can see everyone's calls, notes and meetings sees them all."),
       ul(
         "Choosing the salesperson for a new lead needs permission to assign leads (or to reassign accounts and leads). Without it, a new lead is yours if your role is Sales, and otherwise goes to the lead assignment rules.",
         "Passing a lead you own to a colleague needs permission to hand off your own accounts and leads. Changing the owner of anybody's lead, or leaving one with nobody, needs permission to reassign accounts and leads.",
@@ -91,6 +91,7 @@ export const guide: SeedGuide = {
         "Work a lead from its page",
         ul(
           runs({ b: "Log activity" }, " — choose the kind (call, email, note or meeting), say what happened and log it. The lead's owner is told if it isn't you."),
+          runs("Under it, the lead's ", { b: "Activity" }, ": edits — with what each field was and became — stage moves, calls, notes, meetings, tasks, documents and emails, newest first. Narrow it by kind, person or dates, and select ", { b: "Show older" }, " to go further back."),
           runs({ b: "Call" }, " — log a call to the contact; it also goes on the timeline."),
           runs({ b: "Schedule meeting" }, ", ", { b: "Plan visit" }, " or ", { b: "Create proposal" }, ", where those modules are on and you're allowed."),
           runs("Keep ", { b: "Products required" }, ", ", { b: "Tasks" }, " and the lead's own fields up to date."),

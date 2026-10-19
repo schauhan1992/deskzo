@@ -15,6 +15,7 @@ import {
   Megaphone,
   Package,
   Receipt,
+  History,
   ScrollText,
   Settings as SettingsIcon,
   ShieldCheck,
@@ -131,7 +132,10 @@ export const SYSTEM_NAV: { group: string; items: SystemNavItem[] }[] = [
       // No permission gate: everybody can see their own activity, and should. A log that is secret
       // from the people in it is surveillance; one they can check is also the fastest way somebody
       // notices a sign-in that was not them. The action narrows the rows.
-      { href: "/activity", label: "Activity log", icon: ScrollText },
+      // Exact: Work activity below sits under it.
+      { href: "/activity", label: "Activity log", icon: ScrollText, exact: true },
+      // Ungated the same way: everybody sees what they did; a manager their team's (owner, 19 Oct 2026).
+      { href: "/activity/work", label: "Work activity", icon: History },
     ],
   },
   {

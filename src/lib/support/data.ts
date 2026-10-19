@@ -1,5 +1,6 @@
 import { cache } from "react";
 import { db } from "@/lib/db";
+import { customerSide } from "@/lib/companies/roles";
 import type { Clock } from "@/lib/time/zone";
 import { loadCreditSubjects } from "@/lib/credit/load";
 import { SUPPORT_VISIT_PURPOSES, type SupportFacts } from "@/lib/support/load";
@@ -128,7 +129,7 @@ export const supportPeers = cache(async (fromIso: string, toIso: string) => {
 /** Customers with any support in the window, among those given — for the Support load list. */
 export async function companiesWithSupport(scope: object, window: { from: Date; to: Date }): Promise<string[]> {
   const inWindow = { gte: window.from, lt: window.to };
-  const base = { AND: [scope, { relationshipType: { in: ["CLIENT", "RESELLER"] as ("CLIENT" | "RESELLER")[] } }] };
+  const base = { AND: [scope, await customerSide()] };
   const rows = await db.company.findMany({
     where: {
       ...base,

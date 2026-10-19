@@ -138,6 +138,15 @@ export const guide: SeedGuide = {
         ),
       ),
       task(
+        "See everything that happened with a company",
+        ol(
+          runs("Open the company and select ", { b: "Activity" }, " at the top of its page. A panel opens on the right with everything, newest first."),
+          "Each line says what happened, who did it and when: the company and its contacts edited — with what changed, from and to — its leads added and moved, calls, notes and meetings, orders, documents, payments, tickets, tasks, visits, and the emails sent to it.",
+          runs("Narrow it by kind, by who did it or by dates. Select ", { b: "Show older" }, " to go further back."),
+        ),
+        p("You see only the kinds you may see elsewhere: no invoice lines without access to documents, no payments without access to payments. A contact's new email or phone shows only as changed, never what it became. A vendor's page has the same button. Select the eye on a line to open what it's about — the lead, order, document or ticket."),
+      ),
+      task(
         "Add another office or GST registration",
         ol(
           runs("Open the company's ", { b: "Locations" }, " tab and select ", { b: "+ Add location" }, "."),
@@ -209,6 +218,11 @@ export const guide: SeedGuide = {
       qa(
         "It says a company with this name already exists, but I can't find it.",
         p("Company names are unique across the whole workspace — vendors, resellers and commission parties included. The one that exists belongs to somebody else's accounts. Ask an admin to give you access to it rather than creating a second one."),
+      ),
+      qa(
+        "One of our vendors also buys from us. Do I add them again?",
+        p(runs("No — one company can have both roles. When the name you type is already a vendor, select ", { b: "Add as a customer too" }, "; or open the vendor and use ", { b: "Add as a customer too" }, " under Roles on its Details tab. It then appears among your companies and your vendors, can have leads and orders, and keeps one set of contacts, addresses and GSTIN.")),
+        p("Under Roles you choose its Account manager for the customer side, who reaches it as they reach their own customers; whoever looks after it as a vendor carries on. Its Statement shows what they owe you, what you owe them, and the net. A customer you also buy from works the same way, with Add as a vendor too."),
       ),
       qa(
         "Why does a company we won say Awaiting Order?",

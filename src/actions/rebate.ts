@@ -12,7 +12,7 @@ import { formatOrderId } from "@/lib/order-id";
 import { calendarDay } from "@/lib/orders/handoff-rules";
 import { workspaceClock } from "@/lib/time/workspace";
 import type { Clock } from "@/lib/time/zone";
-import { isVendorRelationshipType } from "@/lib/validation/company";
+import { isVendorSide } from "@/lib/companies/roles";
 import { saveOrderRebateSchema } from "@/lib/validation/order";
 import { rebateProgrammeSchema, writeOffRebateSchema } from "@/lib/validation/rebate";
 import { matchingProgrammes, REBATE_BASIS_LABELS, type DealRegStatusKey } from "@/lib/rebates/rules";
@@ -73,8 +73,8 @@ export async function saveRebateProgramme(input: unknown): Promise<ActionResult<
     return { ok: false, error: "That brand no longer exists." };
   }
   if (data.vendorId) {
-    const vendor = await db.company.findUnique({ where: { id: data.vendorId }, select: { relationshipType: true } });
-    if (!vendor || !isVendorRelationshipType(vendor.relationshipType)) return { ok: false, error: "Pick a distributor from your vendors." };
+    const vendor = await db.company.findUnique({ where: { id: data.vendorId }, select: { id: true, relationshipType: true } });
+    if (!vendor || !(await isVendorSide(vendor))) return { ok: false, error: "Pick a distributor from your vendors." };
   }
   const row = {
     name: data.name,

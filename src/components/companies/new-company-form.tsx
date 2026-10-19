@@ -120,7 +120,7 @@ export function NewCompanyForm({
         industries={industries}
         categories={categories}
         relationshipTypeOptions={relationshipTypeOptions}
-        nameAddon={<ExistingCompanyMatches name={String(watch("name") ?? "")} />}
+        nameAddon={<ExistingCompanyMatches name={String(watch("name") ?? "")} adding={watch("relationshipType") ?? defaultRelationshipType} />}
         termsAdvice={termsAdvice}
         selectedTerms={String(watch("paymentTerms") ?? "")}
       />

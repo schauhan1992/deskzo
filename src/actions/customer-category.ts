@@ -8,7 +8,7 @@ import { canSeeCompany } from "@/lib/authz/company-scope";
 import { recordAudit } from "@/lib/audit";
 import { categoryTree, checkCategory, type CategoryTree, type FlatCategory } from "@/lib/customers/categories";
 import type { ActionResult } from "@/actions/company";
-import { isCustomerRelationshipType } from "@/lib/validation/company";
+import { isCustomerSide } from "@/lib/companies/roles";
 
 /**
  * Customer categories: the list everybody picks from, the settings screen that shapes it, and
@@ -135,7 +135,7 @@ export async function setCompanyCategory(companyId: string, categoryId: string |
   // Out of scope and missing read the same, as everywhere else.
   if (!company || !(await canSeeCompany(user.id, company))) return { ok: false, error: "Company not found." };
   // A vendor is no customer. Clearing one left from before is still allowed.
-  if (categoryId && !isCustomerRelationshipType(company.relationshipType)) {
+  if (categoryId && !(await isCustomerSide(company))) {
     return { ok: false, error: "Customer categories are for customers and resellers, not vendors or partners." };
   }
   let label = "none";

@@ -9,7 +9,7 @@ import { canSeeCompany, companyScope } from "@/lib/authz/company-scope";
 import { viewerHas } from "@/actions/permission";
 import { toPlain } from "@/lib/serialize";
 import { pageSlice } from "@/lib/pagination";
-import { isCustomerRelationshipType } from "@/lib/validation/company";
+import { customerSide, isCustomerSide } from "@/lib/companies/roles";
 import { assessCredit, termsExceed, type CreditAssessment } from "@/lib/credit/engine";
 import { assessCompanies, assessCompany, cacheAssessments } from "@/lib/credit/load";
 import { MIN_REASON, recordDecision } from "@/lib/credit/guard";
@@ -32,7 +32,7 @@ async function readableCustomer(companyId: string) {
     where: { id: companyId },
     select: { id: true, name: true, ownerUserId: true, relationshipType: true, paymentTerms: true },
   });
-  if (!company || !isCustomerRelationshipType(company.relationshipType)) return null;
+  if (!company || !(await isCustomerSide(company))) return null;
   if (!(await canSeeCompany(user.id, company))) return null;
   return { user, company };
 }
@@ -192,7 +192,8 @@ export async function listCreditRisks(params: { rating?: CreditRating; q?: strin
   const base: Prisma.CompanyWhereInput = {
     AND: [
       await companyScope(user.id),
-      { relationshipType: { in: ["CLIENT", "RESELLER"] }, managedByResellerId: null },
+      await customerSide(),
+      { managedByResellerId: null },
       {
         OR: [
           { products: { some: { orderStatus: { in: ["APPROVED", "PROCESSING", "FULFILLED"] } } } },

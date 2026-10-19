@@ -23,7 +23,7 @@ import { listCompanyVisits } from "@/actions/visit";
 import { customerStatement } from "@/actions/receivable";
 import { expenseSummary } from "@/actions/expense";
 import { listCompanyPayments, companyPaymentSummary } from "@/actions/payment";
-import { companyFieldEntity, holdsBankAccounts, isCustomerRelationshipType } from "@/lib/validation/company";
+import { companyFieldEntity, holdsBankAccounts } from "@/lib/validation/company";
 import { listCompanyBankAccounts } from "@/actions/company-bank";
 import { BankAccountsManager } from "@/components/banking/bank-accounts-manager";
 import { NO_DIRECT_CONTACT_NOTICE } from "@/lib/reseller";
@@ -69,7 +69,6 @@ import { CustomFieldsCard } from "@/components/custom-fields/custom-fields-card"
 import { EditCustomFields } from "@/components/custom-fields/edit-custom-fields";
 import { displayFields, formatMany, formSetup, valuesFor, valuesOf } from "@/lib/custom-fields/server";
 import { formValues } from "@/lib/custom-fields/rules";
-import { ActivityPanelButton, type TimelineEntry } from "@/components/companies/activity-panel-button";
 import { CompanyProductsList } from "@/components/companies/company-products-list";
 import { LocationsManager } from "@/components/companies/locations-manager";
 import { AccountManagerButton } from "@/components/companies/account-manager-button";
@@ -79,6 +78,12 @@ import { CustomerNoticeButton } from "@/components/marketing/customer-notice-but
 import { RenewButton } from "@/components/renewals/renew-button";
 import { CompanyLinks } from "@/components/companies/company-links";
 import { CompanyStageBadge } from "@/components/companies/company-stage-badge";
+import { CompanyRolesControl } from "@/components/companies/company-roles-control";
+import { ActivityPanelButton } from "@/components/activity/activity-panel-button";
+import { activityGroupsFor } from "@/lib/activity/timeline";
+import { rolesAddable, rolesOf } from "@/lib/companies/roles";
+import { vendorStatement } from "@/actions/payable";
+import { mayAccess } from "@/lib/authz/access";
 import { CategoryChip, CategoryGuidance } from "@/components/customers/category-chip";
 import { CategoryPicker } from "@/components/customers/category-picker";
 import { listCustomerCategories } from "@/actions/customer-category";
@@ -120,6 +125,19 @@ import { getWording } from "@/lib/terms/server";
 import { slot } from "@/lib/terms/dictionary";
 
 const CLOSED_STATUSES = ["WON", "LOST", "DISQUALIFIED"];
+
+/** One thing logged on the company — on one of its leads, or a call — for the Last activity card. */
+type TimelineEntry = {
+  id: string;
+  type: string;
+  notes: string;
+  occurredAt: Date | string;
+  user: { id: string; name: string };
+  /** Where it belongs: its lead, or the company's Calls tab for a call on none. */
+  link: { href: string; label: string };
+  /** A lead's call entry, keyed as its call is — so that call isn't counted a second time. */
+  callOf?: string | null;
+};
 
 /**
  * A company's 360 view. Rendered on its own page and again inside the split view on any of the
@@ -235,7 +253,12 @@ export async function CompanyDetail({
   // A vendor is who we buy from, not who we sell to — the sales-pipeline-shaped tabs (Products &
   // Subscriptions, Leads, Renewals) track what a company has bought from us, which doesn't
   // apply. Resellers are on the buying side, so they keep those tabs: their orders are real orders.
-  const isVendor = !isCustomerRelationshipType(company.relationshipType);
+  // A company with a second role (owner, 19 Oct 2026 — src/lib/companies/roles.ts) has both sides' tabs:
+  // `isVendor` is "not a customer at all", and the vendor side's details show wherever it's a vendor.
+  const roles = await rolesOf(company);
+  const isVendor = !roles.customer;
+  const bothSides = roles.customer && roles.vendor;
+  const canEditRoles = await mayAccess(userId, "companies", "edit", company.id);
   // Who may move this account, decided by the same rules the actions enforce — see
   // src/lib/authz/reassign.ts — so the buttons below are shown only to people they will work for.
   const reassign = await reassignRights(userId);
@@ -257,7 +280,7 @@ export async function CompanyDetail({
   ]);
   const resellerTools = isReseller && resellersOn;
   // Several accounts, one primary (owner, 8 Oct 2026); changed with payments.manage — src/actions/company-bank.ts.
-  const bankAccounts = holdsBankAccounts(company.relationshipType) ? await listCompanyBankAccounts(company.id) : null;
+  const bankAccounts = holdsBankAccounts(company.relationshipType) || roles.vendor ? await listCompanyBankAccounts(company.id) : null;
   const payouts = bankAccounts?.ok ? bankAccounts.data : null;
 
   // The estate tab earns its place when there is an estate to show, or when this is somebody we
@@ -279,7 +302,7 @@ export async function CompanyDetail({
 
   // The 360 view: everything raised for, received from, or paid out on this account. Loaded here
   // rather than per-tab because the header counts need them regardless of which tab is open.
-  const documentsEnabled = isVendor ? purchaseDocsEnabled : salesDocsEnabled;
+  const documentsEnabled = isVendor ? purchaseDocsEnabled : bothSides ? salesDocsEnabled || purchaseDocsEnabled : salesDocsEnabled;
   const [visits, visitExpenses] = visitsEnabled
     ? await Promise.all([listCompanyVisits(company.id), expensesInPlan ? expenseSummary({ companyId: company.id }) : null])
     : [[], null];
@@ -287,6 +310,9 @@ export async function CompanyDetail({
   // The statement is a customer-side view; a vendor has no receivable against us.
   const showStatement = receivablesEnabled && !isVendor;
   const statement = showStatement ? await customerStatement(company.id) : null;
+  // Both sides: what we owe them as a vendor, beside what they owe us, and the net.
+  // Payables' own statement, only where its module is on (src/lib/module-actions.ts).
+  const asVendor = showStatement && bothSides && (await isModuleEnabled("payables")) ? await vendorStatement(company.id) : null;
 
   // Credit is money about the account, so it rides on the payments view like the billed figures do.
   const [documents, companyPayments, paymentSummary, creditProfile, supportLoad, mailSummary, companyForms] = await Promise.all([
@@ -379,6 +405,8 @@ export async function CompanyDetail({
   const activeTab = tabs.some((t) => t.key === tab) ? tab! : "details";
   // The rows only when the tab is open; the counts above are cheap and always there.
   const recentMail = activeTab === "emails" && mailSummary ? await listMailLog({ companyId: company.id, page: 1, pageSize: 50 }) : null;
+  // The Activity panel's kinds: those this person may see elsewhere (the page has checked they may open the company).
+  const activityGroups = await activityGroupsFor(userId, "record");
   // The workspace's own fields (src/lib/custom-fields), on the tabs that show them. Whoever may open
   // the company may edit its fields, as with the company itself.
   const companyFields = activeTab === "details" ? await companyCustomFields(company.id, userId, companyFieldEntity(company.relationshipType)) : null;
@@ -492,6 +520,7 @@ export async function CompanyDetail({
             {isVendor && (
               <Badge tone="amber">{relationshipTypeLabels[company.relationshipType]}</Badge>
             )}
+            {roles.added && <Badge tone="blue">{roles.added === "vendor" ? "Also a vendor" : "Also a customer"}</Badge>}
           </div>
           <p className="mt-1 text-sm text-muted">
             {[company.industry?.name, primaryLocation?.city, primaryLocation?.state, primaryLocation?.country]
@@ -538,7 +567,8 @@ export async function CompanyDetail({
           {isVendor && <VendorCodeButton companyId={company.id} vendorCode={company.vendorCode} />}
           {/* Resellers need this for the PAN their onboarding KYC step checks. */}
           {payouts?.canManage && <PayoutDetailsButton companyId={company.id} panNumber={company.panNumber} />}
-          {showActivity && <ActivityPanelButton timeline={timeline} />}
+          {/* Everything that happened to the customer or vendor, and who did it, in a side panel (owner, 19 Oct 2026 — src/lib/activity). */}
+          <ActivityPanelButton source={{ kind: "company", id: company.id }} groups={activityGroups} people={assignableUsers.map((u) => ({ id: u.id, name: u.name }))} zone={clock.zone} />
           <Link href={`/companies/${company.id}/edit`}>
             <Button variant="secondary">Edit</Button>
           </Link>
@@ -784,7 +814,18 @@ export async function CompanyDetail({
               </Card>
             )}
 
-            {isVendor && (
+            {!managedByReseller && (
+              <CompanyRolesControl
+                companyId={company.id}
+                mainLabel={relationshipTypeLabels[company.relationshipType]}
+                added={roles.added}
+                addable={rolesAddable(company.relationshipType)}
+                sideOwnerId={roles.sideOwnerUserId}
+                people={assignableUsers.map((u) => ({ id: u.id, name: u.name }))}
+                canEdit={canEditRoles}
+              />
+            )}
+            {(roles.vendor || isCommissionParty) && (
               <Card>
                 <CardHeader className="text-sm font-medium text-text">
                   {isCommissionParty ? "Commission party details" : slot(w, "Vendor details", "vendor", "{one} details")}
@@ -1078,6 +1119,33 @@ export async function CompanyDetail({
           )}
 
           {activeTab === "statement" && statement && <CompanyStatement statement={statement} />}
+          {activeTab === "statement" && statement && asVendor && (
+            <Card>
+              <CardHeader className="text-sm font-medium text-text">As a vendor — what we owe them</CardHeader>
+              <CardContent className="grid grid-cols-2 gap-3 text-sm @2xl:grid-cols-4">
+                <div>
+                  <div className="text-xs text-muted">Billed to us</div>
+                  <div className="font-medium text-text">{formatCurrency(asVendor.billed)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted">We&apos;ve paid</div>
+                  <div className="font-medium text-text">{formatCurrency(asVendor.paid)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted">We owe them</div>
+                  <div className="font-medium text-text">{formatCurrency(asVendor.outstanding)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted">Net</div>
+                  <div className={statement.outstanding - asVendor.outstanding >= 0 ? "font-medium text-text" : "font-medium text-danger"}>
+                    {statement.outstanding - asVendor.outstanding >= 0
+                      ? `They owe us ${formatCurrency(statement.outstanding - asVendor.outstanding)}`
+                      : `We owe them ${formatCurrency(asVendor.outstanding - statement.outstanding)}`}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {activeTab === "credit" && creditProfile && <CompanyCredit companyId={company.id} profile={creditProfile} />}
 

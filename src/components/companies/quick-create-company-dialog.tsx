@@ -165,7 +165,8 @@ export function QuickCreateCompanyDialog({
           {errors.name && <p className="text-xs text-danger">{errors.name.message}</p>}
           {/* The picker that opened this only knows this person's accounts. The same name held by
               somebody else is a duplicate the save will refuse — said here, before the rest is filled. */}
-          <ExistingCompanyMatches name={String(watch("name") ?? "")} />
+          {/* A vendor of that name made a customer too is picked as if it were made here (src/lib/companies/roles.ts). */}
+          <ExistingCompanyMatches name={String(watch("name") ?? "")} adding="CLIENT" onUseExisting={(company) => onCreated(company)} />
         </div>
 
         <div className="grid grid-cols-2 gap-3">

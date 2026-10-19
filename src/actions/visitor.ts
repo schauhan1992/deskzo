@@ -5,6 +5,7 @@ import { randomBytes } from "crypto";
 import { Prisma } from "@prisma/client";
 import type { VisitorPurpose } from "@prisma/client";
 import { db } from "@/lib/db";
+import { vendorKindsSide } from "@/lib/companies/roles";
 import { requireModuleUser } from "@/lib/modules-access";
 import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
@@ -392,7 +393,7 @@ export async function importVendorCompanies(): Promise<ActionResult<{ added: num
   if (!manage) return { ok: false, error: "You can't manage the visitor company list." };
 
   const vendors = await db.company.findMany({
-    where: { relationshipType: { in: ["VENDOR", "OEM", "DISTRIBUTOR"] } },
+    where: await vendorKindsSide(["VENDOR", "OEM", "DISTRIBUTOR"]),
     select: { id: true, name: true },
   });
 

@@ -14,7 +14,7 @@ import { CATEGORY_SELECT } from "@/lib/customers/categories";
 import { formSetup } from "@/lib/custom-fields/server";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { NewOrderForm } from "@/components/orders/new-order-form";
-import { customerRelationshipTypeValues, isCustomerRelationshipType } from "@/lib/validation/company";
+import { isCustomerSide } from "@/lib/companies/roles";
 
 /**
  * How many customers and products the page sends with the form. Each list is asked for one row more:
@@ -53,7 +53,7 @@ async function prefillFor(userId: string, companyId: unknown) {
       managedByResellerId: true,
     },
   });
-  if (!company || !isCustomerRelationshipType(company.relationshipType)) return null;
+  if (!company || !(await isCustomerSide(company))) return null;
   if (company.stage === "DISQUALIFIED" || company.managedByResellerId !== null) return null;
   if (!(await canSeeCompany(userId, company))) return null;
   const context = await punchCustomerContext(company.id);
@@ -86,7 +86,7 @@ export default async function NewOrderPage({
 
   // The prefill's lookups run beside the lists rather than before them.
   const [customerRows, itemRows, users, commissionParties, vendors, prefill, customFields] = await Promise.all([
-    listCompanyOptions({ relationshipTypes: [...customerRelationshipTypeValues], withContacts: false, take: CUSTOMERS_SENT + 1 }),
+    listCompanyOptions({ side: "customer", withContacts: false, take: CUSTOMERS_SENT + 1 }),
     listItemOptions({ take: ITEMS_SENT + 1 }),
     listAssignableUsers(),
     // Every party, unflagged: which of them are tied to the customer comes with the customer's context.
