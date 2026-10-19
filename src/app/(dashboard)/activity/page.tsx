@@ -5,6 +5,7 @@ import { listActivity, activitySummary, activityUserOptions, type ActivityFilter
 import { ACTIVITY_GROUPS, ACTIVITY_KINDS, type ActivityGroup } from "@/lib/security/activity-kinds";
 import { resolvePage, resolvePageSize, totalPages, PAGE_SIZES } from "@/lib/pagination";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Pagination } from "@/components/ui/pagination";
 import { SearchParamInput } from "@/components/ui/search-param-input";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
@@ -142,23 +143,11 @@ export default async function ActivityPage({
         />
         <label className="flex items-center gap-2 text-sm text-muted">
           From
-          <input
-            type="date"
-            name="from"
-            defaultValue={filters.from}
-            form="activity-dates"
-            className="h-8 rounded-md border border-line-strong bg-surface px-2 text-sm text-text"
-          />
+          <Input type="date" name="from" defaultValue={filters.from} form="activity-dates" className="h-8 w-36 rounded-md px-2" />
         </label>
         <label className="flex items-center gap-2 text-sm text-muted">
           to
-          <input
-            type="date"
-            name="to"
-            defaultValue={filters.to}
-            form="activity-dates"
-            className="h-8 rounded-md border border-line-strong bg-surface px-2 text-sm text-text"
-          />
+          <Input type="date" name="to" defaultValue={filters.to} form="activity-dates" className="h-8 w-36 rounded-md px-2" />
         </label>
         {/* A plain GET form: the dates land in the query string like every other filter, so the
             view survives a reload and can be sent to somebody else as a link. */}

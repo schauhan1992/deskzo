@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ActionNotice } from "@/components/ui/action-notice";
 import { setRecurringBilling, type RecurringBillingView } from "@/actions/recurring-billing";
 import { documentPath } from "@/lib/trade-documents";
@@ -99,10 +100,10 @@ export function RecurringBillingCard({ view }: { view: RecurringBillingView }) {
                   <label htmlFor="recurring-from" className="text-muted">
                     from
                   </label>
-                  <input
+                  <Input
                     id="recurring-from"
                     type="date"
-                    className="h-8 rounded-base border border-line bg-surface px-2 text-sm text-text"
+                    className="h-8 w-36 border-line px-2"
                     value={billFrom}
                     min={view.term.start ?? undefined}
                     max={view.term.end ?? undefined}
