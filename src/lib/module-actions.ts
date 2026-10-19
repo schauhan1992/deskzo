@@ -37,6 +37,9 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "activity-awards.ts": ["wins"],
   "activity-tracking.ts": "core",
   "activity.ts": "core",
+  // Activity on records and people (src/lib/activity/timeline.ts): each read checks its record or person, and
+  // shows only the kinds the viewer may see elsewhere.
+  "activity-feed.ts": "core",
   "addon-proposal.ts": ["renewals"],
   "addon.ts": ["renewals"],
   "analytics.ts": ["reports"],

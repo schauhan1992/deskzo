@@ -69,7 +69,6 @@ import { CustomFieldsCard } from "@/components/custom-fields/custom-fields-card"
 import { EditCustomFields } from "@/components/custom-fields/edit-custom-fields";
 import { displayFields, formatMany, formSetup, valuesFor, valuesOf } from "@/lib/custom-fields/server";
 import { formValues } from "@/lib/custom-fields/rules";
-import { ActivityPanelButton, type TimelineEntry } from "@/components/companies/activity-panel-button";
 import { CompanyProductsList } from "@/components/companies/company-products-list";
 import { LocationsManager } from "@/components/companies/locations-manager";
 import { AccountManagerButton } from "@/components/companies/account-manager-button";
@@ -80,6 +79,8 @@ import { RenewButton } from "@/components/renewals/renew-button";
 import { CompanyLinks } from "@/components/companies/company-links";
 import { CompanyStageBadge } from "@/components/companies/company-stage-badge";
 import { CompanyRolesControl } from "@/components/companies/company-roles-control";
+import { ActivityFeed } from "@/components/activity/activity-feed";
+import { activityGroupsFor, recordActivity } from "@/lib/activity/timeline";
 import { rolesAddable, rolesOf } from "@/lib/companies/roles";
 import { vendorStatement } from "@/actions/payable";
 import { mayAccess } from "@/lib/authz/access";
@@ -124,6 +125,19 @@ import { getWording } from "@/lib/terms/server";
 import { slot } from "@/lib/terms/dictionary";
 
 const CLOSED_STATUSES = ["WON", "LOST", "DISQUALIFIED"];
+
+/** One thing logged on the company — on one of its leads, or a call — for the Last activity card. */
+type TimelineEntry = {
+  id: string;
+  type: string;
+  notes: string;
+  occurredAt: Date | string;
+  user: { id: string; name: string };
+  /** Where it belongs: its lead, or the company's Calls tab for a call on none. */
+  link: { href: string; label: string };
+  /** A lead's call entry, keyed as its call is — so that call isn't counted a second time. */
+  callOf?: string | null;
+};
 
 /**
  * A company's 360 view. Rendered on its own page and again inside the split view on any of the
@@ -379,6 +393,8 @@ export async function CompanyDetail({
     ...(showFormsTab ? [{ key: "forms", label: "Forms" }] : []),
     ...(tasksEnabled ? [{ key: "tasks", label: "Tasks" }] : []),
     ...(canManagePortal && portalInPlan && !isVendor ? [{ key: "portal", label: "Portal" }] : []),
+    // Everything that happened to this customer or vendor, and who did it (owner, 19 Oct 2026 — src/lib/activity).
+    { key: "activity", label: "Activity" },
   ];
   /** A link to one of the tabs below, keeping the list filters when embedded — as `TabNav` builds them. */
   const tabHref = (key: string) => {
@@ -391,6 +407,11 @@ export async function CompanyDetail({
   const activeTab = tabs.some((t) => t.key === tab) ? tab! : "details";
   // The rows only when the tab is open; the counts above are cheap and always there.
   const recentMail = activeTab === "emails" && mailSummary ? await listMailLog({ companyId: company.id, page: 1, pageSize: 50 }) : null;
+  // The page has checked this person may open the company: its Activity, the kinds they may see elsewhere.
+  const activity =
+    activeTab === "activity"
+      ? await Promise.all([recordActivity(userId, { companyId: company.id }), activityGroupsFor(userId, "record"), workspaceClock()]).then(([page, groups, clock]) => ({ page, groups, zone: clock.zone }))
+      : null;
   // The workspace's own fields (src/lib/custom-fields), on the tabs that show them. Whoever may open
   // the company may edit its fields, as with the company itself.
   const companyFields = activeTab === "details" ? await companyCustomFields(company.id, userId, companyFieldEntity(company.relationshipType)) : null;
@@ -551,7 +572,6 @@ export async function CompanyDetail({
           {isVendor && <VendorCodeButton companyId={company.id} vendorCode={company.vendorCode} />}
           {/* Resellers need this for the PAN their onboarding KYC step checks. */}
           {payouts?.canManage && <PayoutDetailsButton companyId={company.id} panNumber={company.panNumber} />}
-          {showActivity && <ActivityPanelButton timeline={timeline} />}
           <Link href={`/companies/${company.id}/edit`}>
             <Button variant="secondary">Edit</Button>
           </Link>
@@ -679,12 +699,15 @@ export async function CompanyDetail({
               </Card>
             </Link>
           )}
+          {/* Opens the Activity tab — everything that happened to the company, not only what was logged. */}
           {showActivity && (
-            <Card className="p-4">
-              <div className="text-xs uppercase tracking-wide text-subtle">Last activity</div>
-              <div className="mt-1 text-lg font-semibold text-text">{clock.date(timeline[0]?.occurredAt ?? null)}</div>
-              <div className="mt-0.5 text-xs text-muted">{timeline.length} logged total</div>
-            </Card>
+            <Link href={tabHref("activity")} className="block">
+              <Card className="h-full p-4 transition hover:border-line-strong">
+                <div className="text-xs uppercase tracking-wide text-subtle">Last activity</div>
+                <div className="mt-1 text-lg font-semibold text-text">{clock.date(timeline[0]?.occurredAt ?? null)}</div>
+                <div className="mt-0.5 text-xs text-muted">{timeline.length} logged total</div>
+              </Card>
+            </Link>
           )}
         </div>
       )}
@@ -1101,6 +1124,16 @@ export async function CompanyDetail({
             <RecordMeetings record={{ kind: "company", id: company.id }} viewerId={userId} emptyText="No meetings scheduled with this customer yet — from here, a lead, a contact or a ticket." />
           )}
 
+          {activeTab === "activity" && activity && (
+            <ActivityFeed
+              key={activity.page.items[0]?.id ?? "none"}
+              source={{ kind: "company", id: company.id }}
+              initial={activity.page}
+              groups={activity.groups}
+              people={assignableUsers.map((u) => ({ id: u.id, name: u.name }))}
+              zone={activity.zone}
+            />
+          )}
           {activeTab === "statement" && statement && <CompanyStatement statement={statement} />}
           {activeTab === "statement" && statement && asVendor && (
             <Card>

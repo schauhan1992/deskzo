@@ -15,7 +15,7 @@ import { listTasks } from "@/actions/task";
 import { listAssignableUsers } from "@/actions/company";
 import { hasEffectivePermission } from "@/actions/permission";
 import { currentUser } from "@/lib/session";
-import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CompanyLinks } from "@/components/companies/company-links";
 import { CompanyStageBadge } from "@/components/companies/company-stage-badge";
@@ -27,11 +27,13 @@ import { LeadVisits } from "@/components/leads/lead-visits";
 import { LeadStatusBadge } from "@/components/leads/lead-status-badge";
 import { LeadStatusControl } from "@/components/leads/lead-status-control";
 import { leadStages, stagesOfLeads } from "@/lib/pipeline/server";
-import { kindOf, readStageNote } from "@/lib/pipeline/rules";
+import { kindOf } from "@/lib/pipeline/rules";
 import { LeadPipelineControls } from "@/components/leads/lead-pipeline-controls";
 import { db } from "@/lib/db";
 import { STILL_THERE } from "@/lib/contacts/left";
 import { ActivityForm } from "@/components/leads/activity-form";
+import { ActivityFeed } from "@/components/activity/activity-feed";
+import { activityGroupsFor, recordActivity } from "@/lib/activity/timeline";
 import { RequirementsList } from "@/components/leads/requirements-list";
 import { TaskList } from "@/components/tasks/task-list";
 import { LeadScoreBadge, LeadScoreCard } from "@/components/leads/lead-score";
@@ -86,7 +88,8 @@ export async function LeadDetail({ id }: { id: string }) {
     getLead(id),
     itemsEnabled ? listItemOptions() : Promise.resolve([]),
     tasksEnabled ? listTasks({ leadId: id }) : Promise.resolve([]),
-    tasksEnabled ? listAssignableUsers() : Promise.resolve([]),
+    // Also whose work the Activity feed can be narrowed to.
+    listAssignableUsers(),
     salesDocsEnabled ? listLeadDocuments(id) : Promise.resolve([]),
     visitsEnabled ? listLeadVisits(id) : Promise.resolve([]),
   ]);
@@ -143,6 +146,9 @@ export async function LeadDetail({ id }: { id: string }) {
   // rather than collapsed into one "sales rep" that would be wrong half the time.
   const accountManager = company.assignedTo ?? company.owner ?? null;
   const clock = await workspaceClock();
+  // Everything that happened to the lead and who did it (owner, 19 Oct 2026 — src/lib/activity): its
+  // calls, notes, stage moves and edits, the kinds this person may see; `getLead` has checked they may open it.
+  const [activity, activityGroups] = await Promise.all([recordActivity(userId, { leadId: lead.id }), activityGroupsFor(userId, "record")]);
   // The workspace's own words (Settings → Wording, src/lib/terms).
   const w = await getWording();
 
@@ -294,21 +300,16 @@ export async function LeadDetail({ id }: { id: string }) {
             <CardHeader className="text-sm font-medium text-text">Activity</CardHeader>
             <CardContent className="space-y-4">
               <ActivityForm leadId={lead.id} />
-              <div className="space-y-3 border-t border-line pt-4">
-                {lead.activities.map((a) => (
-                  <div key={a.id} className="text-sm">
-                    <div className="flex items-center gap-2">
-                      <Badge>{a.type.replaceAll("_", " ")}</Badge>
-                      <span className="text-xs text-subtle">
-                        {a.user.name} · {clock.date(a.occurredAt)}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-text">{a.type === "STAGE_CHANGE" ? readStageNote(a.notes, stages) : a.notes}</p>
-                  </div>
-                ))}
-                {lead.activities.length === 0 && (
-                  <p className="text-sm text-subtle">No activity logged yet.</p>
-                )}
+              <div className="border-t border-line pt-4">
+                {/* Keyed to its newest line, so what was just logged shows when the page refreshes. */}
+                <ActivityFeed
+                  key={activity.items[0]?.id ?? "none"}
+                  source={{ kind: "lead", id: lead.id }}
+                  initial={activity}
+                  groups={activityGroups}
+                  people={assignableUsers.map((u) => ({ id: u.id, name: u.name }))}
+                  zone={clock.zone}
+                />
               </div>
             </CardContent>
           </Card>

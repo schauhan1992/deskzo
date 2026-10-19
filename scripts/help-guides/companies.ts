@@ -138,6 +138,15 @@ export const guide: SeedGuide = {
         ),
       ),
       task(
+        "See everything that happened with a company",
+        ol(
+          runs("Open the company and its ", { b: "Activity" }, " tab, or select the ", { b: "Last activity" }, " card."),
+          "Each line says what happened, who did it and when: the company and its contacts edited — with what changed, from and to — its leads added and moved, calls, notes and meetings, orders, documents, payments, tickets, tasks, visits, and the emails sent to it.",
+          runs("Narrow it by kind, by who did it or by dates. Select ", { b: "Show older" }, " to go further back."),
+        ),
+        p("You see only the kinds you may see elsewhere: no invoice lines without access to documents, no payments without access to payments. A contact's new email or phone shows only as changed, never what it became. A vendor's page has the same tab."),
+      ),
+      task(
         "Add another office or GST registration",
         ol(
           runs("Open the company's ", { b: "Locations" }, " tab and select ", { b: "+ Add location" }, "."),

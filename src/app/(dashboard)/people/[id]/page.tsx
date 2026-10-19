@@ -20,6 +20,7 @@ import { HrTasks } from "@/components/hr/hr-tasks";
 import { handoverHistory } from "@/actions/handover";
 import { HandoverHistory } from "@/components/people/handover-history";
 import { isModuleEntitled } from "@/lib/modules-access";
+import { mayViewPersonActivity } from "@/lib/activity/timeline";
 
 export default async function PersonPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const enabled = await isModuleEnabled("hr");
@@ -55,7 +56,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
    */
   // Salary is the payroll module's: a plan without it shows no salary card, and asks for none.
   const payrollInPlan = await isModuleEntitled("payroll");
-  const [balances, structures, tax, documents, history, letters, checklist, tasks, handovers] = await Promise.all([
+  const [balances, structures, tax, documents, history, letters, checklist, tasks, handovers, seesWork] = await Promise.all([
     leaveBalances(person.id),
     payrollInPlan ? salaryHistory(person.id) : Promise.resolve([]),
     payrollInPlan ? taxDeclarations(person.id) : Promise.resolve(null),
@@ -65,6 +66,8 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
     personChecklist(person.id),
     hrTasksFor(person.id),
     handoverHistory(person.id),
+    // Their Work activity, offered to whoever may see it: themselves, their managers, everyone's viewers.
+    mayViewPersonActivity(caps.userId, person.id),
   ]);
 
   const profile = person.employeeProfile;
@@ -81,9 +84,16 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
 
   return (
     <div className="animate-fade-rise">
-      <Link href="/people" className="text-sm text-muted hover:text-text">
-        ← People
-      </Link>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Link href="/people" className="text-sm text-muted hover:text-text">
+          ← People
+        </Link>
+        {seesWork && (
+          <Link href={`/activity/work?person=${person.id}`} className="text-sm text-brand hover:underline">
+            Work activity →
+          </Link>
+        )}
+      </div>
       <div className="mt-3">
         <EmployeeRecord
           person={person}

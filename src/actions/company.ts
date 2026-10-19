@@ -5,6 +5,7 @@ import { z } from "zod";
 import { Prisma, type CompanyStage, type CompanySource, type CompanyRelationshipType, type VendorStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { refuseWhileViewingAs, requireUser } from "@/lib/session";
+import { companyChanges, contactChanges } from "@/lib/activity/fields";
 import { STILL_THERE } from "@/lib/contacts/left";
 import { canSeeCompany, companyScope } from "@/lib/authz/company-scope";
 import { accessLevel, leadAccess, mayAccess, mayAccessContactsOf, mayAddTo, orderAccess, timelineAccess } from "@/lib/authz/access";
@@ -403,12 +404,12 @@ export async function updateCompany(input: unknown): Promise<ActionResult<{ id: 
         : (current.vendorStatus ?? "ONBOARDING");
 
   try {
-    await db.company.update({
-      where: { id },
-      data: { ...companyScalarData(companyInput, current.employeeCount), vendorStatus },
-    });
+    const next = { ...companyScalarData(companyInput, current.employeeCount), vendorStatus };
+    await db.company.update({ where: { id }, data: next });
 
-    await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Company", entityId: id, entityLabel: companyInput.name });
+    // What changed, field by field, for the company's Activity (src/lib/activity/fields.ts).
+    const changes = await companyChanges(current as unknown as Record<string, unknown>, next as unknown as Record<string, unknown>);
+    await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Company", entityId: id, entityLabel: companyInput.name, changes });
     if (termsCheck.decision) {
       await recordDecision({ userId: user.id, companyId: id, kind: "TERMS", ...termsCheck.decision });
     }
@@ -556,20 +557,20 @@ export async function updateContact(input: unknown): Promise<ActionResult<{ id: 
     changed = saved.changed;
   }
 
-  await db.contact.update({
-    where: { id },
-    data: {
-      name: c.name.trim(),
-      designation: c.designation,
-      ...((await designationData(db, c)) ?? {}),
-      ...(detailsHidden ? {} : { email: c.email || null, phone: c.phone || null }),
-      linkedinUrl: c.linkedinUrl || null,
-      isPrimary: c.isPrimary,
-      receivesDocuments: c.receivesDocuments,
-    },
-  });
+  const nextContact = {
+    name: c.name.trim(),
+    designation: c.designation,
+    ...((await designationData(db, c)) ?? {}),
+    ...(detailsHidden ? {} : { email: c.email || null, phone: c.phone || null }),
+    linkedinUrl: c.linkedinUrl || null,
+    isPrimary: c.isPrimary,
+    receivesDocuments: c.receivesDocuments,
+  };
+  await db.contact.update({ where: { id }, data: nextContact });
 
-  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Contact", entityId: id, entityLabel: `${c.name.trim()}${changedLabel(changed)}` });
+  // What changed, for the company's Activity — an email or phone said to have changed, never to what.
+  const changes = contactChanges(contact as unknown as Record<string, unknown>, nextContact as unknown as Record<string, unknown>);
+  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Contact", entityId: id, entityLabel: `${c.name.trim()}${changedLabel(changed)}`, changes });
 
   revalidatePath(`/companies/${contact.companyId}`);
   return { ok: true, data: { id } };

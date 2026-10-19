@@ -4174,11 +4174,23 @@ model AuditLog {
    */
   impersonatedByUserId String?
   impersonatedBy       User?       @relation("AuditImpersonatedBy", fields: [impersonatedByUserId], references: [id])
+  /**
+   * The customer or vendor, and the lead, the change belongs to (owner, 19 Oct 2026) — a contact edited,
+   * an invoice issued, a payment recorded show on that company's and that lead's Activity tab. Worked out
+   * as the entry is written (src/lib/activity/subjects.ts); no foreign keys, as the entry outlives what it
+   * describes. Read by name — in NOT_YET_EVERYWHERE until every workspace has them.
+   */
+  companyId            String?
+  leadId               String?
+  /** What an edit changed, field by field: [{ field, label, from, to }] — the main forms only. */
+  changes              Json?
   createdAt            DateTime    @default(now())
 
   @@index([userId, createdAt])
   @@index([impersonatedByUserId])
   @@index([entityType, entityId])
+  @@index([companyId, createdAt])
+  @@index([leadId, createdAt])
   @@map("audit_logs")
 }
 

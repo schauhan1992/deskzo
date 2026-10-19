@@ -267,6 +267,9 @@ const NOT_YET_EVERYWHERE = {
   // and 20261119100000_company_two_roles: read by name through src/lib/companies/roles.ts, which treats a
   // workspace without them as every company having its one kind.
   company: { customFields: true, alsoCustomer: true, alsoVendor: true, sideOwnerUserId: true },
+  // 20261119110000_activity_subjects: written and read by name in src/lib/audit.ts and src/lib/activity, which
+  // write an entry without them, and show no Activity, where a workspace doesn't have them yet.
+  auditLog: { companyId: true, leadId: true, changes: true },
   // and 20261029100000_contact_left, 20261029110000_designations_vendor_fields_reminders: read by name in
   // src/lib/contacts/left.ts, designations.ts and moves.ts. user.reminderSounds: src/actions/reminder-sounds.ts.
   contact: { customFields: true, leftAt: true, designationId: true, previousContactId: true },

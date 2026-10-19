@@ -628,7 +628,11 @@ async function ActivityTab({ person, viewerId }: { person: PersonFacts; viewerId
         </Card>
       )}
       <p className="text-sm text-muted">
-        Everything else they did is in the{" "}
+        Their work — records added and changed, calls, notes, emails — is in{" "}
+        <Link href={`/activity/work?person=${person.id}`} className="text-brand hover:underline">
+          work activity
+        </Link>
+        ; sign-ins, exports and refusals in the{" "}
         <Link href={`/activity?userId=${person.id}`} className="text-brand hover:underline">
           activity log
         </Link>

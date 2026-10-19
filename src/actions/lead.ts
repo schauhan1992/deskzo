@@ -5,6 +5,7 @@ import Papa from "papaparse";
 import { Prisma, type LeadSource, type LeadStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { isCustomerSide } from "@/lib/companies/roles";
+import { leadChanges } from "@/lib/activity/fields";
 import { CATEGORY_SELECT } from "@/lib/customers/categories";
 // Leads are a module of their own (owner, 14 Oct 2026): sold with Deskzo Pipeline, CRM and One.
 import { requireModuleUser } from "@/lib/modules-access";
@@ -653,7 +654,9 @@ export async function updateLeadDetails(input: unknown): Promise<ActionResult<nu
   ].filter((c): c is string => !!c);
   if (changed.length === 0) return { ok: true, data: null };
   await db.lead.update({ where: { id: lead.id }, data: next, select: { id: true } });
-  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Lead", entityId: lead.id, entityLabel: `${next.title} — ${changed.join(", ")} changed` });
+  // What changed, for the lead's Activity (src/lib/activity/fields.ts).
+  const changes = await leadChanges(lead as unknown as Record<string, unknown>, next as unknown as Record<string, unknown>);
+  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Lead", entityId: lead.id, entityLabel: `${next.title} — ${changed.join(", ")} changed`, changes });
   await refreshLeadScore(lead.id);
   revalidatePath("/leads");
   revalidatePath(`/leads/${lead.id}`);
