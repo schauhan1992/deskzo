@@ -1,6 +1,31 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
+import {
+  Building2,
+  CalendarDays,
+  CheckSquare,
+  Eye,
+  FileText,
+  FolderKanban,
+  Globe,
+  History,
+  LifeBuoy,
+  LogIn,
+  Mail,
+  MapPin,
+  MessageSquare,
+  Package,
+  Phone,
+  Receipt,
+  ShoppingCart,
+  StickyNote,
+  TrendingUp,
+  UserRound,
+  Wallet,
+  type LucideIcon,
+} from "lucide-react";
 import { companyActivity, leadActivity, peopleActivity, type ActivityQuery } from "@/actions/activity-feed";
 import { ACTIVITY_GROUPS, type ActivityGroupKey, type ActivityItem, type ActivityPage } from "@/lib/activity/types";
 import { Select } from "@/components/ui/input";
@@ -10,9 +35,32 @@ type Source = { kind: "company" | "lead" | "person"; id: string };
 
 const ACTION_WORD: Record<string, string> = { CREATE: "Added", UPDATE: "Changed", DELETE: "Removed" };
 
+const GROUP_ICON: Record<ActivityGroupKey, LucideIcon> = {
+  company: Building2,
+  contacts: UserRound,
+  leads: TrendingUp,
+  notes: StickyNote,
+  calls: Phone,
+  emails: Mail,
+  orders: Package,
+  documents: FileText,
+  payments: Wallet,
+  purchase: ShoppingCart,
+  tickets: LifeBuoy,
+  tasks: CheckSquare,
+  meetings: CalendarDays,
+  visits: MapPin,
+  projects: FolderKanban,
+  expenses: Receipt,
+  feedback: MessageSquare,
+  portal: Globe,
+  signins: LogIn,
+  other: History,
+};
+
 /**
  * An Activity feed (owner, 19 Oct 2026 — src/lib/activity/timeline.ts): what happened, who did it, and
- * when, newest first, filtered by kind, person and dates, an older page at a time.
+ * when, newest first, as a timeline — filtered by kind, person and dates, an older page at a time.
  */
 export function ActivityFeed({
   source,
@@ -63,9 +111,9 @@ export function ActivityFeed({
   const groupLabel = (key: ActivityGroupKey) => ACTIVITY_GROUPS.find((g) => g.key === key)?.label ?? key;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2 text-sm">
-        <Select aria-label="Kind" className="h-8 w-44 text-sm" value={filters.group ?? ""} disabled={pending} onChange={(e) => change({ group: e.target.value || null })}>
+        <Select aria-label="Kind" className="h-8 w-40 text-sm" value={filters.group ?? ""} disabled={pending} onChange={(e) => change({ group: e.target.value || null })}>
           <option value="">Everything</option>
           {ACTIVITY_GROUPS.filter((g) => groups.includes(g.key)).map((g) => (
             <option key={g.key} value={g.key}>
@@ -74,7 +122,7 @@ export function ActivityFeed({
           ))}
         </Select>
         {people && people.length > 0 && (
-          <Select aria-label="Who" className="h-8 w-48 text-sm" value={filters.personId ?? ""} disabled={pending} onChange={(e) => change({ personId: e.target.value || null })}>
+          <Select aria-label="Who" className="h-8 w-40 text-sm" value={filters.personId ?? ""} disabled={pending} onChange={(e) => change({ personId: e.target.value || null })}>
             <option value="">Anybody</option>
             {people.map((p) => (
               <option key={p.id} value={p.id}>
@@ -98,40 +146,52 @@ export function ActivityFeed({
       {items.length === 0 ? (
         <p className="text-sm text-muted">{pending ? "Loading…" : "Nothing yet."}</p>
       ) : (
-        <ol className="divide-y divide-line rounded-base border border-line">
-          {items.map((item) => (
-            <li key={item.id} className="px-4 py-2.5 text-sm">
-              <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-                <span className="text-text">
-                  {item.action && <span className="mr-1 text-muted">{ACTION_WORD[item.action]} ·</span>}
-                  {item.title}
+        <ol>
+          {items.map((item, n) => {
+            const Icon = GROUP_ICON[item.group] ?? History;
+            return (
+              <li key={item.id} className="relative flex gap-3 pb-5 last:pb-0">
+                {/* The line joining one entry to the next. */}
+                {n < items.length - 1 && <span aria-hidden="true" className="absolute bottom-0 left-4 top-9 w-px bg-line" />}
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand-subtle text-brand" title={groupLabel(item.group)}>
+                  <Icon className="size-4" aria-hidden="true" />
                 </span>
-                <span className="shrink-0 text-xs text-muted">{when(item.at)}</span>
-              </div>
-              <div className="mt-0.5 text-xs text-muted">
-                {item.who?.name ?? "Deskzo"}
-                {item.asBy ? ` (${item.asBy}, viewing as them)` : ""} · {groupLabel(item.group)}
-              </div>
-              {item.detail && <p className="mt-1 whitespace-pre-line text-xs text-muted">{item.detail}</p>}
-              {item.changes.length > 0 && (
-                <ul className="mt-1 space-y-0.5 text-xs">
-                  {item.changes.map((c) => (
-                    <li key={c.field} className="text-muted">
-                      <span className="text-text">{c.label}</span>
-                      {c.withheld ? (
-                        " changed"
-                      ) : (
-                        <>
-                          : {c.from || "—"} <span aria-hidden="true">→</span>
-                          <span className="sr-only">changed to</span> {c.to || "—"}
-                        </>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </li>
-          ))}
+                <div className="min-w-0 flex-1 pt-1 text-sm">
+                  <p className="text-text">
+                    {item.action && <span className="text-muted">{ACTION_WORD[item.action]} · </span>}
+                    {item.title}
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted">
+                    by <span className="font-medium text-text">{item.who?.name ?? "Deskzo"}</span>
+                    {item.asBy ? ` (${item.asBy}, viewing as them)` : ""} at {when(item.at)}
+                  </p>
+                  {item.detail && <p className="mt-1 whitespace-pre-line text-xs text-muted">{item.detail}</p>}
+                  {item.changes.length > 0 && (
+                    <ul className="mt-1 space-y-0.5 text-xs">
+                      {item.changes.map((c) => (
+                        <li key={c.field} className="text-muted">
+                          <span className="text-text">{c.label}</span>
+                          {c.withheld ? (
+                            " changed"
+                          ) : (
+                            <>
+                              : {c.from || "—"} <span aria-hidden="true">→</span>
+                              <span className="sr-only">changed to</span> {c.to || "—"}
+                            </>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+                {item.href && (
+                  <Link href={item.href} className="mt-1.5 shrink-0 text-brand hover:opacity-80" aria-label={`Open: ${item.title}`} title="Open">
+                    <Eye className="size-4" aria-hidden="true" />
+                  </Link>
+                )}
+              </li>
+            );
+          })}
         </ol>
       )}
 

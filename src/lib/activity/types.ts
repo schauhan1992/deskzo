@@ -67,6 +67,8 @@ export type ActivityItem = {
   title: string;
   detail: string | null;
   changes: FieldChange[];
+  /** What the line opens — the lead, order, document… it's about; null where there's nothing to open. */
+  href: string | null;
 };
 
 export type ActivityPage = { items: ActivityItem[]; more: boolean; before: string | null };

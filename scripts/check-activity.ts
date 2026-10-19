@@ -81,7 +81,7 @@ const MIGRATION = "prisma/migrations/20261119110000_activity_subjects/migration.
 async function main() {
   section("Where it shows");
   const detail = read("src/components/companies/company-detail.tsx");
-  ok("a customer's and a vendor's page has an Activity tab", detail.includes('{ key: "activity", label: "Activity" }') && detail.includes('source={{ kind: "company", id: company.id }}'));
+  ok("a customer's and a vendor's page has an Activity button opening a side panel, not a tab", detail.includes('<ActivityPanelButton source={{ kind: "company", id: company.id }}') && !detail.includes('key: "activity"') && read("src/components/activity/activity-panel-button.tsx").includes("<SidePane"));
   ok("a lead's Activity card is the feed, under the form that logs to it", read("src/components/leads/lead-detail.tsx").includes('source={{ kind: "lead", id: lead.id }}'));
   const work = read("src/app/(dashboard)/activity/work/page.tsx");
   ok("a person's Work activity page refuses with a 404", work.includes("if (!(await mayViewPersonActivity(user.id, personId))) notFound();"));
@@ -240,8 +240,16 @@ async function main() {
     const note = all.items.find((i) => i.title.startsWith("Note — "));
     ok("  each line says who and when", note?.who?.id === rep.id && !!note.at && note.detail === "Zz asked for a demo next week", note);
     ok("  with what changed, on the edits", all.items.find((i) => i.title === "Zz Activity Traders Pvt")?.changes.length === 2);
+    const paths = require("../src/lib/record-links") as typeof import("../src/lib/record-links"); // eslint-disable-line @typescript-eslint/no-require-imports
+    const seqs = await db.company.findUnique({ where: { id: company.id }, select: { companySeq: true, leads: { select: { id: true, leadSeq: true } } } });
+    const leadHref = paths.leadPath(seqs!.leads.find((l) => l.id === leadId)!.leadSeq);
+    const href = (p: { items: { title: string; href: string | null }[] }, start: string) => p.items.find((i) => i.title.startsWith(start))?.href;
+    ok("each line opens what it's about: the lead, by its readable address", href(all, "Zz Laptops and docks") === leadHref && href(all, "Note — ") === leadHref, href(all, "Zz Laptops and docks"));
+    ok("  a contact, its company's Contacts tab", href(all, "Zz Priya Sharma") === `${paths.companyPath(seqs!.companySeq)}?tab=contacts`, href(all, "Zz Priya Sharma"));
+    ok("  nothing for the company the feed is on, nor a record that isn't there", href(all, "Zz Activity Traders Pvt") === null && href(all, "Invoice INV-0001") === null);
     const leadFeed = await timelineLib.recordActivity(boss.id, { leadId });
     const lt = titles(leadFeed);
+    ok("  on the lead's own feed its lines open nothing — it's open", leadFeed.items.every((i) => i.href !== leadHref));
     ok("a lead's Activity: its edits, its task, the note and its invoice — not the company's own edit", lt.some((x) => x.startsWith("Zz Laptops and docks")) && lt.includes("Zz send the quote") && lt.some((x) => x.startsWith("Note — ")) && lt.includes("Invoice INV-0001 — Zz Activity Traders") && !lt.includes("Zz Activity Traders Pvt"), lt);
 
     section("Only the kinds a viewer may see");
