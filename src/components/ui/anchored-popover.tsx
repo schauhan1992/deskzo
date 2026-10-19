@@ -3,6 +3,7 @@
 import { useEffect, useState, useSyncExternalStore, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { LAYER_POPOVER } from "@/components/ui/layers";
+import { cn } from "@/lib/utils";
 
 /** Anything that takes keyboard input, and so must be allowed to take focus. */
 const FOCUSABLE_FIELDS = "input, textarea, select, [contenteditable='true']";
@@ -69,6 +70,13 @@ export function AnchoredPopover({
    */
   onPointerEnter,
   onPointerLeave,
+  /**
+   * The height the panel needs to show whole — a calendar, which is no use scrolled. It opens above the
+   * anchor when below can't hold that and above has more room.
+   */
+  fitHeight,
+  /** Added to the panel's own classes: a calendar's rounder corners. */
+  className,
 }: {
   anchorRef: RefObject<HTMLElement | null>;
   open: boolean;
@@ -80,6 +88,8 @@ export function AnchoredPopover({
   offset?: number;
   onPointerEnter?: (e: React.PointerEvent<HTMLDivElement>) => void;
   onPointerLeave?: (e: React.PointerEvent<HTMLDivElement>) => void;
+  fitHeight?: number;
+  className?: string;
 }) {
   /** The panel once drawn, so a "right" panel can be placed by the height it really has. */
   const [panel, setPanel] = useState<HTMLDivElement | null>(null);
@@ -122,7 +132,7 @@ export function AnchoredPopover({
       const spaceBelow = window.innerHeight - rect.bottom;
       // Flip up only when below genuinely can't fit and above has more room, so the panel doesn't
       // jump around as the page scrolls past the midpoint.
-      const flipped = spaceBelow < Math.min(maxHeight, 200) && rect.top > spaceBelow;
+      const flipped = spaceBelow < Math.min(maxHeight, fitHeight ?? 200) && rect.top > spaceBelow;
       const panelWidth = width ?? rect.width;
       setPosition({
         top: flipped ? rect.top : rect.bottom,
@@ -154,7 +164,7 @@ export function AnchoredPopover({
       window.removeEventListener("transitionend", place, true);
       resized?.disconnect();
     };
-  }, [open, anchorRef, width, maxHeight, align, side, offset, panel]);
+  }, [open, anchorRef, width, maxHeight, align, side, offset, panel, fitHeight]);
 
   if (!isClient || !open || !position) return null;
 
@@ -180,7 +190,7 @@ export function AnchoredPopover({
       // Above a modal, not level with it: this panel is always opened *from* something, and when
       // that something is a combobox inside a dialog, a popover on the same layer disappears behind
       // the dialog it belongs to.
-      className={`${LAYER_POPOVER} overscroll-contain overflow-y-auto rounded-lg border border-line bg-surface shadow-lg`}
+      className={cn(LAYER_POPOVER, "overscroll-contain overflow-y-auto rounded-lg border border-line bg-surface shadow-lg", className)}
     >
       {children}
     </div>,
