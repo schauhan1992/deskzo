@@ -1,12 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { Prisma, type ExpenseCategory, type ExpenseStatus } from "@prisma/client";
+import { Prisma, type ExpenseApprovalFlow, type ExpenseApprovalStep, type ExpenseCategory, type ExpenseStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { leadsSeenBy } from "@/lib/leads/shown";
 import { rolePermits } from "@/lib/authz/role-permission";
 import { PEOPLE_ONLY } from "@/lib/people";
-import { requireModuleUser } from "@/lib/modules-access";
+import { moduleAvailableForTenant, requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { pageSlice } from "@/lib/pagination";
 import { calendarDayRange } from "@/lib/time/zone";
@@ -15,6 +15,15 @@ import { hasEffectivePermission } from "@/actions/permission";
 import { isModuleEnabled } from "@/actions/module";
 import { ensureChartOfAccounts, postExpenseReimbursementToLedger, postExpenseToLedger } from "@/lib/ledger/journal";
 import { notifyUser } from "@/lib/notify";
+import { peopleHolding } from "@/lib/orders/handoff";
+import {
+  DEFAULT_EXPENSE_APPROVAL_FLOW,
+  EXPENSE_APPROVAL_FLOWS,
+  afterApproval,
+  expenseApprovalFlowLabels,
+  firstApprovalStep,
+  mayDecideExpense,
+} from "@/lib/expense-approval";
 import { recordAudit } from "@/lib/audit";
 import { expensePath } from "@/lib/record-links";
 import {
@@ -43,24 +52,49 @@ async function visibleUserIds(userId: string): Promise<string[] | null> {
   return peopleReached(userId, "expenses", "view");
 }
 
+/** The company's rule for who signs claims off (Settings › People › Expense approvals); no row is HR. */
+async function approvalFlowNow(): Promise<ExpenseApprovalFlow> {
+  const row = await db.expenseSettings.findUnique({ where: { id: "global" }, select: { approvalFlow: true } });
+  return row?.approvalFlow ?? DEFAULT_EXPENSE_APPROVAL_FLOW;
+}
+
+/** The claimant's reporting manager, while that manager is still active. */
+async function activeManagerOf(claimantId: string): Promise<string | null> {
+  const claimant = await db.user.findUnique({ where: { id: claimantId }, select: { managerId: true } });
+  if (!claimant?.managerId) return null;
+  const manager = await db.user.findUnique({ where: { id: claimant.managerId }, select: { id: true, active: true } });
+  return manager?.active ? manager.id : null;
+}
+
 /**
- * Who a claim goes to. The claimant's manager is the default. A claimant with no manager — or one
- * whose manager has been deactivated — would otherwise submit into a void, so those fall through to
- * an active user who holds `expenses.approve`, never the claimant themselves. The answer is
- * snapshotted onto the row at submit time, so a later reporting-line change can't move a claim
- * that's already mid-review.
+ * Where a claim goes when it is submitted, snapshotted onto it: the rule, the step, and — at the
+ * manager's step — which manager. HR's step is a queue rather than a person: anybody holding "Approve
+ * expense claims (HR)" may take it.
+ */
+async function routeClaim(claimantId: string): Promise<{
+  approvalFlow: ExpenseApprovalFlow;
+  approvalStep: ExpenseApprovalStep;
+  approverUserId: string | null;
+}> {
+  const approvalFlow = await approvalFlowNow();
+  const manager = await activeManagerOf(claimantId);
+  const approvalStep = firstApprovalStep(approvalFlow, !!manager);
+  const approverUserId = approvalStep === "MANAGER" ? (manager ?? (await fallbackApprover(claimantId))) : null;
+  return { approvalFlow, approvalStep, approverUserId };
+}
+
+/**
+ * Who a manager's-step claim goes to when the claimant has no manager. A claimant with no manager — or
+ * one whose manager has been deactivated — would otherwise submit into a void, so those fall through to
+ * an active user who holds `expenses.approve`, never the claimant themselves. The answer is snapshotted
+ * onto the row at submit time, so a later reporting-line change can't move a claim that's already
+ * mid-review.
  *
  * Null is still possible — a one-person deployment has nobody else to ask — and the claim then sits
  * as SUBMITTED until someone with the override permission picks it up, which the UI says plainly
  * rather than pretending a manager is looking at it.
  */
-async function resolveApprover(claimantId: string): Promise<string | null> {
-  const claimant = await db.user.findUnique({ where: { id: claimantId }, select: { managerId: true } });
-  if (claimant?.managerId) {
-    const manager = await db.user.findUnique({ where: { id: claimant.managerId }, select: { id: true, active: true } });
-    if (manager?.active) return manager.id;
-  }
-
+async function fallbackApprover(claimantId: string): Promise<string | null> {
   const candidates = await db.user.findMany({
     // People only: naming `id` takes this past db's own filter (src/lib/db.ts).
     where: { active: true, id: { not: claimantId }, ...PEOPLE_ONLY },
@@ -73,11 +107,60 @@ async function resolveApprover(claimantId: string): Promise<string | null> {
   return null;
 }
 
-/** A decision is the snapshotted approver's to make, or anyone holding the override permission. */
-async function canDecide(userId: string, expense: { userId: string; approverUserId: string | null }) {
-  if (expense.userId === userId) return false; // nobody approves their own claim
-  if (expense.approverUserId === userId) return true;
-  return hasEffectivePermission(userId, "expenses.approve");
+/** Tells whoever has the claim now: the manager it went to, or everybody who approves claims for HR. */
+async function tellApprovers(
+  claim: { expenseSeq: number; category: ExpenseCategory; amount: number; claimantId: string },
+  step: ExpenseApprovalStep,
+  approverUserId: string | null,
+  title = "An expense claim needs your approval",
+) {
+  const to = step === "HR" ? await peopleHolding("hr.approveExpenses", [claim.claimantId]) : approverUserId ? [approverUserId] : [];
+  await Promise.all(
+    to.map((userId) =>
+      notifyUser({
+        userId,
+        type: "EXPENSE_SUBMITTED",
+        title,
+        message: `${expenseCategoryLabels[claim.category]} — ₹${claim.amount.toFixed(2)}`,
+        link: expensePath(claim.expenseSeq),
+      }),
+    ),
+  );
+}
+
+/**
+ * A decision is the snapshotted manager's to make (or whoever may approve any claim) at the manager's
+ * step, and HR's at HR's — never the claimant's (src/lib/expense-approval.ts).
+ */
+async function canDecide(
+  userId: string,
+  expense: { userId: string; approverUserId: string | null; approvalStep: ExpenseApprovalStep | null },
+) {
+  const [holdsHrApproval, holdsAnyClaimApproval] = await Promise.all([
+    hasEffectivePermission(userId, "hr.approveExpenses"),
+    hasEffectivePermission(userId, "expenses.approve"),
+  ]);
+  return mayDecideExpense({
+    viewerId: userId,
+    claimantId: expense.userId,
+    step: expense.approvalStep,
+    approverUserId: expense.approverUserId,
+    holdsHrApproval,
+    holdsAnyClaimApproval,
+  });
+}
+
+/**
+ * The claims waiting on this person: routed to them at the manager's step, and — for somebody who
+ * approves claims for HR — every claim at HR's. Never their own.
+ */
+async function awaitingDecisionBy(viewerId: string): Promise<Prisma.ExpenseWhereInput> {
+  const holdsHrApproval = await hasEffectivePermission(viewerId, "hr.approveExpenses");
+  return {
+    status: "SUBMITTED",
+    userId: { not: viewerId },
+    OR: [{ approvalStep: { not: "HR" }, approverUserId: viewerId }, { approvalStep: null, approverUserId: viewerId }, ...(holdsHrApproval ? [{ approvalStep: "HR" as const }] : [])],
+  };
 }
 
 /** Whether this person may act for a visit's visitor — the visit rule's answer for changing it. */
@@ -121,18 +204,14 @@ async function expenseListWhere(viewerId: string, params?: ExpenseListParams): P
   const spentOn = calendarDayRange(params?.from, params?.to);
   return {
     // The claims this person may see, under AND — so "claims by" narrows it and can never stand in for
-    // it. The approval queue below is its own path: a claim submitted to you, whoever's it is.
-    ...(params?.awaitingMyDecision ? {} : { AND: [await expenseAccess(viewerId, "view")] }),
+    // it. The approval queue is its own path: a claim waiting on you, whoever's it is.
+    AND: [params?.awaitingMyDecision ? await awaitingDecisionBy(viewerId) : await expenseAccess(viewerId, "view")],
     ...(params?.userId && !params?.awaitingMyDecision ? { userId: params.userId } : {}),
     ...(params?.status ? { status: params.status } : {}),
     ...(params?.category ? { category: params.category } : {}),
     ...(params?.companyId ? { companyId: params.companyId } : {}),
     ...(params?.visitId ? { visitId: params.visitId } : {}),
     ...(params?.reimbursable !== undefined ? { reimbursable: params.reimbursable } : {}),
-    // A claim you can decide is one submitted to you, and never one of your own.
-    ...(params?.awaitingMyDecision
-      ? { status: "SUBMITTED" as const, approverUserId: viewerId, userId: { not: viewerId } }
-      : {}),
     ...(spentOn ? { spentOn } : {}),
     ...(params?.search
       ? {
@@ -150,6 +229,7 @@ async function expenseListWhere(viewerId: string, params?: ExpenseListParams): P
 const expenseListInclude = {
   user: { select: { id: true, name: true } },
   approver: { select: { id: true, name: true } },
+  managerApprover: { select: { id: true, name: true } },
   company: { select: { id: true, name: true, companySeq: true } },
   visit: { select: { id: true, visitSeq: true, company: { select: { name: true } } } },
   lead: { select: { id: true, leadSeq: true, title: true } },
@@ -187,7 +267,7 @@ export async function expenseSummary(params?: ExpenseListParams) {
       _sum: { amount: true },
       _count: { _all: true },
     }),
-    db.expense.count({ where: { status: "SUBMITTED", approverUserId: user.id, userId: { not: user.id } } }),
+    db.expense.count({ where: await awaitingDecisionBy(user.id) }),
   ]);
 
   return {
@@ -222,9 +302,22 @@ export async function expenseByCategory(params?: ExpenseListParams) {
 export async function getExpense(id: string) {
   const user = await requireModuleUser("expenses");
   // The approver has to be able to open a claim even when the claimant isn't in their reach — which
-  // happens whenever the override permission routed it to them.
+  // happens whenever the override permission routed it to them, and for HR, whose queue is everybody's.
+  const holdsHrApproval = await hasEffectivePermission(user.id, "hr.approveExpenses");
   const expense = await db.expense.findFirst({
-    where: { AND: [{ id }, { OR: [await expenseAccess(user.id, "view"), { approverUserId: user.id }] }] },
+    where: {
+      AND: [
+        { id },
+        {
+          OR: [
+            await expenseAccess(user.id, "view"),
+            { approverUserId: user.id },
+            { managerApproverId: user.id },
+            ...(holdsHrApproval ? [{ approvalStep: "HR" as const }] : []),
+          ],
+        },
+      ],
+    },
     include: expenseListInclude,
   });
   if (!expense) return null;
@@ -264,6 +357,7 @@ export async function createExpense(input: unknown): Promise<ActionResult<{ id: 
   }
 
   const submitting = data.submit;
+  const route = submitting ? await routeClaim(claimantId) : null;
   const expense = await db.expense.create({
     data: {
       category: data.category,
@@ -281,19 +375,17 @@ export async function createExpense(input: unknown): Promise<ActionResult<{ id: 
       userId: claimantId,
       status: submitting ? "SUBMITTED" : "DRAFT",
       submittedAt: submitting ? new Date() : null,
-      approverUserId: submitting ? await resolveApprover(claimantId) : null,
+      ...(route ?? {}),
     },
     select: { id: true, expenseSeq: true, approverUserId: true, amount: true },
   });
 
-  if (submitting && expense.approverUserId) {
-    await notifyUser({
-      userId: expense.approverUserId,
-      type: "EXPENSE_SUBMITTED",
-      title: "An expense claim needs your approval",
-      message: `${expenseCategoryLabels[data.category]} — ₹${data.amount.toFixed(2)}`,
-      link: expensePath(expense.expenseSeq),
-    });
+  if (route) {
+    await tellApprovers(
+      { expenseSeq: expense.expenseSeq, category: data.category, amount: data.amount, claimantId },
+      route.approvalStep,
+      route.approverUserId,
+    );
   }
   await recordAudit({
     userId: user.id,
@@ -353,7 +445,7 @@ export async function updateExpense(input: unknown): Promise<ActionResult<{ id: 
   return { ok: true, data: { id, expenseSeq } };
 }
 
-/** Hands a draft (or a rejected claim being re-tried) to the manager's queue. */
+/** Hands a draft (or a rejected claim being re-tried) to whoever approves it first — HR, or the manager. */
 export async function submitExpense(id: string): Promise<ActionResult<{ id: string }>> {
   const user = await requireModuleUser("expenses");
   const expense = await db.expense.findUnique({
@@ -364,21 +456,26 @@ export async function submitExpense(id: string): Promise<ActionResult<{ id: stri
   if (expense.userId !== user.id) return { ok: false, error: "You can only submit your own claims." };
   if (!isExpenseEditable(expense.status)) return { ok: false, error: "This claim has already been submitted." };
 
-  const approverUserId = await resolveApprover(user.id);
+  const route = await routeClaim(user.id);
   await db.expense.update({
     where: { id },
-    data: { status: "SUBMITTED", submittedAt: new Date(), approverUserId, decidedAt: null, decisionNote: null },
+    data: {
+      status: "SUBMITTED",
+      submittedAt: new Date(),
+      ...route,
+      // A resubmitted claim starts again from the first step.
+      managerApproverId: null,
+      managerApprovedAt: null,
+      decidedAt: null,
+      decisionNote: null,
+    },
   });
 
-  if (approverUserId) {
-    await notifyUser({
-      userId: approverUserId,
-      type: "EXPENSE_SUBMITTED",
-      title: "An expense claim needs your approval",
-      message: `${expenseCategoryLabels[expense.category]} — ₹${Number(expense.amount).toFixed(2)}`,
-      link: expensePath(expense.expenseSeq),
-    });
-  }
+  await tellApprovers(
+    { expenseSeq: expense.expenseSeq, category: expense.category, amount: Number(expense.amount), claimantId: user.id },
+    route.approvalStep,
+    route.approverUserId,
+  );
 
   revalidatePath("/expenses");
   revalidatePath(`/expenses/${id}`);
@@ -395,7 +492,16 @@ export async function decideExpense(input: unknown): Promise<ActionResult<{ id: 
 
   const expense = await db.expense.findUnique({
     where: { id },
-    select: { userId: true, status: true, approverUserId: true, expenseSeq: true, amount: true, category: true },
+    select: {
+      userId: true,
+      status: true,
+      approverUserId: true,
+      approvalFlow: true,
+      approvalStep: true,
+      expenseSeq: true,
+      amount: true,
+      category: true,
+    },
   });
   if (!expense) return { ok: false, error: "That expense no longer exists." };
   if (expense.status !== "SUBMITTED") return { ok: false, error: "This claim isn't waiting for a decision." };
@@ -410,10 +516,50 @@ export async function decideExpense(input: unknown): Promise<ActionResult<{ id: 
   }
   if (!approved && !note) return { ok: false, error: "Say why it's being rejected, so it can be fixed." };
 
+  // The manager's yes on a claim HR also signs off: it moves to HR's desk, still waiting, and nothing
+  // reaches the books until HR approves it.
+  if (approved && afterApproval(expense.approvalFlow, expense.approvalStep) === "to-hr") {
+    const moved = await db.expense.updateMany({
+      where: { id, status: "SUBMITTED", approvalStep: expense.approvalStep },
+      data: {
+        approvalStep: "HR",
+        approverUserId: null,
+        managerApproverId: user.id,
+        managerApprovedAt: new Date(),
+        decisionNote: note || null,
+      },
+    });
+    if (moved.count === 0) return { ok: false, error: "This claim has just been decided by somebody else." };
+    await tellApprovers(
+      { expenseSeq: expense.expenseSeq, category: expense.category, amount: Number(expense.amount), claimantId: expense.userId },
+      "HR",
+      null,
+      "An expense claim needs HR's approval",
+    );
+    await notifyUser({
+      userId: expense.userId,
+      type: "EXPENSE_DECIDED",
+      title: "Your manager approved your expense claim — it's with HR now",
+      message: `${formatExpenseId(expense.expenseSeq)} — ${expenseCategoryLabels[expense.category]}`,
+      link: expensePath(expense.expenseSeq),
+    });
+    await recordAudit({
+      userId: user.id,
+      action: "UPDATE",
+      entityType: "Expense",
+      entityId: id,
+      entityLabel: `${formatExpenseId(expense.expenseSeq)} approved by the manager, passed to HR`,
+    });
+    revalidatePath("/expenses");
+    revalidatePath(`/expenses/${id}`);
+    return { ok: true, data: { id } };
+  }
+
   let postingWarning: string | null = null;
 
-  await db.expense.update({
-    where: { id },
+  // Only while it is still waiting at the step it was read at — two approvers pressing at once decide it once.
+  const decided = await db.expense.updateMany({
+    where: { id, status: "SUBMITTED", approvalStep: expense.approvalStep },
     data: {
       status: approved ? "APPROVED" : "REJECTED",
       decidedAt: new Date(),
@@ -422,6 +568,7 @@ export async function decideExpense(input: unknown): Promise<ActionResult<{ id: 
       approverUserId: user.id,
     },
   });
+  if (decided.count === 0) return { ok: false, error: "This claim has just been decided by somebody else." };
 
   // Approval is when the cost becomes real, so that is when it reaches the books — before anybody
   // is paid back. A month's P&L has to be right on the last day of the month, not on payday.
@@ -452,6 +599,7 @@ export async function decideExpense(input: unknown): Promise<ActionResult<{ id: 
   revalidatePath("/expenses");
   revalidatePath(`/expenses/${id}`);
   revalidatePath("/accounting/journal");
+  revalidatePath("/accounting/expense-claims");
   if (postingWarning) {
     return { ok: false, error: `Approved, but it didn't reach the ledger: ${postingWarning}` };
   }
@@ -510,6 +658,7 @@ export async function reimburseExpenses(input: unknown): Promise<ActionResult<{ 
   }
 
   revalidatePath("/expenses");
+  revalidatePath("/accounting/expense-claims");
   return { ok: true, data: { count: payable.length, skipped: expenses.length - payable.length } };
 }
 
@@ -560,7 +709,9 @@ export async function listVisitExpenses(visitId: string) {
  * chart of accounts was mid-edit is a person left waiting.
  */
 async function postApprovedExpense(expenseId: string, userId: string): Promise<{ ok: true } | { ok: false; error: string }> {
-  if (!(await isModuleEnabled("accounting"))) return { ok: true };
+  // Whether the company keeps its books here — not whether the approver can open Accounting. HR approves
+  // claims and, as a rule, doesn't see the ledger; asking about them left every claim HR approved unbooked.
+  if (!(await moduleAvailableForTenant("accounting"))) return { ok: true };
   try {
     await ensureChartOfAccounts();
     await db.$transaction((tx) => postExpenseToLedger(tx, expenseId, userId));
@@ -571,7 +722,7 @@ async function postApprovedExpense(expenseId: string, userId: string): Promise<{
 }
 
 async function postExpensePayment(expenseId: string, userId: string, paidOn: Date) {
-  if (!(await isModuleEnabled("accounting"))) return;
+  if (!(await moduleAvailableForTenant("accounting"))) return;
   try {
     await ensureChartOfAccounts();
     await db.$transaction((tx) => postExpenseReimbursementToLedger(tx, expenseId, userId, paidOn));
@@ -621,4 +772,129 @@ export async function postExpensesToLedger(expenseIds: string[]): Promise<Action
   revalidatePath("/expenses");
   revalidatePath("/accounting/journal");
   return { ok: true, data: { posted, failed } };
+}
+
+// ─── Who approves (Settings › People › Expense approvals) ─────────────────────────────────────────
+
+/** The company's rule for who signs claims off. */
+export async function getExpenseApprovalFlow(): Promise<ExpenseApprovalFlow> {
+  await requireModuleUser("expenses");
+  return approvalFlowNow();
+}
+
+/**
+ * Sets who signs claims off: HR, the reporting manager, or the manager and then HR. HR's to change
+ * (`hr.manage`). Claims already submitted keep the rule they were submitted under.
+ */
+export async function setExpenseApprovalFlow(input: unknown): Promise<ActionResult<{ approvalFlow: ExpenseApprovalFlow }>> {
+  const user = await requireModuleUser("expenses");
+  if (!(await hasEffectivePermission(user.id, "hr.manage"))) {
+    return { ok: false, error: "Only HR administrators can change who approves expense claims." };
+  }
+  const approvalFlow = input as ExpenseApprovalFlow;
+  if (!EXPENSE_APPROVAL_FLOWS.includes(approvalFlow)) return { ok: false, error: "Choose who approves expense claims." };
+  const before = await approvalFlowNow();
+  await db.expenseSettings.upsert({
+    where: { id: "global" },
+    create: { id: "global", approvalFlow, updatedById: user.id },
+    update: { approvalFlow, updatedById: user.id },
+  });
+  if (before !== approvalFlow) {
+    await recordAudit({
+      userId: user.id,
+      action: "UPDATE",
+      entityType: "ExpenseSettings",
+      entityId: "global",
+      entityLabel: "Who approves expense claims",
+      changes: [{ field: "approvalFlow", label: "Approved by", from: expenseApprovalFlowLabels[before], to: expenseApprovalFlowLabels[approvalFlow] }],
+    });
+  }
+  revalidatePath("/settings/expense-approvals");
+  return { ok: true, data: { approvalFlow } };
+}
+
+// ─── Accounts (Accounting › Expense claims) ─────────────────────────────────────────────────────
+
+export type ExpenseClaimsView = "to-pay" | "paid" | "company-paid";
+
+/**
+ * What Accounts sees of expense claims once they are approved: the ones to pay back, the ones paid, and
+ * company-paid spend (approved, owed to nobody). Nothing before approval — a claim reaches Accounts when it
+ * is approved, as it reaches the books. For whoever pays claims out (`expenses.reimburse`), or reads every
+ * claim (`expenses.viewAll`); everyone else gets nothing.
+ */
+export async function listExpenseClaimsForAccounts(params: {
+  view: ExpenseClaimsView;
+  from?: string;
+  to?: string;
+  search?: string;
+  page: number;
+  pageSize: number;
+}) {
+  const user = await requireModuleUser("expenses");
+  const [mayPay, maySeeAll] = await Promise.all([
+    hasEffectivePermission(user.id, "expenses.reimburse"),
+    hasEffectivePermission(user.id, "expenses.viewAll"),
+  ]);
+  if (!mayPay && !maySeeAll) return null;
+
+  const spentOn = calendarDayRange(params.from, params.to);
+  const byView: Record<ExpenseClaimsView, Prisma.ExpenseWhereInput> = {
+    "to-pay": { status: "APPROVED", reimbursable: true },
+    paid: { status: "REIMBURSED" },
+    "company-paid": { status: { in: ["APPROVED", "REIMBURSED"] }, reimbursable: false },
+  };
+  const where: Prisma.ExpenseWhereInput = {
+    AND: [
+      byView[params.view],
+      ...(spentOn ? [{ spentOn }] : []),
+      ...(params.search
+        ? [
+            {
+              OR: [
+                { description: { contains: params.search, mode: "insensitive" as const } },
+                { reimbursementRef: { contains: params.search, mode: "insensitive" as const } },
+                { user: { name: { contains: params.search, mode: "insensitive" as const } } },
+              ],
+            },
+          ]
+        : []),
+    ],
+  };
+  const [rows, total, toPay, paidThisView] = await Promise.all([
+    db.expense.findMany({
+      where,
+      orderBy: params.view === "paid" ? [{ reimbursedAt: "desc" }, { spentOn: "desc" }] : [{ decidedAt: "asc" }, { spentOn: "asc" }],
+      ...pageSlice(params.page, params.pageSize),
+      select: {
+        id: true,
+        expenseSeq: true,
+        category: true,
+        amount: true,
+        spentOn: true,
+        description: true,
+        paymentMode: true,
+        reimbursable: true,
+        status: true,
+        decidedAt: true,
+        approvalStep: true,
+        reimbursedAt: true,
+        reimbursementRef: true,
+        user: { select: { id: true, name: true } },
+        approver: { select: { id: true, name: true } },
+        managerApprover: { select: { id: true, name: true } },
+        journalEntries: { where: { reversesId: null }, select: { id: true, entryNumber: true, source: true } },
+      },
+    }),
+    db.expense.count({ where }),
+    db.expense.aggregate({ where: byView["to-pay"], _sum: { amount: true }, _count: { _all: true } }),
+    db.expense.aggregate({ where, _sum: { amount: true } }),
+  ]);
+  return toPlain({
+    rows,
+    total,
+    totalAmount: Number(paidThisView._sum.amount ?? 0),
+    toPay: { amount: Number(toPay._sum.amount ?? 0), count: toPay._count._all },
+    mayPay,
+  });
 }

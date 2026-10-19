@@ -20,7 +20,7 @@ export const guide: SeedGuide = {
     module: "expenses",
     heading: "Expenses",
     summary:
-      "Every company expense in one place — travel claimed against a field visit and everything else the business spends — sent to your manager for approval, and marked reimbursed when accounts pays it out.",
+      "Every company expense in one place — the official expenses each person claims, travel against a field visit, and everything else the business spends — approved by HR (or the reporting manager, as the company chooses), then paid back by Accounts from Accounting › Expense claims.",
     purpose: [
       p(
         "Expenses is where people claim what they've spent for the business: a cab to a client, a hotel, fuel, a software subscription, office supplies. Each claim has a category, an amount, the day it was spent, how it was paid, what it was for and, ideally, a photo or PDF of the receipt. It can be tied to a customer, or to a field visit, or left as general business spend.",
@@ -37,7 +37,9 @@ export const guide: SeedGuide = {
           { b: "Rejected" },
           ", and finally ",
           { b: "Reimbursed" },
-          ". Submitting it sends it to your reporting manager; once approved, accounts pays it out and marks it reimbursed. The claimant is notified when it's decided and when it's paid.",
+          ". Submitting it sends it to HR — or to your reporting manager, or to the manager and then HR, as your company has chosen. Once approved it shows in ",
+          { b: "Accounting › Expense claims" },
+          ", where Accounts pays it back and marks it reimbursed. The claimant is notified when it's decided and when it's paid.",
         ),
       ),
       note(
@@ -62,14 +64,22 @@ export const guide: SeedGuide = {
         runs({ b: "Changing a claim." }, " Only the person claiming can edit, submit or delete it, and only while it's a draft or has come back rejected."),
         runs(
           { b: "Deciding a claim." },
-          " A claim goes to the claimant's reporting manager. If they have none, or theirs is deactivated, it goes to somebody who holds ",
+          " Who decides is set in ",
+          { b: "Settings › People › Expense approvals" },
+          ". With HR, anybody who holds ",
+          { b: "Approve expense claims (HR)" },
+          " decides it, and nobody else. With the reporting manager, the claimant's manager does — or, for somebody with none, a holder of ",
           { b: "Approve or reject expense claims" },
-          ". Holders of that permission can also decide any submitted claim. Nobody can approve their own.",
+          ", who can also decide any claim waiting on a manager. With the manager and then HR, the manager approves first and HR after. Nobody can approve their own.",
         ),
         runs({ b: "Paying it out." }, " Marking a claim reimbursed needs ", { b: "Mark expenses reimbursed" }, "."),
       ),
     ],
     permissions: [
+      perm(
+        "hr.approveExpenses",
+        "Approve or reject the claims that come to HR — every claim when HR approves them, or each claim after the manager has. Never your own claim. The HR roles and Management have it by default.",
+      ),
       perm("section.expenses", "Shows Expenses in the menu and lets people open it to claim and see their own expenses. Every role has it until an admin unticks it for one."),
       perm(
         "expenses.approve",
@@ -77,18 +87,25 @@ export const guide: SeedGuide = {
       ),
       perm(
         "expenses.reimburse",
-        "Shows Mark reimbursed on approved, reimbursable claims, one at a time or in bulk. With Accounting on, it also lets you post approved claims the ledger missed, from the Accounting overview (if you can open it). Accounts and Management have it by default.",
+        "Opens Accounting › Expense claims and shows Mark reimbursed on approved, reimbursable claims, one at a time or in bulk. With Accounting on, it also lets you post approved claims the ledger missed. Accounts and Management have it by default.",
       ),
       perm("expenses.viewAll", "See every claim in the company, not just your own and your team's — for company-wide spend reporting. Management and Accounts have it by default."),
     ],
     setup: [
-      p("Claims work as soon as the module is on. What decides where they go is set up once by an admin:"),
+      p("Claims work as soon as the module is on. What decides where they go is set up once:"),
       ul(
-        runs("Give each person a reporting manager in ", { b: "Settings › Users" }, ". That's who their claims are sent to."),
         runs(
-          "Make sure somebody holds ",
+          "Choose who approves claims in ",
+          { b: "Settings › People › Expense approvals" },
+          ": HR (to begin with), the reporting manager, or the manager and then HR. A claim keeps the choice it was submitted under.",
+        ),
+        runs("Make sure somebody in HR holds ", { b: "Approve expense claims (HR)" }, " — the HR roles do to begin with."),
+        runs(
+          "If managers approve, give each person a reporting manager in ",
+          { b: "Settings › Users" },
+          ", and make sure somebody holds ",
           { b: "Approve or reject expense claims" },
-          ", so a claim from someone with no manager still reaches a person. Without anybody, it waits as submitted, and the claim says so.",
+          ", so a claim from someone with no manager still reaches a person.",
         ),
         runs("Give whoever pays claims out ", { b: "Mark expenses reimbursed" }, ". Permissions are in ", { b: "Settings › Roles & Permissions" }, "."),
       ),
@@ -97,7 +114,7 @@ export const guide: SeedGuide = {
       task(
         "Claim an expense",
         ol(
-          runs("Open ", { b: "Field & Expenses › Expenses" }, " and select ", { b: "New expense" }, " (or use ", { b: "Create" }, " › ", { b: "New expense" }, " in the header)."),
+          runs("Open ", { b: "People › Expenses" }, " and select ", { b: "New expense" }, " (or use ", { b: "Create" }, " › ", { b: "New expense" }, " in the header)."),
           runs(
             "Under ",
             { b: "What was spent" },
@@ -117,7 +134,7 @@ export const guide: SeedGuide = {
           runs("Write ", { b: "What it was for" }, "."),
           runs("Under ", { b: "What it was against" }, ", pick the ", { b: "Company" }, " it was for, or leave it blank for general business spend."),
           runs("Select ", { b: "Attach" }, " to add the ", { b: "Receipt" }, ": a PNG, JPEG, WebP or PDF, up to 512KB."),
-          runs("Select ", { b: "Submit for approval" }, " to send it to your manager, or ", { b: "Save as draft" }, " to submit it later."),
+          runs("Select ", { b: "Submit for approval" }, " to send it for approval, or ", { b: "Save as draft" }, " to submit it later."),
         ),
       ),
       task(
@@ -141,18 +158,27 @@ export const guide: SeedGuide = {
       task(
         "Approve or reject claims",
         ol(
-          runs("When claims are waiting on you, the Expenses page shows how many — select the banner to list only those."),
+          runs("Open ", { b: "People › Expenses" }, " and select ", { b: "To approve" }, " — it shows how many claims are waiting on you."),
           runs("Open a claim and check it, and its receipt. Select ", { b: "Approve" }, ", or ", { b: "Reject" }, "."),
           runs("To reject, write the ", { b: "Reason" }, " — the claimant sees it and can fix and resubmit — and select ", { b: "Reject" }, "."),
         ),
-        p(runs("To approve several at once, tick them in the list and select ", { b: "Approve" }, " with the number — this is offered for claims sent to you.")),
+        p(
+          runs(
+            "To approve several at once, tick them in the list and select ",
+            { b: "Approve" },
+            " with the number. When the manager approves first, the manager's button says ",
+            { b: "Approve and send to HR" },
+            ": the claim goes on to HR, and reaches the books and Accounts once HR approves it.",
+          ),
+        ),
       ),
       task(
-        "Mark claims reimbursed",
+        "Pay claims back (Accounts)",
         ol(
-          runs("In the list, set ", { b: "Status" }, " to ", { b: "Approved" }, " and ", { b: "Reimbursable" }, " to ", { b: "Reimbursable" }, "."),
-          "Tick the claims you've paid. The bar shows how much of the selection is payable.",
-          runs("Type the ", { b: "Payment reference" }, " (a UTR or cheque number) and select ", { b: "Mark reimbursed" }, "."),
+          runs("Open ", { b: "Accounting › Expense claims" }, ". ", { b: "To pay" }, " lists every approved claim owed to somebody, with who approved it and its ledger entry."),
+          "Tick the claims you've paid. The bar shows how much of the selection is to pay.",
+          runs("Type the ", { b: "Payment reference" }, " (a UTR or cheque number), pick the day it was ", { b: "Paid on" }, ", and select ", { b: "Mark paid" }, "."),
+          runs("They move to ", { b: "Paid" }, ". ", { b: "Company paid" }, " lists approved spend nobody is owed, such as a company card's."),
         ),
         p(
           runs(
@@ -203,9 +229,14 @@ export const guide: SeedGuide = {
       ),
       setting("Paid by", "In each claim", p("Cash, Personal card, Company card, UPI or Bank transfer — how the money was spent.")),
       setting(
+        "Expense claims are approved by",
+        "Settings › People › Expense approvals",
+        p("HR (to begin with), the reporting manager, or the reporting manager and then HR. Somebody with no manager goes straight to HR under the last. A claim keeps the choice it was submitted under, so changing it doesn't move claims already waiting."),
+      ),
+      setting(
         "Reporting manager",
         "Settings › Users",
-        p("Decides who a person's claims are sent to. The approver is fixed when the claim is submitted, so changing someone's manager later doesn't move a claim that's already waiting."),
+        p("When managers approve, decides who a person's claims are sent to. The approver is fixed when the claim is submitted, so changing someone's manager later doesn't move a claim that's already waiting."),
       ),
       setting(
         "Whose claims a role can see",
@@ -223,14 +254,17 @@ export const guide: SeedGuide = {
         p("You have no reporting manager set, and nobody else can approve claims. Ask an admin to set your manager in Settings › Users, or to give someone the permission to approve or reject expense claims — they can then pick it up."),
       ),
       qa("Why can't I edit my claim?", p("It's been submitted and is waiting for a decision. If it's rejected you can edit it and resubmit; once approved it's a record.")),
-      qa("Why can't I approve this claim?", p("It's your own — nobody approves their own claim — or it was sent to somebody else and you don't hold the permission to approve or reject any claim.")),
+      qa(
+        "Why can't I approve this claim?",
+        p("It's your own — nobody approves their own claim — or it's with HR and you don't hold Approve expense claims (HR), or it was sent to another manager and you don't hold the permission to approve or reject any claim."),
+      ),
       qa(
         "The receipt won't attach.",
         p("It has to be a PNG, JPEG, WebP or PDF of 512KB or less. Take a smaller photo or save the PDF at a lower quality."),
       ),
       qa(
         "It said the claim was approved but didn't reach the ledger.",
-        p("The approval stands — the claimant isn't kept waiting. The claim is listed on the Accounting overview as something the ledger never received, and somebody who may mark expenses reimbursed can post it from there with Post these now."),
+        p("The approval stands — the claimant isn't kept waiting. The claim is listed on the Accounting overview and on Accounting › Expense claims as something the ledger never received, and somebody who may mark expenses reimbursed can post it from there with Post these now."),
       ),
       qa("Can I see a colleague's claims?", p("Only if they report to you, you hold the permission to view all company expenses, or an admin has given your role a wider reach.")),
     ],

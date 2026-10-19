@@ -397,6 +397,16 @@ export const PERMISSION_REGISTRY = [
     defaultRoles: ["MANAGEMENT"],
   },
   {
+    // HR signs expense claims off (owner, 19 Oct 2026) — or after the reporting manager, as Settings ›
+    // People › Expense approvals says. Never one's own claim.
+    key: "hr.approveExpenses",
+    label: "Approve expense claims (HR)",
+    description:
+      "Decide the expense claims that come to HR: every claim when HR approves them, or each claim after the reporting manager has, as Settings › People › Expense approvals sets. An approved claim goes to the books and to Accounts to pay.",
+    defaultRoles: ["MANAGEMENT", "HR", "HR_HEAD"],
+    selfExcluded: true,
+  },
+  {
     key: "payroll.manage",
     label: "Run payroll",
     description:
@@ -1231,8 +1241,8 @@ export const PERMISSION_REGISTRY = [
   { key: "section.feedback", label: "Support › Customer Feedback", description: "See Customer Feedback in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.helpdesk", label: "Support › Helpdesk / Tickets", description: "See Helpdesk / Tickets in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.projects", label: "Delivery › Projects", description: "See Projects in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
-  { key: "section.visits", label: "Field & Expenses › Field Visits", description: "See Field Visits in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
-  { key: "section.expenses", label: "Field & Expenses › Expenses", description: "See Expenses in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.visits", label: "Field Visits", description: "See Field Visits in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.expenses", label: "People › Expenses", description: "See Expenses in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.itAssets", label: "IT Assets", description: "See IT Assets in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.contactsLibrary", label: "Directory › Contacts Library", description: "See Contacts Library in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.vendors", label: "Directory › Vendors", description: "See Vendors in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },

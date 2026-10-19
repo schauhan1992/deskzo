@@ -200,7 +200,8 @@ export function buildNavigation(access: NavAccess): VisibleNavSection[] {
   for (const mod of MODULE_REGISTRY) {
     if (!open.has(mod.key)) continue;
     const items = mod.navItems
-      .filter((i) => linkAllowed(i, ctx))
+      // A link about a second module as well is shown only while that one is open too.
+      .filter((i) => (!i.alsoNeeds || open.has(i.alsoNeeds)) && linkAllowed(i, ctx))
       .map((i): VisibleNavItem => ({ href: i.href, label: i.label, ...(i.term ? { term: i.term } : {}) }));
     if (items.length === 0) continue;
     groups.set(mod.navGroup, [...(groups.get(mod.navGroup) ?? []), ...items]);
@@ -263,7 +264,7 @@ const GROUP_ICONS: Record<(typeof NAV_GROUP_ORDER)[number] | "Reports" | "Admini
   Accounting: BookOpen,
   Support: LifeBuoy,
   Delivery: FolderKanban,
-  "Field & Expenses": MapPin,
+  "Field Visits": MapPin,
   "IT Assets": Laptop,
   Directory: BookUser,
   Marketing: Megaphone,
@@ -300,7 +301,7 @@ const GROUP_HEADINGS: Record<(typeof NAV_GROUP_ORDER)[number] | "Reports" | "Adm
   Payments: "Finance",
   Accounting: "Finance",
   Delivery: "Operations",
-  "Field & Expenses": "Operations",
+  "Field Visits": "Operations",
   "IT Assets": "Operations",
   Directory: "Operations",
   People: "Team",

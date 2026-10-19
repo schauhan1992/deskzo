@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  Wallet,
   LayoutTemplate,
   Inbox,
   Archive,
@@ -636,6 +637,15 @@ export const SETTINGS: SettingsSection[] = [
             permission: "hr.manage",
             module: "hr",
             external: true,
+          },
+          {
+            key: "expense-approvals",
+            label: "Expense approvals",
+            description: "Who approves expense claims: HR, the reporting manager, or the manager and then HR.",
+            href: "/settings/expense-approvals",
+            icon: Wallet,
+            permission: "hr.manage",
+            module: "expenses",
           },
           {
             key: "wins",

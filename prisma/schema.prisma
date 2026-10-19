@@ -647,6 +647,7 @@ model User {
   visits                     Visit[]                  @relation("VisitBy")
   expenses                   Expense[]                @relation("ExpenseBy")
   expensesToApprove          Expense[]                @relation("ExpenseApprover")
+  expensesManagerApproved    Expense[]                @relation("ExpenseManagerApprover")
   notifications              Notification[]
   notificationPreferences    NotificationPreference[]
   contactsCreated            Contact[]                @relation("ContactCreatedBy")
@@ -4340,6 +4341,45 @@ enum ExpenseStatus {
 }
 
 /**
+ * Who signs off an expense claim (owner, 19 Oct 2026: claims are HR's to approve). Chosen once for the
+ * company in Settings › People › Expense approvals; no row is HR.
+ */
+enum ExpenseApprovalFlow {
+  /**
+   * HR: anyone holding "Approve expense claims (HR)".
+   */
+  HR
+  /**
+   * The claimant's reporting manager, as before 19 Oct 2026.
+   */
+  MANAGER
+  /**
+   * The reporting manager first, and then HR.
+   */
+  MANAGER_THEN_HR
+}
+
+/**
+ * Whose desk a submitted claim is on.
+ */
+enum ExpenseApprovalStep {
+  MANAGER
+  HR
+}
+
+/**
+ * The company's expense rules, one row (id "global"); no row is the defaults.
+ */
+model ExpenseSettings {
+  id           String              @id @default("global")
+  approvalFlow ExpenseApprovalFlow @default(HR)
+  updatedById  String?
+  updatedAt    DateTime            @updatedAt
+
+  @@map("expense_settings")
+}
+
+/**
  * A company expense. Most are incurred by a person and reimbursed (a salesperson's travel to a
  * client), but the model also covers spend that isn't reimbursable — a company-card software
  * subscription — so the Expenses module is the whole picture rather than just travel claims.
@@ -4393,6 +4433,22 @@ model Expense {
    */
   approverUserId   String?
   approver         User?     @relation("ExpenseApprover", fields: [approverUserId], references: [id])
+  /**
+   * Who signs it off, snapshotted when submitted — as the approver is — so changing the company's rule
+   * can't move a claim mid-review. Null on claims from before 19 Oct 2026, which were the manager's.
+   */
+  approvalFlow      ExpenseApprovalFlow?
+  /**
+   * Whose desk it is on while SUBMITTED, and whose said the last word after: the manager's (then
+   * `approverUserId` is that manager) or HR's (anybody holding "Approve expense claims (HR)").
+   */
+  approvalStep      ExpenseApprovalStep?
+  /**
+   * The manager's yes, when the manager approves first and HR after.
+   */
+  managerApproverId String?
+  managerApprover   User?     @relation("ExpenseManagerApprover", fields: [managerApproverId], references: [id])
+  managerApprovedAt DateTime?
   decidedAt        DateTime?
   decisionNote     String?
   reimbursedAt     DateTime?
@@ -4405,6 +4461,7 @@ model Expense {
 
   @@index([userId, status])
   @@index([approverUserId, status])
+  @@index([status, approvalStep])
   @@index([status, spentOn])
   @@index([visitId])
   @@index([companyId])

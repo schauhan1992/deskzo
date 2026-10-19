@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { ExpenseCategory, ExpensePaymentMode, ExpenseStatus } from "@prisma/client";
+import type { ExpenseApprovalStep, ExpenseCategory, ExpensePaymentMode, ExpenseStatus } from "@prisma/client";
 import { reimburseExpenses, decideExpense } from "@/actions/expense";
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import {
   formatExpenseId,
   isPayable,
 } from "@/lib/expenses";
+import { expenseApprovalStepLabels, mayDecideExpense } from "@/lib/expense-approval";
 import { formatVisitId } from "@/lib/visits";
 import { companyPath, expensePath, visitPath } from "@/lib/record-links";
 
@@ -34,6 +35,7 @@ type ExpenseRow = {
   status: ExpenseStatus;
   receiptDataUrl: string | null;
   approverUserId: string | null;
+  approvalStep: ExpenseApprovalStep | null;
   user: { id: string; name: string };
   approver: { id: string; name: string } | null;
   company: { id: string; name: string; companySeq: number } | null;
@@ -44,10 +46,15 @@ export function ExpensesTable({
   expenses,
   currentUserId,
   canReimburse,
+  holdsHrApproval = false,
+  emptyText = "No expenses match this filter.",
 }: {
   expenses: ExpenseRow[];
   currentUserId: string;
   canReimburse: boolean;
+  /** Approves claims for HR: every claim at HR's step is theirs to decide (src/lib/expense-approval.ts). */
+  holdsHrApproval?: boolean;
+  emptyText?: string;
 }) {
   const router = useRouter();
   const selection = useRowSelection(expenses);
@@ -59,9 +66,19 @@ export function ExpensesTable({
   const selected = expenses.filter((e) => selection.isSelected(e.id));
   const payableSelected = selected.filter((e) => isPayable(e.status, e.reimbursable));
   const payableTotal = payableSelected.reduce((sum, e) => sum + e.amount, 0);
-  // Claims sitting in the current user's queue — bulk approve is only offered for these.
+  // Claims sitting in the current user's queue — routed to them, or at HR's step for HR. Bulk approve is
+  // only offered for these; the server decides each one again.
   const decidableSelected = selected.filter(
-    (e) => e.status === "SUBMITTED" && e.approverUserId === currentUserId && e.user.id !== currentUserId,
+    (e) =>
+      e.status === "SUBMITTED" &&
+      mayDecideExpense({
+        viewerId: currentUserId,
+        claimantId: e.user.id,
+        step: e.approvalStep,
+        approverUserId: e.approverUserId,
+        holdsHrApproval,
+        holdsAnyClaimApproval: false,
+      }),
   );
 
   function run(fn: () => Promise<{ ok: boolean; error?: string }>, message: string) {
@@ -175,6 +192,9 @@ export function ExpensesTable({
                 </td>
                 <td className="px-4 py-2.5">
                   <Badge tone={expenseStatusTone[e.status]}>{expenseStatusLabels[e.status]}</Badge>
+                  {e.status === "SUBMITTED" && e.approvalStep && (
+                    <div className="mt-0.5 text-xs text-subtle">{expenseApprovalStepLabels[e.approvalStep]}</div>
+                  )}
                   {!e.reimbursable && (
                     <div className="mt-0.5 text-xs text-subtle">Not reimbursable</div>
                   )}
@@ -200,14 +220,18 @@ export function ExpensesTable({
                 <td className="px-4 py-2.5 text-muted">{expensePaymentModeLabels[e.paymentMode]}</td>
                 <td className="px-4 py-2.5 text-muted">
                   {e.user.name}
-                  {e.approver && <div className="text-xs text-subtle">via {e.approver.name}</div>}
+                  {e.approver && (
+                    <div className="text-xs text-subtle">
+                      {e.status === "SUBMITTED" ? "with" : e.status === "REJECTED" ? "rejected by" : "approved by"} {e.approver.name}
+                    </div>
+                  )}
                 </td>
               </tr>
             ))}
             {expenses.length === 0 && (
               <tr>
                 <td colSpan={9} className="px-4 py-10 text-center text-subtle">
-                  No expenses match this filter.
+                  {emptyText}
                 </td>
               </tr>
             )}

@@ -17,6 +17,7 @@ export function ExpenseActions({
   canDecide,
   canReimburse,
   approverName,
+  passesToHr = false,
 }: {
   id: string;
   status: ExpenseStatus;
@@ -27,6 +28,8 @@ export function ExpenseActions({
   canReimburse: boolean;
   /** Null when nothing could be routed to — no manager, and nobody else can approve. */
   approverName: string | null;
+  /** The manager's yes on a claim HR approves after: it goes on to HR rather than to the books. */
+  passesToHr?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -76,7 +79,7 @@ export function ExpenseActions({
         {canDecide && status === "SUBMITTED" && (
           <>
             <Button onClick={() => run(() => decideExpense({ id, approved: true }))} disabled={pending}>
-              Approve
+              {passesToHr ? "Approve and send to HR" : "Approve"}
             </Button>
             <Button variant="danger" onClick={() => setRejectOpen(true)} disabled={pending}>
               Reject

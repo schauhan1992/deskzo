@@ -4,12 +4,13 @@ import { auth } from "@/lib/auth";
 import { listExpensesPaged, expenseSummary, expenseByCategory, listExpenseUsers } from "@/actions/expense";
 import { isModuleEnabled } from "@/actions/module";
 import { hasEffectivePermission } from "@/actions/permission";
-import { Badge, Card } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { SearchParamInput } from "@/components/ui/search-param-input";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
 import { DateRangePicker } from "@/components/ui/date-range-picker";
+import { TabNav } from "@/components/ui/tab-nav";
 import { ExpensesTable } from "@/components/expenses/expenses-table";
 import { Pagination } from "@/components/ui/pagination";
 import { PAGE_SIZES, resolvePage, resolvePageSize, totalPages } from "@/lib/pagination";
@@ -34,6 +35,7 @@ export default async function ExpensesPage({
     user?: string;
     reimbursable?: string;
     mine?: string;
+    view?: string;
     q?: string;
     from?: string;
     to?: string;
@@ -49,24 +51,40 @@ export default async function ExpensesPage({
   const page = resolvePage(params.page);
   const pageSize = resolvePageSize(params.pageSize);
 
+  const [holdsHrApproval, holdsAnyClaimApproval] = await Promise.all([
+    hasEffectivePermission(userId, "hr.approveExpenses"),
+    hasEffectivePermission(userId, "expenses.approve"),
+  ]);
+  /**
+   * Three views (owner, 19 Oct 2026 — everybody lists their official expenses, HR approves): your own
+   * claims, the ones waiting on you, and every claim you may see. `mine=approvals` is the old address of
+   * the second, still followed.
+   */
+  const view = params.view === "approve" || params.mine === "approvals" ? "approve" : params.view === "all" ? "all" : "mine";
+
   const filters = {
     status: asStatus(params.status),
     category: asCategory(params.category),
-    userId: params.user,
+    userId: view === "mine" ? userId : params.user,
     reimbursable: params.reimbursable === "yes" ? true : params.reimbursable === "no" ? false : undefined,
-    awaitingMyDecision: params.mine === "approvals",
+    awaitingMyDecision: view === "approve",
     search: params.q,
     from: params.from,
     to: params.to,
   };
 
-  const [result, summary, byCategory, users, canReimburse] = await Promise.all([
+  const [result, summary, byCategory, users, canReimburse, waiting] = await Promise.all([
     listExpensesPaged({ ...filters, page, pageSize }),
     expenseSummary(filters),
     expenseByCategory(filters),
     listExpenseUsers(),
     hasEffectivePermission(userId, "expenses.reimburse"),
+    // The count on the To approve tab, whatever the view.
+    view === "approve" ? null : expenseSummary({ awaitingMyDecision: true }),
   ]);
+  const awaitingCount = (waiting ?? summary).awaitingMyDecision;
+  // The tab is for anybody who approves: HR, whoever may decide any claim, and a manager with claims waiting.
+  const approves = holdsHrApproval || holdsAnyClaimApproval || awaitingCount > 0;
 
   const topCategories = byCategory.slice(0, 6);
   const maxCategory = topCategories[0]?.amount ?? 0;
@@ -77,7 +95,8 @@ export default async function ExpensesPage({
         <div>
           <h1 className="text-xl font-semibold text-text">Expenses</h1>
           <p className="mt-1 text-sm text-muted">
-            Every company expense — field travel claimed against a visit, and everything else the business spends.
+            Your official expenses, claimed and paid back: add each one with its receipt and submit it. Once it is
+            approved it goes to the books, and Accounts pays it back.
           </p>
         </div>
         <Link href="/expenses/new">
@@ -85,11 +104,25 @@ export default async function ExpensesPage({
         </Link>
       </div>
 
-      {summary.awaitingMyDecision > 0 && (
-        <Link href="/expenses?mine=approvals" className="mt-4 block">
+      <div className="mt-4">
+        <TabNav
+          basePath="/expenses"
+          paramName="view"
+          activeKey={view}
+          defaultKey="mine"
+          tabs={[
+            { key: "mine", label: "My expenses" },
+            ...(approves ? [{ key: "approve", label: holdsHrApproval ? "To approve (HR)" : "To approve", count: awaitingCount }] : []),
+            { key: "all", label: "All expenses" },
+          ]}
+        />
+      </div>
+
+      {view !== "approve" && awaitingCount > 0 && (
+        <Link href="/expenses?view=approve" className="mt-4 block">
           <Card className="border-warning/40 bg-warning-bg px-4 py-3 text-sm text-warning transition-shadow hover:shadow-md">
             <span className="font-medium">
-              {summary.awaitingMyDecision} claim{summary.awaitingMyDecision === 1 ? "" : "s"} waiting on your approval
+              {awaitingCount} claim{awaitingCount === 1 ? "" : "s"} waiting on your approval
             </span>{" "}
             — review them.
           </Card>
@@ -150,12 +183,14 @@ export default async function ExpensesPage({
           label="Category"
           options={expenseCategoryValues.map((c) => ({ value: c, label: expenseCategoryLabels[c] }))}
         />
-        <SelectParamFilter
-          paramName="user"
-          label="Claimant"
-          allLabel="Everyone visible"
-          options={users.map((u) => ({ value: u.id, label: u.name }))}
-        />
+        {view === "all" && (
+          <SelectParamFilter
+            paramName="user"
+            label="Claimant"
+            allLabel="Everyone visible"
+            options={users.map((u) => ({ value: u.id, label: u.name }))}
+          />
+        )}
         <SelectParamFilter
           paramName="reimbursable"
           label="Reimbursable"
@@ -165,15 +200,22 @@ export default async function ExpensesPage({
           ]}
         />
         <DateRangePicker fromParam="from" toParam="to" label="Spent on" />
-        {params.mine === "approvals" && (
-          <Link href="/expenses">
-            <Badge tone="amber">My approvals only — clear</Badge>
-          </Link>
-        )}
       </div>
 
       <div className="mt-5">
-        <ExpensesTable expenses={result.rows} currentUserId={userId} canReimburse={canReimburse} />
+        <ExpensesTable
+          expenses={result.rows}
+          currentUserId={userId}
+          canReimburse={canReimburse}
+          holdsHrApproval={holdsHrApproval}
+          emptyText={
+            view === "mine"
+              ? "You haven't claimed any expenses yet — select New expense to add one."
+              : view === "approve"
+                ? "Nothing is waiting on your approval."
+                : undefined
+          }
+        />
       </div>
 
       <Pagination

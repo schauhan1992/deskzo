@@ -111,6 +111,11 @@ export const guide: SeedGuide = {
         "books.close",
         "Lets you set and remove the period lock and close or reopen a financial year on Close the Books. Deliberately separate from writing entries. No role has it by default.",
       ),
+      perm(
+        "expenses.reimburse",
+        "Opens Expense claims — the approved expense claims to pay back, the ones paid and company-paid spend — and lets you mark them paid, which posts the payment. The Accounts and Management roles have it by default.",
+      ),
+      perm("expenses.viewAll", "Opens Expense claims to read, without marking anything paid — as it opens every claim under Expenses. The Accounts and Management roles have it by default."),
     ],
     setup: [
       p("There's little to set up. The default chart of accounts is created the first time anything posts to the ledger, so invoices and payments reach the books from the first day. What's worth doing once:"),
@@ -310,6 +315,15 @@ export const guide: SeedGuide = {
             ": the closing entry is reversed, not deleted, and the lock rolls back to the start of the year. A later closed year has to be reopened first.",
           ),
         ),
+      ),
+      task(
+        "Pay back approved expense claims",
+        ol(
+          runs("Open ", { b: "Accounting › Expense claims" }, ". ", { b: "To pay" }, " lists every approved claim owed to somebody — who claimed it, who approved it, and the ledger entry its approval posted."),
+          runs("Tick the claims you've paid, type the ", { b: "Payment reference" }, ", pick the day it was ", { b: "Paid on" }, " and select ", { b: "Mark paid" }, "."),
+          runs("They move to ", { b: "Paid" }, ", and the payment is posted. The claimants are told."),
+        ),
+        p(runs("A claim reaches this page once it's approved — by HR, or the manager, as the company has chosen. See ", ["Expenses", "/help/expenses"], ".")),
       ),
     ],
     settings: [

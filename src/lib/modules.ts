@@ -40,6 +40,11 @@ export type NavItem = {
    * "eventTeam": they manage cards, or are on the team of a card event that ended less than a week ago.
    */
   onlyFor?: NavFact;
+  /**
+   * A second module the link is about, shown only while that one is open as well: Accounting's
+   * Expense claims, which is nothing without Expenses.
+   */
+  alsoNeeds?: string;
 };
 
 /** What `NavItem.onlyFor` can ask. Worked out once per request with the rest of the menu (modules-access.ts). */
@@ -256,6 +261,8 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
       { href: "/accounting/gst", label: "GST Returns", icon: FileSpreadsheet, permission: "payments.manage" },
       { href: "/accounting/tds", label: "TDS", icon: Percent, permission: "payments.manage" },
       { href: "/accounting/books", label: "Close the Books", icon: Lock, permission: ["books.close", "ledger.viewReports"] },
+      // Approved expense claims, to pay back (owner, 19 Oct 2026) — for whoever pays them, or reads every claim.
+      { href: "/accounting/expense-claims", label: "Expense claims", icon: Wallet, permission: ["expenses.reimburse", "expenses.viewAll"], alsoNeeds: "expenses" },
     ],
   },
   {
@@ -436,15 +443,17 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     label: "Field Visits",
     description:
       "Client meetings and field visits: plan them with a purpose and agenda, check in and out on the day, write up the outcome, and claim the travel against them.",
-    navGroup: "Field & Expenses",
+    navGroup: "Field Visits",
     navItems: [{ href: "/visits", label: "Field Visits", term: { key: "visit" }, icon: MapPin }],
   },
   {
     key: "expenses",
     label: "Expenses",
     description:
-      "Every company expense in one place — travel claimed against a visit, and everything else the business spends — with manager approval and reimbursement tracking.",
-    navGroup: "Field & Expenses",
+      "Every company expense in one place — official expenses each person claims, travel claimed against a visit, and everything else the business spends — approved by HR (or the reporting manager, as the company chooses), then booked and paid back by Accounts.",
+    // In HR's part of the menu (owner, 19 Oct 2026): everybody claims their official expenses there and
+    // HR approves them; Accounts sees the approved ones under Accounting › Expense claims.
+    navGroup: "People",
     navItems: [{ href: "/expenses", label: "Expenses", icon: Wallet }],
   },
   {
@@ -690,7 +699,7 @@ export const NAV_GROUP_ORDER = [
   "Accounting",
   "Support",
   "Delivery",
-  "Field & Expenses",
+  "Field Visits",
   "IT Assets",
   "Directory",
   "Marketing",
