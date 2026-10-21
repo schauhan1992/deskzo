@@ -428,6 +428,17 @@ export const PERMISSION_REGISTRY = [
     selfExcluded: true,
   },
   {
+    // GPS attendance (owner, 22 Oct 2026): who may let somebody clock in or out away from their office — approve
+    // or refuse their request, grant one for them, revoke one not yet used. Never one's own.
+    key: "hr.approveAttendanceExceptions",
+    label: "Approve attendance location exceptions",
+    description:
+      "Let somebody clock in or out away from their office's GPS area — approve or refuse their request, grant one for a day, and revoke one not yet used. Never one's own. Every exception is recorded with who decided it and why.",
+    defaultRoles: ["MANAGEMENT", "HR", "HR_HEAD"],
+    selfExcluded: true,
+    tier: "sensitive",
+  },
+  {
     key: "payroll.manage",
     label: "Run payroll",
     description:

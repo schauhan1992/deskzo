@@ -4,10 +4,10 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Button, Card, Heading, Notice, colors, styles } from "@/components/ui";
 import { TaskRow } from "@/components/task-row";
-import { ApiError, api, type Attendance, type Today } from "@/lib/api";
+import { ClockCard } from "@/components/clock-card";
+import { ApiError, api, type Today } from "@/lib/api";
 import { setWaiting } from "@/lib/badges";
-import { clockTime, dayOf, days, span, worked } from "@/lib/format";
-import { whereAmI } from "@/lib/location";
+import { dayOf, days, span } from "@/lib/format";
 import { useSession } from "@/lib/session";
 
 /**
@@ -66,7 +66,9 @@ export default function TodayScreen() {
         </Card>
       )}
 
-      {today?.attendance && <ClockCard attendance={today.attendance} onChanged={(attendance) => setToday({ ...today, attendance })} />}
+      {today?.attendance && (
+        <ClockCard attendance={today.attendance} policy={today.location ?? null} onChanged={(attendance, location) => setToday({ ...today, attendance, location })} />
+      )}
 
       {/* Always here — Approvals has no tab of its own, so this is the way in, with or without anything waiting. */}
       {today && (
@@ -150,42 +152,5 @@ export default function TodayScreen() {
         <Notice>Nothing here for you yet. Everything else in Deskzo is on the Deskzo tab.</Notice>
       )}
     </ScrollView>
-  );
-}
-
-/** Clocked in or not — and the button to change that, with where the phone is when it shares it. */
-function ClockCard({ attendance, onChanged }: { attendance: Attendance; onChanged: (a: Attendance) => void }) {
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<{ tone: "danger" | "muted"; text: string } | null>(null);
-  const action = !attendance.check_in_at ? "in" : !attendance.check_out_at ? "out" : null;
-
-  async function clock(which: "in" | "out") {
-    setBusy(true);
-    setMessage(null);
-    try {
-      const place = await whereAmI();
-      const next = await api<Attendance>("POST", "/api/app/attendance", { action: which, ...(place ?? {}) });
-      onChanged(next);
-      if (!place) setMessage({ tone: "muted", text: `Clocked ${which} — without your location: the phone didn't share it.` });
-    } catch (e) {
-      setMessage({ tone: "danger", text: e instanceof Error ? e.message : "That didn't work." });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Card>
-      <Text style={styles.body}>
-        {attendance.check_out_at && attendance.check_in_at
-          ? `Clocked in ${clockTime(attendance.check_in_at)}, out ${clockTime(attendance.check_out_at)}${attendance.worked_minutes ? ` · ${worked(attendance.worked_minutes)}` : ""}`
-          : attendance.check_in_at
-            ? `Clocked in at ${clockTime(attendance.check_in_at)}`
-            : "You haven't clocked in today."}
-      </Text>
-      {action && <Button title={action === "in" ? "Clock in" : "Clock out"} kind={action === "in" ? "primary" : "secondary"} busy={busy} onPress={() => void clock(action)} />}
-      {message && <Notice tone={message.tone}>{message.text}</Notice>}
-      {action && <Text style={styles.small}>Your location when you clock {action} is saved with your attendance, if you let the phone share it.</Text>}
-    </Card>
   );
 }

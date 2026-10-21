@@ -132,6 +132,7 @@
     "check:public-api": "tsx scripts/check-public-api.ts",
     "check:phone-app": "tsx scripts/check-phone-app.ts",
     "check:app-daily": "tsx scripts/check-app-daily.ts",
+    "check:geo-attendance": "tsx scripts/check-geo-attendance.ts",
     "check:app-chat": "tsx scripts/check-app-chat.ts",
     "check:pwa": "tsx scripts/check-pwa.ts",
     "check:call-report": "tsx scripts/check-call-report.ts",

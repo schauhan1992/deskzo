@@ -16,11 +16,14 @@ export function needsCamera(pathname: string): boolean {
 }
 
 /**
- * The one page that asks where somebody is: the access page, for a role that records location at
- * sign-in. Nowhere else — the location is asked for once, at the door, not tracked afterwards.
+ * The pages that ask where somebody is, each once, at a tap: the access page, for a role that records location at
+ * sign-in; and, for GPS attendance (owner, 22 Oct 2026), the two pages with the Clock in button and the one where
+ * HR may fill an office's point from where they stand. Nowhere else — and never tracked afterwards.
  */
+const LOCATION_PAGES = new Set(["/access", "/people/me", "/people/attendance", "/settings/attendance-locations"]);
+
 export function needsLocation(pathname: string): boolean {
-  return pathname === "/access";
+  return LOCATION_PAGES.has(pathname);
 }
 
 /**

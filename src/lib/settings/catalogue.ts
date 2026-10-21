@@ -40,6 +40,7 @@ import {
   Trophy,
   Tv,
   MapPin,
+  LocateFixed,
   MessageCircle,
   MessageSquareOff,
   Shuffle,
@@ -638,6 +639,15 @@ export const SETTINGS: SettingsSection[] = [
             permission: "hr.manage",
             module: "hr",
             external: true,
+          },
+          {
+            key: "attendance-locations",
+            label: "Attendance locations",
+            description: "Each office's GPS point and radius, and whether clocking in and out there needs the phone to be inside it — with exceptions for the days it can't be.",
+            href: "/settings/attendance-locations",
+            icon: LocateFixed,
+            permission: "hr.manage",
+            module: "hr",
           },
           {
             key: "expense-approvals",

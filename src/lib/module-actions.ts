@@ -53,6 +53,7 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "app-devices.ts": "core",
   "asset.ts": ["accounting"],
   "attendance.ts": ["hr"],
+  "attendance-exceptions.ts": ["hr"],
   "attendance-location.ts": ["hr"],
   "auth.ts": "core",
   "backup.ts": "core",
