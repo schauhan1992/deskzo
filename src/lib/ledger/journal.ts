@@ -106,27 +106,29 @@ export async function ensureChartOfAccounts(client: Pick<Tx, "ledgerAccount"> = 
   const byCode = new Map<string, string>(
     (await client.ledgerAccount.findMany({ select: { id: true, code: true } })).map((a) => [a.code, a.id]),
   );
-  // Upsert rather than create, because `missing` was worked out before any of these ran and this
-  // function is called by several report queries that a single page fires in parallel. They all
-  // compute the same missing set, and the second one to reach a code hit the unique constraint on
-  // it — a P2002 that took the whole Accounting page down rather than settling for the row that
-  // was already there. Whoever arrives second now simply reads it.
+  // `missing` was worked out before any of these ran, and this function is called by several report
+  // queries that a single page fires in parallel: they all compute the same missing set, and the second
+  // one to reach a code hit the unique constraint on it — a P2002 that took the whole Accounting page
+  // down. An upsert didn't settle it: Prisma reads, then inserts, so both could insert. ON CONFLICT DO
+  // NOTHING (`skipDuplicates`) does — whoever arrives second inserts nothing, raises nothing (which inside
+  // a posting's transaction would abort it), and reads the row that is there.
   for (const seed of missing.sort((a, b) => a.code.localeCompare(b.code))) {
-    const created = await client.ledgerAccount.upsert({
-      where: { code: seed.code },
-      update: {},
-      create: {
-        code: seed.code,
-        name: seed.name,
-        type: seed.type,
-        isGroup: seed.isGroup ?? false,
-        systemKey: seed.systemKey ?? null,
-        description: seed.description ?? null,
-        parentId: seed.parent ? (byCode.get(seed.parent) ?? null) : null,
-      },
-      select: { id: true, code: true },
+    await client.ledgerAccount.createMany({
+      data: [
+        {
+          code: seed.code,
+          name: seed.name,
+          type: seed.type,
+          isGroup: seed.isGroup ?? false,
+          systemKey: seed.systemKey ?? null,
+          description: seed.description ?? null,
+          parentId: seed.parent ? (byCode.get(seed.parent) ?? null) : null,
+        },
+      ],
+      skipDuplicates: true,
     });
-    byCode.set(created.code, created.id);
+    const row = await client.ledgerAccount.findUnique({ where: { code: seed.code }, select: { id: true, code: true } });
+    if (row) byCode.set(row.code, row.id);
   }
 }
 

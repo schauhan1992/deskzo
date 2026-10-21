@@ -120,6 +120,17 @@ async function main() {
       }
     };
 
+    section("The chart, set up by many requests at once");
+    // A page fires several reports in parallel, and each makes sure the chart has its system accounts — on an
+    // upgraded workspace, the stock accounts are missing the first time. None may fail on a duplicate code.
+    const raced = await Promise.allSettled(Array.from({ length: 8 }, () => ensureChartOfAccounts()));
+    ok("eight at once on an empty chart: none fails", raced.every((r) => r.status === "fulfilled"), raced.filter((r) => r.status === "rejected").map((r) => String((r as PromiseRejectedResult).reason).slice(0, 120)));
+    const keyed = await db.ledgerAccount.groupBy({ by: ["systemKey"], where: { systemKey: { not: null } }, _count: { _all: true } });
+    ok("  and each system account is there once — the stock ones too", keyed.every((k) => k._count._all === 1) && ["INVENTORY", "GRNI", "COGS", "STOCK_ADJUSTMENT"].every((k) => keyed.some((r) => r.systemKey === k)), keyed.filter((k) => k._count._all !== 1));
+    await db.ledgerAccount.deleteMany({ where: { systemKey: { in: ["INVENTORY", "GRNI", "COGS", "STOCK_ADJUSTMENT"] } } });
+    const upgraded = await Promise.allSettled(Array.from({ length: 8 }, () => ensureChartOfAccounts()));
+    ok("  and on an upgraded chart missing only the stock accounts, the same", upgraded.every((r) => r.status === "fulfilled") && (await db.ledgerAccount.count({ where: { systemKey: { in: ["INVENTORY", "GRNI", "COGS", "STOCK_ADJUSTMENT"] } } })) === 4);
+
     section("Who may");
     ok("a salesperson reads nothing", (await as(sales, () => settingsActions.getAccountsSettings())) === null);
     const base = { ...DEFAULT_ACCOUNTS_SETTINGS, seriesPrefixes: {} };
@@ -144,7 +155,6 @@ async function main() {
     ok("a clean prefix is kept, upper-cased, for the next number", prefixed.ok && afterPrefix!.series.find((s) => s.key === "PAYMENT")!.next.startsWith("PAY/"), afterPrefix?.series.find((s) => s.key === "PAYMENT")?.next);
 
     section("Costing under stock");
-    await ensureChartOfAccounts();
     const item = await db.item.create({ data: { name: "Zz Widget", sku: "ZZ-WID-1", type: "GOOD", trackInventory: true, sellingPrice: 500, costPrice: 120, createdById: boss.id }, select: { id: true } });
     const current = await accountsSettings();
     await db.$transaction((tx) => recordOpeningStock(tx, { itemId: item.id, quantity: 10, unitCost: 120, userId: boss.id, reason: "Opening stock" }, current));
