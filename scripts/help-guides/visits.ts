@@ -46,7 +46,7 @@ export const guide: SeedGuide = {
       task(
         "Plan a visit",
         ol(
-          runs("Open ", { b: "Field & Expenses › Field Visits" }, " and select ", { b: "Plan visit" }, " — or use ", { b: "Plan visit" }, " on a customer's or lead's page, which fills the customer in for you."),
+          runs("Open ", { b: "Field Visits" }, " and select ", { b: "Plan visit" }, " — or use ", { b: "Plan visit" }, " on a customer's or lead's page, which fills the customer in for you."),
           runs("Choose the ", { b: "Company" }, ", then who you're ", { b: "Meeting with" }, " and the ", { b: "Office" }, ". The ", { b: "Address" }, " follows the office until you type over it."),
           runs("Pick the ", { b: "Purpose" }, " and the ", { b: "Date & time" }, ". A manager can choose another ", { b: "Rep" }, " from their team."),
           runs("If it's for a deal, choose it under ", { b: "Against lead" }, "."),
@@ -86,7 +86,7 @@ export const guide: SeedGuide = {
       ),
       task(
         "Find visits",
-        p(runs("On ", { b: "Field & Expenses › Field Visits" }, ", search by company, agenda or outcome, and filter by ", { b: "Status" }, ", ", { b: "Purpose" }, ", ", { b: "Rep" }, " and the ", { b: "Scheduled" }, " dates. The count at the top says how many visits are still open.")),
+        p(runs("On ", { b: "Field Visits" }, ", search by company, agenda or outcome, and filter by ", { b: "Status" }, ", ", { b: "Purpose" }, ", ", { b: "Rep" }, " and the ", { b: "Scheduled" }, " dates. The count at the top says how many visits are still open.")),
       ),
     ],
     settings: [

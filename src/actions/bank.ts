@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { isIfsc, normaliseIfsc } from "@/lib/ifsc";
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
@@ -69,6 +70,9 @@ export async function saveBankAccount(input: {
 
   const name = input.name.trim();
   if (!name) return { ok: false, error: "Name the account — 'HDFC Current' is enough." };
+  // Checked like every other IFSC, after the same cleaning (src/lib/ifsc.ts) — it was stored as typed.
+  const ifsc = normaliseIfsc(input.ifsc ?? "");
+  if (ifsc && !isIfsc(ifsc)) return { ok: false, error: "That IFSC isn't right — it's four letters, a zero, then six characters, like HDFC0001234." };
 
   await ensureChartOfAccounts();
 
@@ -79,7 +83,7 @@ export async function saveBankAccount(input: {
         name,
         bankName: input.bankName?.trim() || null,
         accountNumber: input.accountNumber?.trim() || null,
-        ifsc: input.ifsc?.trim().toUpperCase() || null,
+        ifsc: ifsc || null,
         branch: input.branch?.trim() || null,
       },
       select: { id: true, ledgerAccountId: true },
@@ -99,7 +103,7 @@ export async function saveBankAccount(input: {
       name,
       bankName: input.bankName?.trim() || null,
       accountNumber: input.accountNumber?.trim() || null,
-      ifsc: input.ifsc?.trim().toUpperCase() || null,
+      ifsc: ifsc || null,
       branch: input.branch?.trim() || null,
       ledgerAccountId,
       // The first account is the default whether or not anybody ticked the box — otherwise payments

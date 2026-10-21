@@ -93,12 +93,24 @@ eq("The application names thirteen roles of its own — the eight it shipped wit
  * its starting menu with the sections it leaves ticked.
  */
 {
+  /**
+   * What a role starts with: its rows, and — for a key the migration wrote no row for — the role's
+   * default (`rolePermits`), which is how a permission added after it reaches the role (Approve expense
+   * claims (HR), 19 Oct 2026, held by HR and HR head by default). A preset key that is neither written
+   * nor held by default is still drift, and still fails.
+   */
+  const startsWith = (role: string, rows: { role: string; key: string; allowed: boolean }[], preset: readonly string[]) => {
+    const written = new Set(rows.filter((r) => r.role === role).map((r) => r.key));
+    const granted = rows.filter((r) => r.role === role && r.allowed).map((r) => r.key);
+    const defaulted = preset.filter((k) => !written.has(k) && heldByDefaultKey(k, role));
+    return [...new Set([...granted, ...defaulted])].sort();
+  };
   const sql = readFileSync(join(__dirname, "..", "prisma", "migrations", "20261030110000_built_in_hr_recruiter_renewal_roles", "migration.sql"), "utf8");
   const rows = [...sql.matchAll(/\('([A-Z_]+)', '([a-zA-Z.]+)', (true|false)\)/g)].map((m) => ({ role: m[1]!, key: m[2]!, allowed: m[3] === "true" }));
   for (const [role, preset] of [["HR", "hr-executive"], ["RECRUITER", "recruiter"], ["RENEWAL_SPECIALIST", "renewal-specialist"]] as const) {
-    const granted = rows.filter((r) => r.role === role && r.allowed).map((r) => r.key).sort();
     const wanted = [...(getPreset(preset)?.permissions ?? [])].map(String).sort();
-    ok(`${role} starts as the ${preset} preset`, granted.join() === wanted.join(), `migration ${granted.length}, preset ${wanted.length}`);
+    const granted = startsWith(role, rows, wanted);
+    ok(`${role} starts as the ${preset} preset`, granted.join() === wanted.join(), `migration and defaults ${granted.length}, preset ${wanted.length}`);
     const unticked = rows.filter((r) => r.role === role && !r.allowed).map((r) => r.key);
     ok(`  and only unticks sections`, unticked.length > 0 && unticked.every((k) => k.startsWith("section.")), unticked.filter((k) => !k.startsWith("section.")).join(", "));
     ok(`  keeping everybody's own HR self-service`, !unticked.includes("section.hr"));
@@ -118,9 +130,9 @@ eq("The application names thirteen roles of its own — the eight it shipped wit
   // HR head (9 Oct 2026): the preset, and HR's starting menu with the vault the preset uses.
   const headSql = readFileSync(join(__dirname, "..", "prisma", "migrations", "20261030130000_built_in_hr_head_role", "migration.sql"), "utf8");
   const headRows = [...headSql.matchAll(/\('([A-Z_]+)', '([a-zA-Z.]+)', (true|false)\)/g)].map((m) => ({ role: m[1]!, key: m[2]!, allowed: m[3] === "true" }));
-  const headGranted = headRows.filter((r) => r.role === "HR_HEAD" && r.allowed).map((r) => r.key).sort();
   const headWanted = [...(getPreset("hr-head")?.permissions ?? [])].map(String).sort();
-  ok("HR_HEAD starts as the hr-head preset", headRows.every((r) => r.role === "HR_HEAD") && headGranted.join() === headWanted.join(), `migration ${headGranted.length}, preset ${headWanted.length}`);
+  const headGranted = startsWith("HR_HEAD", headRows, headWanted);
+  ok("HR_HEAD starts as the hr-head preset", headRows.every((r) => r.role === "HR_HEAD") && headGranted.join() === headWanted.join(), `migration and defaults ${headGranted.length}, preset ${headWanted.length}`);
   const headUnticked = headRows.filter((r) => !r.allowed).map((r) => r.key).sort();
   const hrUnticked = rows.filter((r) => r.role === "HR" && !r.allowed).map((r) => r.key).filter((k) => k !== "section.vault").sort();
   ok("  with HR's starting menu, the credential vault kept", headUnticked.join() === hrUnticked.join() && !headUnticked.includes("section.vault"), `${headUnticked.length} unticked`);
@@ -146,6 +158,11 @@ ok(
   "those are granted one at a time by a person, never by a profile",
 );
 ok(
+  "No preset hands out an admin-only key",
+  ROLE_PRESETS.every((p) => p.permissions.every((k) => getPermissionDefinition(k)?.adminOnly !== true)),
+  "an admin or the super admin gives those to a person — the file manager, for one",
+);
+ok(
   "Every preset targets a role that exists",
   ROLE_PRESETS.every((p) => (SYSTEM_ROLE_KEYS as readonly string[]).includes(p.role)),
 );
@@ -153,14 +170,15 @@ ok(
 // Every key a preset is ALLOWED to contain should be reachable through one, or the preset list
 // stops describing the job functions it claims to.
 //
-// Two exemptions, and the second was a contradiction this check used to contain: a superAdminOnly
+// Three exemptions, and the second was a contradiction this check used to contain: a superAdminOnly
 // key is forbidden from appearing in any preset by the assertion above, while this one demanded it
 // appear in at least one. No key could satisfy both. Administration keys are exempt for the
-// original reason — they are granted to a person one at a time, never handed out by a profile.
+// original reason — they are granted to a person one at a time, never handed out by a profile. And an
+// adminOnly key is an admin's to give a person (the file manager), so no profile carries it either.
 const presetCovered = new Set(ROLE_PRESETS.flatMap((p) => p.permissions as readonly string[]));
 const uncovered = PERMISSIONS.filter(
   // Sections are held by every role until unticked, and no preset touches them (src/lib/permissions.ts).
-  (p) => permissionGroup(p) !== "Administration" && p.superAdminOnly !== true && p.everyone !== true && !presetCovered.has(p.key),
+  (p) => permissionGroup(p) !== "Administration" && p.superAdminOnly !== true && p.adminOnly !== true && p.everyone !== true && !presetCovered.has(p.key),
 ).map((p) => p.key);
 ok("Every non-admin permission appears in at least one preset", uncovered.length === 0, uncovered.join(", ") || "all covered");
 

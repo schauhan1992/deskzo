@@ -6,6 +6,7 @@ import { formatCurrency } from "@/lib/utils";
 import { amountInWords } from "@/lib/gst-engine";
 import { monthLabel } from "@/lib/hr/calendar";
 import { formatCalendarDay, indiaClock } from "@/lib/time/zone";
+import { customLinesOf } from "@/lib/hr/salary-split";
 
 /**
  * A payslip as a document.
@@ -39,6 +40,10 @@ export default async function PrintPayslipPage({
     { label: "Medical", value: num(slip.medical) },
     { label: "Special allowance", value: num(slip.specialAllowance) },
     { label: "Other allowance", value: num(slip.otherAllowance) },
+    // The company's own components (owner, 21 Oct 2026), by the names it gave them.
+    ...customLinesOf(slip.customEarnings).map((line) => ({ label: line.name, value: line.amount })),
+    // In gross, so on the page — the rows used to add up to less than the gross under them.
+    { label: "Incentive", value: num(slip.incentive) },
   ].filter((row) => row.value > 0);
 
   const deductions = [

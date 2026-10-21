@@ -37,6 +37,12 @@ export type PermissionDefinition = {
    */
   superAdminOnly?: boolean;
   /**
+   * Only an admin or the super admin may grant this, to a role or to a person (src/lib/authz/guards.ts) —
+   * for a door the owner wants opened by the people at the top and nobody else, however far
+   * `permissions.manage` has been handed down.
+   */
+  adminOnly?: boolean;
+  /**
    * The holder may not exercise this on a record they created or own. Separation of duties as a
    * property of the permission rather than a rule each action has to remember.
    */
@@ -266,6 +272,21 @@ export const PERMISSION_REGISTRY = [
     tier: "sensitive",
   },
   {
+    /**
+     * The file manager (owner, 21 Oct 2026): "only admin and superadmin can allow this to employees".
+     * Nobody holds it by role; an admin holds it as they hold everything, and gives it to a person from
+     * People › File manager, or to a role.
+     */
+    key: "files.view",
+    label: "Use the file manager",
+    description:
+      "Open People › File manager to see and download your own payslips, letters (offer, appointment, letter of intent, salary certificate and the rest) and documents — those an admin has switched on. Only an admin or the super admin can give it.",
+    defaultRoles: [],
+    group: "People & HR",
+    delegable: false,
+    adminOnly: true,
+  },
+  {
     key: "visitors.view",
     label: "See the visitor book",
     description:
@@ -395,6 +416,16 @@ export const PERMISSION_REGISTRY = [
     description:
       "Decide any leave request, not only those from people who report to you — for whoever covers while a manager is away.",
     defaultRoles: ["MANAGEMENT"],
+  },
+  {
+    // HR signs expense claims off (owner, 19 Oct 2026) — or after the reporting manager, as Settings ›
+    // People › Expense approvals says. Never one's own claim.
+    key: "hr.approveExpenses",
+    label: "Approve expense claims (HR)",
+    description:
+      "Decide the expense claims that come to HR: every claim when HR approves them, or each claim after the reporting manager has, as Settings › People › Expense approvals sets. An approved claim goes to the books and to Accounts to pay.",
+    defaultRoles: ["MANAGEMENT", "HR", "HR_HEAD"],
+    selfExcluded: true,
   },
   {
     key: "payroll.manage",
@@ -1231,8 +1262,8 @@ export const PERMISSION_REGISTRY = [
   { key: "section.feedback", label: "Support › Customer Feedback", description: "See Customer Feedback in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.helpdesk", label: "Support › Helpdesk / Tickets", description: "See Helpdesk / Tickets in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.projects", label: "Delivery › Projects", description: "See Projects in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
-  { key: "section.visits", label: "Field & Expenses › Field Visits", description: "See Field Visits in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
-  { key: "section.expenses", label: "Field & Expenses › Expenses", description: "See Expenses in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.visits", label: "Field Visits", description: "See Field Visits in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.expenses", label: "People › Expenses", description: "See Expenses in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.itAssets", label: "IT Assets", description: "See IT Assets in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.contactsLibrary", label: "Directory › Contacts Library", description: "See Contacts Library in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.vendors", label: "Directory › Vendors", description: "See Vendors in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },

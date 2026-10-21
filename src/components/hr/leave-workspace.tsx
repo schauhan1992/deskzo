@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, Check, X } from "lucide-react";
+import { CalendarPlus, Check, Timer, X } from "lucide-react";
 import type { BalanceRow, leaveApprovalQueue, myLeaveRequests, upcomingLeave } from "@/actions/leave";
 import { applyForLeave, cancelLeave, decideLeave, previewLeaveDays } from "@/actions/leave";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -55,7 +56,17 @@ export function LeaveWorkspace({
             </Card>
           )}
         </div>
-        {leaveTypes.length > 0 && <ApplyDialog leaveTypes={leaveTypes} balances={balances} />}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* A couple of hours rather than a day: its own tab, where it's asked for (owner, 21 Oct 2026). */}
+          <Link
+            href="/people/leave?view=short"
+            className="inline-flex h-9 items-center gap-1.5 rounded-base border border-line-strong bg-surface px-3.5 text-sm font-medium text-text shadow-sm hover:bg-surface-sunken"
+          >
+            <Timer className="h-4 w-4" aria-hidden />
+            Short leave
+          </Link>
+          {leaveTypes.length > 0 && <ApplyDialog leaveTypes={leaveTypes} balances={balances} />}
+        </div>
       </div>
 
       {queue.pending.length > 0 && (

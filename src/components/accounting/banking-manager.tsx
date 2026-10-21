@@ -114,7 +114,9 @@ export function BankingManager({
                   </span>
                   <span className="block text-xs text-subtle">
                     {a.bankName ?? "—"}
-                    {a.accountNumber && ` · ${a.accountNumber}`} · {a.ledgerAccount.code}
+                    {a.accountNumber && ` · ${a.accountNumber}`}
+                    {a.ifsc && ` · IFSC ${a.ifsc}`}
+                    {a.branch && ` · ${a.branch}`} · {a.ledgerAccount.code}
                   </span>
                 </button>
               ))}
@@ -609,7 +611,19 @@ function NewAccountDialog({
           </div>
         </div>
         <div className="flex gap-2 pt-1">
-          <Button disabled={pending || !form.name.trim()} onClick={() => run(() => saveBankAccount(form), onClose)}>
+          <Button
+            disabled={pending || !form.name.trim()}
+            onClick={() =>
+              run(
+                () => saveBankAccount(form),
+                () => {
+                  // Empty for the next one, rather than the last account's details waiting to be added twice.
+                  setForm({ name: "", bankName: "", accountNumber: "", ifsc: "", branch: "" });
+                  onClose();
+                },
+              )
+            }
+          >
             {pending ? "Saving…" : "Add"}
           </Button>
           <Button variant="secondary" onClick={onClose}>

@@ -45,6 +45,7 @@ export function MyHr({
   queue,
   payslips,
   nextHoliday,
+  shortLeave = null,
 }: {
   today: TodayRow;
   balances: BalanceRow[];
@@ -53,6 +54,8 @@ export function MyHr({
   queue: Queue;
   payslips: Slip[];
   nextHoliday: Holiday | null;
+  /** This month's short leave (owner, 21 Oct 2026), or null where the company has none set up. */
+  shortLeave?: { used: number; perMonth: number; pending: number } | null;
 }) {
   const pendingLeave = leave.filter((l) => l.status === "PENDING");
   const pendingRegs = regularisations.filter((r) => r.status === "PENDING");
@@ -82,9 +85,10 @@ export function MyHr({
         <Card>
           <CardContent className="py-3">
             <div className="text-xs uppercase tracking-wide text-subtle">Waiting on a decision</div>
-            <div className="mt-1 text-lg font-semibold text-text">{pendingLeave.length + pendingRegs.length}</div>
+            <div className="mt-1 text-lg font-semibold text-text">{pendingLeave.length + pendingRegs.length + (shortLeave?.pending ?? 0)}</div>
             <div className="text-xs text-muted">
-              {pendingLeave.length} leave, {pendingRegs.length} attendance correction
+              {pendingLeave.length} leave, {shortLeave ? `${shortLeave.pending} short leave, ` : ""}
+              {pendingRegs.length} attendance correction
             </div>
           </CardContent>
         </Card>
@@ -129,6 +133,18 @@ export function MyHr({
             </Link>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
+            {shortLeave && shortLeave.perMonth > 0 && (
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3 border-b border-line pb-2">
+                <span className="text-muted">Short leave</span>
+                <span className="text-text">
+                  <span className="font-medium">{shortLeave.used}</span>
+                  <span className="text-xs text-subtle"> of {shortLeave.perMonth} this month · </span>
+                  <Link href="/people/leave?view=short" className="text-xs text-brand hover:underline">
+                    Ask
+                  </Link>
+                </span>
+              </div>
+            )}
             {balances.length === 0 && <p className="text-subtle">No leave types set up yet.</p>}
             {balances.map((b) => (
               <div key={b.typeId} className="flex flex-wrap items-baseline justify-between gap-x-3">

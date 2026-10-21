@@ -12,9 +12,13 @@ import { getDownlineUserIds } from "@/lib/org-chart";
 import { checkUpload } from "@/lib/hr/document-upload";
 import { dateOnly } from "@/lib/hr/calendar";
 import { monthlyGross } from "@/lib/hr/payroll";
+import { STRUCTURE_EXTRAS_READ, componentsOfStructure, ctcOfStructure } from "@/lib/hr/salary-split";
+import { mergeLetterTemplate } from "@/lib/hr/letter-templates";
+import { notMigratedYet } from "@/lib/not-migrated";
+import { hiddenFileIds, isFileHidden } from "@/lib/hr/file-visibility";
 import { letterNumberFor, renderLetter, subjectFor, type LetterPayload } from "@/lib/hr/letters";
 import { computeGratuity, serviceYears } from "@/lib/hr/settlement";
-import { getOrganisation } from "@/lib/organisation";
+import { getOrganisation, letterSignatureImage, letterSignatureSettings } from "@/lib/organisation";
 import { workspaceClock } from "@/lib/time/workspace";
 import { personPath } from "@/lib/record-links";
 import type { ActionResult } from "@/actions/company";
@@ -273,31 +277,62 @@ export async function deleteEmploymentHistory(id: string): Promise<ActionResult<
 // ─── Letters ──────────────────────────────────────────────────────────────────
 
 export async function listEmployeeLetters(userId: string) {
-  const { canRead } = await access(userId);
+  const { canRead, manage, isSelf } = await access(userId);
   if (!canRead) return [];
-  return toPlain(
-    await db.employeeLetter.findMany({
-      where: { userId },
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true, type: true, letterNumber: true, subject: true, issuedOn: true,
-        status: true, createdAt: true, issuedBy: { select: { name: true } },
-      },
-    }),
-  );
+  // A letter an admin has switched off in the file manager is kept from the person it's for.
+  const hidden = isSelf && !manage ? await hiddenFileIds(userId, "LETTER") : new Set<string>();
+  const where = { userId, ...(hidden.size ? { id: { notIn: [...hidden] } } : {}) };
+  const select = {
+    id: true, type: true, letterNumber: true, subject: true, issuedOn: true,
+    status: true, createdAt: true, issuedBy: { select: { name: true } },
+  } as const;
+  try {
+    // The template's name where it came from one, shown instead of "From a template".
+    return toPlain(await db.employeeLetter.findMany({ where, orderBy: { createdAt: "desc" }, select: { ...select, templateName: true } }));
+  } catch (err) {
+    if (!notMigratedYet(err)) throw err;
+    return toPlain((await db.employeeLetter.findMany({ where, orderBy: { createdAt: "desc" }, select })).map((l) => ({ ...l, templateName: null })));
+  }
 }
 
 /**
- * Builds a letter from the employee record as it stands *today*, and freezes that into the row.
- *
- * Everything the letter will assert is captured now — see the note in src/lib/hr/letters.ts. The
- * body comes back editable, because whoever issues it always wants to change a sentence, and a
- * template nobody can adjust gets replaced by a Word document within a month.
+ * Every employee's letters, newest first — People › Letters (owner, 21 Oct 2026). HR's only: the per-person
+ * list on someone's page is what anybody else reads. Filtered by status, and by the template it came from.
  */
-export async function draftLetter(userId: string, type: LetterType): Promise<ActionResult<{ id: string }>> {
-  const { user, manage } = await access(userId);
-  if (!manage) return { ok: false, error: "Only HR can issue letters." };
+export async function recentLetters(filters: { status?: string; templateId?: string; page?: number } = {}) {
+  const { manage } = await access(null);
+  if (!manage) return null;
+  const pageSize = 50;
+  const page = Math.max(1, Math.floor(Number(filters.page) || 1));
+  const status = filters.status === "DRAFT" || filters.status === "ISSUED" || filters.status === "REVOKED" ? filters.status : undefined;
+  const select = {
+    id: true, type: true, letterNumber: true, subject: true, issuedOn: true, status: true,
+    user: { select: { name: true, userSeq: true } },
+    issuedBy: { select: { name: true } },
+  } as const;
+  try {
+    const where = { userId: { not: null }, ...(status ? { status } : {}), ...(filters.templateId ? { templateId: filters.templateId } : {}) } satisfies Prisma.EmployeeLetterWhereInput;
+    const [rows, total] = await Promise.all([
+      db.employeeLetter.findMany({ where, orderBy: { createdAt: "desc" }, skip: (page - 1) * pageSize, take: pageSize, select: { ...select, templateName: true, signed: true } }),
+      db.employeeLetter.count({ where }),
+    ]);
+    return toPlain({ rows, total, page, pageSize });
+  } catch (err) {
+    if (!notMigratedYet(err)) throw err;
+    const where = { userId: { not: null }, ...(status ? { status } : {}) } satisfies Prisma.EmployeeLetterWhereInput;
+    const [rows, total] = await Promise.all([
+      db.employeeLetter.findMany({ where, orderBy: { createdAt: "desc" }, skip: (page - 1) * pageSize, take: pageSize, select }),
+      db.employeeLetter.count({ where }),
+    ]);
+    return toPlain({ rows: rows.map((r) => ({ ...r, templateName: null, signed: false })), total, page, pageSize });
+  }
+}
 
+/**
+ * The facts a letter freezes, from the employee record as it stands *today* — for a built-in letter and for
+ * one of HR's own templates alike (src/lib/hr/letter-templates.ts). Null when the person is gone.
+ */
+async function employeePayload(userId: string, issuerName: string) {
   const person = await db.user.findUnique({
     where: { id: userId },
     select: {
@@ -305,8 +340,8 @@ export async function draftLetter(userId: string, type: LetterType): Promise<Act
       department: { select: { name: true } },
       manager: { select: { name: true } },
       employeeProfile: true,
-        // Two, so an increment letter can state what the salary was as well as what it becomes.
-      salaryStructures: { orderBy: { effectiveFrom: "desc" }, take: 2 },
+      // Two, so an increment letter can state what the salary was as well as what it becomes.
+      salaryStructures: { orderBy: { effectiveFrom: "desc" }, take: 2, omit: STRUCTURE_EXTRAS_READ },
       payslips: {
         where: { run: { status: { in: ["LOCKED", "PAID"] } } },
         orderBy: [{ run: { year: "desc" } }, { run: { month: "desc" } }],
@@ -315,34 +350,16 @@ export async function draftLetter(userId: string, type: LetterType): Promise<Act
       },
     },
   });
-  if (!person) return { ok: false, error: "That user no longer exists." };
+  if (!person) return null;
 
   const profile = person.employeeProfile;
   const structure = person.salaryStructures[0];
-  const gross = structure
-    ? monthlyGross({
-        basic: Number(structure.basic),
-        hra: Number(structure.hra),
-        conveyance: Number(structure.conveyance),
-        medical: Number(structure.medical),
-        specialAllowance: Number(structure.specialAllowance),
-        otherAllowance: Number(structure.otherAllowance),
-      })
-    : null;
+  const gross = structure ? monthlyGross(componentsOfStructure(structure)) : null;
 
   const org = await getOrganisation();
   const slip = person.payslips[0];
   const previous = person.salaryStructures[1];
-  const previousGross = previous
-    ? monthlyGross({
-        basic: Number(previous.basic),
-        hra: Number(previous.hra),
-        conveyance: Number(previous.conveyance),
-        medical: Number(previous.medical),
-        specialAllowance: Number(previous.specialAllowance),
-        otherAllowance: Number(previous.otherAllowance),
-      })
-    : null;
+  const previousGross = previous ? monthlyGross(componentsOfStructure(previous)) : null;
 
   // Gratuity is computed rather than typed, so the statement and the settlement cannot disagree.
   const gratuity =
@@ -361,7 +378,9 @@ export async function draftLetter(userId: string, type: LetterType): Promise<Act
     employeeCode: profile?.employeeCode ?? null,
     companyName: org.legalName || "the company",
     companyAddress: [org.addressLine1, org.addressLine2, org.city, org.state, org.pincode].filter(Boolean).join("\n") || null,
-    annualCtc: gross ? Math.round(gross * 12) : null,
+    // The CTC the salary card shows (src/lib/hr/salary-split.ts): gross and the employer's PF and ESI,
+    // a year of it. Letters said twelve months of gross, which wasn't the CTC anybody was offered.
+    annualCtc: structure ? Math.round(ctcOfStructure(structure)) : null,
     monthlyGross: gross,
     joinedOn: profile?.joinedOn ? profile.joinedOn.toISOString().slice(0, 10) : null,
     probationMonths: profile?.probationEndsOn && profile.joinedOn
@@ -377,10 +396,10 @@ export async function draftLetter(userId: string, type: LetterType): Promise<Act
     netPay: slip ? Number(slip.netPay) : null,
     // The configured signatory if there is one — an appointment letter should be signed by the HR
     // head, not by whichever colleague happened to press the button.
-    signatoryName: org.letterSignatoryName || user.name,
+    signatoryName: org.letterSignatoryName || issuerName,
     signatoryTitle: org.letterSignatoryTitle || "For " + (org.legalName || "the company"),
 
-    previousCtc: previousGross ? Math.round(previousGross * 12) : null,
+    previousCtc: previous ? Math.round(ctcOfStructure(previous)) : previousGross ? Math.round(previousGross * 12) : null,
     previousDesignation: profile?.designation ?? null,
     effectiveFrom: structure?.effectiveFrom.toISOString().slice(0, 10) ?? null,
     previousLocation: profile?.workLocation ?? null,
@@ -400,8 +419,25 @@ export async function draftLetter(userId: string, type: LetterType): Promise<Act
       profile?.joinedOn && profile.exitedOn ? serviceYears(profile.joinedOn, profile.exitedOn) : null,
     contractMonths: profile?.employmentType === "CONTRACT" || profile?.employmentType === "CONSULTANT" ? 12 : null,
   };
+  return { payload, org, clock, year: today.year };
+}
 
-  const year = today.year;
+/**
+ * Builds a letter from the employee record as it stands *today*, and freezes that into the row.
+ *
+ * Everything the letter will assert is captured now — see the note in src/lib/hr/letters.ts. The
+ * body comes back editable, because whoever issues it always wants to change a sentence, and a
+ * template nobody can adjust gets replaced by a Word document within a month.
+ */
+export async function draftLetter(userId: string, type: LetterType): Promise<ActionResult<{ id: string }>> {
+  const { user, manage } = await access(userId);
+  if (!manage) return { ok: false, error: "Only HR can issue letters." };
+  if (type === "CUSTOM") return { ok: false, error: "Pick the template to draft it from." };
+
+  const built = await employeePayload(userId, user.name);
+  if (!built) return { ok: false, error: "That user no longer exists." };
+  const { payload, org, clock, year } = built;
+
   const sequence = (await db.employeeLetter.count({ where: { type, issuedOn: { gte: new Date(Date.UTC(year, 0, 1)) } } })) + 1;
 
   const created = await db.employeeLetter.create({
@@ -414,6 +450,7 @@ export async function draftLetter(userId: string, type: LetterType): Promise<Act
       payload: payload as unknown as Prisma.InputJsonValue,
       body: renderLetter(type, payload),
       issuedById: user.id,
+      ...(await signedByDefault()),
     },
     select: { id: true },
   });
@@ -422,17 +459,94 @@ export async function draftLetter(userId: string, type: LetterType): Promise<Act
   return { ok: true, data: created };
 }
 
+/**
+ * A letter from one of HR's own templates (owner, 21 Oct 2026): the person's facts frozen as for a built-in
+ * letter, the template's subject and body with them filled in, and a number with the template's own code.
+ */
+export async function draftTemplateLetter(userId: string, templateId: string): Promise<ActionResult<{ id: string }>> {
+  const { user, manage } = await access(userId);
+  if (!manage) return { ok: false, error: "Only HR can issue letters." };
+  const template = await db.letterTemplate.findUnique({ where: { id: templateId }, select: { id: true, name: true, code: true, subject: true, body: true, active: true } });
+  if (!template || !template.active) return { ok: false, error: "That template isn't available any more." };
+
+  const built = await employeePayload(userId, user.name);
+  if (!built) return { ok: false, error: "That user no longer exists." };
+  const { payload, org, clock, year } = built;
+  const today = clock.dateKey(new Date());
+
+  // Counted by the number itself, so a template deleted and made again under the same code carries on.
+  const stem = letterNumberFor("CUSTOM", year, 0, org.letterNumberPrefix, template.code).replace(/000$/, "");
+  const sequence = (await db.employeeLetter.count({ where: { letterNumber: { startsWith: stem } } })) + 1;
+  const created = await db.employeeLetter.create({
+    data: {
+      userId,
+      type: "CUSTOM",
+      templateId: template.id,
+      templateName: template.name,
+      letterNumber: letterNumberFor("CUSTOM", year, sequence, org.letterNumberPrefix, template.code),
+      subject: mergeLetterTemplate(template.subject, payload, today),
+      issuedOn: clock.calendarDate(new Date()),
+      payload: payload as unknown as Prisma.InputJsonValue,
+      body: mergeLetterTemplate(template.body, payload, today),
+      issuedById: user.id,
+      ...(await signedByDefault()),
+    },
+    select: { id: true },
+  });
+
+  await recordAudit({ userId: user.id, action: "CREATE", entityType: "EmployeeLetter", entityId: created.id, entityLabel: `Drafted from the template ${template.name}` });
+  revalidatePath(`/people/${userId}`);
+  return { ok: true, data: created };
+}
+
+/** A new letter carries the signature when the company has said so — and only where the column is there. */
+async function signedByDefault(): Promise<{ signed?: boolean }> {
+  const settings = await letterSignatureSettings();
+  return settings.migrated ? { signed: settings.signByDefault } : {};
+}
+
+/**
+ * What a letter adds to its row since 21 Oct 2026 — the signature choice, the copy made on issue, and the
+ * template it came from — read by name, and nothing in a workspace not migrated yet.
+ */
+async function letterExtras(id: string) {
+  try {
+    const row = await db.employeeLetter.findUnique({ where: { id }, select: { signed: true, signatureDataUrl: true, templateName: true } });
+    return { signed: row?.signed ?? false, signatureDataUrl: row?.signatureDataUrl ?? null, templateName: row?.templateName ?? null, migrated: true };
+  } catch (err) {
+    if (notMigratedYet(err)) return { signed: false, signatureDataUrl: null, templateName: null, migrated: false };
+    throw err;
+  }
+}
+
 export async function getLetter(id: string) {
   const letter = await db.employeeLetter.findUnique({
     where: { id },
     include: { user: { select: { id: true, userSeq: true, name: true } }, issuedBy: { select: { name: true } } },
   });
   if (!letter) return null;
-  const { manage, canRead } = await access(letter.userId);
+  const { manage, canRead, user } = await access(letter.userId);
   if (!canRead) return null;
   // A draft is HR's working copy — the employee sees a letter once it has been issued.
   if (letter.status === "DRAFT" && !manage) return null;
-  return toPlain(letter);
+  // Switched off for them in the file manager.
+  if (!manage && letter.userId === user.id && (await isFileHidden("LETTER", letter.id))) return null;
+  return toPlain({ ...letter, ...(await letterExtras(id)) });
+}
+
+/**
+ * Whether a draft carries the signatory's signature (owner, 21 Oct 2026). HR's to switch, while it's a draft:
+ * once issued, the letter keeps the copy it was issued with.
+ */
+export async function setLetterSigned(id: string, signed: boolean): Promise<ActionResult<null>> {
+  const letter = await db.employeeLetter.findUnique({ where: { id }, select: { userId: true, status: true } });
+  if (!letter) return { ok: false, error: "That letter no longer exists." };
+  const { manage } = await access(letter.userId);
+  if (!manage) return { ok: false, error: "Only HR can sign a letter." };
+  if (letter.status !== "DRAFT") return { ok: false, error: "An issued letter keeps the signature it was issued with." };
+  await db.employeeLetter.update({ where: { id }, data: { signed } });
+  revalidatePath(`/people/letters/${id}`);
+  return { ok: true, data: null };
 }
 
 export async function updateLetterBody(id: string, body: string): Promise<ActionResult<null>> {
@@ -465,8 +579,18 @@ export async function issueLetter(id: string): Promise<ActionResult<null>> {
   if (!manage) return { ok: false, error: "Only HR can issue a letter." };
   if (letter.status !== "DRAFT") return { ok: false, error: `That letter is already ${letter.status.toLowerCase()}.` };
 
+  // The signature as it is now goes onto the letter with it, so a new image in settings never re-signs a
+  // letter somebody already holds; and it's dated the day it's issued, not the day it was drafted.
+  const extras = await letterExtras(id);
+  const signature = extras.signed ? await letterSignatureImage() : null;
+  const issuedOn = (await workspaceClock()).calendarDate(new Date());
+
   await db.$transaction(async (tx) => {
-    await tx.employeeLetter.update({ where: { id }, data: { status: "ISSUED", issuedById: user.id } });
+    await tx.employeeLetter.update({
+      where: { id },
+      // Signed with no image to sign with is unsigned: what the letter carries is what it was issued with.
+      data: { status: "ISSUED", issuedById: user.id, issuedOn, ...(extras.migrated ? { signatureDataUrl: signature, signed: !!signature } : {}) },
+    });
     await tx.employeeDocument.create({
       data: {
         userId: letter.userId,

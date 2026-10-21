@@ -13,7 +13,9 @@ import { attachToPayslips } from "@/lib/hr/incentive-payout";
 import { hasEffectivePermission } from "@/actions/permission";
 import { dateOnly, daysInMonth, monthLabel, monthRange } from "@/lib/hr/calendar";
 import { lossOfPayDays } from "@/lib/hr/loss-of-pay";
-import { annualCtcOf, computePayslip, salaryPartsInMonth, suggestStructure } from "@/lib/hr/payroll";
+import { hiddenFileIds, isFileHidden } from "@/lib/hr/file-visibility";
+import { computePayslip, salaryPartsInMonth } from "@/lib/hr/payroll";
+import { DEFAULT_SPLIT_RULES, STRUCTURE_EXTRAS_READ, componentsOfStructure, type ComponentDefault, type SplitRules } from "@/lib/hr/salary-split";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { workOutTds } from "@/lib/hr/tds";
 import { computeProfessionalTax, normaliseState, ptRuleFor, seniorCitizenIn } from "@/lib/hr/professional-tax";
@@ -23,6 +25,7 @@ import { branchIdentity } from "@/lib/branches/identity";
 import { payrollRunSchema, payslipAdjustSchema, salaryStructureSchema, taxDeclarationSchema } from "@/lib/validation/hr";
 import { TAX_YEARS, taxYearOf } from "@/lib/hr/income-tax";
 import { lockedRunFrom } from "@/lib/hr/salary-locks";
+import { notMigratedYet } from "@/lib/not-migrated";
 import { workspaceClock } from "@/lib/time/workspace";
 import type { ActionResult } from "@/actions/company";
 
@@ -52,13 +55,15 @@ async function requirePayrollAccess() {
 export async function salaryHistory(userId: string) {
   const { user, allowed } = await requirePayrollAccess();
   if (!allowed && user.id !== userId) return [];
-  return toPlain(
-    await db.salaryStructure.findMany({
-      where: { userId },
-      orderBy: { effectiveFrom: "desc" },
-      include: { createdBy: { select: { name: true } } },
-    }),
-  );
+  const rows = await db.salaryStructure.findMany({
+    where: { userId },
+    orderBy: { effectiveFrom: "desc" },
+    include: { createdBy: { select: { name: true } } },
+    omit: STRUCTURE_EXTRAS_READ,
+  });
+  // The one they're on can be corrected in place until a locked month has paid from it (updateSalaryStructure).
+  const editable = allowed && rows[0] ? !(await lockedRunFrom(rows[0].effectiveFrom)) : false;
+  return toPlain(rows.map((row, i) => ({ ...row, editable: i === 0 && editable })));
 }
 
 /** The structure in force on a date — the newest one that had already started. */
@@ -66,23 +71,33 @@ async function structureOn(userId: string, on: Date) {
   return db.salaryStructure.findFirst({
     where: { userId, effectiveFrom: { lte: on } },
     orderBy: { effectiveFrom: "desc" },
+    omit: STRUCTURE_EXTRAS_READ,
   });
 }
 
 /** Every structure that has taken effect by `on` — split into the month's parts by `salaryPartsInMonth`. */
 async function structuresBy(userId: string, on: Date) {
-  return db.salaryStructure.findMany({ where: { userId, effectiveFrom: { lte: on } }, orderBy: { effectiveFrom: "asc" } });
+  return db.salaryStructure.findMany({ where: { userId, effectiveFrom: { lte: on } }, orderBy: { effectiveFrom: "asc" }, omit: STRUCTURE_EXTRAS_READ });
 }
 
-type Money = Parameters<typeof n>[0];
-const componentsOf = (s: { basic: Money; hra: Money; conveyance: Money; medical: Money; specialAllowance: Money; otherAllowance: Money }) => ({
-  basic: n(s.basic),
-  hra: n(s.hra),
-  conveyance: n(s.conveyance),
-  medical: n(s.medical),
-  specialAllowance: n(s.specialAllowance),
-  otherAllowance: n(s.otherAllowance),
-});
+// A structure as the engine takes it, the company's own components included (src/lib/hr/salary-split.ts).
+const componentsOf = componentsOfStructure;
+
+const BUILT_IN_NAMES = ["basic", "hra", "house rent allowance", "conveyance", "medical", "special allowance", "other allowance"];
+
+/** The company's own components on a structure, checked: named once each, never as one of the six. */
+function customComponentsOrRefusal(lines: { name: string; amount: number }[]): { ok: true; lines: { name: string; amount: number }[] } | { ok: false; error: string } {
+  const seen = new Set<string>();
+  const kept: { name: string; amount: number }[] = [];
+  for (const line of lines) {
+    const key = line.name.trim().toLowerCase();
+    if (BUILT_IN_NAMES.includes(key)) return { ok: false, error: `“${line.name}” is one of the built-in components — enter it there.` };
+    if (seen.has(key)) return { ok: false, error: `“${line.name}” is in the structure twice.` };
+    seen.add(key);
+    if (line.amount > 0) kept.push({ name: line.name.trim(), amount: Math.round(line.amount * 100) / 100 });
+  }
+  return { ok: true, lines: kept };
+}
 
 export async function saveSalaryStructure(input: unknown): Promise<ActionResult<{ id: string }>> {
   const { user, allowed } = await requirePayrollAccess();
@@ -115,20 +130,14 @@ export async function saveSalaryStructure(input: unknown): Promise<ActionResult<
     };
   }
 
+  const custom = customComponentsOrRefusal(data.customComponents);
+  if (!custom.ok) return custom;
+
   const created = await db.salaryStructure.create({
     data: {
       userId: data.userId,
       effectiveFrom,
-      basic: dec(data.basic),
-      hra: dec(data.hra),
-      conveyance: dec(data.conveyance),
-      medical: dec(data.medical),
-      specialAllowance: dec(data.specialAllowance),
-      otherAllowance: dec(data.otherAllowance),
-      pfApplicable: data.pfApplicable,
-      esiApplicable: data.esiApplicable,
-      ptApplicable: data.ptApplicable,
-      note: data.note?.trim() || null,
+      ...structureFields(data, custom.lines),
       createdById: user.id,
     },
     select: { id: true },
@@ -146,11 +155,171 @@ export async function saveSalaryStructure(input: unknown): Promise<ActionResult<
   return { ok: true, data: created };
 }
 
-/** A starting split for a CTC, for the form's "fill from CTC" button. */
-export async function suggestFromCtc(annualCtc: number) {
+type StructureInput = ReturnType<typeof salaryStructureSchema.parse>;
+
+/** What a structure saves, from the form — the six, the flags, the company's own components, and how it was given. */
+function structureFields(data: StructureInput, custom: { name: string; amount: number }[]) {
+  return {
+    basic: dec(data.basic),
+    hra: dec(data.hra),
+    conveyance: dec(data.conveyance),
+    medical: dec(data.medical),
+    specialAllowance: dec(data.specialAllowance),
+    otherAllowance: dec(data.otherAllowance),
+    pfApplicable: data.pfApplicable,
+    esiApplicable: data.esiApplicable,
+    ptApplicable: data.ptApplicable,
+    note: data.note?.trim() || null,
+    customComponents: custom.length ? (custom as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
+    annualCtc: data.annualCtc !== undefined ? dec(data.annualCtc) : null,
+    revisionBasis: data.revisionBasis ?? null,
+    revisionValue: data.revisionBasis && data.revisionValue !== undefined ? dec(data.revisionValue) : null,
+  };
+}
+
+/**
+ * Changes a structure in place (owner, 21 Oct 2026: "HR can edit it") — the one somebody is on, while no
+ * locked month has paid from it. One a locked or paid payslip came from is history: revise instead.
+ */
+export async function updateSalaryStructure(id: string, input: unknown): Promise<ActionResult<{ id: string }>> {
+  const { user, allowed } = await requirePayrollAccess();
+  if (!allowed) return { ok: false, error: "You can't set salaries." };
+  const parsed = salaryStructureSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  const data = parsed.data;
+
+  const existing = await db.salaryStructure.findUnique({ where: { id }, select: { userId: true, effectiveFrom: true, user: { select: { name: true } } } });
+  if (!existing || existing.userId !== data.userId) return { ok: false, error: "That salary structure isn't there any more." };
+  const effectiveFrom = dateOnly(data.effectiveFrom);
+  // Neither the day it ran from nor the day it would run from may be in a locked month.
+  for (const day of [existing.effectiveFrom, effectiveFrom]) {
+    const locked = await lockedRunFrom(day);
+    if (locked) {
+      return {
+        ok: false,
+        error: `Payroll for ${monthLabel(locked.month, locked.year)} is locked and was paid from this structure. Revise the salary from a later date instead.`,
+      };
+    }
+  }
+  if (effectiveFrom.getTime() !== existing.effectiveFrom.getTime()) {
+    const clash = await db.salaryStructure.findFirst({ where: { userId: data.userId, effectiveFrom, id: { not: id } }, select: { id: true } });
+    if (clash) return { ok: false, error: "There's already a structure starting on that date." };
+  }
+  const custom = customComponentsOrRefusal(data.customComponents);
+  if (!custom.ok) return custom;
+
+  await db.salaryStructure.update({ where: { id }, data: { effectiveFrom, ...structureFields(data, custom.lines) } });
+  await recordAudit({
+    userId: user.id,
+    action: "UPDATE",
+    entityType: "SalaryStructure",
+    entityId: id,
+    entityLabel: `Salary from ${data.effectiveFrom} corrected for ${existing.user.name}`,
+  });
+  revalidatePath("/people/payroll");
+  revalidatePath(`/people/${data.userId}`);
+  return { ok: true, data: { id } };
+}
+
+// ─── How a CTC is split, and the company's own components ────────────────────────
+
+/** The split rules, the defaults while nobody has set them, or null where the tables aren't there yet. */
+async function splitRulesNow(): Promise<SplitRules | null> {
+  try {
+    const row = await db.salarySplitRules.findUnique({ where: { id: "global" } });
+    return row
+      ? { basicPercent: n(row.basicPercent), hraPercent: n(row.hraPercent), conveyance: n(row.conveyance), medical: n(row.medical) }
+      : DEFAULT_SPLIT_RULES;
+  } catch (err) {
+    if (notMigratedYet(err)) return null;
+    throw err;
+  }
+}
+
+/**
+ * What the salary dialog splits a CTC with (owner, 21 Oct 2026): the company's rules and its own active
+ * components, with what a split starts each at. Whoever runs payroll; null otherwise.
+ */
+export async function salarySplitSetup(): Promise<{ rules: SplitRules; components: (ComponentDefault & { id: string })[]; migrated: boolean } | null> {
   const { allowed } = await requirePayrollAccess();
   if (!allowed) return null;
-  return suggestStructure(annualCtc);
+  const rules = await splitRulesNow();
+  if (!rules) return { rules: DEFAULT_SPLIT_RULES, components: [], migrated: false };
+  const rows = await db.salaryComponent.findMany({ where: { active: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] });
+  return { rules, components: rows.map((r) => ({ id: r.id, name: r.name, mode: r.mode, value: n(r.value) })), migrated: true };
+}
+
+/** Everything Settings › People › Salary structure shows: the rules, and every component, switched off too. */
+export async function salarySetupForSettings() {
+  const { allowed } = await requirePayrollAccess();
+  if (!allowed) return null;
+  const rules = await splitRulesNow();
+  if (!rules) return null;
+  const rows = await db.salaryComponent.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }] });
+  return { rules, components: rows.map((r) => ({ id: r.id, name: r.name, mode: r.mode, value: n(r.value), active: r.active })) };
+}
+
+export async function saveSplitRules(input: SplitRules): Promise<ActionResult<null>> {
+  const { user, allowed } = await requirePayrollAccess();
+  if (!allowed) return { ok: false, error: "Only whoever runs payroll can change how a CTC is split." };
+  const rules = {
+    basicPercent: Number(input.basicPercent),
+    hraPercent: Number(input.hraPercent),
+    conveyance: Number(input.conveyance),
+    medical: Number(input.medical),
+  };
+  if (!(rules.basicPercent > 0 && rules.basicPercent <= 100)) return { ok: false, error: "Basic is a percentage of the CTC above 0 and up to 100." };
+  if (!(rules.hraPercent >= 0 && rules.hraPercent <= 100)) return { ok: false, error: "HRA is a percentage of basic from 0 to 100." };
+  if (!(rules.conveyance >= 0 && rules.medical >= 0) || !Number.isFinite(rules.conveyance + rules.medical)) {
+    return { ok: false, error: "Conveyance and medical are amounts a month, 0 or more." };
+  }
+  await db.salarySplitRules.upsert({
+    where: { id: "global" },
+    create: { id: "global", ...rules, updatedById: user.id },
+    update: { ...rules, updatedById: user.id },
+  });
+  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "SalarySplitRules", entityId: "global", entityLabel: `CTC split: basic ${rules.basicPercent}%, HRA ${rules.hraPercent}% of basic` });
+  revalidatePath("/settings/salary-structure");
+  return { ok: true, data: null };
+}
+
+/** Adds or changes one of the company's own components. A name is one component, whatever its case. */
+export async function saveSalaryComponent(input: { id?: string; name: string; mode: "FIXED" | "PERCENT_OF_BASIC"; value: number; active?: boolean }): Promise<ActionResult<{ id: string }>> {
+  const { user, allowed } = await requirePayrollAccess();
+  if (!allowed) return { ok: false, error: "Only whoever runs payroll can change the salary components." };
+  const name = (input.name ?? "").trim().replace(/\s+/g, " ");
+  if (!name) return { ok: false, error: "Name the component — “Food allowance”, say." };
+  if (name.length > 40) return { ok: false, error: "Keep the name under 40 characters." };
+  if (BUILT_IN_NAMES.includes(name.toLowerCase())) return { ok: false, error: `${name} is built in already.` };
+  if (input.mode !== "FIXED" && input.mode !== "PERCENT_OF_BASIC") return { ok: false, error: "Choose a fixed amount or a percentage of basic." };
+  const value = Number(input.value);
+  if (!Number.isFinite(value) || value < 0 || (input.mode === "PERCENT_OF_BASIC" && value > 100)) {
+    return { ok: false, error: input.mode === "PERCENT_OF_BASIC" ? "A percentage of basic from 0 to 100." : "An amount a month, 0 or more." };
+  }
+  const clash = await db.salaryComponent.findFirst({ where: { name: { equals: name, mode: "insensitive" }, ...(input.id ? { id: { not: input.id } } : {}) }, select: { id: true } });
+  if (clash) return { ok: false, error: `There's already a component called ${name}.` };
+  const data = { name, mode: input.mode, value: dec(value), ...(input.active !== undefined ? { active: input.active } : {}) };
+  const row = input.id
+    ? await db.salaryComponent.update({ where: { id: input.id }, data, select: { id: true } })
+    : await db.salaryComponent.create({ data: { ...data, sortOrder: await db.salaryComponent.count() }, select: { id: true } });
+  await recordAudit({ userId: user.id, action: input.id ? "UPDATE" : "CREATE", entityType: "SalaryComponent", entityId: row.id, entityLabel: `Salary component ${name}` });
+  revalidatePath("/settings/salary-structure");
+  return { ok: true, data: row };
+}
+
+/**
+ * Removes one of the company's own components from the list. Structures that carry it keep it — they hold
+ * its name and amount — so nobody's pay changes; it's only no longer offered.
+ */
+export async function deleteSalaryComponent(id: string): Promise<ActionResult<null>> {
+  const { user, allowed } = await requirePayrollAccess();
+  if (!allowed) return { ok: false, error: "Only whoever runs payroll can change the salary components." };
+  const row = await db.salaryComponent.findUnique({ where: { id }, select: { name: true } });
+  if (!row) return { ok: false, error: "That component isn't there any more." };
+  await db.salaryComponent.delete({ where: { id } });
+  await recordAudit({ userId: user.id, action: "DELETE", entityType: "SalaryComponent", entityId: id, entityLabel: `Salary component ${row.name}` });
+  revalidatePath("/settings/salary-structure");
+  return { ok: true, data: null };
 }
 
 // ─── The monthly run ──────────────────────────────────────────────────────────
@@ -342,6 +511,9 @@ export async function runPayroll(input: unknown): Promise<ActionResult<{ id: str
       medical: dec(result.components.medical),
       specialAllowance: dec(result.components.specialAllowance),
       otherAllowance: dec(result.components.otherAllowance),
+      // The company's own components, pro-rated like the six; written only where there are some, so a
+      // workspace not migrated yet — which has none — writes what it always did.
+      ...(result.components.custom?.length ? { customEarnings: result.components.custom as unknown as Prisma.InputJsonValue } : {}),
       incentive: dec(result.incentive),
       grossEarnings: dec(result.grossEarnings),
       pfEmployee: dec(result.pfEmployee),
@@ -759,9 +931,11 @@ export async function saveTaxDeclaration(input: unknown): Promise<ActionResult<n
 
 export async function myPayslips() {
   const user = await requireModuleUser("payroll");
+  // One an admin has switched off in the file manager is kept from them here too (src/lib/hr/file-visibility.ts).
+  const hidden = await hiddenFileIds(user.id, "PAYSLIP");
   return toPlain(
     await db.payslip.findMany({
-      where: { userId: user.id, run: { status: { in: ["LOCKED", "PAID"] } } },
+      where: { userId: user.id, run: { status: { in: ["LOCKED", "PAID"] } }, ...(hidden.size ? { id: { notIn: [...hidden] } } : {}) },
       orderBy: [{ run: { year: "desc" } }, { run: { month: "desc" } }],
       include: { run: { select: { month: true, year: true, status: true, paidAt: true } } },
     }),
@@ -773,7 +947,7 @@ export async function getPayslip(id: string) {
   const user = await requireModuleUser("payroll");
   const slip = await db.payslip.findUnique({
     where: { id },
-    omit: { incomeTaxBasis: false, taxWorking: false },
+    omit: { incomeTaxBasis: false, taxWorking: false, customEarnings: false },
     include: {
       run: { select: { month: true, year: true, status: true, paidAt: true } },
       user: {
@@ -787,8 +961,11 @@ export async function getPayslip(id: string) {
     },
   });
   if (!slip) return null;
-  if (slip.userId !== user.id && !(await hasEffectivePermission(user.id, "payroll.manage"))) return null;
+  const payroll = await hasEffectivePermission(user.id, "payroll.manage");
+  if (slip.userId !== user.id && !payroll) return null;
   // Drafts are working figures — nobody but payroll should see one and think it is their pay.
   if (slip.run.status === "DRAFT" && slip.userId === user.id) return null;
+  // Switched off for them in the file manager: theirs to read only once it's switched back on.
+  if (slip.userId === user.id && !payroll && (await isFileHidden("PAYSLIP", slip.id))) return null;
   return toPlain(slip);
 }

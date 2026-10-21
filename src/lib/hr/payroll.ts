@@ -20,7 +20,15 @@ export type SalaryComponents = {
   medical: number;
   specialAllowance: number;
   otherAllowance: number;
+  /**
+   * The company's own components besides the six (owner, 21 Oct 2026) — a food allowance, an LTA. Part
+   * of gross like the six, so ESI and professional tax count them and PF (on basic) doesn't.
+   */
+  custom?: SalaryCustomLine[];
 };
+
+/** One of the company's own pay components, in a structure or on a payslip: its name and monthly rupees. */
+export type SalaryCustomLine = { name: string; amount: number };
 
 export type StatutoryFlags = {
   pfApplicable: boolean;
@@ -38,7 +46,8 @@ export function roundRupee(value: number) {
 }
 
 export function monthlyGross(c: SalaryComponents) {
-  return round2(c.basic + c.hra + c.conveyance + c.medical + c.specialAllowance + c.otherAllowance);
+  const custom = (c.custom ?? []).reduce((sum, line) => sum + line.amount, 0);
+  return round2(c.basic + c.hra + c.conveyance + c.medical + c.specialAllowance + c.otherAllowance + custom);
 }
 
 // ─── Provident Fund ───────────────────────────────────────────────────────────
@@ -354,7 +363,16 @@ export function computePayslip(input: PayslipInput): PayslipResult {
   });
   const lopDays = round2(parts.reduce((sum, p) => sum + p.lop, 0));
   const paidDays = round2(parts.reduce((sum, p) => sum + p.paid, 0));
-  const earned = (key: keyof SalaryComponents) => round2(parts.reduce((sum, p) => sum + p.components[key] * (p.paid / monthDays), 0));
+  type Fixed = Exclude<keyof SalaryComponents, "custom">;
+  const earned = (key: Fixed) => round2(parts.reduce((sum, p) => sum + p.components[key] * (p.paid / monthDays), 0));
+  // The company's own components, by name, each part at its own rate — pro-rated exactly as the six are.
+  const customNames = [...new Set(parts.flatMap((p) => (p.components.custom ?? []).map((line) => line.name)))];
+  const custom = customNames
+    .map((name) => ({
+      name,
+      amount: round2(parts.reduce((sum, p) => sum + (p.components.custom?.find((line) => line.name === name)?.amount ?? 0) * (p.paid / monthDays), 0)),
+    }))
+    .filter((line) => line.amount > 0);
   const components: SalaryComponents = {
     basic: earned("basic"),
     hra: earned("hra"),
@@ -362,6 +380,7 @@ export function computePayslip(input: PayslipInput): PayslipResult {
     medical: earned("medical"),
     specialAllowance: earned("specialAllowance"),
     otherAllowance: earned("otherAllowance"),
+    ...(custom.length ? { custom } : {}),
   };
   // Added after the loss-of-pay factor, not inside it: the components above are pay for time, and
   // this is pay for result.
@@ -484,29 +503,7 @@ export function computePayslip(input: PayslipInput): PayslipResult {
   };
 }
 
-/**
- * A CTC split into monthly components, as a starting point for a new structure.
- *
- * A suggestion, not a rule — every company splits differently, and the form lets it be overridden.
- * Basic at 40% of CTC and HRA at half of basic is the common Indian arrangement, and keeps basic
- * high enough that gratuity and PF are not artificially suppressed.
- */
-export function suggestStructure(annualCtc: number): SalaryComponents & { employerPf: number } {
-  const monthly = annualCtc / 12;
-  const basic = round2(monthly * 0.4);
-  const hra = round2(basic * 0.5);
-  const employerPf = computePf(basic, { applicable: true }).employer;
-  const remaining = round2(monthly - basic - hra - employerPf);
-  return {
-    basic,
-    hra,
-    conveyance: 0,
-    medical: 0,
-    specialAllowance: Math.max(remaining, 0),
-    otherAllowance: 0,
-    employerPf,
-  };
-}
+// A CTC split into a structure, and revisions by a percentage or an amount: src/lib/hr/salary-split.ts.
 
 /** Annual cost to company implied by a monthly structure. */
 export function annualCtcOf(c: SalaryComponents, flags: Pick<StatutoryFlags, "pfApplicable" | "esiApplicable">) {

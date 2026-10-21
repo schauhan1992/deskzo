@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { isVendorSide } from "@/lib/companies/roles";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
@@ -55,7 +56,9 @@ const NO_RIGHT = "Changing a company's bank accounts needs the “Manage finance
 async function payee(userId: string, companyId: string): Promise<{ ok: true; id: string; name: string; seq: number } | { ok: false; error: string }> {
   const company = await db.company.findUnique({ where: { id: companyId }, select: { id: true, name: true, companySeq: true, ownerUserId: true, relationshipType: true } });
   if (!company || !(await canSeeCompany(userId, company))) return { ok: false, error: NOT_HERE };
-  if (!holdsBankAccounts(company.relationshipType)) return { ok: false, error: NOT_A_PAYEE };
+  // Its kind, or the vendor role a customer was given (src/lib/companies/roles.ts) — the company page
+  // offers its bank accounts either way, and this refused the second, so the card never appeared.
+  if (!holdsBankAccounts(company.relationshipType) && !(await isVendorSide(company))) return { ok: false, error: NOT_A_PAYEE };
   return { ok: true, id: company.id, name: company.name, seq: company.companySeq };
 }
 

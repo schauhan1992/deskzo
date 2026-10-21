@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ifscSchema } from "@/lib/ifsc";
 
 export const employmentTypeValues = ["FULL_TIME", "PART_TIME", "CONTRACT", "INTERN", "CONSULTANT"] as const;
 export const exitTypeValues = ["RESIGNED", "TERMINATED", "RETIRED", "CONTRACT_ENDED", "ABSCONDED"] as const;
@@ -66,13 +67,8 @@ const pan = z
   .optional()
   .or(z.literal(""));
 
-const ifsc = z
-  .string()
-  .trim()
-  .toUpperCase()
-  .regex(/^[A-Z]{4}0[A-Z0-9]{6}$/, "An IFSC is four letters, a zero, then six characters.")
-  .optional()
-  .or(z.literal(""));
+// Cleaned of what a paste carries before it's checked (src/lib/ifsc.ts).
+const ifsc = ifscSchema("An IFSC is four letters, a zero, then six characters — like HDFC0001234.");
 
 export const employeeProfileSchema = z.object({
   userId: z.string().min(1),
@@ -191,6 +187,18 @@ export const salaryStructureSchema = z.object({
   esiApplicable: z.boolean().default(true),
   ptApplicable: z.boolean().default(true),
   note: optionalText(200),
+  /**
+   * The company's own components besides the six (owner, 21 Oct 2026), monthly rupees. Names are checked
+   * against each other and the six in src/actions/payroll.ts.
+   */
+  customComponents: z
+    .array(z.object({ name: z.string().trim().min(1, "Name every component.").max(40, "Keep a component's name under 40 characters."), amount: z.coerce.number().min(0) }))
+    .max(15, "Up to 15 of the company's own components.")
+    .default([]),
+  /** The CTC it was split from, and how a revision was given — kept for the record and the letter. */
+  annualCtc: z.coerce.number().positive().max(1e10).optional(),
+  revisionBasis: z.enum(["PERCENT", "AMOUNT", "CTC"]).optional(),
+  revisionValue: z.coerce.number().min(-1e10).max(1e10).optional(),
 });
 
 export const payrollRunSchema = z.object({

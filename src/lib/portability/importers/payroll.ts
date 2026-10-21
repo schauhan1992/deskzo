@@ -1,4 +1,5 @@
 import { Prisma, type TaxRegime } from "@prisma/client";
+import { IFSC_PATTERN, normaliseIfsc } from "@/lib/ifsc";
 import { db } from "@/lib/db";
 import { recordAudit } from "@/lib/audit";
 import { monthLabel } from "@/lib/hr/calendar";
@@ -227,7 +228,7 @@ async function resolve(row: Record<string, string>): Promise<Resolved<Row>> {
   const bankName = r.text(COLUMNS.bankName);
   if (bankName) ids.bankName = bankName.slice(0, 80);
   ids.bankAccountNumber = idNumber(r, COLUMNS.account, /^[A-Z0-9]{6,32}$/, "an account number is 6 to 32 letters or digits");
-  ids.bankIfsc = idNumber(r, COLUMNS.ifsc, /^[A-Z]{4}0[A-Z0-9]{6}$/, "an IFSC is four letters, a zero, then six characters");
+  ids.bankIfsc = idNumber(r, COLUMNS.ifsc, IFSC_PATTERN, "an IFSC is four letters, a zero, then six characters", normaliseIfsc);
   ids.panNumber = idNumber(r, COLUMNS.pan, /^[A-Z]{5}[0-9]{4}[A-Z]$/, "a PAN is five letters, four digits, then a letter");
   // The whole number, its last four, or the masked form exports print (XXXX XXXX 1234): the digits decide.
   const aadhaar = idNumber(r, COLUMNS.aadhaar, /^(\d{4}|\d{12})$/, "Aadhaar is its 12 digits or the last four", (v) => v.replace(/\D/g, ""));

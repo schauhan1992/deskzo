@@ -53,11 +53,12 @@ export const guide: SeedGuide = {
         "Set or revise someone's salary",
         ol(
           runs("Open the person in ", { b: "People › People" }, " and, on the ", { b: "Salary" }, " card, select ", { b: "Set salary" }, " (or ", { b: "Revise" }, ")."),
-          runs("Type the ", { b: "Annual CTC" }, " and select ", { b: "Split it" }, " for a starting split — basic at 40%, HRA at half of basic. Edit any figure."),
-          runs("Set ", { b: "Effective from" }, " and the amounts for ", { b: "Basic" }, ", ", { b: "HRA" }, ", ", { b: "Conveyance" }, ", ", { b: "Medical" }, ", ", { b: "Special allowance" }, " and ", { b: "Other" }, "."),
-          runs("Tick whether ", { b: "Provident fund" }, ", ", { b: "ESI" }, " and ", { b: "Professional tax" }, " apply, check the monthly gross and annual cost to company, and select ", { b: "Save structure" }, "."),
+          runs("Type the ", { b: "Annual CTC" }, ". It's split as you type, by the rules in ", { b: "Settings › Salary structure" }, ", with your own components in and the special allowance taking up the rest, so the structure costs exactly the CTC."),
+          runs("To revise, choose ", { b: "Revise by" }, " — ", { b: "A percentage" }, ", ", { b: "An amount a year (₹)" }, " or ", { b: "A new CTC (₹)" }, " — and type it. ", { b: "The breakup" }, " keeps theirs, scaled up, or splits it again by the company's rules."),
+          runs("Change any part. With ", { b: "Keep to the CTC" }, " ticked, the special allowance takes up the difference. Add one of the company's own components, or another typed there, from ", { b: "+ Add a component…" }, "."),
+          runs("Set ", { b: "Effective from" }, ", tick whether ", { b: "Provident fund" }, ", ", { b: "ESI" }, " and ", { b: "Professional tax" }, " apply, check the monthly gross and annual cost to company, and select ", { b: "Save structure" }, "."),
         ),
-        p("A revision keeps the earlier structures as history. A structure can't start on or before a month that is already locked."),
+        p(runs("A revision keeps the earlier structures as history, and the card shows how it was given (+10%, +₹60,000 a year). A structure can't start on or before a month that is already locked. To correct the structure someone is on, select ", { b: "Edit" }, " — offered until a locked month has paid from it.")),
       ),
       task(
         "Record an income tax declaration",
@@ -120,6 +121,12 @@ export const guide: SeedGuide = {
         "Salary",
         "On each person's record in People › People",
         p("The person's salary structure: the components, the date it takes effect, and whether provident fund, ESI and professional tax apply. Earlier structures are kept under History. Payroll uses the structure in force for each month."),
+      ),
+      setting(
+        "Salary structure",
+        "Settings › Salary structure",
+        p(runs("How a CTC is split: ", { b: "Basic (% of the CTC)" }, ", ", { b: "HRA (% of basic)" }, ", and fixed ", { b: "Conveyance" }, " and ", { b: "Medical" }, " a month. The example underneath shows a ₹6,00,000 CTC split by what you've typed.")),
+        p(runs("Under ", { b: "Your own components" }, ", add earnings besides the built-in ones — a food or shift allowance — at ", { b: "₹ a month" }, " or ", { b: "% of basic" }, ". They're offered on every salary, count towards gross, ESI and professional tax, and show on the payslip by name. Untick ", { b: "Offered" }, " or remove one to stop offering it; salaries that have it keep it.")),
       ),
       setting(
         "Provident fund, ESI and Professional tax",
