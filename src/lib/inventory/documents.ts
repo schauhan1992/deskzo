@@ -90,8 +90,10 @@ export async function applyTradeDocumentStock(tx: Tx, documentId: string, userId
   if (!applies) return [];
   const lines = stockLines(doc);
   if (lines.length === 0) return [];
-  // An invoice raised from a challan that already took the goods out moves nothing more.
+  // An invoice raised from a challan that already took the goods out moves nothing more — nor does a challan
+  // issued late, after the invoice raised from it took them.
   if (doc.docType === "INVOICE" && (await challanIssuedStock(tx, doc.sourceDocumentId))) return [];
+  if (doc.docType === "DELIVERY_CHALLAN" && (await invoiceFromChallanIssuedStock(tx, doc.id))) return [];
 
   if (doc.docType === "BILL") {
     const received = await receiptsForBill(tx, doc);
@@ -201,6 +203,13 @@ async function challanIssuedStock(tx: Tx, documentId: string | null): Promise<bo
   const source = await tx.tradeDocument.findUnique({ where: { id: documentId }, select: { docType: true } });
   if (source?.docType !== "DELIVERY_CHALLAN") return false;
   const live = await tx.stockMovement.count({ where: { tradeDocumentId: documentId, reversesId: null, reversedBy: { is: null } } });
+  return live > 0;
+}
+
+async function invoiceFromChallanIssuedStock(tx: Tx, challanId: string): Promise<boolean> {
+  const live = await tx.stockMovement.count({
+    where: { tradeDocument: { sourceDocumentId: challanId, docType: "INVOICE" }, reversesId: null, reversedBy: { is: null } },
+  });
   return live > 0;
 }
 

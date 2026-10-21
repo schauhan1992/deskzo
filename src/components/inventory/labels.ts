@@ -24,6 +24,15 @@ export const stockTypePlural: Record<StockDocumentType, string> = {
   PURCHASE_RETURN: "Purchase returns",
 };
 
+/** The "New …" buttons — the words the help guide tells people to look for. */
+export const stockTypeNew: Record<StockDocumentType, string> = {
+  GRN: "New goods receipt",
+  TRANSFER: "New transfer",
+  ADJUSTMENT: "New adjustment",
+  PHYSICAL_COUNT: "New physical count",
+  PURCHASE_RETURN: "New purchase return",
+};
+
 export const stockTypeHint: Record<StockDocumentType, string> = {
   GRN: "Goods in from a vendor — against a purchase order or not — with what was accepted and what was rejected.",
   TRANSFER: "Stock sent from one warehouse to another. It leaves when sent and arrives when received.",

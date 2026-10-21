@@ -5,7 +5,7 @@ import { inventoryCapabilities, listWarehouses } from "@/actions/inventory";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { InventoryNotReady } from "@/components/inventory/not-ready";
 import { StockDocumentForm } from "@/components/inventory/stock-document-form";
-import { isStockDocumentType, STOCK_DOCUMENT_TYPES, stockTypeHint, stockTypeLabel, stockTypeNeeds } from "@/components/inventory/labels";
+import { isStockDocumentType, STOCK_DOCUMENT_TYPES, stockTypeHint, stockTypeLabel, stockTypeNeeds, stockTypeNew } from "@/components/inventory/labels";
 import { Card, CardContent } from "@/components/ui/card";
 import { workspaceClock } from "@/lib/time/workspace";
 
@@ -45,7 +45,7 @@ export default async function NewStockVoucherPage({ searchParams }: { searchPara
   if (!first) {
     return (
       <div className="space-y-4">
-        <h1 className="text-xl font-semibold text-text">New {stockTypeLabel[type].toLowerCase()}</h1>
+        <h1 className="text-xl font-semibold text-text">{stockTypeNew[type]}</h1>
         <p className="text-sm text-muted">
           There&apos;s no open warehouse. <Link href="/items/warehouses" className="text-brand hover:underline">Add one</Link> first.
         </p>

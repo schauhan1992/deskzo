@@ -306,6 +306,37 @@ async function run(scratchName: string) {
   ok("cancelling the invoice puts the 3 back at ₹300", cancelled.ok && (await balance(A.id)).qty === 10 && (await balance(A.id)).value === 1000, cancelled.ok ? await balance(A.id) : cancelled.error);
   ok("  and reverses the cost-of-sales entry", !!(await entry(`stock:doc:${invoice.id}:reversal`)));
 
+  // ── Delivery challan → invoice ─────────────────────────────────────────────────────────────────
+  section("A delivery challan takes the goods out; the invoice raised from it doesn't again");
+  const beforeChallan = await balance(A.id);
+  const salesDoc = (docNumber: string, docType: "DELIVERY_CHALLAN" | "INVOICE", sourceDocumentId: string | null = null) =>
+    db.tradeDocument.create({
+      data: {
+        docNumber, docType, direction: "SALES", status: "DRAFT", companyId: customer.id, createdById: owner.id, sourceDocumentId,
+        issueDate: new Date(`${day}T06:00:00.000Z`), currency: "INR", exchangeRate: 1, subtotal: 1000, taxableValue: 1000, igstAmount: docType === "INVOICE" ? 180 : 0, total: docType === "INVOICE" ? 1180 : 1000,
+        lines: { create: [{ name: "A", itemId: A.id, quantity: 2, unitPrice: 500, taxRatePercent: 18, taxableValue: 1000, igstAmount: docType === "INVOICE" ? 180 : 0, lineTotal: docType === "INVOICE" ? 1180 : 1000, sortOrder: 0 }] },
+      },
+      select: { id: true },
+    });
+  const challan = await salesDoc(`${TAG}-DC-001`, "DELIVERY_CHALLAN");
+  as(owner);
+  const challanIssued = await docs.issueTradeDocument({ id: challan.id });
+  ok("issuing the challan takes 2 out", challanIssued.ok && (await balance(A.id)).qty === beforeChallan.qty - 2, challanIssued.ok ? await balance(A.id) : challanIssued.error);
+  const challanCogs = await entry(`stock:doc:${challan.id}`);
+  ok("  Dr Cost of Goods Sold / Cr Stock in Hand ₹200", challanCogs?.on("COGS") === 200 && challanCogs.on("INVENTORY") === -200);
+  const fromChallan = await salesDoc(`${TAG}-INV-002`, "INVOICE", challan.id);
+  const invoiceIssued = await docs.issueTradeDocument({ id: fromChallan.id });
+  ok("the invoice raised from it issues without moving stock again", invoiceIssued.ok && (await balance(A.id)).qty === beforeChallan.qty - 2 && (await db.stockMovement.count({ where: { tradeDocumentId: fromChallan.id } })) === 0, invoiceIssued.ok ? "" : invoiceIssued.error);
+  ok("  nor costing it twice", !(await entry(`stock:doc:${fromChallan.id}`)));
+  const challanCancel = await docs.setTradeDocumentStatus(challan.id, "CANCELLED", "Raised in error");
+  ok("the challan can't be cancelled while its invoice stands", !challanCancel.ok && /cancel the invoice first/.test(challanCancel.ok ? "" : challanCancel.error), challanCancel.ok ? "CANCELLED" : challanCancel.error);
+  ok("  and nothing moved", (await balance(A.id)).qty === beforeChallan.qty - 2 && (await db.tradeDocument.findUnique({ where: { id: challan.id }, select: { status: true } }))?.status === "ISSUED");
+  const invoiceCancel = await docs.setTradeDocumentStatus(fromChallan.id, "CANCELLED", "Raised in error");
+  ok("cancelling the invoice moves no stock — it never moved any", invoiceCancel.ok && (await balance(A.id)).qty === beforeChallan.qty - 2, invoiceCancel.ok ? "" : invoiceCancel.error);
+  const challanCancel2 = await docs.setTradeDocumentStatus(challan.id, "CANCELLED", "Goods came back");
+  ok("then the challan cancels, and the 2 come back at their value", challanCancel2.ok && (await balance(A.id)).qty === beforeChallan.qty && (await balance(A.id)).value === beforeChallan.value, challanCancel2.ok ? await balance(A.id) : challanCancel2.error);
+  ok("  its cost-of-sales entry reversed", !!(await entry(`stock:doc:${challan.id}:reversal`)));
+
   // ── Idempotency ────────────────────────────────────────────────────────────────────────────────
   section("The same key moves stock once");
   const first = await move({ itemId: A.id, warehouseId: "wh_main", quantity: 2, type: "RECEIVED", idempotencyKey: `${TAG}:once`, unitCost: 100 });

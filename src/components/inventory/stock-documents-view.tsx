@@ -21,6 +21,7 @@ import {
   stockStatusTone,
   stockTypeLabel,
   stockTypeNeeds,
+  stockTypeNew,
   stockTypePlural,
 } from "@/components/inventory/labels";
 
@@ -63,7 +64,7 @@ export async function StockDocumentsView({ params, basePath, fixedType, title, i
             <Link key={t} href={`/items/stock/new?type=${t}`}>
               <Button size="sm" variant={t === (fixedType ?? type) ? "primary" : "secondary"}>
                 <Plus aria-hidden="true" className="h-3.5 w-3.5" />
-                New {stockTypeLabel[t].toLowerCase()}
+                {stockTypeNew[t]}
               </Button>
             </Link>
           ))}

@@ -72,8 +72,8 @@ export function StockDocumentActions({
           </Link>
         )}
         {isDraft && can.post && needsApproval && (
-          <Button size="sm" disabled={pending} onClick={() => run(() => submitStockDocument(id), "Sent for approval.")}>
-            Send for approval
+          <Button size="sm" disabled={pending} onClick={() => run(() => submitStockDocument(id), "Submitted for approval.")}>
+            Submit for approval
           </Button>
         )}
         {isDraft && can.post && !needsApproval && (

@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { ActionNotice } from "@/components/ui/action-notice";
-import { qty, rupees, stockTypeHint, stockTypeLabel } from "@/components/inventory/labels";
+import { qty, rupees, stockTypeHint, stockTypeLabel, stockTypeNew } from "@/components/inventory/labels";
 
 /**
  * Writing a stock voucher (owner, 22 Oct 2026): one form for the five kinds, showing each the columns it
@@ -230,7 +230,7 @@ export function StockDocumentForm({
           ← {isGrn ? "Goods receipts" : "Stock vouchers"}
         </Link>
         <h1 className="mt-1 text-xl font-semibold text-text">
-          {initial.id ? `Edit ${stockTypeLabel[type].toLowerCase()} ${initial.number ?? ""}` : `New ${stockTypeLabel[type].toLowerCase()}`}
+          {initial.id ? `Edit ${stockTypeLabel[type].toLowerCase()} ${initial.number ?? ""}` : stockTypeNew[type]}
         </h1>
         <p className="mt-1 max-w-3xl text-sm text-muted">{stockTypeHint[type]} Saving keeps it as a draft; it moves stock when posted.</p>
       </div>
