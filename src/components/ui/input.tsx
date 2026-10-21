@@ -1,4 +1,5 @@
 import { forwardRef, type InputHTMLAttributes, type TextareaHTMLAttributes, type SelectHTMLAttributes } from "react";
+import { DateField } from "@/components/ui/date-field";
 import { cn } from "@/lib/utils";
 
 const fieldClasses = cn(
@@ -11,8 +12,17 @@ const fieldClasses = cn(
   "disabled:cursor-not-allowed disabled:opacity-55 disabled:bg-surface-sunken",
 );
 
-export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
-  ({ className, ...props }, ref) => <input ref={ref} className={cn(fieldClasses, className)} {...props} />,
+const opensCalendar = (type: string | undefined): type is "date" | "datetime-local" | "month" =>
+  type === "date" || type === "datetime-local" || type === "month";
+
+export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(({ className, type, ...props }, ref) =>
+  // A date, a date and time, or a month opens the app's own calendar (owner, 19 Oct 2026), not the
+  // browser's: still the same input underneath, so forms, react-hook-form and `onChange` don't notice.
+  opensCalendar(type) ? (
+    <DateField ref={ref} type={type} className={cn(fieldClasses, className)} {...props} />
+  ) : (
+    <input ref={ref} type={type} className={cn(fieldClasses, className)} {...props} />
+  ),
 );
 Input.displayName = "Input";
 

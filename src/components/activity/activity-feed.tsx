@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 import { companyActivity, leadActivity, peopleActivity, type ActivityQuery } from "@/actions/activity-feed";
 import { ACTIVITY_GROUPS, type ActivityGroupKey, type ActivityItem, type ActivityPage } from "@/lib/activity/types";
-import { Select } from "@/components/ui/input";
+import { Input, Select } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
 type Source = { kind: "company" | "lead" | "person"; id: string };
@@ -133,11 +133,11 @@ export function ActivityFeed({
         )}
         <label className="flex items-center gap-1 text-muted">
           From
-          <input type="date" className="h-8 rounded-md border border-line-strong bg-surface px-2 text-sm text-text" value={filters.from ?? ""} disabled={pending} onChange={(e) => change({ from: e.target.value || null })} />
+          <Input type="date" className="h-8 w-36 rounded-md px-2" value={filters.from ?? ""} disabled={pending} onChange={(e) => change({ from: e.target.value || null })} />
         </label>
         <label className="flex items-center gap-1 text-muted">
           to
-          <input type="date" className="h-8 rounded-md border border-line-strong bg-surface px-2 text-sm text-text" value={filters.to ?? ""} disabled={pending} onChange={(e) => change({ to: e.target.value || null })} />
+          <Input type="date" className="h-8 w-36 rounded-md px-2" value={filters.to ?? ""} disabled={pending} onChange={(e) => change({ to: e.target.value || null })} />
         </label>
       </div>
 
