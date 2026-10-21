@@ -104,8 +104,12 @@ const SIGNATURE_CLICK = /^\/s\/[A-Za-z0-9._-]{20,120}$/;
 const REFERRAL_COOKIE = "deskzo_ref";
 const REFERRAL_CODE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
-/** Reached with nobody signed in. Matched by whole segment: "/c" is a digital card (/c/<name>), never "/cards". */
-const PUBLIC_PREFIXES = ["/login", "/handoff", "/switch", "/link/start", "/link/complete", "/forgot-password", "/reset-password", "/join", "/review", "/preferences", "/forms", "/track", "/kiosk", "/portal", "/c", "/book"];
+/**
+ * Reached with nobody signed in. Matched by whole segment: "/c" is a digital card (/c/<name>), never "/cards".
+ * "/sw.js" is the home-screen app's service worker (src/lib/pwa.ts): it keeps nothing of the workspace, and a
+ * browser must fetch it without being sent to sign-in, which it can't follow.
+ */
+const PUBLIC_PREFIXES = ["/login", "/handoff", "/switch", "/link/start", "/link/complete", "/forgot-password", "/reset-password", "/join", "/review", "/preferences", "/forms", "/track", "/kiosk", "/portal", "/c", "/book", "/sw.js"];
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));

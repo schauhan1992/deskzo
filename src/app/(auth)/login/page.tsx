@@ -8,6 +8,10 @@ import { workspaceClock } from "@/lib/time/workspace";
 import { getBranding } from "@/actions/branding";
 import { signInProviders } from "@/lib/workplace/settings";
 import { SIGN_IN_IDS, SIGN_IN_NAMES, providerOfSignIn, sayEither } from "@/lib/workplace/providers";
+import { appMetadata } from "@/lib/pwa";
+
+/** Installable from here too: an iPhone added to the home screen before signing in opens the workspace (src/lib/pwa.ts). */
+export const generateMetadata = appMetadata;
 
 export default async function LoginPage({
   searchParams,

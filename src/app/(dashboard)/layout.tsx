@@ -41,6 +41,8 @@ import { recordPageView } from "@/lib/security/page-view";
 import { DlpGuard } from "@/components/security/dlp-guard";
 import { Watermark } from "@/components/security/watermark";
 import { MaintenanceBanner } from "@/components/layout/maintenance-banner";
+import { InstallApp } from "@/components/layout/install-app";
+import { appMetadata, homeScreenName } from "@/lib/pwa";
 import { getCopilotAvailability } from "@/actions/copilot";
 import { CopilotButton } from "@/components/copilot/copilot-panel";
 import { HeaderSearch } from "@/components/layout/header-search";
@@ -77,6 +79,9 @@ function ChatGate({ on, meId, unread, sound, children }: { on: boolean; meId: st
 
 /** Nothing unread on either side — for nobody signed in, or a count that could not be read. */
 const NO_UNREAD = { deskzo: 0, company: 0 };
+
+/** Installable as the workspace's app on a phone's home screen — an iPhone's above all (src/lib/pwa.ts). */
+export const generateMetadata = appMetadata;
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [session, requestHeaders, branding, viewAs, securityPolicy, wording, zone] = await Promise.all([
@@ -366,6 +371,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
         */}
         <div className="mx-auto w-full max-w-[1600px] px-4 md:px-6">
           <PlatformAnnouncements items={announcements} />
+          {/* Its service worker, and on an iPhone in Safari how to add it to the home screen — not to an admin viewing as somebody. */}
+          <InstallApp appName={homeScreenName(branding)} hint={!!session?.user && !viewAs} />
           {billing && (
             <Link
               href="/settings/billing"
