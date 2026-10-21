@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isModuleEnabled } from "@/actions/module";
-import { accountsReportAccess, type AccountsReportKey } from "@/actions/accounts-reports";
+import { accountsReportAccess, registerParty, type AccountsReportKey } from "@/actions/accounts-reports";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { getOrganisation } from "@/lib/organisation";
 import { ReportHeader } from "@/components/accounting/report-chrome";
@@ -10,6 +10,7 @@ import { SearchParamInput } from "@/components/ui/search-param-input";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
 import { TabNav } from "@/components/ui/tab-nav";
 import { AccountsReportBody } from "@/components/reports/accounts/accounts-report-body";
+import { PartyParamFilter } from "@/components/reports/accounts/party-param-filter";
 import { indiaClock } from "@/lib/time/zone";
 import { financialYearBounds } from "@/lib/india-time";
 
@@ -45,6 +46,8 @@ export default async function RegistersPage({ searchParams }: { searchParams: Pr
   const today = indiaClock.today();
   const yearly = register === "expenses" || register === "gst";
   const fromFallback = register === "audit" ? undefined : yearly ? financialYearBounds(new Date()).from : `${today.slice(0, 7)}-01`;
+  const byParty = register === "sales" || register === "purchase";
+  const party = byParty ? await registerParty(params.party) : null;
 
   return (
     <div className="animate-fade-rise">
@@ -60,7 +63,13 @@ export default async function RegistersPage({ searchParams }: { searchParams: Pr
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        {(register === "sales" || register === "purchase") && <SearchParamInput paramName="q" placeholder={register === "sales" ? "Number or customer…" : "Number or vendor…"} className="w-72" />}
+        {byParty && (
+          <>
+            <SearchParamInput paramName="q" placeholder={register === "sales" ? "Number or customer…" : "Number or vendor…"} className="w-72" />
+            {/* Keyed on the register, so switching tabs doesn't carry one direction's party into the other's box. */}
+            <PartyParamFilter key={register} direction={register === "sales" ? "SALES" : "PURCHASE"} selected={party} />
+          </>
+        )}
         {register === "journal" && <SearchParamInput paramName="q" placeholder="Entry number or narration…" className="w-72" />}
         {register === "audit" && (
           <>
@@ -77,7 +86,7 @@ export default async function RegistersPage({ searchParams }: { searchParams: Pr
 
       <AccountsReportBody
         report={register}
-        params={{ from: params.from, to: params.to, q: params.q, party: params.party, entity: params.entity }}
+        params={{ from: params.from, to: params.to, q: params.q, party: byParty ? params.party : undefined, entity: params.entity }}
         page={params.page}
         pageSize={params.pageSize}
         canExport={access.export}

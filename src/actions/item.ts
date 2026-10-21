@@ -33,6 +33,7 @@ import type { ActionResult } from "@/actions/company";
 import { randomUUID } from "node:crypto";
 import { accountsSettings } from "@/lib/accounts/settings";
 import { moveStock, StockError } from "@/lib/inventory/engine";
+import { pair, postInventoryEntry, type InventoryLine } from "@/lib/inventory/posting";
 import { recordOpeningStock } from "@/lib/inventory/opening";
 import { defaultWarehouseId } from "@/lib/inventory/warehouses";
 
@@ -274,20 +275,36 @@ export async function adjustStock(input: unknown): Promise<ActionResult<{ stockQ
   }
 
   try {
+    const key = `manual:${requestId || randomUUID()}`;
     const after = await db.$transaction(async (tx) => {
       const where = warehouseId || (await defaultWarehouseId(tx, settings));
-      await moveStock(tx, {
+      const date = new Date();
+      const moved = await moveStock(tx, {
         itemId,
         warehouseId: where,
         quantity: quantityChange,
         type,
         sourceType: "MANUAL",
-        date: new Date(),
+        date,
         userId: user.id,
         reason: reason || null,
-        idempotencyKey: `manual:${requestId || randomUUID()}`,
+        idempotencyKey: key,
         settings,
       });
+      // Under perpetual inventory the ledger follows the stock (src/lib/inventory/posting.ts): a sale or a
+      // customer's return by hand against Cost of Goods Sold, anything else against Stock Adjustments.
+      if (settings.inventoryAccounting === "PERPETUAL") {
+        const paise = moved.reduce((t, m) => t + m.valuePaise, 0);
+        const lines: InventoryLine[] =
+          type === "SOLD"
+            ? pair("COGS", "INVENTORY", paise)
+            : type === "RETURNED"
+              ? pair("INVENTORY", "COGS", paise)
+              : quantityChange > 0
+                ? pair("INVENTORY", "STOCK_ADJUSTMENT", paise)
+                : pair("STOCK_ADJUSTMENT", "INVENTORY", paise);
+        await postInventoryEntry(tx, { postingKey: `stock:${key}`, date, narration: `${item.name}: ${type.toLowerCase()} by hand${reason ? ` — ${reason}` : ""}`, userId: user.id, lines });
+      }
       const row = await tx.item.findUniqueOrThrow({ where: { id: itemId }, select: { stockQuantity: true } });
       return Number(row.stockQuantity);
     });
@@ -303,6 +320,8 @@ export async function adjustStock(input: unknown): Promise<ActionResult<{ stockQ
     return { ok: true, data: { stockQuantity: after } };
   } catch (err) {
     if (err instanceof StockError) return { ok: false, error: err.message };
+    // Perpetual inventory posts it, so the books' period lock applies (src/lib/ledger/journal.ts assertPeriodOpen).
+    if (err instanceof Error && /books are closed/.test(err.message)) return { ok: false, error: err.message };
     throw err;
   }
 }

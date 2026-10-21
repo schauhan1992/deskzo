@@ -152,6 +152,8 @@ async function run(scratchName: string) {
   const engine = require("../src/lib/inventory/engine") as typeof import("../src/lib/inventory/engine");
   const inventory = require("../src/actions/inventory") as typeof import("../src/actions/inventory");
   const docs = require("../src/actions/trade-document") as typeof import("../src/actions/trade-document");
+  const items = require("../src/actions/item") as typeof import("../src/actions/item");
+  const { recordOpeningStock } = require("../src/lib/inventory/opening") as typeof import("../src/lib/inventory/opening");
   const { accountsSettings } = require("../src/lib/accounts/settings") as typeof import("../src/lib/accounts/settings");
   /* eslint-enable @typescript-eslint/no-require-imports */
 
@@ -353,10 +355,39 @@ async function run(scratchName: string) {
   await move({ itemId: N.id, warehouseId: "wh_main", quantity: 5, type: "RECEIVED", idempotencyKey: `${TAG}:n4`, unitCost: 60 });
   const nLayers = await db.stockCostLayer.aggregate({ where: { itemId: N.id }, _sum: { remaining: true } });
   ok("  a receipt fills what was owed first: 3 on hand, 3 in layers", (await balance(N.id)).qty === 3 && Number(nLayers._sum.remaining) === 3, { balance: await balance(N.id), layers: Number(nLayers._sum.remaining) });
+  // The 2 issued beyond stock went out at ₹50 (all there was to price them); the receipt says they cost ₹60.
+  const nLayerValue = (await db.stockCostLayer.findMany({ where: { itemId: N.id, remaining: { gt: 0 } }, select: { remaining: true, unitCost: true } })).reduce((t, l) => t + Number(l.remaining) * Number(l.unitCost), 0);
+  ok("  and what is left is worth what its layers say, ₹180 — the ₹20 belongs to what went out", (await balance(N.id)).value === 180 && Math.round(nLayerValue * 100) === 18000, { balance: await balance(N.id), layers: nLayerValue });
+  const n4 = await db.stockMovement.findUnique({ where: { idempotencyKey: `${TAG}:n4` }, select: { id: true } });
+  const reval = await db.stockMovement.findUnique({ where: { idempotencyKey: `revalue:${n4!.id}` }, select: { id: true, quantityChange: true, value: true } });
+  ok("  by a revaluation of no quantity, −₹20", !!reval && Number(reval.quantityChange) === 0 && Number(reval.value) === -20, reval);
+  const revalEntry = reval ? await entry(`stock:revalue:${reval.id}`) : null;
+  ok("  which, under perpetual inventory, moves ₹20 from Stock in Hand to Cost of Goods Sold", revalEntry?.on("COGS") === 20 && revalEntry.on("INVENTORY") === -20, revalEntry ? { cogs: revalEntry.on("COGS"), inventory: revalEntry.on("INVENTORY") } : null);
   await move({ itemId: B.id, warehouseId: "wh_main", quantity: 1, type: "RECEIVED", idempotencyKey: `${TAG}:b0`, unitCost: 10, batch: { batchNo: "B-OLD", expiryDate: new Date("2025-01-01") } });
   const batchNeg = await refused(() => move({ itemId: B.id, warehouseId: "wh_main", quantity: -5, type: "ADJUSTMENT", idempotencyKey: `${TAG}:bneg` }));
   ok("  but never for batches", !!batchNeg && /Batches can't go below nothing|Not enough/.test(batchNeg), batchNeg);
   s = await settings({ allowNegativeStock: false });
+
+  // ── By hand, under perpetual inventory ─────────────────────────────────────────────────────────
+  section("Stock moved by hand, and opening stock, reach the ledger under perpetual inventory");
+  as(owner);
+  const beforeHand = await balance(A.id);
+  const damaged = await items.adjustStock({ itemId: A.id, type: "DAMAGED", quantity: 1, reason: "Dropped", requestId: `${TAG}-hand-1` });
+  const handMove = await db.stockMovement.findUnique({ where: { idempotencyKey: `manual:${TAG}-hand-1` }, select: { value: true } });
+  const handEntry = await entry(`stock:manual:${TAG}-hand-1`);
+  ok("a damaged unit written off on the item's page: Dr Stock Adjustments / Cr Stock in Hand, at its cost", damaged.ok && !!handMove && !!handEntry && handEntry.on("STOCK_ADJUSTMENT") === -Number(handMove.value) && handEntry.on("INVENTORY") === Number(handMove.value), { damaged, handMove, handEntry: handEntry && { adj: handEntry.on("STOCK_ADJUSTMENT"), inv: handEntry.on("INVENTORY") } });
+  const handAgain = await items.adjustStock({ itemId: A.id, type: "DAMAGED", quantity: 1, reason: "Dropped", requestId: `${TAG}-hand-1` });
+  ok("  the same form sent twice moves and posts once", handAgain.ok && (await balance(A.id)).qty === beforeHand.qty - 1 && (await db.journalEntry.count({ where: { postingKey: `stock:manual:${TAG}-hand-1` } })) === 1);
+  const found = await items.adjustStock({ itemId: A.id, type: "ADJUSTMENT", direction: "IN", quantity: 1, reason: "Found in the back", requestId: `${TAG}-hand-2` });
+  const foundEntry = await entry(`stock:manual:${TAG}-hand-2`);
+  ok("a unit found: Dr Stock in Hand / Cr Stock Adjustments", found.ok && !!foundEntry && foundEntry.on("INVENTORY") > 0 && foundEntry.on("STOCK_ADJUSTMENT") === -foundEntry.on("INVENTORY"));
+  const handSold = await items.adjustStock({ itemId: A.id, type: "SOLD", quantity: 1, reason: "Counter sale", requestId: `${TAG}-hand-3` });
+  const soldEntry = await entry(`stock:manual:${TAG}-hand-3`);
+  ok("a sale by hand: Dr Cost of Goods Sold / Cr Stock in Hand", handSold.ok && !!soldEntry && soldEntry.on("COGS") > 0 && soldEntry.on("INVENTORY") === -soldEntry.on("COGS"));
+  const O = await item("O-OPEN", { costPrice: 75 });
+  await db.$transaction((tx) => recordOpeningStock(tx, { itemId: O.id, quantity: 4, unitCost: 75, userId: owner.id, reason: "Opening stock" }, s));
+  const openEntry = await entry(`stock:opening:${O.id}`);
+  ok("opening stock of 4 at ₹75: Dr Stock in Hand ₹300 / Cr Opening Balance Equity ₹300", openEntry?.on("INVENTORY") === 300 && openEntry.on("OPENING_BALANCE_EQUITY") === -300, openEntry && { inv: openEntry.on("INVENTORY"), obe: openEntry.on("OPENING_BALANCE_EQUITY") });
 
   // ── Concurrency ────────────────────────────────────────────────────────────────────────────────
   section("Two sales of the last unit at once");
@@ -551,9 +582,9 @@ async function run(scratchName: string) {
     GROUP BY 1, 2, 3`;
   const off = byKey.filter((r) => Number(r.mq) !== Number(r.bq ?? 0) || Math.round(Number(r.mv) * 100) !== Math.round(Number(r.bv ?? 0) * 100));
   ok("balances are the sum of their movements — quantity and value", byKey.length > 0 && off.length === 0, off.slice(0, 3));
-  const items = await db.item.findMany({ where: { trackInventory: true }, select: { id: true, name: true, stockQuantity: true } });
+  const tracked = await db.item.findMany({ where: { trackInventory: true }, select: { id: true, name: true, stockQuantity: true } });
   const sums = await db.stockBalance.groupBy({ by: ["itemId"], _sum: { quantity: true } });
-  const itemOff = items.filter((i) => Number(i.stockQuantity) !== Number(sums.find((x) => x.itemId === i.id)?._sum.quantity ?? 0));
+  const itemOff = tracked.filter((i) => Number(i.stockQuantity) !== Number(sums.find((x) => x.itemId === i.id)?._sum.quantity ?? 0));
   ok("each item's total is the sum of its balances", itemOff.length === 0, itemOff.map((i) => i.name));
   const negativeLayers = await db.stockCostLayer.count({ where: { remaining: { lt: 0 } } });
   ok("no cost layer below nothing", negativeLayers === 0, negativeLayers);

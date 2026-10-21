@@ -119,6 +119,11 @@ async function main() {
   ok("a stock voucher's breadcrumb: Finance › Accounts › Inventory › Stock vouchers", ["Finance", "Accounts", "Inventory", "Stock vouchers"].every((w) => words.includes(w)) && crumb.includes('href="/items/stock"'), words.join(" › "));
   pathname = "/items/stock";
   ok("  on the page itself, the last crumb is the current page", renderToStaticMarkup(createElement(NavBreadcrumb, { navigation: all })).includes('aria-current="page"'));
+  pathname = "/items/settings";
+  const reader = menu(["inventory.view", ...SECTIONS]);
+  ok("  and none on a page whose link the person doesn't have — not the nearest one they do", renderToStaticMarkup(createElement(NavBreadcrumb, { navigation: reader })) === "");
+  pathname = "/items/abc123";
+  ok("  while an item's own page is under Items & Inventory", renderToStaticMarkup(createElement(NavBreadcrumb, { navigation: reader })).includes('href="/items"'));
   pathname = "/leads";
   ok("  and none outside Accounts", renderToStaticMarkup(createElement(NavBreadcrumb, { navigation: all })) === "");
   pathname = "/items/stock";

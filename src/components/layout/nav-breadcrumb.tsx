@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronRight } from "lucide-react";
+import { MODULE_REGISTRY } from "@/lib/modules";
 import { navHeadingOf, type VisibleNavItem, type VisibleNavSection } from "@/lib/navigation";
 import { useWording } from "@/components/terms/wording-provider";
 import { slot } from "@/lib/terms/dictionary";
@@ -13,6 +14,9 @@ import { slot } from "@/lib/terms/dictionary";
  * Built from the same menu the sidebar draws (`buildNavigation`), so it never names a page the person can't
  * open. Only for the groups drawn in parts: elsewhere the sidebar's one level already says where you are.
  */
+/** Every module link, whoever may see it — to tell a page of the person's from one under it that isn't. */
+const ALL_HREFS = MODULE_REGISTRY.flatMap((m) => m.navItems.map((i) => i.href));
+
 export function NavBreadcrumb({ navigation }: { navigation: VisibleNavSection[] }) {
   const pathname = usePathname() ?? "";
   const wording = useWording();
@@ -26,6 +30,10 @@ export function NavBreadcrumb({ navigation }: { navigation: VisibleNavSection[] 
     }
   }
   if (!best?.item.section) return null;
+  // A page of a link this person doesn't have (Accounts settings, to somebody without it — the page says it
+  // isn't there) is not "under" the nearest link they do have: no trail, rather than a wrong one.
+  const deepest = ALL_HREFS.filter((h) => pathname === h || pathname.startsWith(`${h}/`)).sort((a, b) => b.length - a.length)[0];
+  if (deepest && deepest !== best.item.href) return null;
 
   const { section, item } = best;
   const label = (i: VisibleNavItem) => (i.term ? slot(wording, i.label, i.term.key, i.term.template) : i.label);

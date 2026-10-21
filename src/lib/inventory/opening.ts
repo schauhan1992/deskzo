@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import type { AccountsSettings } from "@/lib/accounts/settings";
 import { moveStock } from "@/lib/inventory/engine";
+import { pair, postInventoryEntry } from "@/lib/inventory/posting";
 import { defaultWarehouseId } from "@/lib/inventory/warehouses";
 
 type Tx = Prisma.TransactionClient;
@@ -27,18 +28,30 @@ export async function recordOpeningStock(
     await tx.item.update({ where: { id: params.itemId }, data: { stockQuantity: params.quantity }, select: { id: true } });
     return;
   }
-  await moveStock(tx, {
+  const date = new Date();
+  const moved = await moveStock(tx, {
     itemId: params.itemId,
     warehouseId: await defaultWarehouseId(tx, settings),
     quantity: params.quantity,
     type: "OPENING",
     sourceType: "OPENING",
     sourceId: params.itemId,
-    date: new Date(),
+    date,
     userId: params.userId,
     reason: params.reason,
     idempotencyKey: `opening:${params.itemId}`,
     unitCost: params.unitCost,
     settings,
   });
+  // Under perpetual inventory, opening stock is on the balance sheet from the start — against Opening Balance
+  // Equity, as the switch to perpetual brings stock already on hand (src/actions/accounts-settings.ts).
+  if (settings.inventoryAccounting === "PERPETUAL") {
+    await postInventoryEntry(tx, {
+      postingKey: `stock:opening:${params.itemId}`,
+      date,
+      narration: `Opening stock: ${params.reason}`,
+      userId: params.userId,
+      lines: pair("INVENTORY", "OPENING_BALANCE_EQUITY", moved.reduce((t, m) => t + m.valuePaise, 0)),
+    });
+  }
 }

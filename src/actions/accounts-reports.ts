@@ -113,6 +113,30 @@ async function moneyAccounts() {
   return rows.map((r) => ({ value: r.id, label: `${r.code} · ${r.name}${r.active ? "" : " (closed)"}`, cash: r.systemKey === SYSTEM_ACCOUNTS.CASH }));
 }
 
+/**
+ * Customers or vendors matching what's typed, for the registers' party filter — the companies with a document of
+ * that direction, so the list offers only those the register can show.
+ */
+export async function searchRegisterParties(term: string, direction: "SALES" | "PURCHASE") {
+  const a = await access();
+  if (!a.books) return [];
+  const q = term.trim();
+  if (q.length < 2) return [];
+  return db.company.findMany({
+    where: { name: { contains: q, mode: "insensitive" }, tradeDocuments: { some: { direction } } },
+    orderBy: { name: "asc" },
+    take: 15,
+    select: { id: true, name: true },
+  });
+}
+
+/** The party a register is filtered to, by name — for the filter to show what is chosen. */
+export async function registerParty(id: string | undefined) {
+  const a = await access();
+  if (!a.books || !id) return null;
+  return db.company.findUnique({ where: { id }, select: { id: true, name: true } });
+}
+
 /** One report, a page of it, with totals over everything the filters match. */
 export async function accountsReport(key: AccountsReportKey, params: AccountsReportParams = {}): Promise<ReportResult> {
   const a = await access();

@@ -1,7 +1,8 @@
 import type { Prisma, SerialStatus, StockMovementType, StockSourceType } from "@prisma/client";
-import { fromCost4, fromMilli, fromPaise, toCost4, toMilli, toPaise, unitCost4, valuePaise } from "@/lib/accounts/money";
+import { fromCost4, fromMilli, fromPaise, proportionPaise, toCost4, toMilli, toPaise, unitCost4, valuePaise } from "@/lib/accounts/money";
 import type { AccountsSettings } from "@/lib/accounts/settings";
 import { costIssue, type CostLayer } from "@/lib/inventory/costing";
+import { pair, postInventoryEntry } from "@/lib/inventory/posting";
 
 /**
  * The stock engine (owner, 22 Oct 2026): the one door every change to what is on hand goes through.
@@ -59,7 +60,8 @@ export type MoveStockInput = {
   skipExpired?: boolean;
   /** The movement this one undoes — taking a receipt back out draws on that receipt's own cost layer first. */
   reversesId?: string | null;
-  settings: Pick<AccountsSettings, "costingMethod" | "allowNegativeStock">;
+  /** Under perpetual inventory, a receipt that fills stock issued before it came posts the difference it reveals. */
+  settings: Pick<AccountsSettings, "costingMethod" | "allowNegativeStock"> & { inventoryAccounting?: AccountsSettings["inventoryAccounting"] };
 };
 
 export type MovementWritten = {
@@ -335,6 +337,17 @@ async function moveOne(
     select: { id: true },
   });
 
+  /**
+   * A receipt filling stock issued before it came (negative stock, where allowed): those units went out at the
+   * cost known then, and this receipt says what they really cost. The difference is theirs, not the stock
+   * left's — so it is taken off (or put back on) the balance by a revaluation of no quantity, and under
+   * perpetual inventory moved between Stock in Hand and Cost of Goods Sold. Without it, what is left on hand
+   * would carry the earlier issue's under- or over-costing, and drift from its cost layers.
+   */
+  const fillMilli = part.qtyMilli > 0 ? Math.min(part.qtyMilli, Math.max(0, -balance.qtyMilli)) : 0;
+  const revaluePaise =
+    fillMilli > 0 ? proportionPaise(movementPaise, fillMilli, part.qtyMilli) - proportionPaise(-balance.valuePaise, fillMilli, -balance.qtyMilli) : 0;
+
   await tx.stockBalance.upsert({
     where: key,
     create: {
@@ -345,8 +358,40 @@ async function moveOne(
       quantity: fromMilli(part.qtyMilli),
       value: fromPaise(movementPaise),
     },
-    update: { quantity: { increment: fromMilli(part.qtyMilli) }, value: { increment: fromPaise(movementPaise) } },
+    update: { quantity: { increment: fromMilli(part.qtyMilli) }, value: { increment: fromPaise(movementPaise - revaluePaise) } },
   });
+
+  if (revaluePaise !== 0) {
+    // Its own key, apart from the receipt's: the receipt's callers cost what they moved, and this is not that.
+    const revaluation = await tx.stockMovement.create({
+      data: {
+        itemId: item.id,
+        warehouseId,
+        batchId: part.batchId,
+        type: "ADJUSTMENT",
+        quantityChange: 0,
+        reason: `Revalued: ${fromMilli(fillMilli)} issued before this receipt came, at its cost`,
+        createdByUserId: input.userId,
+        movementDate: input.date,
+        unitCost: 0,
+        value: fromPaise(-revaluePaise),
+        sourceType: input.sourceType,
+        sourceId: input.sourceId ?? null,
+        sourceLineId: input.sourceLineId ?? null,
+        idempotencyKey: `revalue:${movement.id}`,
+      },
+      select: { id: true },
+    });
+    if (input.settings.inventoryAccounting === "PERPETUAL") {
+      await postInventoryEntry(tx, {
+        postingKey: `stock:revalue:${revaluation.id}`,
+        date: input.date,
+        narration: `${item.name}: stock issued before it was received, revalued at the receipt's cost`,
+        userId: input.userId,
+        lines: revaluePaise > 0 ? pair("COGS", "INVENTORY", revaluePaise) : pair("INVENTORY", "COGS", -revaluePaise),
+      });
+    }
+  }
 
   if (part.qtyMilli > 0) {
     // What a receipt adds to stock on hand: all of it, less whatever it fills of a balance below nothing.
@@ -414,7 +459,7 @@ async function moveSerials(
 export async function reverseMovement(
   tx: Tx,
   movementId: string,
-  params: { userId: string; reason: string; date?: Date; settings: Pick<AccountsSettings, "costingMethod" | "allowNegativeStock"> },
+  params: { userId: string; reason: string; date?: Date; settings: MoveStockInput["settings"] },
 ): Promise<MovementWritten | null> {
   const original = await tx.stockMovement.findUnique({
     where: { id: movementId },

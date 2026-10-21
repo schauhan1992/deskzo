@@ -190,7 +190,7 @@ export const guide: SeedGuide = {
         ul(
           runs({ b: "Accounts › Day Book" }, " — every entry posted in a date range, whatever wrote it, with its lines."),
           runs({ b: "Accounts › Cash & bank books" }, " — one cash or bank account's receipts and payments, with its opening and running balance."),
-          runs({ b: "Accounts › Registers" }, " — the sales and purchase registers with their GST, the journal register, expenses by account and month, a GST summary of output against input tax, and who did what to each voucher."),
+          runs({ b: "Accounts › Registers" }, " — the sales and purchase registers with their GST (for one customer or vendor, if you pick one), the journal register, expenses by account and month, a GST summary of output against input tax, and who did what to each voucher."),
         ),
         p("Each opens the entries and documents behind it, and can be exported as CSV by somebody allowed to export finance data."),
       ),
