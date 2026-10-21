@@ -13,7 +13,10 @@ type Tx = Prisma.TransactionClient;
  * it on, so a company that has always recorded stock by hand doesn't find it moved twice:
  *
  *   · **a tax invoice** issues its goods from its warehouse ("Invoices issue stock"), filling the order's
- *     reservation if it had one, first-expiry-first-out where the goods keep batches;
+ *     reservation if it had one, first-expiry-first-out where the goods keep batches — unless a delivery
+ *     challan it was raised from already took them out;
+ *   · **a delivery challan** takes them out the same way, under the same setting — the sales flow's order →
+ *     challan → invoice, where the goods leave with the challan and the invoice that follows moves nothing;
  *   · **a vendor bill** receives them ("Bills receive stock") — unless a goods receipt already brought them
  *     in against its purchase order, when the bill only clears what the receipt left owing;
  *   · **a credit note** takes goods back into stock at what they cost when sold ("Credit notes return stock").
@@ -81,12 +84,14 @@ export async function applyTradeDocumentStock(tx: Tx, documentId: string, userId
   const doc = await loadDocument(tx, documentId);
   if (!doc) return [];
   const applies =
-    (doc.docType === "INVOICE" && settings.invoiceIssuesStock) ||
+    ((doc.docType === "INVOICE" || doc.docType === "DELIVERY_CHALLAN") && settings.invoiceIssuesStock) ||
     (doc.docType === "BILL" && settings.billReceivesStock) ||
     (doc.docType === "CREDIT_NOTE" && settings.creditNoteReturnsStock);
   if (!applies) return [];
   const lines = stockLines(doc);
   if (lines.length === 0) return [];
+  // An invoice raised from a challan that already took the goods out moves nothing more.
+  if (doc.docType === "INVOICE" && (await challanIssuedStock(tx, doc.sourceDocumentId))) return [];
 
   if (doc.docType === "BILL") {
     const received = await receiptsForBill(tx, doc);
@@ -107,7 +112,7 @@ export async function applyTradeDocumentStock(tx: Tx, documentId: string, userId
     const key = `doc:${doc.id}:line:${line.id}`;
     const common = { itemId: item.id, warehouseId, tradeDocumentId: doc.id, sourceId: doc.id, sourceLineId: line.id, date: doc.issueDate, userId, idempotencyKey: key, settings };
 
-    if (doc.docType === "INVOICE") {
+    if (doc.docType === "INVOICE" || doc.docType === "DELIVERY_CHALLAN") {
       const serials = item.trackSerials ? await serialsFromDescription(tx, item.id, line.description, qty, warehouseId) : [];
       if (item.trackSerials && serials.length !== qty) {
         throw new StockError(`${item.name} keeps serial numbers — list the ${qty} sold, in stock in this warehouse, in the line's description (${serials.length} found).`);
@@ -119,7 +124,7 @@ export async function applyTradeDocumentStock(tx: Tx, documentId: string, userId
           quantity: -qty,
           type: "SOLD",
           sourceType: "SALES_INVOICE",
-          reason: `Sold on ${doc.docNumber}`,
+          reason: `${doc.docType === "DELIVERY_CHALLAN" ? "Delivered on" : "Sold on"} ${doc.docNumber}`,
           serials,
           reservation,
           skipExpired: true,
@@ -136,10 +141,11 @@ export async function applyTradeDocumentStock(tx: Tx, documentId: string, userId
       const valuePaise = toPaise(Number(line.taxableValue) * rate);
       written.push(...(await moveStock(tx, { ...common, quantity: qty, type: "RECEIVED", sourceType: "PURCHASE_BILL", reason: `Received on ${doc.docNumber}`, valuePaise })));
     } else {
-      // A credit note: back at what the goods cost when its invoice sold them, where it did.
+      // A credit note: back at what the goods cost when its invoice sold them — or the challan the invoice was
+      // raised from delivered them — where it did.
       const sold = doc.againstDocumentId
         ? await tx.stockMovement.findMany({
-            where: { tradeDocumentId: doc.againstDocumentId, itemId: item.id, sourceType: "SALES_INVOICE", reversesId: null },
+            where: { tradeDocumentId: { in: await issuingDocuments(tx, doc.againstDocumentId) }, itemId: item.id, sourceType: "SALES_INVOICE", reversesId: null },
             select: { quantityChange: true, value: true, batchId: true },
           })
         : [];
@@ -170,7 +176,7 @@ export async function applyTradeDocumentStock(tx: Tx, documentId: string, userId
   if (settings.inventoryAccounting === "PERPETUAL") {
     const total = written.reduce((t, m) => t + m.valuePaise, 0);
     const lines =
-      doc.docType === "INVOICE"
+      doc.docType === "INVOICE" || doc.docType === "DELIVERY_CHALLAN"
         ? pair("COGS", "INVENTORY", total)
         : doc.docType === "BILL"
           ? pair("INVENTORY", "PURCHASES", total)
@@ -178,7 +184,7 @@ export async function applyTradeDocumentStock(tx: Tx, documentId: string, userId
     await postInventoryEntry(tx, {
       postingKey: `stock:doc:${doc.id}`,
       date: doc.issueDate,
-      narration: `${doc.docType === "INVOICE" ? "Cost of goods sold on" : doc.docType === "BILL" ? "Stock received on" : "Stock returned on"} ${doc.docNumber}`,
+      narration: `${doc.docType === "INVOICE" || doc.docType === "DELIVERY_CHALLAN" ? "Cost of goods sold on" : doc.docType === "BILL" ? "Stock received on" : "Stock returned on"} ${doc.docNumber}`,
       userId,
       lines,
       documentId: doc.id,
@@ -187,6 +193,21 @@ export async function applyTradeDocumentStock(tx: Tx, documentId: string, userId
     });
   }
   return written;
+}
+
+/** Whether a document is a delivery challan whose goods have left — and not come back — through its own movements. */
+async function challanIssuedStock(tx: Tx, documentId: string | null): Promise<boolean> {
+  if (!documentId) return false;
+  const source = await tx.tradeDocument.findUnique({ where: { id: documentId }, select: { docType: true } });
+  if (source?.docType !== "DELIVERY_CHALLAN") return false;
+  const live = await tx.stockMovement.count({ where: { tradeDocumentId: documentId, reversesId: null, reversedBy: { is: null } } });
+  return live > 0;
+}
+
+/** The documents an invoice's goods left on: the invoice itself, and the challan it was raised from. */
+async function issuingDocuments(tx: Tx, invoiceId: string): Promise<string[]> {
+  const invoice = await tx.tradeDocument.findUnique({ where: { id: invoiceId }, select: { sourceDocument: { select: { id: true, docType: true } } } });
+  return invoice?.sourceDocument?.docType === "DELIVERY_CHALLAN" ? [invoiceId, invoice.sourceDocument.id] : [invoiceId];
 }
 
 /** Goods receipts posted for this bill, or for the purchase order it bills, that no bill has cleared yet. */
@@ -236,8 +257,13 @@ async function clearReceiptsWithBill(tx: Tx, doc: NonNullable<DocRow>, receipts:
  * next bill. Runs whatever the settings say now — they may have changed since it was issued.
  */
 export async function reverseTradeDocumentStock(tx: Tx, documentId: string, userId: string, settings: AccountsSettings) {
-  const doc = await tx.tradeDocument.findUnique({ where: { id: documentId }, select: { id: true, docNumber: true } });
+  const doc = await tx.tradeDocument.findUnique({ where: { id: documentId }, select: { id: true, docNumber: true, docType: true } });
   if (!doc) return;
+  // A challan's goods are the invoice raised from it's too: it can't be undone from under a live invoice.
+  if (doc.docType === "DELIVERY_CHALLAN") {
+    const invoice = await tx.tradeDocument.findFirst({ where: { sourceDocumentId: doc.id, docType: "INVOICE", status: { not: "CANCELLED" } }, select: { id: true } });
+    if (invoice) throw new StockError("An invoice was raised from this challan — cancel the invoice first.");
+  }
   const live = await tx.stockMovement.findMany({
     where: { tradeDocumentId: doc.id, reversesId: null, reversedBy: { is: null } },
     orderBy: { createdAt: "asc" },
