@@ -8,6 +8,7 @@ import { indiaClock } from "@/lib/time/zone";
 import { accountTypeLabels } from "@/lib/ledger/chart";
 import { Amount, ReportHeader, accountTypeTone } from "@/components/accounting/report-chrome";
 import { DateParamInput } from "@/components/accounting/date-param-input";
+import { OptionParamFilter } from "@/components/ui/option-param-filter";
 import { companyPath } from "@/lib/record-links";
 
 export default async function AccountLedgerPage({
@@ -15,13 +16,13 @@ export default async function AccountLedgerPage({
   searchParams,
 }: {
   params: Promise<{ accountId: string }>;
-  searchParams: Promise<{ from?: string; to?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; company?: string }>;
 }) {
   const enabled = await isModuleEnabled("accounting");
   if (!enabled) return <ModuleDisabledNotice moduleKey="accounting" />;
 
   const [{ accountId }, query] = await Promise.all([params, searchParams]);
-  const report = await accountLedger({ accountId, from: query.from, to: query.to });
+  const report = await accountLedger({ accountId, from: query.from, to: query.to, companyId: query.company });
   if (!report) notFound();
 
   return (
@@ -37,6 +38,16 @@ export default async function AccountLedgerPage({
           organisation={`${report.account.code} · ${accountTypeLabels[report.account.type]}`}
         >
           <div className="flex flex-wrap items-center gap-3">
+            {/* Company-wise: one customer's or vendor's lines, where the account has parties at all. */}
+            {report.parties.length > 0 && (
+              <OptionParamFilter
+                paramName="company"
+                label="Company"
+                listLabel="Companies"
+                options={report.parties}
+                placeholder="All companies — type to search"
+              />
+            )}
             <DateParamInput paramName="from" label="From" />
             <DateParamInput paramName="to" label="To" />
           </div>
@@ -113,7 +124,9 @@ export default async function AccountLedgerPage({
             {report.rows.length === 0 && (
               <tr>
                 <td colSpan={7} className="px-4 py-12 text-center text-subtle">
-                  Nothing posted to this account in this period.
+                  {report.party
+                    ? `Nothing posted to this account for ${report.party.name} in this period.`
+                    : "Nothing posted to this account in this period."}
                 </td>
               </tr>
             )}
@@ -121,7 +134,7 @@ export default async function AccountLedgerPage({
           <tfoot>
             <tr className="border-t-2 border-line-strong">
               <td colSpan={4} className="px-4 py-2.5 font-semibold text-text">
-                Closing balance
+                Closing balance{report.party ? ` — ${report.party.name}` : ""}
                 <Badge tone={accountTypeTone[report.account.type]} className="ml-2">
                   {accountTypeLabels[report.account.type]}
                 </Badge>

@@ -239,8 +239,14 @@ export async function balanceSheet(params?: { to?: string }) {
   };
 }
 
-/** One account's transactions with a running balance — the drill-down from every other report. */
-export async function accountLedger(params: { accountId: string; from?: string; to?: string }) {
+/**
+ * One account's transactions with a running balance — the drill-down from every other report.
+ *
+ * `companyId` narrows it to one party — one customer's lines on Accounts Receivable, one vendor's on
+ * Accounts Payable — and the opening, totals and running balance are then that party's alone.
+ * `parties` is everyone with a line on the account, for the picker.
+ */
+export async function accountLedger(params: { accountId: string; from?: string; to?: string; companyId?: string }) {
   const gate = await mayReadBooks();
   if (!gate.ok) throw new Error(gate.error);
   await requireModuleUser("accounting");
@@ -252,12 +258,13 @@ export async function accountLedger(params: { accountId: string; from?: string; 
 
   const from = params.from ? startOfDay(params.from) : undefined;
   const to = params.to ? endOfDay(params.to) : undefined;
+  const party = params.companyId ? { companyId: params.companyId } : {};
 
   // Everything before the window collapses into one opening figure, so the running balance is right
   // even when you only asked for last month.
   const opening = from
     ? await db.journalLine.aggregate({
-        where: { accountId: account.id, entry: { date: { lt: from } } },
+        where: { accountId: account.id, ...party, entry: { date: { lt: from } } },
         _sum: { debit: true, credit: true },
       })
     : null;
@@ -265,6 +272,7 @@ export async function accountLedger(params: { accountId: string; from?: string; 
   const lines = await db.journalLine.findMany({
     where: {
       accountId: account.id,
+      ...party,
       entry: { date: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } },
     },
     orderBy: [{ entry: { date: "asc" } }, { entry: { entryNumber: "asc" } }, { sortOrder: "asc" }],
@@ -303,8 +311,22 @@ export async function accountLedger(params: { accountId: string; from?: string; 
     };
   });
 
+  const partyIds = await db.journalLine.groupBy({
+    by: ["companyId"],
+    where: { accountId: account.id, companyId: { not: null } },
+  });
+  const parties = partyIds.length
+    ? await db.company.findMany({
+        where: { id: { in: partyIds.map((p) => p.companyId!) } },
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+      })
+    : [];
+
   return {
     account,
+    parties,
+    party: parties.find((p) => p.id === params.companyId) ?? null,
     openingBalance,
     rows,
     closingBalance: balance,
