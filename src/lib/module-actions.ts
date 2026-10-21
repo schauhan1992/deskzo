@@ -124,6 +124,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "email-verification.ts": "core",
   "exchange-rate.ts": "core",
   "employee-docs.ts": ["hr"],
+  // HR's own letter templates and the signature on letters — HR's, like the letters (employee-docs.ts).
+  "letter-templates.ts": ["hr"],
   "eway.ts": ["sales_documents"],
   "expense.ts": ["expenses"],
   "feedback-public.ts": "public",

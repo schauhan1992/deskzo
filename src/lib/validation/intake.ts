@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ifscSchema } from "@/lib/ifsc";
 
 /**
  * What a new joiner may send us before they have an account.
@@ -16,13 +17,8 @@ const pan = z
   .optional()
   .or(z.literal(""));
 
-const ifsc = z
-  .string()
-  .trim()
-  .toUpperCase()
-  .regex(/^[A-Z]{4}0[A-Z0-9]{6}$/, "An IFSC is four letters, a zero, then six characters.")
-  .optional()
-  .or(z.literal(""));
+// Cleaned of what a paste carries before it's checked (src/lib/ifsc.ts).
+const ifsc = ifscSchema("An IFSC is four letters, a zero, then six characters — like HDFC0001234.");
 
 const text = (max = 120) => z.string().trim().max(max).optional().or(z.literal(""));
 

@@ -369,6 +369,8 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
       { href: "/people/hiring", label: "Hiring", icon: UserPlus, permission: "hiring.manage" },
       { href: "/people/leave", label: "Leave", icon: Plane },
       { href: "/people/attendance", label: "Attendance", icon: CalendarDays },
+      // Every letter, HR's own templates and the signature letters carry (owner, 21 Oct 2026).
+      { href: "/people/letters", label: "Letters", icon: FileText, permission: "hr.manage" },
       { href: "/people/celebrations", label: "Celebrations", icon: PartyPopper, permission: "hr.manage" },
       { href: "/people/devices", label: "Biometric", icon: Fingerprint, permission: "hr.manage" },
     ],

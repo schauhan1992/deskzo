@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { getLetter } from "@/actions/employee-docs";
-import { getOrganisation, foreignCountry } from "@/lib/organisation";
+import { getOrganisation, foreignCountry, letterSignatureImage } from "@/lib/organisation";
 import { getBranding } from "@/actions/branding";
 import { PrintButton } from "@/components/documents/print-button";
 import { formatCalendarDay } from "@/lib/time/zone";
@@ -42,6 +42,14 @@ export default async function PrintLetterPage({
     [org.city, org.state, org.pincode, foreignCountry(org)].filter(Boolean).join(", ") || null,
   ].filter(Boolean) as string[];
   const contactLine = [org.phone, org.email].filter(Boolean).join("  ·  ");
+  // The signature only on a letter marked signed (owner, 21 Oct 2026). An issued one prints the copy it was
+  // issued with; a draft, what it would be signed with now. Letters from before signatures were a choice
+  // carry no copy, and keep printing the stamp they always printed.
+  const signature = !letter.migrated
+    ? org.signatureDataUrl
+    : !letter.signed
+      ? null
+      : letter.signatureDataUrl ?? (letter.status === "DRAFT" ? await letterSignatureImage() : org.signatureDataUrl);
 
   return (
     <div className="mx-auto max-w-3xl bg-white p-12 text-[13px] leading-relaxed text-neutral-900 shadow-sm print:p-0 print:shadow-none">
@@ -91,11 +99,14 @@ export default async function PrintLetterPage({
       {/* The signature block. The names come from the frozen payload, because "signed by" is part of
           what the letter asserts — reprinting it after the signatory has left must not silently
           reassign their signature to their successor. Only the image is read from settings. */}
-      {(payload.signatoryName || org.signatureDataUrl) && (
+      {(payload.signatoryName || signature) && (
         <div className="mt-10 break-inside-avoid">
-          {org.signatureDataUrl && (
+          {signature ? (
             /* eslint-disable-next-line @next/next/no-img-element -- a data URL, printed as-is */
-            <img src={org.signatureDataUrl} alt="" className="mb-1 h-14 w-auto object-contain" />
+            <img src={signature} alt="" className="mb-1 h-14 w-auto object-contain" />
+          ) : (
+            // Room to sign by hand on an unsigned letter.
+            <div className="h-14" aria-hidden />
           )}
           <div className="w-56 border-t border-neutral-400 pt-1">
             <p className="text-sm font-medium">{payload.signatoryName ?? "—"}</p>
@@ -107,7 +118,7 @@ export default async function PrintLetterPage({
       <footer className="mt-12 border-t border-neutral-300 pt-3 text-[10px] text-neutral-500">
         {org.letterheadFooter && <p className="mb-1 whitespace-pre-wrap">{org.letterheadFooter}</p>}
         <p>
-          {letterTypeLabels[letter.type]} · {letter.letterNumber}
+          {letter.templateName ?? letterTypeLabels[letter.type]} · {letter.letterNumber}
           {letter.issuedBy && ` · issued by ${letter.issuedBy.name}`}
           {letter.status === "DRAFT" && " · DRAFT, not yet issued"}
         </p>

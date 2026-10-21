@@ -485,6 +485,9 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
   AttendanceLocation: { disposition: "archive", reason: "Where somebody clocked in or out from the Deskzo app — immutable history beside the attendance day, archived with it." },
   ShortLeaveRequest: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   ShortLeavePolicy: { disposition: "specification", reason: "Configuration rather than records: the company's short leave length and monthly count, two numbers to set again in whatever comes next." },
+  LetterTemplate: { disposition: "specification", reason: "Configuration rather than records: HR's own letter wording with its {{fields}}, text to set up again in whatever comes next. The letters drafted from it are archived with the other letters." },
+  SalaryComponent: { disposition: "specification", reason: "Configuration rather than records: the company's own salary components and what a CTC split starts each at. The amounts people are paid are on their salary structures, archived." },
+  SalarySplitRules: { disposition: "specification", reason: "Configuration rather than records: four numbers saying how a CTC is split into basic, HRA and fixed allowances." },
   EwayBill: {
     disposition: "archive",
     reason:

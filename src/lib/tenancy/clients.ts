@@ -289,7 +289,8 @@ const NOT_YET_EVERYWHERE = {
   securityPolicy: { watermarkScope: true },
   // 20261028110000_bank_accounts_vendor_codes. Read by name in src/lib/companies/vendor-code.ts and
   // src/lib/banking/organisation-accounts.ts, which fall back when the column is not there yet.
-  organisationSettings: { vendorCodePrefix: true },
+  // and 20261121100000_letter_signatures_templates: read by name in src/lib/organisation.ts (the letter signature).
+  organisationSettings: { vendorCodePrefix: true, letterSignatureDataUrl: true, letterSignByDefault: true },
   branch: { defaultBankAccountId: true },
   // and 20261029120000_document_cancel_reason_pi_issued: read by name in src/lib/documents/cancellation.ts.
   tradeDocument: { bankAccountId: true, cancelReason: true, cancelledAt: true, cancelledById: true, paidBefore: true },
@@ -301,7 +302,14 @@ const NOT_YET_EVERYWHERE = {
   role: { active: true },
   // 20261110160000_income_tax_tds. Read by name in src/actions/payroll.ts and the payslip screens, which
   // show how TDS was worked out — the payroll pages need the migration.
-  payslip: { incomeTaxBasis: true, taxWorking: true },
+  payslip: { incomeTaxBasis: true, taxWorking: true, customEarnings: true },
+  // 20261121110000_salary_components_revisions. Read by name in src/actions/payroll.ts (STRUCTURE_EXTRAS),
+  // src/actions/settlement.ts and src/actions/employee-docs.ts — the salary pages need the migration, as
+  // the payroll pages do; and a payslip's custom earnings by the payslip screens.
+  salaryStructure: { customComponents: true, annualCtc: true, revisionBasis: true, revisionValue: true },
+  // 20261121100000_letter_signatures_templates. Read by name in src/actions/employee-docs.ts and the letter
+  // pages, which treat a workspace without them as letters with no signature choice or template.
+  employeeLetter: { signed: true, signatureDataUrl: true, templateId: true, templateName: true },
   // 20261110150000_leave_opening_balances. Asked for with `omit: TYPED_OPENING` in
   // src/lib/hr/leave-balance.ts, which every balance goes through — so the leave pages need the migration.
   leaveBalance: { openingTyped: true, usedBefore: true, openingNote: true },

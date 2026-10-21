@@ -4,6 +4,7 @@ import { ModuleDisabledNotice } from "@/components/settings/module-disabled-noti
 import { hrCapabilities, listHolidays } from "@/actions/hr";
 import { leaveBalances, myLeaveRequests } from "@/actions/leave";
 import { myRegularisations, regularisationQueue } from "@/actions/regularisation";
+import { shortLeaveOverview } from "@/actions/short-leave";
 import { myToday } from "@/actions/attendance";
 import { myPayslips } from "@/actions/payroll";
 import { MyHr } from "@/components/hr/my-hr";
@@ -25,7 +26,7 @@ export default async function MyHrPage() {
   const now = new Date();
   const year = clock.parts(now).year;
 
-  const [today, balances, leave, regularisations, queue, payslips, holidays, handovers, me] = await Promise.all([
+  const [today, balances, leave, regularisations, queue, payslips, holidays, handovers, me, shortLeave] = await Promise.all([
     myToday(),
     leaveBalances(caps.userId),
     myLeaveRequests(),
@@ -46,6 +47,7 @@ export default async function MyHrPage() {
       where: { id: caps.userId },
       select: { name: true, userSeq: true, employeeProfile: { select: { exitedOn: true } } },
     }),
+    shortLeaveOverview(),
   ]);
 
   const todayDate = clock.calendarDate(now);
@@ -89,6 +91,11 @@ export default async function MyHrPage() {
           queue={queue}
           payslips={payslips}
           nextHoliday={nextHoliday}
+          shortLeave={
+            shortLeave
+              ? { used: shortLeave.usedThisMonth, perMonth: shortLeave.policy.perMonth, pending: shortLeave.mine.filter((r) => r.status === "PENDING").length }
+              : null
+          }
         />
       </div>
     </div>

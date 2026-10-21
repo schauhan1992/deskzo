@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { notMigratedYet } from "@/lib/not-migrated";
 import { decryptSecret } from "@/lib/crypto";
 import type { ProviderConfig } from "@/lib/einvoice/provider";
 
@@ -299,4 +300,40 @@ export async function getEInvoiceConfig(): Promise<ProviderConfig | null> {
 /** Enough of an address filled in that a document header won't print half-blank. */
 export function isOrganisationReady(org: Organisation) {
   return !!(org.legalName && org.gstin && org.stateCode && org.addressLine1 && org.city && org.pincode);
+}
+
+/**
+ * The signature for HR letters (owner, 21 Oct 2026): its own image if one is set — the signatory's, apart
+ * from the invoice stamp — and whether new letters carry it. Read by name; a workspace not migrated yet
+ * has neither, and its letters sign with the stamp as they always did.
+ */
+export async function letterSignatureSettings(): Promise<{
+  imageDataUrl: string | null;
+  stampDataUrl: string | null;
+  signByDefault: boolean;
+  migrated: boolean;
+}> {
+  const stamp = async () =>
+    (await db.organisationSettings.findUnique({ where: { id: "global" }, select: { signatureDataUrl: true } }).catch(() => null))?.signatureDataUrl ?? null;
+  try {
+    const row = await db.organisationSettings.findUnique({
+      where: { id: "global" },
+      select: { letterSignatureDataUrl: true, letterSignByDefault: true, signatureDataUrl: true },
+    });
+    return {
+      imageDataUrl: row?.letterSignatureDataUrl ?? null,
+      stampDataUrl: row?.signatureDataUrl ?? null,
+      signByDefault: row?.letterSignByDefault ?? true,
+      migrated: true,
+    };
+  } catch (err) {
+    if (!notMigratedYet(err)) throw err;
+    return { imageDataUrl: null, stampDataUrl: await stamp(), signByDefault: true, migrated: false };
+  }
+}
+
+/** The image a signed letter carries: the letter signature, or the invoice stamp when there's none. */
+export async function letterSignatureImage(): Promise<string | null> {
+  const settings = await letterSignatureSettings();
+  return settings.imageDataUrl ?? settings.stampDataUrl;
 }

@@ -1823,6 +1823,15 @@ model OrganisationSettings {
    */
   letterSignatoryName   String?
   letterSignatoryTitle  String?
+  /**
+   * The signatory's signature, as an image, for HR letters (owner, 21 Oct 2026) — apart from the invoice
+   * stamp above, which a letter falls back to when this isn't set. Copied onto a letter when it is issued.
+   */
+  letterSignatureDataUrl String?
+  /**
+   * Whether a new letter is drafted with the signature on; each letter can be switched either way.
+   */
+  letterSignByDefault    Boolean @default(true)
 
   /**
    * Feedback. `feedbackReviewUrl` is the public review page — a Google Business Profile short
@@ -5560,6 +5569,22 @@ model SalaryStructure {
   medical          Decimal @default(0) @db.Decimal(12, 2)
   specialAllowance Decimal @default(0) @db.Decimal(12, 2)
   otherAllowance   Decimal @default(0) @db.Decimal(12, 2)
+  /**
+   * The company's own components besides the six (owner, 21 Oct 2026) — a food allowance, an LTA —
+   * as [{ name, amount }], monthly rupees. Part of gross, as the six are.
+   */
+  customComponents Json?
+
+  /**
+   * The annual CTC it was split from, when it was (src/lib/hr/salary-split.ts) — kept for the record;
+   * the CTC shown is still worked out from the components.
+   */
+  annualCtc     Decimal?             @db.Decimal(14, 2)
+  /**
+   * A revision: given as a percentage, an amount a year, or a new CTC, and the figure given.
+   */
+  revisionBasis SalaryRevisionBasis?
+  revisionValue Decimal?             @db.Decimal(14, 2)
 
   /**
    * Off by default for a consultant, or someone whose PF sits with a previous employer.
@@ -5576,6 +5601,68 @@ model SalaryStructure {
 
   @@index([userId, effectiveFrom])
   @@map("salary_structures")
+}
+
+enum SalaryRevisionBasis {
+  /**
+   * Up by a percentage of the CTC.
+   */
+  PERCENT
+  /**
+   * Up by an amount a year.
+   */
+  AMOUNT
+  /**
+   * To a new CTC.
+   */
+  CTC
+}
+
+/**
+ * A pay component the company adds to the six built in (owner, 21 Oct 2026): offered on every salary
+ * structure, with the amount a CTC split starts it at — fixed rupees a month, or a percentage of basic.
+ */
+model SalaryComponent {
+  id        String              @id @default(cuid())
+  name      String              @unique
+  mode      SalaryComponentMode @default(FIXED)
+  value     Decimal             @default(0) @db.Decimal(12, 2)
+  active    Boolean             @default(true)
+  sortOrder Int                 @default(0)
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  @@map("salary_components")
+}
+
+enum SalaryComponentMode {
+  FIXED
+  PERCENT_OF_BASIC
+}
+
+/**
+ * How a CTC is split into a salary structure (owner, 21 Oct 2026), one row (id "global"); no row is
+ * basic at 40% of the CTC and HRA at half of basic, as before.
+ */
+model SalarySplitRules {
+  id           String   @id @default("global")
+  /**
+   * Of the monthly CTC.
+   */
+  basicPercent Decimal  @default(40) @db.Decimal(5, 2)
+  /**
+   * Of basic.
+   */
+  hraPercent   Decimal  @default(50) @db.Decimal(5, 2)
+  /**
+   * Fixed monthly amounts.
+   */
+  conveyance   Decimal  @default(0) @db.Decimal(12, 2)
+  medical      Decimal  @default(0) @db.Decimal(12, 2)
+  updatedById  String?
+  updatedAt    DateTime @updatedAt
+
+  @@map("salary_split_rules")
 }
 
 model PayrollRun {
@@ -5670,6 +5757,10 @@ model Payslip {
   taxWorking         Json?
   otherDeduction     Decimal @default(0) @db.Decimal(12, 2)
   otherDeductionNote String?
+  /**
+   * The company's own components for the month, pro-rated like the six: [{ name, amount }]. In gross.
+   */
+  customEarnings     Json?
 
   totalDeductions Decimal @db.Decimal(12, 2)
   netPay          Decimal @db.Decimal(12, 2)
@@ -6111,6 +6202,21 @@ model EmployeeLetter {
 
   status LetterStatus @default(DRAFT)
 
+  /**
+   * Carries the signatory's signature image (owner, 21 Oct 2026). Copied onto the letter when it is
+   * issued, so changing the image in settings never re-signs a letter somebody already holds.
+   */
+  signed           Boolean @default(false)
+  signatureDataUrl String?
+
+  /**
+   * Drafted from one of HR's own templates (type CUSTOM). Its name is kept on the letter, so renaming or
+   * deleting the template never changes what an issued letter says it was.
+   */
+  templateId   String?
+  template     LetterTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  templateName String?
+
   issuedById String?
   issuedBy   User?    @relation("LetterIssuedBy", fields: [issuedById], references: [id])
   createdAt  DateTime @default(now())
@@ -6151,6 +6257,35 @@ enum LetterType {
   EXPERIENCE
   INTERNSHIP_COMPLETION
   GRATUITY_STATEMENT
+  /**
+   * From one of HR's own templates (LetterTemplate).
+   */
+  CUSTOM
+}
+
+/**
+ * A letter or official document HR writes once and issues to anybody (owner, 21 Oct 2026) — alongside
+ * the built-in letters, which stay as they are. The body is text with {{fields}} filled in from the
+ * person's record when a letter is drafted (src/lib/hr/letter-templates.ts).
+ */
+model LetterTemplate {
+  id      String  @id @default(cuid())
+  name    String
+  /**
+   * The letter number's middle part: WRF/NOC/2026/004.
+   */
+  code    String
+  subject String
+  body    String
+  active  Boolean @default(true)
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  letters EmployeeLetter[]
+
+  @@map("letter_templates")
 }
 
 enum LetterStatus {

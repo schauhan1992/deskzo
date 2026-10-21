@@ -10,6 +10,7 @@ import {
   deleteEmploymentHistory,
   deleteEmployeeDocument,
   draftLetter,
+  draftTemplateLetter,
   saveEmploymentHistory,
   uploadEmployeeDocument,
   verifyEmploymentHistory,
@@ -62,6 +63,7 @@ export function EmployeeFile({
   letters,
   canManage,
   letterOptions,
+  templates = [],
 }: {
   userId: string;
   userName: string;
@@ -70,13 +72,15 @@ export function EmployeeFile({
   letters: Letter[];
   canManage: boolean;
   letterOptions: { type: LetterType; reason?: string }[];
+  /** HR's own letter templates, offered beside the built-in letters (src/actions/letter-templates.ts). */
+  templates?: { id: string; name: string }[];
 }) {
   return (
     <div className="space-y-5">
       <DocumentsCard userId={userId} documents={documents} canManage={canManage} />
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <HistoryCard userId={userId} history={history} canManage={canManage} />
-        <LettersCard userId={userId} userName={userName} letters={letters} canManage={canManage} options={letterOptions} />
+        <LettersCard userId={userId} userName={userName} letters={letters} canManage={canManage} options={letterOptions} templates={templates} />
       </div>
     </div>
   );
@@ -483,24 +487,28 @@ function LettersCard({
   letters,
   canManage,
   options,
+  templates,
 }: {
   userId: string;
   userName: string;
   letters: Letter[];
   canManage: boolean;
   options: { type: LetterType; reason?: string }[];
+  templates: { id: string; name: string }[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [type, setType] = useState<LetterType>("OFFER");
+  // A built-in letter's type, or "template:<id>" for one of HR's own.
+  const [type, setType] = useState<string>("OFFER");
+  const templateId = type.startsWith("template:") ? type.slice("template:".length) : null;
 
-  const blocked = options.find((o) => o.type === type)?.reason;
+  const blocked = templateId ? undefined : options.find((o) => o.type === type)?.reason;
 
   function create() {
     setError(null);
     startTransition(async () => {
-      const result = await draftLetter(userId, type);
+      const result = templateId ? await draftTemplateLetter(userId, templateId) : await draftLetter(userId, type as LetterType);
       if (!result.ok) {
         setError(result.error);
         return;
@@ -523,7 +531,7 @@ function LettersCard({
                 {/* Grouped by lifecycle stage — twenty-three in one flat list is not a menu. An
                     option that does not apply stays visible but says why when picked, rather than
                     vanishing and leaving somebody hunting for it. */}
-                <Select id="letterType" value={type} onChange={(e) => setType(e.target.value as LetterType)} className="h-9 text-sm">
+                <Select id="letterType" value={type} onChange={(e) => setType(e.target.value)} className="h-9 text-sm">
                   {letterGroups.map((g) => (
                     <optgroup key={g.group} label={g.group}>
                       {g.types.map((t) => {
@@ -537,6 +545,15 @@ function LettersCard({
                       })}
                     </optgroup>
                   ))}
+                  {templates.length > 0 && (
+                    <optgroup label="Our templates">
+                      {templates.map((t) => (
+                        <option key={t.id} value={`template:${t.id}`}>
+                          {t.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </Select>
               </div>
               <Button size="sm" disabled={pending || !!blocked} onClick={create}>
@@ -561,6 +578,7 @@ function LettersCard({
               </Link>
               <span className="block font-mono text-[11px] text-subtle">
                 {l.letterNumber} · {formatCalendarDay(l.issuedOn)}
+                {l.templateName && ` · ${l.templateName}`}
                 {l.issuedBy && ` · ${l.issuedBy.name}`}
               </span>
             </div>

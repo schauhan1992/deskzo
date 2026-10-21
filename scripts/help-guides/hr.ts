@@ -40,7 +40,7 @@ export const guide: SeedGuide = {
       perm("section.hr", "Shows People (HR) in the menu — My HR, People, Leave and Attendance — and lets people open its pages. Every role has it until an admin unticks it for one."),
       perm(
         "hr.manage",
-        "The HR administrator's permission: edit anyone's record, record exits, keep the holiday calendar, leave types, opening balances and office hours, issue letters, convert hired candidates, and see everyone's attendance and leave. Shows Celebrations and Biometric in the menu. It doesn't show anyone's pay. Management has it by default; the built-in HR and HR head roles start with it.",
+        "The HR administrator's permission: edit anyone's record, record exits, keep the holiday calendar, leave types, opening balances and office hours, issue letters, convert hired candidates, and see everyone's attendance and leave. Shows Letters, Celebrations and Biometric in the menu. It doesn't show anyone's pay. Management has it by default; the built-in HR and HR head roles start with it.",
       ),
       perm(
         "hiring.manage",
@@ -86,6 +86,16 @@ export const guide: SeedGuide = {
         p(runs("To take a request back, select ", { b: "Withdraw" }, " on it under ", { b: "Your requests" }, ". You can do this until the leave starts, whether it is pending or approved.")),
       ),
       task(
+        "Ask for a short leave",
+        ol(
+          runs("Open ", { b: "People › Leave" }, " and select ", { b: "Short leave" }, " — the button beside ", { b: "Apply for leave" }, ", or the tab of the same name."),
+          runs("Select ", { b: "Ask for a short leave" }, ", pick the ", { b: "Day" }, ", the ", { b: "From" }, " and ", { b: "To" }, " times inside office hours, and write a ", { b: "Reason" }, "."),
+          "Send it. Your manager is notified, and decides it as they do leave.",
+        ),
+        p("A short leave is a couple of hours off on one working day — coming in late, leaving early, or stepping out in between. It uses no leave balance, up to the number a month and the length your company allows; the tab says how many you've used. An approved one clears the Late or Left early mark it covers on the attendance grid. People › My HR shows this month's count too."),
+        p(runs("Managers decide them under ", { b: "Waiting on you" }, " on the same tab, and HR sees everybody's there, filterable by status, team, person and date. HR sets the length and how many a month under ", { b: "Rules" }, ".")),
+      ),
+      task(
         "Approve leave and attendance corrections",
         ol(
           runs("Leave requests waiting for you are under ", { b: "Waiting on you" }, " on ", { b: "People › Leave" }, ". Corrections are under ", { b: "Attendance corrections waiting on you" }, " on ", { b: "People › My HR" }, "."),
@@ -110,9 +120,28 @@ export const guide: SeedGuide = {
           runs("Open ", { b: "People › People" }, ", search by name, email, code or designation, and open the person."),
           runs("Select ", { b: "Edit record" }, ", change what you need and select ", { b: "Save record" }, "."),
           runs("To file a document, select ", { b: "Upload" }, " on the ", { b: "Documents" }, " card, choose the file, name it and select ", { b: "Add to file" }, ". HR can untick ", { b: "The employee can see this" }, " for something filed about the person rather than for them."),
-          runs("To issue a letter, pick it under ", { b: "Letters" }, " and select ", { b: "Draft" }, ". Edit the wording, select ", { b: "Save changes" }, ", then ", { b: "Issue" }, " and ", { b: "Print" }, "."),
+          runs("To issue a letter, pick it under ", { b: "Letters" }, " — a built-in one, or one of yours under ", { b: "Our templates" }, " — and select ", { b: "Draft" }, ". Edit the wording, tick or untick ", { b: "Add digital signature" }, ", select ", { b: "Save changes" }, ", then ", { b: "Issue" }, " and ", { b: "Print" }, "."),
         ),
-        p(runs("An issued letter's wording is fixed because its number has been given out. To change it, select ", { b: "Revoke" }, " — it stays on record as withdrawn — and draft another.")),
+        p(runs("An issued letter's wording is fixed because its number has been given out. To change it, select ", { b: "Revoke" }, " — it stays on record as withdrawn — and draft another. A letter is dated the day it's issued, and keeps the signature it was issued with.")),
+      ),
+      task(
+        "Make a letter template of your own",
+        ol(
+          runs("Open ", { b: "People › Letters" }, " and choose ", { b: "Our templates" }, ". Select ", { b: "New template" }, "."),
+          runs("Give it a ", { b: "Name" }, " and a ", { b: "Code" }, " of 2 to 5 letters — the code goes in the letter number, like WRF/BON/2026/001."),
+          runs("Write the ", { b: "Subject" }, " and the ", { b: "Letter" }, ". Click a field on the right to put it in — ", { b: "{{employee.name}}" }, ", the CTC, the joining date — and it's filled in from the person's record when a letter is drafted."),
+          runs("Select ", { b: "Save template" }, ". It's offered under ", { b: "Our templates" }, " on everybody's Letters card."),
+        ),
+        p("A field with nothing on someone's record leaves a blank line on the draft to fill in. A template with letters drafted from it is switched off rather than deleted; the letters keep their own text."),
+      ),
+      task(
+        "Sign letters digitally",
+        ol(
+          runs("Open ", { b: "People › Letters" }, " and choose ", { b: "Signature" }, "."),
+          runs("Select ", { b: "Upload an image" }, " for a scan of the signatory's signature, or ", { b: "Sign here" }, " to sign with a mouse or a finger and select ", { b: "Save signature" }, "."),
+          runs("Leave ", { b: "Sign new letters" }, " ticked for letters to start out signed. Each draft still has its own ", { b: "Add digital signature" }, " switch."),
+        ),
+        p("The signature is printed above the signatory's name. With none of its own, signed letters carry the stamp from Settings › Organisation. It's a picture of the signature, not an Aadhaar eSign or a DSC."),
       ),
       task(
         "Hire someone and convert them on joining",
@@ -195,7 +224,7 @@ export const guide: SeedGuide = {
     faq: [
       qa(
         "I can't see People (HR), or one of its pages, in the menu.",
-        p("Either the module is switched off for your company in Settings › Modules, or your role has had the section hidden in Settings › Roles & Permissions. Hiring also needs Run hiring, and Celebrations and Biometric need Manage people records. Ask an admin."),
+        p("Either the module is switched off for your company in Settings › Modules, or your role has had the section hidden in Settings › Roles & Permissions. Hiring also needs Run hiring, and Letters, Celebrations and Biometric need Manage people records. Ask an admin."),
       ),
       qa(
         "Why does the leave form say I don't have enough days?",

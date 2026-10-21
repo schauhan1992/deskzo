@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import type { LeaveStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
@@ -202,7 +203,7 @@ const requestSelect = {
   status: true,
   decidedAt: true,
   decisionNote: true,
-  user: { select: { id: true, name: true } },
+  user: { select: { id: true, userSeq: true, name: true } },
   approver: { select: { id: true, name: true } },
 } as const;
 
@@ -233,4 +234,44 @@ export async function shortLeaveOverview() {
     db.shortLeaveRequest.findMany({ where: { ...scope, status: { in: ["APPROVED", "REJECTED"] } }, orderBy: { decidedAt: "desc" }, take: 10, select: requestSelect }),
   ]);
   return toPlain({ policy: rules, usedThisMonth, mine, pending, recent, canManage, hours, today });
+}
+
+export type ShortLeaveFilters = {
+  status?: string;
+  userId?: string;
+  departmentId?: string;
+  from?: string;
+  to?: string;
+  page?: number;
+  pageSize?: number;
+};
+
+/**
+ * Everybody's short leave the viewer may see, as leave's register is (owner, 21 Oct 2026: HR had only
+ * what was waiting and the last ten decided): everyone's for HR — `hr.viewAll` or `hr.manage` — their
+ * own and their team's for anybody else. Newest first; null while the tables aren't there.
+ */
+export async function allShortLeaves(filters?: ShortLeaveFilters) {
+  const user = await requireModuleUser("hr");
+  if (!(await policy())) return null;
+  const everyone = (await hasEffectivePermission(user.id, "hr.viewAll")) || (await hasEffectivePermission(user.id, "hr.manage"));
+  const allowed = everyone ? null : [user.id, ...(await getDownlineUserIds(user.id))];
+  const statuses = ["PENDING", "APPROVED", "REJECTED", "CANCELLED"];
+  const where = {
+    ...(allowed ? { userId: { in: allowed } } : {}),
+    ...(filters?.status && statuses.includes(filters.status) ? { status: filters.status as LeaveStatus } : {}),
+    ...(filters?.userId ? { userId: allowed && !allowed.includes(filters.userId) ? "__nobody__" : filters.userId } : {}),
+    ...(filters?.departmentId ? { user: { departmentId: filters.departmentId } } : {}),
+    ...(filters?.from || filters?.to
+      ? { date: { ...(filters?.from ? { gte: dateOnly(filters.from) } : {}), ...(filters?.to ? { lte: dateOnly(filters.to) } : {}) } }
+      : {}),
+  };
+  const page = filters?.page ?? 1;
+  const pageSize = filters?.pageSize ?? 50;
+  const [rows, total, pendingCount] = await Promise.all([
+    db.shortLeaveRequest.findMany({ where, orderBy: [{ date: "desc" }, { fromMinute: "desc" }], skip: (page - 1) * pageSize, take: pageSize, select: requestSelect }),
+    db.shortLeaveRequest.count({ where }),
+    db.shortLeaveRequest.count({ where: { ...where, status: "PENDING" } }),
+  ]);
+  return { rows: toPlain(rows), total, pendingCount, everyone };
 }
