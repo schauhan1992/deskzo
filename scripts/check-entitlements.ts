@@ -342,9 +342,9 @@ async function main() {
     if (layout.startsWith("FAILED")) broken.push(`the layout: ${layout}`);
     ok("the company page, the dashboard, the layout and Settings render on a CRM-only plan", broken.length === 0, broken.join(" | "));
     // Groups render collapsed, so their headings are what is always there: Workspace sits under
-    // Prospecting; the Helpdesk under Support, sales documents under Quotes & Invoices.
-    const sidebarGroups = [...layout.matchAll(/>(Prospecting|Support|Quotes &amp; Invoices|My work)</g)].map((m) => m[1]);
-    ok("  the sidebar has the plan's modules and not the others", sidebarGroups.includes("Prospecting") && sidebarGroups.includes("My work") && !sidebarGroups.includes("Support") && !sidebarGroups.includes("Quotes &amp; Invoices"), sidebarGroups.join(", "));
+    // Prospecting; the Helpdesk under Support, sales documents under Finance → Accounts.
+    const sidebarGroups = [...layout.matchAll(/>(Prospecting|Support|Accounts|My work)</g)].map((m) => m[1]);
+    ok("  the sidebar has the plan's modules and not the others", sidebarGroups.includes("Prospecting") && sidebarGroups.includes("My work") && !sidebarGroups.includes("Support") && !sidebarGroups.includes("Accounts"), sidebarGroups.join(", "));
     ok("  Settings → Lists leaves out the vault's and projects' lists", !/Credential vault tags|Project types/.test(html["Settings → Lists"]!));
     const Tickets = (require(`${D}/tickets/page`) as { default: Page }).default;
     const Portal = (require(`${D}/settings/portal/page`) as { default: Page }).default;

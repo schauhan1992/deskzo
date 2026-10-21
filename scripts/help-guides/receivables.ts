@@ -89,7 +89,7 @@ export const guide: SeedGuide = {
       perm("section.receivables", "Shows Receivables under Payments in the menu and lets people open its pages. Every role has it until an admin unticks it for one."),
       perm(
         "collections.followUp",
-        "Shows Payments › My collections: what is owed on the accounts someone manages (their team's too, for a manager) and on orders they punched on anybody's account, and logging each follow-up. Needs View payments as well. No role has it by default.",
+        "Shows Accounts › My collections: what is owed on the accounts someone manages (their team's too, for a manager) and on orders they punched on anybody's account, and logging each follow-up. Needs View payments as well. No role has it by default.",
       ),
       perm(
         "payments.record",
@@ -171,7 +171,7 @@ export const guide: SeedGuide = {
       task(
         "See who owes what",
         ol(
-          runs("Open ", { b: "Payments › Receivables" }, ". The cards show the ", { b: "Total outstanding" }, ", what is ", { b: "Overdue" }, ", ", { b: "Not yet due" }, " and ", { b: "90+ days" }, "."),
+          runs("Open ", { b: "Accounts › Receivables" }, ". The cards show the ", { b: "Total outstanding" }, ", what is ", { b: "Overdue" }, ", ", { b: "Not yet due" }, " and ", { b: "90+ days" }, "."),
           runs("Type in ", { b: "Search customer name…" }, ", or pick ", { b: "Broken promises" }, " or ", { b: "Promised this week" }, "."),
           runs("Select a customer to open their ", { b: "Statement" }, " tab: what they were invoiced, received and credited, the ageing, their open invoices and the running statement of account."),
         ),
@@ -199,7 +199,7 @@ export const guide: SeedGuide = {
       task(
         "Work through My collections",
         ol(
-          runs("Open ", { b: "Payments › My collections" }, "."),
+          runs("Open ", { b: "Accounts › My collections" }, "."),
           runs(
             "Pick a filter: ",
             { b: "All" },
@@ -224,7 +224,7 @@ export const guide: SeedGuide = {
       task(
         "Check a customer's credit and set a limit",
         ol(
-          runs("Open ", { b: "Payments › Customer credit" }, ". Customers are listed riskiest first; filter by rating or search."),
+          runs("Open ", { b: "Accounts › Customer credit" }, ". Customers are listed riskiest first; filter by rating or search."),
           runs("Select a customer to open their ", { b: "Credit" }, " tab: the suggested and standing terms, the credit limit, and ", { b: "What the rating is based on" }, ", bill by bill."),
           runs(
             "With the permission to override credit, use ",

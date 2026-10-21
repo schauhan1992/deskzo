@@ -177,8 +177,16 @@ export const adjustStockSchema = z.object({
   itemId: z.string().min(1),
   type: z.enum(stockMovementTypeValues),
   direction: z.enum(["IN", "OUT"]).optional(),
-  quantity: z.preprocess((v) => Number(v), z.number().int().positive("Quantity must be greater than zero")),
+  // Up to three decimals since stock moved to warehouses (owner, 22 Oct 2026) — goods sold by weight.
+  quantity: z.preprocess(
+    (v) => Number(v),
+    z.number().positive("Quantity must be greater than zero").refine((n) => Math.round(n * 1000) === n * 1000, "Up to three decimals."),
+  ),
   reason: z.string().trim().optional().or(z.literal("")),
+  /** The warehouse, where the company has more than one; the default otherwise. */
+  warehouseId: z.string().optional().or(z.literal("")),
+  /** The form's own token, so a double submit records one movement. */
+  requestId: z.string().max(80).optional(),
 });
 
 export type AdjustStockInput = z.infer<typeof adjustStockSchema>;

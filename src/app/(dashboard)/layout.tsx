@@ -13,6 +13,7 @@ import { billingNotice } from "@/actions/billing";
 import { currentTenant } from "@/lib/tenancy/resolve";
 import { canBroadcastNotes } from "@/actions/note";
 import { Sidebar } from "@/components/layout/sidebar";
+import { NavBreadcrumb } from "@/components/layout/nav-breadcrumb";
 import { SideRail } from "@/components/layout/side-rail";
 import { CreateMenu } from "@/components/layout/create-menu";
 import { NotificationBell } from "@/components/layout/notification-bell";
@@ -382,7 +383,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
             </Link>
           )}
         </div>
-        <main className="mx-auto w-full max-w-[1600px] flex-1 animate-fade-rise px-4 py-6 md:px-6 md:py-8">{children}</main>
+        <main className="mx-auto w-full max-w-[1600px] flex-1 animate-fade-rise px-4 py-6 md:px-6 md:py-8">
+          <NavBreadcrumb navigation={navigation} />
+          {children}
+        </main>
         {today && <CelebrationSplash moments={today.moments} />}
         {wishes.length > 0 && (
           <Suspense fallback={null}>

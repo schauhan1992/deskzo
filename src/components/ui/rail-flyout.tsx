@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AnchoredPopover, insideAnchoredPopover } from "@/components/ui/anchored-popover";
@@ -15,6 +15,8 @@ export type RailFlyoutItem = {
   active: boolean;
   /** Read after the label by assistive tech and shown at the row's end — "3 new". */
   badge?: { text: string; label: string };
+  /** The part of the group it is in — a small heading is drawn where the part changes (Finance → Accounts). */
+  section?: string;
 };
 
 /** How long the pointer rests on an icon before its pages open — sweeping past an icon on the way to another opens nothing. */
@@ -260,9 +262,14 @@ export function RailFlyout({
             {label}
           </p>
           <div className="space-y-0.5 px-1.5 pb-1.5">
-            {items.map((item) => (
+            {items.map((item, i) => (
+              <Fragment key={item.key}>
+              {item.section && item.section !== items[i - 1]?.section && (
+                <p aria-hidden="true" className="px-2 pt-2 pb-0.5 text-[10px] font-semibold tracking-[0.06em] text-subtle uppercase">
+                  {item.section}
+                </p>
+              )}
               <Link
-                key={item.key}
                 href={item.href}
                 role="menuitem"
                 aria-current={item.active ? "page" : undefined}
@@ -286,6 +293,7 @@ export function RailFlyout({
                   </span>
                 )}
               </Link>
+              </Fragment>
             ))}
           </div>
         </div>

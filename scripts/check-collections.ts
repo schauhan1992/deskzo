@@ -33,6 +33,7 @@
 import "dotenv/config";
 import Module from "node:module";
 import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { createElement, type ReactElement } from "react";
 import { directClient } from "../src/lib/tenancy/direct-client";
@@ -122,10 +123,10 @@ const TAG = "ZZPROBE_COLL";
 const MAIL = "@zzprobe-coll.invalid";
 /** The daily job is tested on days long past, so no real promise can fall due by them. */
 const JOB_DAYS = ["2026-01-14", "2026-01-15"];
-const RENDERS = path.join(
-  process.env.COLL_RENDERS ??
-    "C:/Users/Sachin/AppData/Local/Temp/claude/C--Users-Sachin-Documents-deskzo/add8f996-e6c0-485a-aa61-d048675d5458/scratchpad/collections/renders",
-);
+// The rendered pages, for a person to look at — in the system's temporary folder unless COLL_RENDERS names
+// another, never inside the working tree (a Windows path written here once became a C:/ folder in the repo
+// on every other machine).
+const RENDERS = path.resolve(process.env.COLL_RENDERS ?? path.join(tmpdir(), "deskzo-check-collections", "renders"));
 
 let failures = 0;
 let passes = 0;
@@ -263,7 +264,8 @@ async function main() {
     ["sales-executive", "sales-manager"].every((k) => ROLE_PRESETS.find((p) => p.key === k)?.permissions.includes("collections.followUp")),
   );
   const nav = MODULE_REGISTRY.find((m) => m.key === "receivables")?.navItems.find((i) => i.href === "/collections");
-  ok("My collections is in Receivables' links, for collections.followUp", !!nav && navPermissionKeys(nav).join() === "collections.followUp", nav?.label);
+  // Either key opens the page (src/lib/collections/load.ts mayLogFollowUps), so the link asks for either.
+  ok("My collections is in Receivables' links, for collections.followUp or accounts' Record payments", !!nav && navPermissionKeys(nav).sort().join() === "collections.followUp,payments.record", nav?.label);
 
   await cleanup();
   // Real promises in the dev database, as they were: the daily job below must leave every one of them alone.

@@ -179,7 +179,7 @@ export const guide: SeedGuide = {
       ),
       qa(
         "A locked month didn't reach the books.",
-        p(runs("If Accounting couldn't take the entry, locking says so. ", { b: "Accounting › Overview" }, " then lists the run, and ", { b: "Post these now" }, " posts it again.")),
+        p(runs("If Accounting couldn't take the entry, locking says so. ", { b: "Accounts › Overview" }, " then lists the run, and ", { b: "Post these now" }, " posts it again.")),
       ),
     ],
     related: ["hr", "accounting", "incentives"],

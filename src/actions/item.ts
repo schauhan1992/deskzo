@@ -30,6 +30,12 @@ import { HSN_REQUIRED_MESSAGE, hsnShapeIssue } from "@/lib/hsn";
 import { hsnIssue, hsnProblemsFor, knownHsnCodes, notInDirectory } from "@/lib/platform/hsn-directory";
 import { workspaceClock } from "@/lib/time/workspace";
 import type { ActionResult } from "@/actions/company";
+import { randomUUID } from "node:crypto";
+import { accountsSettings } from "@/lib/accounts/settings";
+import { moveStock, StockError } from "@/lib/inventory/engine";
+import { pair, postInventoryEntry, type InventoryLine } from "@/lib/inventory/posting";
+import { recordOpeningStock } from "@/lib/inventory/opening";
+import { defaultWarehouseId } from "@/lib/inventory/warehouses";
 
 const FIXED_DIRECTION: Partial<Record<string, 1 | -1>> = {
   RECEIVED: 1,
@@ -95,6 +101,8 @@ export async function createItem(input: unknown): Promise<ActionResult<{ id: str
   if (!custom.ok) return { ok: false, error: custom.error };
   // The revenue pattern is Revenue & Close's: without it the field isn't on the form, and is ignored.
   const revenueCapture = await isModuleEnabled("revenue_close");
+  // Read before the transaction: a workspace without the stock ledger's tables records opening stock as before.
+  const stockSettings = await inventorySettings();
 
   try {
     const item = await db.$transaction(async (tx) => {
@@ -117,22 +125,15 @@ export async function createItem(input: unknown): Promise<ActionResult<{ id: str
           reorderLevel: trackInventory ? (rest.reorderLevel ?? null) : null,
           active: rest.active,
           createdById: user.id,
-          stockQuantity: trackInventory && openingStock ? openingStock : 0,
+          // Nothing on hand until the opening stock is received into the default warehouse below.
+          stockQuantity: 0,
           revenuePattern: revenueCapture ? rest.revenuePattern || null : null,
           ...custom.data,
         },
       });
 
       if (trackInventory && openingStock) {
-        await tx.stockMovement.create({
-          data: {
-            itemId: created.id,
-            type: "RECEIVED",
-            quantityChange: openingStock,
-            reason: "Opening stock",
-            createdByUserId: user.id,
-          },
-        });
+        await recordOpeningStock(tx, { itemId: created.id, quantity: openingStock, unitCost: rest.costPrice ?? null, userId: user.id, reason: "Opening stock" }, stockSettings);
       }
 
       return created;
@@ -229,6 +230,12 @@ export async function updateItemCustomFields(itemId: string, input: unknown): Pr
   return { ok: true, data: null };
 }
 
+/**
+ * A movement recorded by hand on an item's page — received, sold, returned, damaged, or a correction either
+ * way (owner, 22 Oct 2026: now through the stock engine, src/lib/inventory/engine.ts). Into or out of the
+ * warehouse chosen, the default one otherwise; once per form submission (`requestId`). Receiving needs
+ * "Receive stock"; anything that takes stock out or corrects it, "Adjust stock".
+ */
 export async function adjustStock(input: unknown): Promise<ActionResult<{ stockQuantity: number }>> {
   const user = await requireModuleUser("items");
   const moduleError = await requireItemsModule();
@@ -237,34 +244,92 @@ export async function adjustStock(input: unknown): Promise<ActionResult<{ stockQ
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
-  const { itemId, type, direction, quantity, reason } = parsed.data;
+  const { itemId, type, direction, quantity, reason, warehouseId, requestId } = parsed.data;
+  const sign = type === "ADJUSTMENT" ? (direction === "OUT" ? -1 : 1) : (FIXED_DIRECTION[type] ?? 1);
+  const needs = sign > 0 && type !== "ADJUSTMENT" ? "inventory.receive" : "inventory.adjust";
+  if (!(await can(user.id, needs))) {
+    return { ok: false, error: needs === "inventory.receive" ? "Receiving stock needs “Receive stock”." : "Taking stock out or correcting it needs “Adjust stock”." };
+  }
 
-  const item = await db.item.findUnique({ where: { id: itemId } });
+  const item = await db.item.findUnique({ where: { id: itemId }, select: { id: true, name: true, trackInventory: true, stockQuantity: true } });
   if (!item) {
     return { ok: false, error: "Item not found." };
   }
   if (!item.trackInventory) {
     return { ok: false, error: "This item doesn't track inventory." };
   }
-
-  const sign = type === "ADJUSTMENT" ? (direction === "OUT" ? -1 : 1) : (FIXED_DIRECTION[type] ?? 1);
   const quantityChange = sign * quantity;
-  const nextQuantity = item.stockQuantity + quantityChange;
 
-  if (nextQuantity < 0) {
-    return { ok: false, error: `Not enough stock — only ${item.stockQuantity} on hand.` };
+  const settings = await inventorySettings();
+  if (!settings) {
+    // A workspace whose database hasn't been brought up to date: as before, one movement and the total.
+    const nextQuantity = Number(item.stockQuantity) + quantityChange;
+    if (nextQuantity < 0) return { ok: false, error: `Not enough stock — only ${Number(item.stockQuantity)} on hand.` };
+    await db.$transaction(async (tx) => {
+      await tx.stockMovement.create({ data: { itemId, type, quantityChange, reason: reason || null, createdByUserId: user.id } });
+      await tx.item.update({ where: { id: itemId }, data: { stockQuantity: nextQuantity } });
+    });
+    revalidatePath(`/items/${itemId}`);
+    revalidatePath("/items");
+    return { ok: true, data: { stockQuantity: nextQuantity } };
   }
 
-  await db.$transaction(async (tx) => {
-    await tx.stockMovement.create({
-      data: { itemId, type, quantityChange, reason: reason || null, createdByUserId: user.id },
+  try {
+    const key = `manual:${requestId || randomUUID()}`;
+    const after = await db.$transaction(async (tx) => {
+      const where = warehouseId || (await defaultWarehouseId(tx, settings));
+      const date = new Date();
+      const moved = await moveStock(tx, {
+        itemId,
+        warehouseId: where,
+        quantity: quantityChange,
+        type,
+        sourceType: "MANUAL",
+        date,
+        userId: user.id,
+        reason: reason || null,
+        idempotencyKey: key,
+        settings,
+      });
+      // Under perpetual inventory the ledger follows the stock (src/lib/inventory/posting.ts): a sale or a
+      // customer's return by hand against Cost of Goods Sold, anything else against Stock Adjustments.
+      if (settings.inventoryAccounting === "PERPETUAL") {
+        const paise = moved.reduce((t, m) => t + m.valuePaise, 0);
+        const lines: InventoryLine[] =
+          type === "SOLD"
+            ? pair("COGS", "INVENTORY", paise)
+            : type === "RETURNED"
+              ? pair("INVENTORY", "COGS", paise)
+              : quantityChange > 0
+                ? pair("INVENTORY", "STOCK_ADJUSTMENT", paise)
+                : pair("STOCK_ADJUSTMENT", "INVENTORY", paise);
+        await postInventoryEntry(tx, { postingKey: `stock:${key}`, date, narration: `${item.name}: ${type.toLowerCase()} by hand${reason ? ` — ${reason}` : ""}`, userId: user.id, lines });
+      }
+      const row = await tx.item.findUniqueOrThrow({ where: { id: itemId }, select: { stockQuantity: true } });
+      return Number(row.stockQuantity);
     });
-    await tx.item.update({ where: { id: itemId }, data: { stockQuantity: nextQuantity } });
-  });
+    await recordAudit({
+      userId: user.id,
+      action: "UPDATE",
+      entityType: "Item",
+      entityId: itemId,
+      entityLabel: `${item.name}: ${type.toLowerCase()} ${quantityChange > 0 ? "+" : ""}${quantityChange}${reason ? ` — ${reason}` : ""}`,
+    });
+    revalidatePath(`/items/${itemId}`);
+    revalidatePath("/items");
+    return { ok: true, data: { stockQuantity: after } };
+  } catch (err) {
+    if (err instanceof StockError) return { ok: false, error: err.message };
+    // Perpetual inventory posts it, so the books' period lock applies (src/lib/ledger/journal.ts assertPeriodOpen).
+    if (err instanceof Error && /books are closed/.test(err.message)) return { ok: false, error: err.message };
+    throw err;
+  }
+}
 
-  revalidatePath(`/items/${itemId}`);
-  revalidatePath("/items");
-  return { ok: true, data: { stockQuantity: nextQuantity } };
+/** Accounts settings for the stock engine, or null where the workspace's database doesn't have its tables yet. */
+async function inventorySettings() {
+  const settings = await accountsSettings();
+  return settings.migrated ? settings : null;
 }
 
 export async function listItems(params?: {
@@ -699,6 +764,7 @@ export async function importItems(formData: FormData): Promise<ActionResult<Impo
   if (moduleError) return { ok: false, error: moduleError };
   // "Import the catalog" is this upload — as it is from Settings › Import & export.
   if (!(await can(user.id, "data.importCatalog"))) return { ok: false, error: "Importing items from a file needs the permission to import the catalog." };
+  const stockSettings = await inventorySettings();
 
   const file = formData.get("file");
   if (!(file instanceof File)) {
@@ -889,21 +955,17 @@ export async function importItems(formData: FormData): Promise<ActionResult<Impo
               reorderLevel: trackInventory ? (data.reorderLevel ?? null) : null,
               active: data.active,
               createdById: user.id,
-              stockQuantity: trackInventory && data.openingStock ? data.openingStock : 0,
+              stockQuantity: 0,
               ...customData,
             },
           });
 
           if (trackInventory && data.openingStock) {
-            await tx.stockMovement.create({
-              data: {
-                itemId: item.id,
-                type: "RECEIVED",
-                quantityChange: data.openingStock,
-                reason: "Opening stock (import)",
-                createdByUserId: user.id,
-              },
-            });
+            await recordOpeningStock(
+              tx,
+              { itemId: item.id, quantity: data.openingStock, unitCost: data.costPrice ?? null, userId: user.id, reason: "Opening stock (import)" },
+              stockSettings,
+            );
           }
           return item;
         });

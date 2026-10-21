@@ -215,7 +215,8 @@ async function main() {
 
   // 6. Every child unauthorised: the module, open, has no link left — so no heading either.
   const bare = menu(SECTIONS);
-  ok("6. with no accounting permission the Accounting group is gone entirely", !groups(bare).includes("Accounting") && !hrefs(bare).some((h) => h.startsWith("/accounting")));
+  // Accounting's pages are a part of Finance → Accounts (owner, 22 Oct 2026), which other modules' links keep.
+  ok("6. with no accounting permission every Accounting page is gone from Accounts", !hrefs(bare).some((h) => h.startsWith("/accounting")));
   const allMenus = [bare, leadsMenu, menu([]), menu([...PERMISSION_KEYS]), menu(["ledger.viewReports", ...SECTIONS])];
   ok("   and no menu ever has an empty group", allMenus.every((nav) => nav.every((s) => s.items.length > 0)));
 
@@ -226,7 +227,7 @@ async function main() {
   const onlyFor = MODULE_REGISTRY.flatMap((m) => m.navItems.filter((i) => i.onlyFor).map((i) => i.href));
   ok("   but a link for what is true of somebody isn't a permission: without the fact, an admin doesn't get it", onlyFor.length > 0 && onlyFor.every((h) => !hrefs(menu([...PERMISSION_KEYS])).includes(h)), onlyFor.join(", "));
   const smallPlan = menu([...PERMISSION_KEYS], { notEntitled: ["accounting", "revenue_close", "hr", "payroll"] });
-  ok("   but not past the plan: no Accounting, no People (HR) for an admin on a plan without them", !groups(smallPlan).includes("Accounting") && !getModuleDefinition("hr")!.navItems.some((i) => hrefs(smallPlan).includes(i.href)));
+  ok("   but not past the plan: no Accounting, no People (HR) for an admin on a plan without them", !hrefs(smallPlan).some((h) => h.startsWith("/accounting")) && !getModuleDefinition("hr")!.navItems.some((i) => hrefs(smallPlan).includes(i.href)));
   ok("   and the administration links come with their permissions", ["/settings", "/settings/users", "/settings/roles", "/settings/security", "/settings/data", "/performance"].every((h) => hrefs(everything).includes(h)));
   ok("   which nobody else gets", !["/settings", "/settings/users", "/settings/roles", "/settings/security", "/settings/data", "/performance"].some((h) => hrefs(bare).includes(h)));
 

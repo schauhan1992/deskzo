@@ -16,10 +16,12 @@ import { HSN_REQUIRED_MESSAGE } from "@/lib/hsn";
 type FormValues = z.input<typeof updateItemSchema>;
 
 /** Money columns reach the client as plain numbers — see the Decimal extension in src/lib/db.ts. */
-type ItemWithPlainPrices = Omit<Item, "costPrice" | "sellingPrice" | "taxRatePercent"> & {
+type ItemWithPlainPrices = Omit<Item, "costPrice" | "sellingPrice" | "taxRatePercent" | "stockQuantity" | "reorderQuantity"> & {
   costPrice: number | null;
   sellingPrice: number;
   taxRatePercent: number | null;
+  stockQuantity: number;
+  reorderQuantity?: number | null;
 };
 
 export function EditItemForm({

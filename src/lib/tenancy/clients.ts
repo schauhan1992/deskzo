@@ -278,7 +278,17 @@ const NOT_YET_EVERYWHERE = {
   // src/lib/pipeline/server.ts; a stage's pipeline and rule, read by name there and in src/actions/pipeline.ts.
   lead: { customFields: true, stageId: true, stageChangedAt: true, pipelineId: true, fromLeadId: true },
   leadStage: { pipelineId: true, requiredFields: true },
-  item: { customFields: true },
+  // and 20261122110000_finance_accounts: the item's batch, expiry and serial tracking, barcode and reorder
+  // quantity, read by name in src/lib/inventory and the item screens.
+  item: { customFields: true, trackBatches: true, trackExpiry: true, trackSerials: true, barcode: true, reorderQuantity: true },
+  // 20261122110000_finance_accounts. A movement's warehouse, cost and source, read by name in src/lib/inventory.
+  stockMovement: {
+    warehouseId: true, batchId: true, serialNumbers: true, movementDate: true, unitCost: true, value: true,
+    sourceType: true, sourceId: true, sourceLineId: true, tradeDocumentId: true, stockDocumentId: true,
+    idempotencyKey: true, reversesId: true,
+  },
+  // 20261122110000_finance_accounts. Read by name in src/lib/ledger/journal.ts and src/lib/accounts.
+  journalEntry: { postingKey: true, accountVoucherId: true, stockDocumentId: true },
   // 20261016100000_order_steps. Read by name through src/lib/pipeline/order-steps-server.ts.
   companyProduct: { customFields: true, stepId: true, stepChangedAt: true },
   // 20261018100000_workplace_sign_in_and_mail. A Zoho mailbox's details are read by name in
@@ -293,7 +303,8 @@ const NOT_YET_EVERYWHERE = {
   organisationSettings: { vendorCodePrefix: true, letterSignatureDataUrl: true, letterSignByDefault: true },
   branch: { defaultBankAccountId: true },
   // and 20261029120000_document_cancel_reason_pi_issued: read by name in src/lib/documents/cancellation.ts.
-  tradeDocument: { bankAccountId: true, cancelReason: true, cancelledAt: true, cancelledById: true, paidBefore: true },
+  // and 20261122110000_finance_accounts: the warehouse its goods leave or arrive in (src/lib/inventory/documents.ts).
+  tradeDocument: { bankAccountId: true, cancelReason: true, cancelledAt: true, cancelledById: true, paidBefore: true, warehouseId: true },
   // 20261108100000_support_reply_from. Read by name in src/lib/support-mail/send.ts and
   // src/actions/support-mail.ts, which treat a workspace without them as replying through Deskzo.
   supportMailSettings: { replyFrom: true, companyFrom: true },

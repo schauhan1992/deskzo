@@ -95,7 +95,7 @@ export const guide: SeedGuide = {
       task(
         "Record a payment against an order",
         ol(
-          runs("Open ", { b: "Payments › Payments" }, " and select ", { b: "+ Record payment" }, "."),
+          runs("Open ", { b: "Accounts › Payments" }, " and select ", { b: "+ Record payment" }, "."),
           runs("Search for the company and select it. Its orders are listed with the balance due on each."),
           "Select the order the payment is for.",
           runs(
@@ -137,7 +137,7 @@ export const guide: SeedGuide = {
       task(
         "See what is outstanding",
         ol(
-          runs("Open ", { b: "Payments › Payments" }, "."),
+          runs("Open ", { b: "Accounts › Payments" }, "."),
           runs("Type in ", { b: "Search company name…" }, " to see one customer's orders."),
           runs("Use the ", { b: "Status" }, " filter to show only ", { b: "Unpaid" }, ", ", { b: "Partially paid" }, " or ", { b: "Paid" }, " orders."),
         ),

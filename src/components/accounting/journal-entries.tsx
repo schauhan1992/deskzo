@@ -28,6 +28,8 @@ const SOURCE_LABEL: Record<JournalSource, string> = {
   REVENUE: "Revenue",
   SCHEDULE: "Schedule",
   VENDOR_CREDIT: "Vendor credit",
+  VOUCHER: "Voucher",
+  INVENTORY: "Inventory",
 };
 
 const SOURCE_TONE: Record<JournalSource, "default" | "green" | "blue" | "red" | "amber"> = {
@@ -45,6 +47,8 @@ const SOURCE_TONE: Record<JournalSource, "default" | "green" | "blue" | "red" | 
   REVENUE: "green",
   SCHEDULE: "default",
   VENDOR_CREDIT: "amber",
+  VOUCHER: "default",
+  INVENTORY: "blue",
 };
 
 type Entry = {

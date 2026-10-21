@@ -6,7 +6,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { Menu, X, ChevronDown, LayoutDashboard, Search, PanelLeftClose, PanelLeftOpen, Headset } from "lucide-react";
 import { MODULE_REGISTRY } from "@/lib/modules";
-import { DASHBOARD_HREF, hasModuleNavigation, headedNavigation, navGroupIcon, navIcon, type VisibleNavSection } from "@/lib/navigation";
+import { DASHBOARD_HREF, hasModuleNavigation, headedNavigation, navGroupIcon, navIcon, navParts, type VisibleNavSection } from "@/lib/navigation";
 import { RailFlyout } from "@/components/ui/rail-flyout";
 import { brandInitials, type Branding } from "@/lib/branding";
 import { cn } from "@/lib/utils";
@@ -217,10 +217,16 @@ export function Sidebar({
    * starts open; a click can still fold it away. Not remembered: a new page starts from its own section.
    */
   const [openGroup, setOpenGroup] = useState<string | null | undefined>(undefined);
+  /**
+   * The same for the parts of a split group (Finance → Accounts' Sales, Inventory, Reports…): the part
+   * holding the page you are on starts open, one at a time, and a click opens another or folds it away.
+   */
+  const [openPart, setOpenPart] = useState<string | null | undefined>(undefined);
   const [seenPath, setSeenPath] = useState(pathname);
   if (seenPath !== pathname) {
     setSeenPath(pathname);
     setOpenGroup(undefined);
+    setOpenPart(undefined);
   }
 
   function toggleCollapsed() {
@@ -237,18 +243,22 @@ export function Sidebar({
 
   // `canonical` is the app's own label: a renamed page is still found by its old name. A group with
   // nothing in it was dropped by `buildNavigation` — a bare heading over nothing reads as broken.
-  const visibleSections: { group: string; Icon: NavIcon; items: { href: string; label: string; canonical?: string; exact?: boolean; Icon: NavIcon }[] }[] =
-    navigation.map(({ group, items }) => ({
-      group,
-      Icon: navGroupIcon(group, items[0]?.href),
-      items: items.map((i) => ({
-        href: i.href,
-        label: i.term ? slot(wording, i.label, i.term.key, i.term.template) : i.label,
-        canonical: i.label,
-        exact: i.exact,
-        Icon: navIcon(i.href),
-      })),
-    }));
+  const visibleSections: {
+    group: string;
+    Icon: NavIcon;
+    items: { href: string; label: string; canonical?: string; exact?: boolean; section?: string; Icon: NavIcon }[];
+  }[] = navigation.map(({ group, items }) => ({
+    group,
+    Icon: navGroupIcon(group, items[0]?.href),
+    items: items.map((i) => ({
+      href: i.href,
+      label: i.term ? slot(wording, i.label, i.term.key, i.term.template) : i.label,
+      canonical: i.label,
+      exact: i.exact,
+      section: i.section,
+      Icon: navIcon(i.href),
+    })),
+  }));
   /** Nothing to open but the dashboard and the app's own pages — said, rather than shown as a bare menu. */
   const noModules = !hasModuleNavigation(navigation);
 
@@ -272,6 +282,16 @@ export function Sidebar({
    * beside it on hover (src/components/ui/rail-flyout.tsx).
    */
   const isGroupOpen = (group: string) => (openGroup === undefined ? group === activeGroup : group === openGroup);
+
+  /** The part of a split group holding the page you are on, as `group/part`. */
+  const activePart = (() => {
+    for (const section of visibleSections) {
+      const item = section.items.find((i) => i.section && (i.exact ? pathname === i.href : isActive(i.href)));
+      if (item) return `${section.group}/${item.section}`;
+    }
+    return null;
+  })();
+  const isPartOpen = (key: string) => (openPart === undefined ? key === activePart : key === openPart);
 
   /**
    * "Contact Support", at the foot of the menu: the platform's help desk, not a page of this workspace.
@@ -319,7 +339,11 @@ export function Sidebar({
           .map((section) => ({
             ...section,
             items: section.items.filter(
-              (i) => i.label.toLowerCase().includes(query) || (i.canonical ?? "").toLowerCase().includes(query) || section.group.toLowerCase().includes(query),
+              (i) =>
+                i.label.toLowerCase().includes(query) ||
+                (i.canonical ?? "").toLowerCase().includes(query) ||
+                section.group.toLowerCase().includes(query) ||
+                (i.section ?? "").toLowerCase().includes(query),
             ),
           }))
           .filter((section) => section.items.length > 0)
@@ -418,6 +442,7 @@ export function Sidebar({
                       key: item.href,
                       href: item.href,
                       label: item.label,
+                      section: item.section,
                       active: item.exact ? pathname === item.href : isActive(item.href),
                     }))}
                   />
@@ -469,15 +494,45 @@ export function Sidebar({
                       nav into a tour of every page in the app. */}
                   {open && (
                     <div id={panelId} role="group" aria-label={group} className="mb-1 ml-[17px] mt-0.5 space-y-0.5 border-l border-line pl-2">
-                      {items.map((item) => (
-                        <SubLink
-                          key={item.href}
-                          href={item.href}
-                          label={item.label}
-                          active={item.exact ? pathname === item.href : isActive(item.href)}
-                          onNavigate={onNavigate}
-                        />
-                      ))}
+                      {navParts(items).map(({ section: part, items: partItems }) => {
+                        const links = partItems.map((item) => (
+                          <SubLink
+                            key={item.href}
+                            href={item.href}
+                            label={item.label}
+                            active={item.exact ? pathname === item.href : isActive(item.href)}
+                            onNavigate={onNavigate}
+                          />
+                        ));
+                        // A group that isn't split, or a part of one page (Overview, Settings): the links alone.
+                        if (!part || partItems.length === 1) return links;
+                        const key = `${group}/${part}`;
+                        const partOpen = query ? true : isPartOpen(key);
+                        const partId = `${panelId}-${part.replace(/\W+/g, "-").toLowerCase()}`;
+                        return (
+                          <div key={key}>
+                            <button
+                              type="button"
+                              aria-expanded={partOpen}
+                              aria-controls={partOpen ? partId : undefined}
+                              onClick={() => !query && setOpenPart(partOpen ? null : key)}
+                              className={cn(
+                                "flex h-7 w-full items-center gap-1.5 rounded-base px-2.5 text-left text-[12px] font-semibold uppercase tracking-[0.06em] transition-colors duration-150",
+                                key === activePart ? "text-text" : "text-subtle hover:bg-surface-sunken hover:text-text",
+                                DARK_WHITE,
+                              )}
+                            >
+                              <span className="min-w-0 flex-1 truncate">{part}</span>
+                              <ChevronDown aria-hidden="true" className={cn("h-3 w-3 shrink-0 transition-transform duration-150", partOpen && "rotate-180")} />
+                            </button>
+                            {partOpen && (
+                              <div id={partId} role="group" aria-label={part} className="space-y-0.5 pb-1">
+                                {links}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
