@@ -75,6 +75,7 @@ export type LetterPayload = {
 };
 
 export const letterTypeLabels: Record<LetterType, string> = {
+  LETTER_OF_INTENT: "Letter of intent (LOI)",
   OFFER: "Offer letter",
   APPOINTMENT: "Appointment letter",
   INTERNSHIP: "Internship offer",
@@ -98,11 +99,13 @@ export const letterTypeLabels: Record<LetterType, string> = {
   EXPERIENCE: "Experience letter",
   INTERNSHIP_COMPLETION: "Internship completion",
   GRATUITY_STATEMENT: "Gratuity statement",
+  // HR's own (src/lib/hr/letter-templates.ts): the letter carries its template's name, shown instead.
+  CUSTOM: "From a template",
 };
 
 /** Grouped for the picker, because twenty-three in one list is not a menu. */
 export const letterGroups: { group: string; types: LetterType[] }[] = [
-  { group: "Joining", types: ["OFFER", "APPOINTMENT", "INTERNSHIP", "CONTRACT_AGREEMENT"] },
+  { group: "Joining", types: ["LETTER_OF_INTENT", "OFFER", "APPOINTMENT", "INTERNSHIP", "CONTRACT_AGREEMENT"] },
   {
     group: "While employed",
     types: ["CONFIRMATION", "PROBATION_EXTENSION", "INCREMENT", "PROMOTION", "TRANSFER", "APPRECIATION", "WARNING", "MATERNITY_LEAVE"],
@@ -116,6 +119,7 @@ export const letterGroups: { group: string; types: LetterType[] }[] = [
 
 /** The reference-number segment for each type, e.g. WRF/OFR/2026/014. */
 const LETTER_CODE: Record<LetterType, string> = {
+  LETTER_OF_INTENT: "LOI",
   OFFER: "OFR",
   APPOINTMENT: "APT",
   INTERNSHIP: "INT",
@@ -139,10 +143,15 @@ const LETTER_CODE: Record<LetterType, string> = {
   EXPERIENCE: "EXP",
   INTERNSHIP_COMPLETION: "ICC",
   GRATUITY_STATEMENT: "GRT",
+  CUSTOM: "DOC",
 };
 
-export function letterNumberFor(type: LetterType, year: number, sequence: number, prefix = "WRF") {
-  return `${prefix}/${LETTER_CODE[type]}/${year}/${String(sequence).padStart(3, "0")}`;
+/** e.g. WRF/OFR/2026/014; a letter from one of HR's templates takes the template's own code. */
+/** The codes the built-in letters number with — a template's own code can't be one of them. */
+export const BUILT_IN_LETTER_CODES: readonly string[] = Object.values(LETTER_CODE);
+
+export function letterNumberFor(type: LetterType, year: number, sequence: number, prefix = "WRF", code?: string) {
+  return `${prefix}/${code || LETTER_CODE[type]}/${year}/${String(sequence).padStart(3, "0")}`;
 }
 
 const rupees = (value: number | null | undefined) =>
@@ -161,6 +170,8 @@ const longDate = (value: string | null | undefined) => {
 
 export function subjectFor(type: LetterType, p: LetterPayload): string {
   switch (type) {
+    case "LETTER_OF_INTENT":
+      return `Letter of intent — ${p.designation}`;
     case "OFFER":
       return `Offer of employment — ${p.designation}`;
     case "APPOINTMENT":
@@ -207,6 +218,9 @@ export function subjectFor(type: LetterType, p: LetterPayload): string {
       return "Internship completion certificate";
     case "GRATUITY_STATEMENT":
       return "Statement of gratuity";
+    case "CUSTOM":
+      // Its template's subject, merged when it is drafted (src/lib/hr/letter-templates.ts).
+      return "Letter";
   }
 }
 
@@ -220,17 +234,35 @@ export function subjectFor(type: LetterType, p: LetterPayload): string {
 export function renderLetter(type: LetterType, p: LetterPayload): string {
   const name = p.employeeName;
   const company = p.companyName;
-  const signoff = [
-    "",
-    "Yours sincerely,",
-    "",
-    "",
-    p.signatoryName ?? "For " + company,
-    p.signatoryTitle ?? "Authorised Signatory",
-    company,
-  ].join("\n");
+  // The signatory's name and title are printed under the signature on the letter itself (the print page),
+  // so the body ends at the company — they were printed twice (owner, 21 Oct 2026).
+  const signoff = ["", "Yours sincerely,", `For ${company}`].join("\n");
 
   switch (type) {
+    case "LETTER_OF_INTENT":
+      // Before the offer (owner, 21 Oct 2026): what the company means to do, and plainly not yet a contract.
+      return [
+        `Dear ${name},`,
+        "",
+        `Further to our discussions, we are pleased to let you know that ${company} intends to engage you as ${p.designation}${p.department ? ` in our ${p.department} team` : ""}.`,
+        "",
+        p.annualCtc ? `The proposed annual cost to company is ${rupees(p.annualCtc)}.` : "",
+        p.joinedOn ? `We expect you to join on ${longDate(p.joinedOn)}.` : "Your date of joining will be agreed with you.",
+        p.workLocation ? `You will be based at our ${p.workLocation} office.` : "",
+        "",
+        "This letter records our intention only. It is not an offer or a contract of employment: a formal offer letter setting out the full terms will follow, subject to satisfactory reference and background checks and verification of the documents you have provided.",
+        "",
+        p.offerValidUntil
+          ? `Please confirm your acceptance of this letter of intent by ${longDate(p.offerValidUntil)}.`
+          : "Please sign and return a copy of this letter to confirm your acceptance.",
+        "",
+        "We look forward to welcoming you.",
+        signoff,
+      ]
+        .filter((line) => line !== "")
+        .join("\n")
+        .replace(/\n{3,}/g, "\n\n");
+
     case "OFFER":
       return [
         `Dear ${name},`,
@@ -417,7 +449,7 @@ export function renderLetter(type: LetterType, p: LetterPayload): string {
         `We are pleased to inform you that your compensation has been revised with effect from ${longDate(p.effectiveFrom)}.`,
         "",
         p.previousCtc
-          ? `Your annual cost to company increases from ${rupees(p.previousCtc)} to ${rupees(p.annualCtc)}${p.previousCtc && p.annualCtc ? ` — an increase of ${rupees(p.annualCtc - p.previousCtc)}` : ""}.`
+          ? `Your annual cost to company increases from ${rupees(p.previousCtc)} to ${rupees(p.annualCtc)}${p.previousCtc && p.annualCtc ? ` — an increase of ${rupees(p.annualCtc - p.previousCtc)} (${percentWords(((p.annualCtc - p.previousCtc) / p.previousCtc) * 100)})` : ""}.`
           : `Your annual cost to company is now ${rupees(p.annualCtc)}.`,
         "",
         `Your revised monthly gross is ${rupees(p.monthlyGross)}, subject to the usual statutory deductions.`,
@@ -609,7 +641,17 @@ export function renderLetter(type: LetterType, p: LetterPayload): string {
         "This amount forms part of your full and final settlement and is subject to tax as applicable.",
         signoff,
       ]);
+
+    case "CUSTOM":
+      // Written from HR's template when drafted (src/lib/hr/letter-templates.ts), never from here.
+      return "";
   }
+}
+
+/** "12%", "7.5%" — a rise as people say it, to one place where it has one. */
+function percentWords(value: number): string {
+  const rounded = Math.round(value * 10) / 10;
+  return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)}%`;
 }
 
 /** Drops the empty strings used as optional lines, then collapses the gaps they leave behind. */
@@ -643,9 +685,10 @@ export function availableLetters(state: {
   const notJoined = "No joining date on the record yet.";
   const onlyLeavers = "Only for somebody who has left — record their exit first.";
 
-  return (Object.keys(letterTypeLabels) as LetterType[]).map((type) => {
+  // CUSTOM isn't a letter of its own: HR's templates are offered beside these, and always apply.
+  return (Object.keys(letterTypeLabels) as LetterType[]).filter((type) => type !== "CUSTOM").map((type) => {
     // Offers and internships are written before anybody has joined, so they are never gated on it.
-    if (type === "OFFER") return { type };
+    if (type === "OFFER" || type === "LETTER_OF_INTENT") return { type };
     if (type === "INTERNSHIP") {
       return isIntern ? { type } : { type, reason: "Their employment type is not Intern." };
     }

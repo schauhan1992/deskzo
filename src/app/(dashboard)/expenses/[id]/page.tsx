@@ -17,6 +17,7 @@ import {
   expenseStatusTone,
   formatExpenseId,
 } from "@/lib/expenses";
+import { afterApproval, expenseApprovalFlowLabels, mayDecideExpense } from "@/lib/expense-approval";
 import { formatVisitId } from "@/lib/visits";
 import { companyPath, leadPath, visitPath } from "@/lib/record-links";
 import { isModuleEnabled } from "@/actions/module";
@@ -45,17 +46,26 @@ export default async function ExpenseDetailPage({ params, searchParams }: { para
 
   const userId = session!.user.id;
   const isMine = expense.userId === userId;
-  const [canOverride, canReimburse, clock] = await Promise.all([
+  const [canOverride, holdsHrApproval, canReimburse, clock] = await Promise.all([
     hasEffectivePermission(userId, "expenses.approve"),
+    hasEffectivePermission(userId, "hr.approveExpenses"),
     hasEffectivePermission(userId, "expenses.reimburse"),
     workspaceClock(),
   ]);
-  // Never your own claim, whatever permissions you hold.
-  const canDecide = !isMine && (expense.approverUserId === userId || canOverride);
+  // Never your own claim, whatever permissions you hold; HR's step is HR's (src/lib/expense-approval.ts).
+  const canDecide = mayDecideExpense({
+    viewerId: userId,
+    claimantId: expense.userId,
+    step: expense.approvalStep,
+    approverUserId: expense.approverUserId,
+    holdsHrApproval,
+    holdsAnyClaimApproval: canOverride,
+  });
+  const withHr = expense.status === "SUBMITTED" && expense.approvalStep === "HR";
 
   return (
     <div className="animate-fade-rise">
-      <Link href="/expenses" className="text-sm text-muted hover:text-text">
+      <Link href={isMine ? "/expenses" : canDecide ? "/expenses?view=approve" : "/expenses?view=all"} className="text-sm text-muted hover:text-text">
         ← Expenses
       </Link>
 
@@ -87,14 +97,17 @@ export default async function ExpenseDetailPage({ params, searchParams }: { para
             isMine={isMine}
             canDecide={canDecide}
             canReimburse={canReimburse}
-            approverName={expense.approver?.name ?? null}
+            approverName={withHr ? "HR" : (expense.approver?.name ?? null)}
+            passesToHr={afterApproval(expense.approvalFlow, expense.approvalStep) === "to-hr"}
           />
         </CardContent>
       </Card>
 
       {expense.status === "REJECTED" && expense.decisionNote && (
         <Card className="mt-4 border-danger/40 bg-danger-bg px-4 py-3 text-sm text-danger">
-          <span className="font-medium">Rejected by {expense.approver?.name ?? "your manager"}:</span>{" "}
+          <span className="font-medium">
+            Rejected by {expense.approver?.name ?? (expense.approvalStep === "HR" ? "HR" : "your manager")}:
+          </span>{" "}
           {expense.decisionNote}
         </Card>
       )}
@@ -179,9 +192,16 @@ export default async function ExpenseDetailPage({ params, searchParams }: { para
             <CardContent className="space-y-2 text-sm">
               <Row label="Claimant" value={expense.user.name} />
               <Row label="Submitted" value={expense.submittedAt ? clock.date(expense.submittedAt) : "Not yet"} />
+              {expense.approvalFlow && <Row label="Approved by rule" value={expenseApprovalFlowLabels[expense.approvalFlow]} />}
+              {expense.managerApprover && (
+                <Row
+                  label="Manager approved"
+                  value={`${expense.managerApprover.name}${expense.managerApprovedAt ? `, ${clock.date(expense.managerApprovedAt)}` : ""}`}
+                />
+              )}
               <Row
-                label={expense.status === "REJECTED" ? "Rejected by" : "Approver"}
-                value={expense.approver?.name ?? "Not routed yet"}
+                label={expense.status === "REJECTED" ? "Rejected by" : expense.status === "SUBMITTED" ? "Waiting on" : "Approved by"}
+                value={withHr ? "HR" : (expense.approver?.name ?? (expense.status === "DRAFT" ? "Not submitted yet" : "Nobody yet"))}
               />
               <Row label="Decided" value={expense.decidedAt ? clock.date(expense.decidedAt) : "—"} />
               {expense.status === "APPROVED" && expense.decisionNote && (

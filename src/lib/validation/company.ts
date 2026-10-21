@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ifscSchema } from "@/lib/ifsc";
 import type { CompanyRelationshipType } from "@prisma/client";
 import { paymentTermsValues } from "@/lib/gst";
 import { companyLocationFieldsSchema } from "@/lib/validation/company-location";
@@ -257,13 +258,8 @@ export const panField = z
   .optional()
   .or(z.literal(""));
 
-export const ifscField = z
-  .string()
-  .trim()
-  .toUpperCase()
-  .regex(/^[A-Z]{4}0[A-Z0-9]{6}$/, "IFSC must look like HDFC0001234")
-  .optional()
-  .or(z.literal(""));
+// Cleaned of what a paste carries before it's checked (src/lib/ifsc.ts).
+export const ifscField = ifscSchema("IFSC must look like HDFC0001234 — four letters, a zero, then six characters.");
 
 /**
  * Compliance details for a company we pay — set separately from the main company form, same pattern as

@@ -91,6 +91,10 @@ export async function assertGrantWithinOwnAuthority(
   if (def.superAdminOnly) {
     throw new AuthzError(`"${def.label}" can only be granted by a super admin.`);
   }
+  if (def.adminOnly) {
+    const row = await db.user.findUnique({ where: { id: actor.id }, select: { role: true } });
+    if (row?.role !== "ADMIN") throw new AuthzError(`"${def.label}" can only be given by an admin or the super admin.`);
+  }
   if (!(await can(actor.id, key))) {
     throw new AuthzError(`You can't grant "${def.label}" because you don't hold it yourself.`);
   }

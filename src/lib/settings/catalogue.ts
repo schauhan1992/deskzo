@@ -1,5 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  Wallet,
+  IndianRupee,
   LayoutTemplate,
   Inbox,
   Archive,
@@ -636,6 +638,24 @@ export const SETTINGS: SettingsSection[] = [
             permission: "hr.manage",
             module: "hr",
             external: true,
+          },
+          {
+            key: "expense-approvals",
+            label: "Expense approvals",
+            description: "Who approves expense claims: HR, the reporting manager, or the manager and then HR.",
+            href: "/settings/expense-approvals",
+            icon: Wallet,
+            permission: "hr.manage",
+            module: "expenses",
+          },
+          {
+            key: "salary-structure",
+            label: "Salary structure",
+            description: "How a CTC is split into basic, HRA and allowances, and the company's own salary components.",
+            href: "/settings/salary-structure",
+            icon: IndianRupee,
+            permission: "payroll.manage",
+            module: "payroll",
           },
           {
             key: "wins",

@@ -7,8 +7,9 @@ import { formatUserId } from "@/lib/order-id";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { getPerson, hrCapabilities, hrTasksFor, personChecklist } from "@/actions/hr";
 import { leaveBalances } from "@/actions/leave";
-import { salaryHistory, taxDeclarations } from "@/actions/payroll";
+import { salaryHistory, salarySplitSetup, taxDeclarations } from "@/actions/payroll";
 import { listEmployeeDocuments, listEmployeeLetters, listEmploymentHistory } from "@/actions/employee-docs";
+import { listLetterTemplates } from "@/actions/letter-templates";
 import { EmployeeFile } from "@/components/hr/employee-file";
 import { availableLetters } from "@/lib/hr/letters";
 import { serviceYears } from "@/lib/hr/settlement";
@@ -56,9 +57,13 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
    */
   // Salary is the payroll module's: a plan without it shows no salary card, and asks for none.
   const payrollInPlan = await isModuleEntitled("payroll");
-  const [balances, structures, tax, documents, history, letters, checklist, tasks, handovers, seesWork] = await Promise.all([
+  const [balances, structures, splitSetup, letterTemplates, tax, documents, history, letters, checklist, tasks, handovers, seesWork] = await Promise.all([
     leaveBalances(person.id),
     payrollInPlan ? salaryHistory(person.id) : Promise.resolve([]),
+    // How a CTC is split, for whoever sets salaries — the dialog splits as they type.
+    payrollInPlan && caps.payroll ? salarySplitSetup() : Promise.resolve(null),
+    // HR's own letter templates, offered beside the built-in letters to whoever drafts them.
+    caps.manage ? listLetterTemplates({ activeOnly: true }) : Promise.resolve([]),
     payrollInPlan ? taxDeclarations(person.id) : Promise.resolve(null),
     listEmployeeDocuments(person.id),
     listEmploymentHistory(person.id),
@@ -108,7 +113,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
           person themselves — and salaryHistory returns nothing to anybody else regardless. */}
       {payrollInPlan && (caps.payroll || caps.userId === person.id) && (
         <div className="mt-5 grid max-w-4xl gap-4 md:grid-cols-2">
-          <SalaryCard userId={person.id} name={person.name} structures={structures} canEdit={caps.payroll} />
+          <SalaryCard userId={person.id} name={person.name} structures={structures} canEdit={caps.payroll} setup={splitSetup} />
           {tax && tax.declarations.length > 0 && (
             <TaxDeclarationCard userId={person.id} name={person.name} years={tax.years} current={tax.current} declarations={tax.declarations} canEdit={caps.payroll} />
           )}
@@ -169,6 +174,7 @@ export default async function PersonPage({ params, searchParams }: { params: Pro
           letters={letters}
           canManage={caps.manage}
           letterOptions={letterOptions}
+          templates={letterTemplates.map((t) => ({ id: t.id, name: t.name }))}
         />
       </div>
     </div>

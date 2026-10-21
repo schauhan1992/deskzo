@@ -3,11 +3,12 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Check, Printer, Undo2 } from "lucide-react";
+import { Check, PenLine, Printer, Undo2 } from "lucide-react";
 import type { getLetter } from "@/actions/employee-docs";
-import { issueLetter, revokeLetter, updateLetterBody } from "@/actions/employee-docs";
+import { issueLetter, revokeLetter, setLetterSigned, updateLetterBody } from "@/actions/employee-docs";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/bulk-select";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { letterTypeLabels } from "@/lib/hr/letters";
 import { personPath } from "@/lib/record-links";
@@ -22,12 +23,23 @@ type Letter = NonNullable<Awaited<ReturnType<typeof getLetter>>>;
  * changed is the *facts*: those were frozen when the letter was drafted, so editing the prose
  * cannot quietly restate the salary.
  */
-export function LetterEditor({ letter, canManage }: { letter: Letter; canManage: boolean }) {
+export function LetterEditor({
+  letter,
+  canManage,
+  signatureImage = null,
+}: {
+  letter: Letter;
+  canManage: boolean;
+  /** The image a draft would be signed with now — the letter signature, else the stamp. */
+  signatureImage?: string | null;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [body, setBody] = useState(letter.body);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  // Shown switched at once; put back if the server says no.
+  const [signed, setSigned] = useState(letter.signed);
 
   const draft = letter.status === "DRAFT";
   const dirty = body !== letter.body;
@@ -64,7 +76,7 @@ export function LetterEditor({ letter, canManage }: { letter: Letter; canManage:
             </Badge>
           </div>
           <p className="mt-0.5 font-mono text-xs text-subtle">
-            {letter.letterNumber} · {letterTypeLabels[letter.type]} · {formatCalendarDay(letter.issuedOn)}
+            {letter.letterNumber} · {letter.templateName ?? letterTypeLabels[letter.type]} · {formatCalendarDay(letter.issuedOn)}
           </p>
         </div>
 
@@ -100,6 +112,55 @@ export function LetterEditor({ letter, canManage }: { letter: Letter; canManage:
           {letter.status === "ISSUED"
             ? "Issued — the wording is fixed now, because this number has already been quoted. Revoke it and draft another if it needs to change."
             : "Withdrawn. It still prints, stamped as invalid, because the reference number was given to somebody."}
+        </Card>
+      )}
+
+      {/* The signature (owner, 21 Oct 2026): HR's choice per letter while it's a draft, frozen when issued. */}
+      {letter.migrated && (canManage || letter.signed) && (
+        <Card className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+          {canManage && draft ? (
+            <label className="flex items-center gap-2.5 text-sm text-text">
+              <Checkbox
+                checked={signed}
+                disabled={pending}
+                onChange={() => {
+                  const next = !signed;
+                  setSigned(next);
+                  setError(null);
+                  startTransition(async () => {
+                    const result = await setLetterSigned(letter.id, next);
+                    if (!result.ok) {
+                      setSigned(!next);
+                      setError(result.error);
+                      return;
+                    }
+                    router.refresh();
+                  });
+                }}
+                aria-label="Add digital signature"
+              />
+              <PenLine className="h-4 w-4 text-muted" aria-hidden />
+              Add digital signature
+            </label>
+          ) : (
+            <span className="flex items-center gap-2 text-sm text-muted">
+              <PenLine className="h-4 w-4" aria-hidden />
+              {letter.signed ? "Signed" : "Issued without a signature"}
+            </span>
+          )}
+          {(draft ? signed : letter.signed) && (draft ? signatureImage : letter.signatureDataUrl) && (
+            /* eslint-disable-next-line @next/next/no-img-element -- a data URL, shown as stored */
+            <img src={(draft ? signatureImage : letter.signatureDataUrl) ?? ""} alt="The signature it carries" className="h-10 w-auto object-contain" />
+          )}
+          {canManage && draft && signed && !signatureImage && (
+            <p className="w-full text-xs text-warning">
+              There&apos;s no signature to sign with yet —{" "}
+              <Link href="/people/letters?view=signature" className="underline">
+                add one under People › Letters
+              </Link>
+              , or it&apos;s issued unsigned.
+            </p>
+          )}
         </Card>
       )}
 

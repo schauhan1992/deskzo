@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { STRUCTURE_EXTRAS_READ, componentsOfStructure } from "@/lib/hr/salary-split";
 import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
@@ -68,7 +69,7 @@ export async function buildSettlement(
     select: {
       name: true,
       employeeProfile: true,
-      salaryStructures: { orderBy: { effectiveFrom: "desc" } },
+      salaryStructures: { orderBy: { effectiveFrom: "desc" }, omit: STRUCTURE_EXTRAS_READ },
     },
   });
   if (!person) return { ok: false, error: "That user no longer exists." };
@@ -92,14 +93,8 @@ export async function buildSettlement(
 
   const lastWorkingDay = profile.exitedOn;
   const basic = n(structure.basic);
-  const gross = monthlyGross({
-    basic,
-    hra: n(structure.hra),
-    conveyance: n(structure.conveyance),
-    medical: n(structure.medical),
-    specialAllowance: n(structure.specialAllowance),
-    otherAllowance: n(structure.otherAllowance),
-  });
+  // The company's own components count, as on every payslip (src/lib/hr/salary-split.ts).
+  const gross = monthlyGross(componentsOfStructure(structure));
 
   // Days of the final month still owed (src/lib/hr/payroll-month.ts, `finalMonthFor`): the days
   // employed in it up to the last working day, less loss of pay, less what that month's locked payslip
