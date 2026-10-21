@@ -58,6 +58,21 @@ export default async function VoucherPage({ params }: { params: Promise<{ id: st
           can={{ create: caps.create, approve: caps.approve, post: caps.post }}
           approvalRequired={caps.approvalRequired}
           isCreator={viewer?.id === voucher.createdById}
+          copySource={{
+            type: voucher.type,
+            narration: voucher.narration,
+            reference: voucher.reference ?? "",
+            company: voucher.company ? { id: voucher.company.id, name: voucher.company.name } : null,
+            lines: voucher.lines.map((l) => ({
+              accountId: l.accountId,
+              debit: l.debit,
+              credit: l.credit,
+              company: l.company,
+              departmentId: l.departmentId,
+              branchId: l.branchId,
+              narration: l.narration,
+            })),
+          }}
         />
       </div>
 

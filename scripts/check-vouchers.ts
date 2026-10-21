@@ -348,6 +348,31 @@ async function run() {
   ok("  and the two net to nothing on every account", [...net.values()].every((v) => v === 0), Object.fromEntries(net));
   ok("reversing it again is refused", !(await as(boss, () => vouchers.reverseVoucher(firstId, "again"))).ok && (await entriesOf(firstId)).length === 2);
 
+  section("The keys' helpers: standard narrations (F4), previous and next (Page Up / Page Down)");
+  await write(clerk, "PAYMENT", rent, { requestId: randomUUID(), narration: `${TAG} newest rent` });
+  const said = await as(clerk, () => vouchers.recentNarrations("PAYMENT"));
+  ok("standard narrations: each once, none blank, twenty at most", said.length > 0 && said.length <= 20 && new Set(said.map((t) => t.toLowerCase())).size === said.length && said.every((t) => t !== "" && t === t.trim()), said);
+  ok("  the most recent first", said[0] === `${TAG} newest rent`, said[0]);
+  const paymentSaid = new Set((await db.accountVoucher.findMany({ where: { type: "PAYMENT" }, select: { narration: true } })).map((v) => v.narration.trim().toLowerCase()));
+  const firstOther = said.findIndex((t) => !paymentSaid.has(t.toLowerCase()));
+  ok("  this kind's before the others'", firstOther > 0 && said.slice(firstOther).every((t) => !paymentSaid.has(t.toLowerCase())), { firstOther, said });
+  ok("  the others' are offered too", said.includes(`${TAG} journal`), said);
+  ok("  and a salesperson is offered none", (await as(sales, () => vouchers.recentNarrations("PAYMENT"))).length === 0);
+  const listOrder = (await db.accountVoucher.findMany({ orderBy: [{ date: "desc" }, { number: "desc" }], select: { id: true } })).map((v) => v.id);
+  const middle = listOrder[1]!;
+  ok("Page Up goes to the voucher listed above", (await as(clerk, () => vouchers.adjacentVoucher(middle, "previous"))) === listOrder[0]);
+  ok("  Page Down to the one below", (await as(clerk, () => vouchers.adjacentVoucher(middle, "next"))) === listOrder[2]);
+  ok("  and at either end, nowhere", (await as(clerk, () => vouchers.adjacentVoucher(listOrder[0]!, "previous"))) === null && (await as(clerk, () => vouchers.adjacentVoucher(listOrder[listOrder.length - 1]!, "next"))) === null);
+  const walked: string[] = [];
+  let at: string | null = listOrder[0]!;
+  while (at && walked.length <= listOrder.length) {
+    walked.push(at);
+    const from: string = at;
+    at = await as(clerk, (): Promise<string | null> => vouchers.adjacentVoucher(from, "next"));
+  }
+  ok(`  Page Down from the top walks the whole list, in its order (${listOrder.length})`, walked.join() === listOrder.join(), { walked: walked.length, listed: listOrder.length });
+  ok("  and a salesperson goes nowhere", (await as(sales, () => vouchers.adjacentVoucher(middle, "next"))) === null);
+
   section("The books and the record");
   const totals = await db.journalLine.aggregate({ _sum: { debit: true, credit: true } });
   ok("every entry together still balances", paise(totals._sum.debit) === paise(totals._sum.credit) && paise(totals._sum.debit) > 0, { debit: Number(totals._sum.debit), credit: Number(totals._sum.credit) });

@@ -415,6 +415,10 @@ export const guide: SeedGuide = {
     ],
     faq: [
       qa(
+        "Do BUSY's shortcut keys work here?",
+        p("Yes. Alt + F5 a payment voucher, Alt + F6 a receipt, Alt + B the balance sheet, Alt + T the trial balance, Alt + L an account's ledger, F2 to save a voucher, F7 to repeat the line above, Page Up and Page Down from one voucher to the next — and the rest of BUSY's list. Press ? anywhere outside a text field to see every key, and what BUSY calls it. Where BUSY says Alt/Ctrl with a letter, use Alt: Ctrl with a letter stays the browser's."),
+      ),
+      qa(
         "I can't see Accounting in the menu.",
         p(
           "The module may be switched off for your company in Settings › Modules (it's only offered to workspaces in India), or your role may have the Accounting section hidden in Settings › Roles & Permissions. Each link also needs its own permission: See the books for the statements, Manage finance records for Banking, Fixed Assets, GST Returns and TDS. Ask an admin.",

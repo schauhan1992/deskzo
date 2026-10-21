@@ -363,6 +363,50 @@ export async function getStockDocument(id: string) {
   });
 }
 
+/**
+ * The stock voucher beside this one in its list (BUSY's Page Up / Page Down, src/lib/shortcuts/busy.ts): the
+ * list shows the newest first (date, then number, descending), so "previous" — Page Up — is the one above it,
+ * newer, and "next" the one below, older. Only of the same kind, as the list a voucher was opened from shows.
+ */
+export async function adjacentStockDocument(id: string, direction: "previous" | "next"): Promise<{ id: string; number: string } | null> {
+  const c = await caps();
+  if (!c.view) return null;
+  const doc = await db.stockDocument.findUnique({ where: { id }, select: { type: true, date: true, number: true } });
+  if (!doc) return null;
+  const newer = direction === "previous";
+  return db.stockDocument.findFirst({
+    where: {
+      type: doc.type,
+      id: { not: id },
+      OR: newer
+        ? [{ date: { gt: doc.date } }, { date: doc.date, number: { gt: doc.number } }]
+        : [{ date: { lt: doc.date } }, { date: doc.date, number: { lt: doc.number } }],
+    },
+    orderBy: newer ? [{ date: "asc" }, { number: "asc" }] : [{ date: "desc" }, { number: "desc" }],
+    select: { id: true, number: true },
+  });
+}
+
+/**
+ * What a stock voucher pasted from the copy one (BUSY's Alt + F12) needs to show: its items, if they are still
+ * goods that keep stock, and its vendor's name.
+ */
+export async function stockPasteContext(input: { itemIds: string[]; companyId: string | null }) {
+  const c = await caps();
+  if (!c.view) return { items: [], company: null };
+  const ids = [...new Set((input.itemIds ?? []).filter((x) => typeof x === "string"))].slice(0, 200);
+  const [items, company] = await Promise.all([
+    ids.length
+      ? db.item.findMany({
+          where: { id: { in: ids }, type: "GOOD", trackInventory: true, active: true },
+          select: { id: true, name: true, sku: true, unit: true, costPrice: true, trackBatches: true, trackExpiry: true, trackSerials: true },
+        })
+      : Promise.resolve([]),
+    input.companyId ? db.company.findUnique({ where: { id: input.companyId }, select: { id: true, name: true } }) : Promise.resolve(null),
+  ]);
+  return toPlain({ items, company });
+}
+
 export type StockDocumentLineInput = {
   itemId: string;
   quantity?: number | string | null;

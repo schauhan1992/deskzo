@@ -24,8 +24,8 @@ const TYPES: AccountType[] = ["ASSET", "LIABILITY", "EQUITY", "INCOME", "EXPENSE
  * renumbering stay open, because those are the business's to choose, but removing the account an
  * invoice posts to would break every future posting silently.
  */
-export function ChartManager({ accounts, canEdit }: { accounts: Account[]; canEdit: boolean }) {
-  const [editing, setEditing] = useState<Account | "new" | null>(null);
+export function ChartManager({ accounts, canEdit, startNew = false }: { accounts: Account[]; canEdit: boolean; startNew?: boolean }) {
+  const [editing, setEditing] = useState<Account | "new" | null>(startNew ? "new" : null);
 
   const byParent = new Map<string | null, Account[]>();
   for (const a of accounts) {

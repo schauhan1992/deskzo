@@ -14,10 +14,10 @@ type Unit = { id: string; code: string; name: string; decimals: number; active: 
 type Draft = { id?: string; code: string; name: string; decimals: number; active: boolean };
 
 /** Units of measure (owner, 22 Oct 2026): the GST portal's quantity codes, and any of the company's own. */
-export function UnitsManager({ units, canManage }: { units: Unit[]; canManage: boolean }) {
+export function UnitsManager({ units, canManage, startNew = false }: { units: Unit[]; canManage: boolean; startNew?: boolean }) {
   const router = useRouter();
   const id = useId();
-  const [editing, setEditing] = useState<Draft | null>(null);
+  const [editing, setEditing] = useState<Draft | null>(startNew && canManage ? { code: "", name: "", decimals: 0, active: true } : null);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 

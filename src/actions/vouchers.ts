@@ -189,6 +189,53 @@ export async function getVoucher(id: string) {
   });
 }
 
+/**
+ * BUSY's F4 on a voucher's form (src/lib/shortcuts/busy.ts): the narrations written before, to pick one rather
+ * than type it again — the most recent first, this kind's ahead of the others, each once. Twenty at most.
+ */
+export async function recentNarrations(type?: VoucherType | null): Promise<string[]> {
+  const g = await gate();
+  if (!g.read) return [];
+  try {
+    const rows = await db.accountVoucher.findMany({ orderBy: { createdAt: "desc" }, take: 300, select: { type: true, narration: true } });
+    const seen = new Set<string>();
+    const pick = (list: typeof rows) =>
+      list.flatMap((r) => {
+        const text = r.narration.trim();
+        const key = text.toLowerCase();
+        if (!text || seen.has(key)) return [];
+        seen.add(key);
+        return [text];
+      });
+    const own = (VOUCHER_TYPES as readonly string[]).includes(type ?? "") ? rows.filter((r) => r.type === type) : [];
+    return [...pick(own), ...pick(rows)].slice(0, 20);
+  } catch (err) {
+    if (notMigratedYet(err)) return [];
+    throw err;
+  }
+}
+
+/**
+ * BUSY's Page Up / Page Down on a voucher's page: the voucher listed just above it ("previous" — newer) or
+ * just below it ("next" — older), in the list's own order (date, then number, newest first). Null at the ends.
+ */
+export async function adjacentVoucher(id: string, direction: "previous" | "next"): Promise<string | null> {
+  const g = await gate();
+  if (!g.read) return null;
+  const current = await db.accountVoucher.findUnique({ where: { id }, select: { date: true, number: true } });
+  if (!current) return null;
+  const above = direction === "previous";
+  const neighbour = await db.accountVoucher.findFirst({
+    where: {
+      id: { not: id },
+      OR: [{ date: above ? { gt: current.date } : { lt: current.date } }, { date: current.date, number: above ? { gt: current.number } : { lt: current.number } }],
+    },
+    orderBy: above ? [{ date: "asc" }, { number: "asc" }] : [{ date: "desc" }, { number: "desc" }],
+    select: { id: true },
+  });
+  return neighbour?.id ?? null;
+}
+
 export type SaveVoucherInput = {
   id?: string;
   type: VoucherType;
