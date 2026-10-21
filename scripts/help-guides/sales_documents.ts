@@ -38,7 +38,7 @@ export const guide: SeedGuide = {
           " (a reduction against an invoice already issued) and a ",
           { b: "Delivery challan" },
           " (what travels with goods that are moving but not being sold). Each has its own list under ",
-          { b: "Quotes & Invoices" },
+          { b: "Accounts › Sales" },
           ".",
         ),
       ),
@@ -80,7 +80,7 @@ export const guide: SeedGuide = {
       ),
       perm(
         "section.salesDocuments",
-        "Shows Sales Documents under Quotes & Invoices in the menu and lets people open its pages. Every role has it until an admin unticks it for one.",
+        "Shows Sales Documents under Finance › Accounts in the menu and lets people open its pages. Every role has it until an admin unticks it for one.",
       ),
       perm(
         "documents.issue",
@@ -146,7 +146,7 @@ export const guide: SeedGuide = {
         ol(
           runs(
             "Open ",
-            { b: "Quotes & Invoices › Proposals" },
+            { b: "Accounts › Proposals" },
             " and select ",
             { b: "New proposal" },
             ". (On a lead, ",
@@ -226,7 +226,7 @@ export const guide: SeedGuide = {
             " — or select ",
             { b: "New credit note" },
             " on ",
-            { b: "Quotes & Invoices › Credit Notes" },
+            { b: "Accounts › Credit Notes" },
             " and choose the invoice under ",
             { b: "Against invoice" },
             ".",
@@ -302,7 +302,7 @@ export const guide: SeedGuide = {
         ),
         p(
           runs(
-            { b: "Quotes & Invoices › E-Way Bills" },
+            { b: "Accounts › E-Way Bills" },
             " lists every document that carries goods. It opens on ",
             { b: "Needs a bill" },
             "; the other tabs are ",
@@ -514,7 +514,7 @@ export const guide: SeedGuide = {
           runs(
             "A challan is raised from a consignment, which already knows what is moving and where to: open it under IT Assets › Consignments and select ",
             { b: "Raise the challan" },
-            ". It then appears under Quotes & Invoices › Delivery Challans. A challan carries no tax and never reaches the books. See ",
+            ". It then appears under Accounts › Delivery Challans. A challan carries no tax and never reaches the books. See ",
             ["IT Assets", "/help/it-assets"],
             ".",
           ),

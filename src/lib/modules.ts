@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { ClipboardPen, Trophy, DoorOpen, CalendarClock as CalendarClockIcon, MessagesSquare, ClipboardCheck, KeyRound, FolderKanban, BarChart4, StickyNote, MessageCircle, Building2, CalendarDays, Fingerprint, IdCard, Plane, Target, UserRound, Package, PackageCheck, CalendarClock, Banknote, Users, Ticket, Truck, CheckSquare, Handshake, ShoppingCart, HandCoins, Store, FileText, FileCheck2, Receipt, ReceiptText, FileMinus2, ClipboardList, MapPin, Wallet, Scale, BookOpen, NotebookPen, ListTree, TrendingUp, Landmark, PhoneCall, Globe, LayoutList, BadgeCheck, UserPlus, PartyPopper, Waves, Boxes, FileSpreadsheet, Percent, Lock, Laptop, Gauge, MessageSquareQuote, Star, Megaphone, Route, ShieldBan, MailCheck, ScanSearch, Inbox, BellRing, Tags, ShieldCheck, Mail, Send, ListPlus, Combine, CalendarRange, Layers, Hourglass, ListChecks, PiggyBank, Coins, WalletCards, PenLine, MailPlus, CalendarCheck, Workflow, History as RunHistory, LayoutTemplate, Cable, FolderOpen } from "lucide-react";
+import { ClipboardPen, Trophy, DoorOpen, CalendarClock as CalendarClockIcon, MessagesSquare, ClipboardCheck, KeyRound, FolderKanban, BarChart4, StickyNote, MessageCircle, Building2, CalendarDays, Fingerprint, IdCard, Plane, Target, UserRound, Package, PackageCheck, CalendarClock, Banknote, Users, Ticket, Truck, CheckSquare, Handshake, ShoppingCart, HandCoins, Store, FileText, FileCheck2, Receipt, ReceiptText, FileMinus2, ClipboardList, MapPin, Wallet, Scale, BookOpen, NotebookPen, ListTree, TrendingUp, Landmark, PhoneCall, Globe, LayoutList, BadgeCheck, UserPlus, PartyPopper, Waves, Boxes, FileSpreadsheet, Percent, Lock, Laptop, Gauge, MessageSquareQuote, Star, Megaphone, Route, ShieldBan, MailCheck, ScanSearch, Inbox, BellRing, Tags, ShieldCheck, Mail, Send, ListPlus, Combine, CalendarRange, Layers, Hourglass, ListChecks, PiggyBank, Coins, WalletCards, PenLine, MailPlus, CalendarCheck, Workflow, History as RunHistory, LayoutTemplate, Cable, FolderOpen, Warehouse, Ruler, PackagePlus, ArrowLeftRight, ChartColumn, SlidersHorizontal, BookText, Library, TableProperties, NotebookTabs } from "lucide-react";
 import type { PermissionKey } from "@/lib/permissions";
 import type { TermKey } from "@/lib/terms/dictionary";
 
@@ -45,7 +45,35 @@ export type NavItem = {
    * Expense claims, which is nothing without Expenses.
    */
   alsoNeeds?: string;
+  /**
+   * The part of a large group the link sits in — Finance → Accounts is one group of every finance module's
+   * pages (owner, 22 Oct 2026), drawn as collapsible parts in ACCOUNTS_SECTIONS order, whichever module a
+   * page belongs to. Left out in a group that isn't split.
+   */
+  section?: AccountsSection;
 };
+
+/**
+ * Finance → Accounts' parts, in the order the menu draws them — BUSY's own order: what the books are,
+ * the day's transactions, money, tax, stock, what it all adds up to, and closing it.
+ */
+export const ACCOUNTS_SECTIONS = [
+  "Overview",
+  "Masters",
+  "Sales",
+  "Purchases",
+  "Vouchers",
+  "Banking & Cash",
+  "GST & Compliance",
+  "Inventory",
+  "Reports",
+  "Period close",
+  "Settings",
+] as const;
+export type AccountsSection = (typeof ACCOUNTS_SECTIONS)[number];
+
+/** Any one of these opens the inventory pages (src/actions/inventory.ts `caps`). */
+const INVENTORY_ANY = ["inventory.view", "inventory.receive", "inventory.transfer", "inventory.adjust", "inventory.manage"] as const;
 
 /** What `NavItem.onlyFor` can ask. Worked out once per request with the rest of the menu (modules-access.ts). */
 export type NavFact = "cardholder" | "eventTeam";
@@ -130,12 +158,21 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     key: "items",
     label: "Items & Inventory",
     description: "Catalog of goods, services, and subscriptions, with stock tracking for goods.",
-    navGroup: "Catalog & Stock",
+    navGroup: "Accounts",
     navItems: [
-      { href: "/items", label: "Items & Inventory", term: { key: "item", template: "{many} & Inventory" }, icon: Package },
+      { href: "/items", label: "Items & Inventory", term: { key: "item", template: "{many} & Inventory" }, icon: Package, section: "Masters" },
       // The catalogue behind the item pickers — moved here from Settings → Lists, since a reseller's
       // thousand brands are catalogue work rather than configuration.
-      { href: "/items/brands", label: "Brands & families", icon: Tags },
+      { href: "/items/brands", label: "Brands & families", icon: Tags, section: "Masters" },
+      // Inventory (owner, 22 Oct 2026) — src/actions/inventory.ts and src/actions/stock-reports.ts.
+      { href: "/items/warehouses", label: "Warehouses", icon: Warehouse, section: "Masters", permission: INVENTORY_ANY },
+      { href: "/items/units", label: "Units of measure", icon: Ruler, section: "Masters", permission: INVENTORY_ANY },
+      { href: "/items/receipts", label: "Goods receipts (GRN)", icon: PackagePlus, section: "Purchases", permission: ["inventory.view", "inventory.receive"] },
+      { href: "/items/stock", label: "Stock vouchers", icon: ArrowLeftRight, section: "Inventory", permission: INVENTORY_ANY },
+      { href: "/items/stock-reports", label: "Stock reports", icon: ChartColumn, section: "Reports", permission: INVENTORY_ANY },
+      // Inventory accounting, costing, numbering and approvals — Items' because stock is everywhere, the
+      // ledger only in India (src/actions/accounts-settings.ts).
+      { href: "/items/settings", label: "Accounts settings", icon: SlidersHorizontal, section: "Settings", permission: "accounts.configure" },
     ],
   },
   {
@@ -145,13 +182,13 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     label: "Orders",
     description:
       "Order punching: sales punches an order, accounts approves payment terms, purchasing sources the vendor — with margin, PO, and fulfillment tracking end to end.",
-    navGroup: "Orders & Renewals",
+    navGroup: "Accounts",
     navItems: [
-      { href: "/orders", label: "Orders", term: { key: "order" }, icon: ShoppingCart },
+      { href: "/orders", label: "Orders", term: { key: "order" }, icon: ShoppingCart, section: "Sales" },
       // What purchase saved against sales's distributor prices: for purchase, approvers and performance viewers.
-      { href: "/orders/savings", label: "Purchase savings", icon: PiggyBank, permission: ["orders.process", "orders.approve", "performance.view"] },
+      { href: "/orders/savings", label: "Purchase savings", icon: PiggyBank, permission: ["orders.process", "orders.approve", "performance.view"], section: "Purchases" },
       // What OEMs and distributors are to pay back, and what has come in — rebates.view only (owner, 1 Oct 2026).
-      { href: "/orders/rebates", label: "Backend rebates", icon: Percent, permission: "rebates.view" },
+      { href: "/orders/rebates", label: "Backend rebates", icon: Percent, permission: "rebates.view", section: "Purchases" },
     ],
   },
   {
@@ -161,17 +198,16 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     label: "Sales Documents",
     description:
       "Proposals, proforma invoices, GST tax invoices and credit notes — with place-of-supply tax handling, and e-invoice (IRN) and e-way bill generation through the government portal.",
-    navGroup: "Quotes & Invoices",
+    navGroup: "Accounts",
     navItems: [
-      { href: "/sales/proposals", label: "Proposals", icon: FileText },
-      { href: "/sales/proformas", label: "Proforma Invoices", icon: FileCheck2 },
-      { href: "/sales/invoices", label: "Tax Invoices", icon: Receipt },
-      { href: "/sales/credit-notes", label: "Credit Notes", icon: FileMinus2 },
-      // With the other trade documents, because it is one. E-way bills directly below cover
-      // invoices, credit notes *and* challans, so filing the challan elsewhere split a set of three.
-      { href: "/sales/challans", label: "Delivery Challans", icon: PackageCheck },
+      { href: "/sales/proposals", label: "Proposals", icon: FileText, section: "Sales" },
+      { href: "/sales/proformas", label: "Proforma Invoices", icon: FileCheck2, section: "Sales" },
+      { href: "/sales/invoices", label: "Tax Invoices", icon: Receipt, section: "Sales" },
+      { href: "/sales/credit-notes", label: "Credit Notes", icon: FileMinus2, section: "Sales" },
+      // With the other trade documents, because it is one.
+      { href: "/sales/challans", label: "Delivery Challans", icon: PackageCheck, section: "Sales" },
       // Every e-way action asks "Process orders (purchasing)" (src/actions/eway.ts gate), so the link does too.
-      { href: "/sales/eway-bills", label: "E-Way Bills", icon: Truck, countries: COUNTRY_FEATURES.eway, permission: "orders.process" },
+      { href: "/sales/eway-bills", label: "E-Way Bills", icon: Truck, countries: COUNTRY_FEATURES.eway, permission: "orders.process", section: "GST & Compliance" },
     ],
   },
   {
@@ -180,11 +216,11 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     viewPermission: "documents.view",
     label: "Purchase Documents",
     description: "Purchase orders raised on vendors, and the bills they send back against them.",
-    navGroup: "Purchase",
+    navGroup: "Accounts",
     navItems: [
-      { href: "/purchase/orders", label: "Purchase Orders", icon: ClipboardList },
-      { href: "/purchase/bills", label: "Vendor Bills", icon: ReceiptText },
-      { href: "/purchase/reconciliation", label: "Reconciliation", icon: ScanSearch, permission: "purchase.reconcile" },
+      { href: "/purchase/orders", label: "Purchase Orders", icon: ClipboardList, section: "Purchases" },
+      { href: "/purchase/bills", label: "Vendor Bills", icon: ReceiptText, section: "Purchases" },
+      { href: "/purchase/reconciliation", label: "Reconciliation", icon: ScanSearch, permission: "purchase.reconcile", section: "Purchases" },
     ],
   },
   {
@@ -194,7 +230,7 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     label: "Renewals",
     description:
       "Track subscription start/expiry dates across every customer and manage upcoming renewals in one place.",
-    navGroup: "Orders & Renewals",
+    navGroup: "Renewals",
     navItems: [{ href: "/renewals", label: "Renewals", term: { key: "renewal" }, icon: CalendarClockIcon }],
   },
   {
@@ -202,8 +238,8 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     viewPermission: "payments.view",
     label: "Payments",
     description: "Record payments received against orders and track outstanding balances across every customer.",
-    navGroup: "Payments",
-    navItems: [{ href: "/payments", label: "Payments", icon: Banknote }],
+    navGroup: "Accounts",
+    navItems: [{ href: "/payments", label: "Payments", icon: Banknote, section: "Sales" }],
   },
   {
     key: "receivables",
@@ -212,15 +248,15 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     label: "Receivables",
     description:
       "What customers owe, aged from each invoice's due date — with payments and credit notes applied against invoices, and a statement of account per customer.",
-    navGroup: "Payments",
+    navGroup: "Accounts",
     navItems: [
-      { href: "/receivables", label: "Receivables", icon: Scale },
+      { href: "/receivables", label: "Receivables", icon: Scale, section: "Sales" },
       // Who is safe to give terms to — the credit engine's list (src/lib/credit/engine.ts).
-      { href: "/receivables/credit", label: "Customer credit", icon: ShieldCheck },
+      { href: "/receivables/credit", label: "Customer credit", icon: ShieldCheck, section: "Sales" },
       // A salesperson's dues to chase, and the promises they logged (src/actions/collections.ts).
       // Either key opens the page (src/lib/collections/load.ts mayLogFollowUps): the follow-up permission, or
       // accounts' Record payments — the link said only the first, hiding the page from accounts.
-      { href: "/collections", label: "My collections", icon: Coins, permission: ["collections.followUp", "payments.record"] },
+      { href: "/collections", label: "My collections", icon: Coins, permission: ["collections.followUp", "payments.record"], section: "Sales" },
     ],
   },
   {
@@ -231,11 +267,11 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     label: "Payables",
     description:
       "What we owe vendors, aged from each bill's due date — bills settled by payments out, with a statement of account per vendor.",
-    navGroup: "Payments",
+    navGroup: "Accounts",
     navItems: [
-      { href: "/payables", label: "Payables", icon: Scale },
+      { href: "/payables", label: "Payables", icon: Scale, section: "Purchases" },
       // Credit notes and payouts from distributors and OEMs — against their bills, and orders' rebates.
-      { href: "/purchase/vendor-credits", label: "Vendor credits", icon: HandCoins, permission: "rebates.view" },
+      { href: "/purchase/vendor-credits", label: "Vendor credits", icon: HandCoins, permission: "rebates.view", section: "Purchases" },
     ],
   },
   {
@@ -244,25 +280,30 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     label: "Accounting",
     description:
       "The general ledger: a chart of accounts, double-entry postings raised automatically as invoices, bills, payments, expense claims and payroll are recorded, hand-written journal entries, and the statements built from them — trial balance, P&L, balance sheet and cash flow. Plus the bits that keep books defensible: bank reconciliation, a fixed asset register with depreciation, GST and TDS returns, and closing a period so a filed figure can't change afterwards.",
-    navGroup: "Accounting",
+    navGroup: "Accounts",
     navItems: [
-      { href: "/accounting", label: "Overview", icon: BookOpen, permission: "ledger.viewReports" },
-      { href: "/accounting/journal", label: "Journal", icon: NotebookPen, permission: "ledger.viewReports" },
+      { href: "/accounting", label: "Overview", icon: BookOpen, permission: "ledger.viewReports", section: "Overview" },
       // Its page opens for either: the reports' readers, and whoever keeps the chart.
-      { href: "/accounting/accounts", label: "Chart of Accounts", icon: ListTree, permission: ["ledger.viewReports", "ledger.manageAccounts"] },
-      { href: "/accounting/trial-balance", label: "Trial Balance", icon: Scale, permission: "ledger.viewReports" },
-      { href: "/accounting/profit-loss", label: "Profit & Loss", icon: TrendingUp, permission: "ledger.viewReports" },
-      { href: "/accounting/balance-sheet", label: "Balance Sheet", icon: Landmark, permission: "ledger.viewReports" },
-      { href: "/accounting/cash-flow", label: "Cash Flow", icon: Waves, permission: "ledger.viewReports" },
+      { href: "/accounting/accounts", label: "Chart of Accounts", icon: ListTree, permission: ["ledger.viewReports", "ledger.manageAccounts"], section: "Masters" },
+      { href: "/accounting/assets", label: "Fixed Assets", icon: Boxes, permission: "payments.manage", section: "Masters" },
+      // Payment, receipt, contra and journal vouchers (owner, 22 Oct 2026) — src/actions/vouchers.ts.
+      { href: "/accounting/vouchers", label: "Vouchers", icon: NotebookTabs, permission: ["ledger.viewReports", "vouchers.create", "vouchers.approve", "ledger.post"], section: "Vouchers" },
+      { href: "/accounting/journal", label: "Journal", icon: NotebookPen, permission: "ledger.viewReports", section: "Vouchers" },
+      // Approved expense claims, to pay back (owner, 19 Oct 2026) — for whoever pays them, or reads every claim.
+      { href: "/accounting/expense-claims", label: "Expense claims", icon: Wallet, permission: ["expenses.reimburse", "expenses.viewAll"], alsoNeeds: "expenses", section: "Vouchers" },
       // The finance function's (`payments.manage`): the pages and their actions refuse without it, so
       // the links went to an empty page — or, for Banking, to every bank account and cheque.
-      { href: "/accounting/banking", label: "Banking", icon: Building2, permission: "payments.manage" },
-      { href: "/accounting/assets", label: "Fixed Assets", icon: Boxes, permission: "payments.manage" },
-      { href: "/accounting/gst", label: "GST Returns", icon: FileSpreadsheet, permission: "payments.manage" },
-      { href: "/accounting/tds", label: "TDS", icon: Percent, permission: "payments.manage" },
-      { href: "/accounting/books", label: "Close the Books", icon: Lock, permission: ["books.close", "ledger.viewReports"] },
-      // Approved expense claims, to pay back (owner, 19 Oct 2026) — for whoever pays them, or reads every claim.
-      { href: "/accounting/expense-claims", label: "Expense claims", icon: Wallet, permission: ["expenses.reimburse", "expenses.viewAll"], alsoNeeds: "expenses" },
+      { href: "/accounting/banking", label: "Banking", icon: Building2, permission: "payments.manage", section: "Banking & Cash" },
+      { href: "/accounting/cash-book", label: "Cash & bank books", icon: BookText, permission: ["ledger.viewReports", "payments.manage"], section: "Banking & Cash" },
+      { href: "/accounting/gst", label: "GST Returns", icon: FileSpreadsheet, permission: "payments.manage", section: "GST & Compliance" },
+      { href: "/accounting/tds", label: "TDS", icon: Percent, permission: "payments.manage", section: "GST & Compliance" },
+      { href: "/accounting/trial-balance", label: "Trial Balance", icon: Scale, permission: "ledger.viewReports", section: "Reports" },
+      { href: "/accounting/profit-loss", label: "Profit & Loss", icon: TrendingUp, permission: "ledger.viewReports", section: "Reports" },
+      { href: "/accounting/balance-sheet", label: "Balance Sheet", icon: Landmark, permission: "ledger.viewReports", section: "Reports" },
+      { href: "/accounting/cash-flow", label: "Cash Flow", icon: Waves, permission: "ledger.viewReports", section: "Reports" },
+      { href: "/accounting/day-book", label: "Day Book", icon: Library, permission: "ledger.viewReports", section: "Reports" },
+      { href: "/accounting/registers", label: "Registers", icon: TableProperties, permission: "ledger.viewReports", section: "Reports" },
+      { href: "/accounting/books", label: "Close the Books", icon: Lock, permission: ["books.close", "ledger.viewReports"], section: "Period close" },
     ],
   },
   {
@@ -274,12 +315,12 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     label: "Revenue & Close",
     description:
       "Revenue recognised as it is earned rather than when it is invoiced (Ind AS 115): a subscription's or a service's invoice waits in deferred revenue and moves into sales month by month, and a milestone's when the work is delivered. Plus the month-end close — a checklist that mostly checks itself (bank reconciled, revenue recognised, receivables agreeing with the ledger…), prepaid and accrual schedules, and the month's large movements explained before it is locked.",
-    navGroup: "Accounting",
+    navGroup: "Accounts",
     navItems: [
-      { href: "/accounting/revenue", label: "Revenue", icon: CalendarRange, permission: ["revenue.viewReports", "revenue.manage"] },
-      { href: "/accounting/revenue/waterfall", label: "Revenue Waterfall", icon: Layers, permission: ["revenue.viewReports", "revenue.manage"] },
-      { href: "/accounting/schedules", label: "Prepaids & Accruals", icon: Hourglass, permission: ["close.work", "close.manage"] },
-      { href: "/accounting/close", label: "Month-end Close", icon: ListChecks, permission: ["close.work", "close.manage"] },
+      { href: "/accounting/revenue", label: "Revenue", icon: CalendarRange, permission: ["revenue.viewReports", "revenue.manage"], section: "Period close" },
+      { href: "/accounting/revenue/waterfall", label: "Revenue Waterfall", icon: Layers, permission: ["revenue.viewReports", "revenue.manage"], section: "Period close" },
+      { href: "/accounting/schedules", label: "Prepaids & Accruals", icon: Hourglass, permission: ["close.work", "close.manage"], section: "Period close" },
+      { href: "/accounting/close", label: "Month-end Close", icon: ListChecks, permission: ["close.work", "close.manage"], section: "Period close" },
     ],
   },
   {
@@ -695,12 +736,10 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
 export const NAV_GROUP_ORDER = [
   "Sales",
   "Prospecting",
-  "Quotes & Invoices",
-  "Catalog & Stock",
-  "Orders & Renewals",
-  "Purchase",
-  "Payments",
-  "Accounting",
+  "Renewals",
+  // Every finance module's pages, in ACCOUNTS_SECTIONS (owner, 22 Oct 2026): sales and purchase documents,
+  // orders, items and stock, payments, receivables and payables, the ledger and the close.
+  "Accounts",
   "Support",
   "Delivery",
   "Field Visits",

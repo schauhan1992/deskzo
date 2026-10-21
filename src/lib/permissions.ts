@@ -857,6 +857,85 @@ export const PERMISSION_REGISTRY = [
     delegable: false,
     tier: "sensitive",
   },
+  /**
+   * Finance → Accounts (owner, 22 Oct 2026): inventory and vouchers. Posting a voucher to the ledger, or reversing
+   * one, is `ledger.post` as a hand-written journal is; banking is `payments.manage`; locking a period is
+   * `books.close`; downloading a report is `data.exportFinance`.
+   */
+  {
+    key: "inventory.view",
+    label: "See stock",
+    description:
+      "Stock on hand by warehouse and batch, the stock ledger, transfers, adjustments and counts, and the inventory reports — valuation, aging, low stock, slow-moving stock and item profitability.",
+    defaultRoles: ["ACCOUNTS", "MANAGEMENT", "PURCHASE", "SALES"],
+    group: "Finance",
+  },
+  {
+    key: "inventory.receive",
+    label: "Receive stock",
+    description: "Record goods receipts (GRNs) against purchase orders or on their own, with batches, expiry dates and serial numbers.",
+    defaultRoles: ["PURCHASE", "ACCOUNTS", "MANAGEMENT"],
+    group: "Finance",
+  },
+  {
+    key: "inventory.transfer",
+    label: "Transfer stock",
+    description: "Move stock from one warehouse to another — sent, in transit, and received.",
+    defaultRoles: ["PURCHASE", "ACCOUNTS", "MANAGEMENT"],
+    group: "Finance",
+  },
+  {
+    key: "inventory.adjust",
+    label: "Adjust stock",
+    description:
+      "Correct stock by hand, record a physical count, write off damaged or expired goods, and return goods to a vendor. Every change needs a reason and stays in the stock ledger.",
+    defaultRoles: ["ACCOUNTS", "MANAGEMENT"],
+    group: "Finance",
+    tier: "sensitive",
+  },
+  {
+    key: "inventory.approveAdjustments",
+    label: "Approve stock adjustments",
+    description: "Approve stock adjustments and counts waiting for a second person, where Accounts settings ask for one. Never your own.",
+    defaultRoles: ["MANAGEMENT"],
+    group: "Finance",
+    tier: "sensitive",
+    selfExcluded: true,
+  },
+  {
+    key: "inventory.manage",
+    label: "Set up inventory",
+    description: "Warehouses, units of measure, and which items keep batches, expiry dates and serial numbers.",
+    defaultRoles: ["ACCOUNTS", "MANAGEMENT"],
+    group: "Finance",
+  },
+  {
+    key: "vouchers.create",
+    label: "Write vouchers",
+    description:
+      "Draft payment, receipt, contra and journal vouchers and send them for approval. Posting one to the ledger needs “Write and reverse journal entries”.",
+    defaultRoles: ["ACCOUNTS", "MANAGEMENT"],
+    group: "Finance",
+  },
+  {
+    key: "vouchers.approve",
+    label: "Approve vouchers",
+    description: "Approve vouchers waiting for a second person, where Accounts settings ask for one. Never your own.",
+    defaultRoles: ["MANAGEMENT"],
+    group: "Finance",
+    tier: "sensitive",
+    selfExcluded: true,
+  },
+  {
+    key: "accounts.configure",
+    label: "Change Accounts settings",
+    description:
+      "Inventory accounting (periodic or perpetual), the costing method, negative stock, what moves stock automatically, approvals and voucher numbering. The costing method can't change once stock has been valued.",
+    defaultRoles: [],
+    group: "Finance",
+    delegable: false,
+    tier: "sensitive",
+  },
   {
     /**
      * Choosing who owns a lead when it is created — anybody, not only yourself.

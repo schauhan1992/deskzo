@@ -47,7 +47,7 @@ export const guide: SeedGuide = {
     ],
     permissions: [
       perm("orders.view", "Opens Renewals (and Orders), and a customer's Products & Subscriptions and Renewals tabs. Profiling, Calling, Sales, Support, Management, Accounts and Purchase have it by default."),
-      perm("section.renewals", "Shows Renewals in the Orders & Renewals menu and lets people open it. Every role has it until an admin unticks it for one."),
+      perm("section.renewals", "Shows Renewals in its own menu group and lets people open it. Every role has it until an admin unticks it for one."),
       perm("products.edit", "Pin a renewal's stage, punch the renewal order and send the customer a renewal reminder — and change a subscription's quantity, dates and notes on the customer's Products & Subscriptions tab. Management and Sales have it by default."),
       perm("orders.process", "Does the same as editing products & subscriptions here, and also adds seats to a subscription mid-term. Purchase and Management have it by default."),
       perm("documents.issue", "Draft a renewal proposal for the next term, and set up a subscription's recurring billing. Sales, Accounts and Management have it by default."),
@@ -60,7 +60,7 @@ export const guide: SeedGuide = {
       task(
         "See what's coming up",
         ol(
-          runs("Open ", { b: "Orders & Renewals › Renewals" }, "."),
+          runs("Open ", { b: "Renewals" }, "."),
           runs("Choose a ", { b: "Window" }, ": ", { b: "Expired" }, ", or expiring in 30, 60 or 90 days. Search by company name."),
           runs("Use ", { b: "Columns" }, " to choose what the table shows, or switch to the split view to read each subscription's order beside the list."),
         ),

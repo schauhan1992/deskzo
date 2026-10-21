@@ -68,7 +68,7 @@ export const guide: SeedGuide = {
       ),
     ],
     permissions: [
-      perm("section.revenueClose", "Shows Revenue & Close's pages in the Accounting menu. Every role has it until an admin unticks it for one; each page still needs a permission below."),
+      perm("section.revenueClose", "Shows Revenue & Close's pages in the Accounts menu. Every role has it until an admin unticks it for one; each page still needs a permission below."),
       perm(
         "revenue.viewReports",
         "Opens Revenue (its Schedules, Review and Roll-forward tabs), the Revenue Waterfall and each schedule. Read-only: nothing here moves money. The Accounts and Management roles have it by default.",
@@ -99,7 +99,7 @@ export const guide: SeedGuide = {
         runs("Look over ", { b: "Settings › Month-end checklist" }, ". It starts with a standard set of tasks; give them owners, and add, reorder or switch off tasks to match how you close."),
         runs(
           "Bring in invoices issued before Revenue & Close. On ",
-          { b: "Accounting › Revenue" },
+          { b: "Accounts › Revenue" },
           ", the ",
           { b: "Open deferred revenue" },
           " tab walks you through it once (see the task below). A second person then approves the schedules it makes.",
@@ -112,13 +112,13 @@ export const guide: SeedGuide = {
       task(
         "See what's deferred and what's been recognised",
         ol(
-          runs("Open ", { b: "Accounting › Revenue" }, ". The ", { b: "Schedules" }, " tab lists every schedule."),
+          runs("Open ", { b: "Accounts › Revenue" }, ". The ", { b: "Schedules" }, " tab lists every schedule."),
           runs("Narrow it with the search box, ", { b: "Status" }, ", ", { b: "Customer" }, ", ", { b: "Item" }, ", ", { b: "From" }, " and ", { b: "To" }, ", or select ", { b: "Pending approval" }, "."),
           runs("Open a schedule to see what is ", { b: "Recognised" }, ", what is ", { b: "Remaining" }, ", what credit notes took off (", { b: "Credited" }, "), and each month marked ", { b: "Posted" }, " or ", { b: "Planned" }, "."),
           runs("The ", { b: "Roll-forward" }, " tab shows how Deferred Revenue moved in a month, beside the ledger's balance at the month end."),
           runs(
             "For what is still to come, open ",
-            { b: "Accounting › Revenue Waterfall" },
+            { b: "Accounts › Revenue Waterfall" },
             ": the revenue left to recognise ",
             { b: "By customer" },
             " or ",
@@ -135,7 +135,7 @@ export const guide: SeedGuide = {
       task(
         "Recognise revenue for a month",
         ol(
-          runs("On ", { b: "Accounting › Revenue" }, ", find the ", { b: "Recognise revenue" }, " card."),
+          runs("On ", { b: "Accounts › Revenue" }, ", find the ", { b: "Recognise revenue" }, " card."),
           runs("Pick the month in ", { b: "Recognise through" }, " — only months that have ended are offered."),
           runs("Select ", { b: "Recognise through" }, " with the month."),
         ),
@@ -150,7 +150,7 @@ export const guide: SeedGuide = {
       task(
         "Approve a schedule made or changed by hand",
         ol(
-          runs("Open the ", { b: "Review" }, " tab on ", { b: "Accounting › Revenue" }, ". Its count shows how many are waiting."),
+          runs("Open the ", { b: "Review" }, " tab on ", { b: "Accounts › Revenue" }, ". Its count shows how many are waiting."),
           "Open a schedule and check its period, amount and note.",
           runs("Select ", { b: "Approve" }, "."),
         ),
@@ -178,7 +178,7 @@ export const guide: SeedGuide = {
       task(
         "Open deferred revenue for invoices issued earlier",
         ol(
-          runs("On ", { b: "Accounting › Revenue" }, ", open the ", { b: "Open deferred revenue" }, " tab."),
+          runs("On ", { b: "Accounts › Revenue" }, ", open the ", { b: "Open deferred revenue" }, " tab."),
           runs("Choose the month end to open it at — only month ends that have passed, in periods still open — and select ", { b: "List the invoices" }, "."),
           "From the invoices issued in the 24 months up to that date, tick the service and subscription lines that were really for a period, and set the period each one covered.",
           runs("Select ", { b: "Preview" }, " to see what is still unearned at that date, then select ", { b: "Post" }, " with the amount."),
@@ -188,7 +188,7 @@ export const guide: SeedGuide = {
       task(
         "Spread a prepaid cost or accrue a cost",
         ol(
-          runs("Open ", { b: "Accounting › Prepaids & Accruals" }, " and select ", { b: "New schedule" }, "."),
+          runs("Open ", { b: "Accounts › Prepaids & Accruals" }, " and select ", { b: "New schedule" }, "."),
           runs(
             "Choose ",
             { b: "Prepaid — paid ahead, expensed over the months" },
@@ -231,7 +231,7 @@ export const guide: SeedGuide = {
       task(
         "Work the month-end checklist",
         ol(
-          runs("Open ", { b: "Accounting › Month-end Close" }, ". It opens on the last month that has ended; pick another month at the top right."),
+          runs("Open ", { b: "Accounts › Month-end Close" }, ". It opens on the last month that has ended; pick another month at the top right."),
           runs("On the ", { b: "Checklist" }, " tab, open a task. An automatic check says what it found and when it last looked; the checks run again each time you open the month."),
           runs(
             "When a task is done, select ",
@@ -347,7 +347,7 @@ export const guide: SeedGuide = {
       qa(
         "I can't see Revenue & Close in the menu.",
         p(
-          "Its pages sit in the Accounting menu: Revenue, Revenue Waterfall, Prepaids & Accruals and Month-end Close. If they aren't there, the module may be switched off in Settings › Modules (it needs Accounting, and is only offered in India), your role may have its section hidden in Settings › Roles & Permissions, or you may not hold any of the permissions above. Ask an admin.",
+          "Its pages sit in the Accounts menu: Revenue, Revenue Waterfall, Prepaids & Accruals and Month-end Close. If they aren't there, the module may be switched off in Settings › Modules (it needs Accounting, and is only offered in India), your role may have its section hidden in Settings › Roles & Permissions, or you may not hold any of the permissions above. Ask an admin.",
         ),
       ),
       qa(
@@ -375,7 +375,7 @@ export const guide: SeedGuide = {
       qa(
         "How does the month-end close relate to Close the Books?",
         p(
-          "The two share one lock. Closing a month here moves the books' lock to its last day. Moving that lock back on Accounting › Close the Books, or reopening a financial year there, reopens the months it no longer covers, and they need closing again.",
+          "The two share one lock. Closing a month here moves the books' lock to its last day. Moving that lock back on Accounts › Close the Books, or reopening a financial year there, reopens the months it no longer covers, and they need closing again.",
         ),
       ),
     ],

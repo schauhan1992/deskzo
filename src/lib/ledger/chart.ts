@@ -83,6 +83,16 @@ export const SYSTEM_ACCOUNTS = {
   EXP_REPAIRS_MAINTENANCE: "EXP_REPAIRS_MAINTENANCE",
   EXP_PROFESSIONAL_FEES: "EXP_PROFESSIONAL_FEES",
   EXP_OTHER: "EXP_OTHER",
+
+  /**
+   * Finance → Accounts, under perpetual inventory (owner, 22 Oct 2026; src/lib/inventory/posting.ts): stock
+   * on hand at cost; goods received against an order before their bill; the cost of what was sold; and
+   * stock found or written off.
+   */
+  INVENTORY: "INVENTORY",
+  GRNI: "GRNI",
+  COGS: "COGS",
+  STOCK_ADJUSTMENT: "STOCK_ADJUSTMENT",
 } as const;
 
 export type SystemAccountKey = (typeof SYSTEM_ACCOUNTS)[keyof typeof SYSTEM_ACCOUNTS];
@@ -95,6 +105,12 @@ type Seed = {
   systemKey?: SystemAccountKey;
   parent?: string;
   description?: string;
+  /**
+   * Added after businesses had built their own charts (owner, 22 Oct 2026): an account already on this code
+   * is taken as this one only when it has this name. Otherwise the code is somebody's own account, and
+   * this one goes on the next free code instead of taking it over.
+   */
+  adoptOnlySameName?: boolean;
 };
 
 /**
@@ -152,6 +168,15 @@ export const DEFAULT_CHART: Seed[] = [
     systemKey: "PREPAID_EXPENSES",
     description:
       "Paid ahead for months not yet used — a year's insurance, an annual licence. Expensed month by month as they pass.",
+  },
+  {
+    code: "1180",
+    name: "Stock in Hand",
+    type: "ASSET",
+    parent: "1100",
+    systemKey: "INVENTORY",
+    adoptOnlySameName: true,
+    description: "Goods on hand at cost, under perpetual inventory — received in at cost, out at cost as they're sold.",
   },
   { code: "1200", name: "Fixed Assets", type: "ASSET", isGroup: true, parent: "1000" },
   { code: "1210", name: "Computers & Equipment", type: "ASSET", parent: "1200" },
@@ -264,6 +289,16 @@ export const DEFAULT_CHART: Seed[] = [
       "Costs incurred whose bill hasn't arrived yet. Reversed on the 1st of the next month, so the bill books normally.",
   },
 
+  {
+    code: "2160",
+    name: "Goods Received Not Invoiced",
+    type: "LIABILITY",
+    parent: "2100",
+    systemKey: "GRNI",
+    adoptOnlySameName: true,
+    description: "Stock received against a purchase order whose bill hasn't come in. Cleared when it does.",
+  },
+
   { code: "3000", name: "Equity", type: "EQUITY", isGroup: true },
   { code: "3100", name: "Owner's Capital", type: "EQUITY", parent: "3000" },
   {
@@ -307,6 +342,24 @@ export const DEFAULT_CHART: Seed[] = [
 
   { code: "5000", name: "Expenses", type: "EXPENSE", isGroup: true },
   { code: "5100", name: "Purchases", type: "EXPENSE", parent: "5000", systemKey: "PURCHASES" },
+  {
+    code: "5150",
+    name: "Cost of Goods Sold",
+    type: "EXPENSE",
+    parent: "5000",
+    systemKey: "COGS",
+    adoptOnlySameName: true,
+    description: "What the goods sold cost, at the stock's cost — under perpetual inventory.",
+  },
+  {
+    code: "5160",
+    name: "Stock Adjustments & Write-offs",
+    type: "EXPENSE",
+    parent: "5000",
+    systemKey: "STOCK_ADJUSTMENT",
+    adoptOnlySameName: true,
+    description: "Stock found or lost on a count, damaged or expired — under perpetual inventory.",
+  },
   {
     code: "5190",
     name: "Purchase Rebates & Discounts",

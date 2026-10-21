@@ -34,6 +34,10 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "access.ts": "core",
   // Revenue & Close: prepaids and accruals (src/lib/close/schedules.ts).
   "accounting-schedules.ts": ["revenue_close"],
+  // Finance → Accounts (owner, 22 Oct 2026): its settings and stock are Items' — stock is kept everywhere — and
+  // its vouchers and books' reports the ledger's, which is India's.
+  "accounts-settings.ts": ["items"],
+  "accounts-reports.ts": ["accounting"],
   "activity-awards.ts": ["wins"],
   "activity-tracking.ts": "core",
   "activity.ts": "core",
@@ -149,6 +153,7 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "it-asset.ts": ["it_assets"],
   "item-category.ts": ["items"],
   "item.ts": ["items"],
+  "inventory.ts": ["items"],
   // The lead pipeline is a module of its own since 14 Oct 2026 — sold with Pipeline, CRM and One.
   "lead-assignment.ts": ["leads"],
   "lead-capture.ts": ["leads"],
@@ -242,6 +247,7 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "support.ts": "core",
   "support-load.ts": ["helpdesk"],
   "survey.ts": ["engagement"],
+  "stock-reports.ts": ["items"],
   "table-preference.ts": "core",
   "target.ts": ["targets"],
   "task.ts": ["tasks"],
@@ -263,6 +269,7 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "visit.ts": ["visits"],
   "visitor-public.ts": "public",
   "visitor.ts": ["visitors"],
+  "vouchers.ts": ["accounting"],
   "wins.ts": ["wins"],
   // A colleague's wish on a birthday or work anniversary: the occasions are HR's (src/lib/hr/wishes.ts).
   "wishes.ts": ["hr"],

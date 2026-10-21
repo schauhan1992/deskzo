@@ -2114,10 +2114,10 @@ export default async function seedOrders(db: PrismaClient, ctx: DemoContext): Pr
     let movements = 0;
     const apply = async (itemId: string, type: "SOLD" | "ADJUSTMENT" | "DAMAGED" | "RETURNED", change: number, reason: string, at: Date) => {
       const it = await db.item.findUniqueOrThrow({ where: { id: itemId }, select: { stockQuantity: true, trackInventory: true } });
-      if (!it.trackInventory || it.stockQuantity + change < 0) return;
+      if (!it.trackInventory || Number(it.stockQuantity) + change < 0) return;
       await db.$transaction(async (tx) => {
         await tx.stockMovement.create({ data: { itemId, type, quantityChange: change, reason, createdByUserId: keeper, createdAt: at } });
-        await tx.item.update({ where: { id: itemId }, data: { stockQuantity: it.stockQuantity + change } });
+        await tx.item.update({ where: { id: itemId }, data: { stockQuantity: Number(it.stockQuantity) + change } });
       });
       movements += 1;
     };
