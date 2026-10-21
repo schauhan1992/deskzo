@@ -5,7 +5,7 @@ import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
 import { canSeeCompany } from "@/lib/authz/company-scope";
-import { documentAccess, mayAccess, mayAddTo, paymentAccess, throughAccount } from "@/lib/authz/access";
+import { documentAccess, mayAccess, mayAddTo, throughAccount } from "@/lib/authz/access";
 import { toPlain } from "@/lib/serialize";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
@@ -15,6 +15,11 @@ import { formatMoney, formatRate, isBaseCurrency } from "@/lib/currency";
 import { firstOpenDate } from "@/lib/ledger/period";
 import { ensureHeadOffice } from "@/lib/branches/identity";
 import { syncInvoiceStatus } from "@/lib/receivables/sync";
+import { balanceSummaryFor } from "@/lib/receivables/balance-summary";
+import { partyStatement } from "@/lib/receivables/statement";
+import { agingReportFor, type AgingParams } from "@/lib/receivables/aging";
+import { exportAging } from "@/lib/receivables/aging-export";
+import type { ExportPayload } from "@/actions/data-export";
 import { emitPaymentReceived } from "@/lib/automate/emit-records";
 import { bookOnFirstPayment } from "@/lib/orders/handoff";
 import { settlePromisesFor } from "@/lib/collections/promises";
@@ -24,12 +29,9 @@ import {
   agingBucket,
   daysOverdue,
   emptyAging,
-  withRunningBalance,
   type AgingBucket,
 } from "@/lib/receivables";
 import { applyCreditNoteSchema, recordInvoicePaymentSchema } from "@/lib/validation/receivable";
-import { calendarDateOf } from "@/lib/india-time";
-import { calendarDayRange } from "@/lib/time/zone";
 import type { ActionResult } from "@/actions/company";
 
 /** Everything needed to settle an invoice, in one shape the whole module reads. */
@@ -541,140 +543,21 @@ export async function listOpenInvoices(companyId: string) {
 }
 
 /**
- * A customer's statement of account: every invoice, payment and credit note in date order with a
- * running balance, plus the aging of what's still outstanding.
+ * A customer's statement of account: every invoice, payment, credit note, exchange difference and journal
+ * in date order with a running balance, in rupees, the aging of what's still outstanding, and what is open
+ * in each foreign currency they deal in (src/lib/receivables/statement.ts; owner, 21 Oct 2026: "rupees, plus
+ * a per-currency section"). Its closing balance is their row in the Customer Balance Summary.
+ *
+ * The whole account, for somebody who reaches the customer — as the balance summary counts it: a statement
+ * of only the invoices one may open would show a customer with a payment and no invoice as in credit, and
+ * `payments.view` is "money in and owed … the billed and outstanding figures". Out of reach answers null.
  */
 export async function customerStatement(companyId: string, opts?: { from?: string; to?: string }) {
   const user = await requireModuleUser("receivables");
   if (!(await viewerHas("payments.view"))) return null;
+  if (!(await maySeeCustomer(user.id, companyId))) return null;
   const asOf = new Date();
-
-  /**
-   * Scoped rather than refused, because the statement's shape is what the page is built on and a
-   * customer outside the viewer's book should read as one they have no history with.
-   *
-   * Into every query below, not just the first: the aging comes from the invoices, but the closing
-   * balance comes from the payments and the unapplied figures from two aggregates, and a statement
-   * scoped in four places out of five still publishes what the account has paid us. Each by its own
-   * record's rule (src/lib/authz/access.ts) — documents for invoices and credit notes, payments for
-   * receipts — which today all follow the account.
-   */
-  const documentScope = await documentAccess(user.id, "view");
-  const receiptScope = await paymentAccess(user.id, "view");
-
-  const [invoices, payments, creditNotes] = await Promise.all([
-    db.tradeDocument.findMany({
-      where: { AND: [{ companyId, docType: "INVOICE", status: { notIn: ["DRAFT", "CANCELLED"] } }, documentScope] },
-      orderBy: { issueDate: "asc" },
-      select: { id: true, docNumber: true, issueDate: true, dueDate: true, total: true, currency: true, ...invoiceSettlementInclude },
-    }),
-    db.payment.findMany({
-      where: { AND: [{ companyId }, receiptScope] },
-      orderBy: { paidOn: "asc" },
-      select: { id: true, amount: true, paidOn: true, method: true, reference: true },
-    }),
-    db.tradeDocument.findMany({
-      where: { AND: [{ companyId, docType: "CREDIT_NOTE", status: { notIn: ["DRAFT", "CANCELLED"] } }, documentScope] },
-      orderBy: { issueDate: "asc" },
-      select: { id: true, docNumber: true, issueDate: true, total: true, paidBefore: true },
-    }),
-  ]);
-
-  // A document brought from the old system came across with what was left on it: what it had settled
-  // there was settled before this statement's account began, so it counts what came across.
-  const across = (d: { total: Prisma.Decimal | number; paidBefore: Prisma.Decimal | number }) => Number(d.total) - Number(d.paidBefore);
-  const beforeNote = (d: { paidBefore: Prisma.Decimal | number }, what: string) =>
-    Number(d.paidBefore) > 0 ? ` (${formatMoney(Number(d.paidBefore), "INR")} ${what} before Deskzo)` : "";
-
-  const entries = [
-    ...invoices.map((i) => ({
-      id: i.id,
-      date: i.issueDate,
-      kind: "INVOICE" as const,
-      reference: i.docNumber,
-      description: `Tax invoice${beforeNote(i, "settled")}`,
-      debit: across(i),
-      credit: 0,
-      href: `/documents/${i.id}`,
-    })),
-    ...payments.map((p) => ({
-      id: p.id,
-      date: p.paidOn,
-      kind: "PAYMENT" as const,
-      reference: p.reference ?? p.method.replaceAll("_", " "),
-      description: "Payment received",
-      debit: 0,
-      credit: Number(p.amount),
-      href: null,
-    })),
-    ...creditNotes.map((c) => ({
-      id: c.id,
-      date: c.issueDate,
-      kind: "CREDIT_NOTE" as const,
-      reference: c.docNumber,
-      description: `Credit note${beforeNote(c, "used")}`,
-      debit: 0,
-      credit: across(c),
-      href: `/documents/${c.id}`,
-    })),
-  ];
-
-  // An invoice's and a payment's dates are typed days held at UTC midnight: From and To are compared
-  // with the days they hold, both ends in. They were the server's own midnights.
-  const days = calendarDayRange(opts?.from, opts?.to);
-  const filtered = entries.filter((e) => {
-    const day = calendarDateOf(e.date).getTime();
-    if (days?.gte && day < days.gte.getTime()) return false;
-    if (days?.lte && day > days.lte.getTime()) return false;
-    return true;
-  });
-
-  const aging = emptyAging();
-  const openInvoices: {
-    id: string;
-    docNumber: string;
-    issueDate: Date;
-    dueDate: Date | null;
-    /** In the invoice's own currency, which the row shows it in. */
-    balance: number;
-    currency: string;
-    daysOverdue: number;
-    bucket: AgingBucket;
-  }[] = [];
-
-  for (const invoice of invoices) {
-    const settlement = settlementOf(invoice);
-    if (settlement.balance < 0.01) continue;
-    const bucket = agingBucket(invoice.dueDate, invoice.issueDate, asOf);
-    aging[bucket] += settlement.balance;
-    openInvoices.push({
-      id: invoice.id,
-      docNumber: invoice.docNumber,
-      issueDate: invoice.issueDate,
-      dueDate: invoice.dueDate,
-      balance: settlement.balance,
-      currency: invoice.currency,
-      daysOverdue: daysOverdue(invoice.dueDate, invoice.issueDate, asOf),
-      bucket,
-    });
-  }
-
-  const invoiced = invoices.reduce((t, i) => t + across(i), 0);
-  const received = payments.reduce((t, p) => t + Number(p.amount), 0);
-  const credited = creditNotes.reduce((t, c) => t + across(c), 0);
-
-  // Money received or credited that hasn't been set against an invoice yet. Without this the
-  // statement reads as a contradiction: nothing outstanding, but a negative closing balance. They
-  // measure different things — what's still owed on invoices, versus what's sitting on account.
-  // What each allocation took out of its payment (`takenFromPayment`): rupees on account set against a
-  // USD invoice settle dollars but spend rupees, and it is the rupees that leave the payment.
-  const [appliedPayments, appliedCredits] = await Promise.all([
-    db.paymentAllocation.findMany({ where: { payment: { AND: [{ companyId }, receiptScope] } }, select: { amount: true, paymentAmount: true } }),
-    db.creditNoteApplication.aggregate({ where: { creditNote: { AND: [{ companyId }, documentScope] } }, _sum: { amount: true } }),
-  ]);
-  const unappliedPayments = Math.max(received - appliedPayments.reduce((t, a) => t + takenFromPayment(a), 0), 0);
-  const unappliedCredits = Math.max(credited - Number(appliedCredits._sum.amount ?? 0), 0);
-  const outstanding = Object.values(aging).reduce((t, v) => t + v, 0);
+  const statement = await partyStatement("AR", companyId, opts);
 
   // Collections: every follow-up on this account's invoices and orders — one history for sales and
   // accounts, to anybody who can see the account (collections' own rule: the account's, not a record's).
@@ -686,17 +569,21 @@ export async function customerStatement(companyId: string, opts?: { from?: strin
   return toPlain({
     followUps,
     canLogFollowUps,
-    ledger: withRunningBalance(filtered),
-    aging,
-    openInvoices: openInvoices.sort((a, b) => b.daysOverdue - a.daysOverdue),
-    outstanding,
-    invoiced,
-    received,
-    credited,
-    unappliedPayments,
-    unappliedCredits,
-    /** Positive = they owe us; negative = they're in credit with us. */
-    netPosition: Math.round((outstanding - unappliedPayments - unappliedCredits) * 100) / 100,
+    ledger: statement.lines,
+    aging: statement.aging,
+    openInvoices: statement.openDocuments,
+    outstanding: statement.outstanding,
+    invoiced: statement.invoiced,
+    received: statement.received,
+    credited: statement.credited,
+    unappliedPayments: statement.unappliedPayments,
+    unappliedCredits: statement.unappliedCredits,
+    /** Opening balances and journals naming them. */
+    journals: statement.journals,
+    /** Positive = they owe us; negative = they're in credit with us. What Accounts Receivable holds for them. */
+    netPosition: statement.balance,
+    /** What is open in each other currency, as written. */
+    currencies: statement.currencies,
   });
 }
 
@@ -742,6 +629,8 @@ export async function agingReport(params?: { search?: string; promise?: string }
       issueDate: true,
       dueDate: true,
       total: true,
+      currency: true,
+      exchangeRate: true,
       company: { select: { id: true, companySeq: true, name: true } },
       ...invoiceSettlementInclude,
       lines: { where: { companyProductId: { not: null } }, select: { companyProductId: true } },
@@ -750,7 +639,17 @@ export async function agingReport(params?: { search?: string; promise?: string }
 
   const byCompany = new Map<
     string,
-    { id: string; companySeq: number; name: string; buckets: Record<AgingBucket, number>; total: number; oldest: number; invoiceCount: number }
+    {
+      id: string;
+      companySeq: number;
+      name: string;
+      buckets: Record<AgingBucket, number>;
+      total: number;
+      oldest: number;
+      invoiceCount: number;
+      /** What of it is owed in other currencies, as the invoices are written. */
+      foreign: Record<string, number>;
+    }
   >();
   const open: { id: string; companyId: string; orderIds: string[] }[] = [];
 
@@ -760,12 +659,16 @@ export async function agingReport(params?: { search?: string; promise?: string }
     open.push({ id: invoice.id, companyId: invoice.company.id, orderIds: invoice.lines.map((l) => l.companyProductId!) });
     const bucket = agingBucket(invoice.dueDate, invoice.issueDate, asOf);
     const overdue = daysOverdue(invoice.dueDate, invoice.issueDate, asOf);
+    // In rupees, at the rate the invoice was raised at — what Accounts Receivable holds for it. A $292.76
+    // balance was counted as ₹292.76 until 21 Oct 2026; its own figure is kept beside it for the row.
+    const rupees = Math.round(settlement.balance * bookingRate(invoice) * 100) / 100;
 
     const row =
       byCompany.get(invoice.company.id) ??
-      { id: invoice.company.id, companySeq: invoice.company.companySeq, name: invoice.company.name, buckets: emptyAging(), total: 0, oldest: 0, invoiceCount: 0 };
-    row.buckets[bucket] += settlement.balance;
-    row.total += settlement.balance;
+      { id: invoice.company.id, companySeq: invoice.company.companySeq, name: invoice.company.name, buckets: emptyAging(), total: 0, oldest: 0, invoiceCount: 0, foreign: {} };
+    row.buckets[bucket] += rupees;
+    row.total += rupees;
+    if (!isBaseCurrency(invoice.currency)) row.foreign[invoice.currency] = (row.foreign[invoice.currency] ?? 0) + settlement.balance;
     row.oldest = Math.max(row.oldest, overdue);
     row.invoiceCount += 1;
     byCompany.set(invoice.company.id, row);
@@ -791,6 +694,35 @@ export async function agingReport(params?: { search?: string; promise?: string }
   );
 
   return toPlain({ rows, totals });
+}
+
+/**
+ * The Customer Balance Summary (owner, 21 Oct 2026; src/lib/receivables/balance-summary.ts): what each
+ * customer owes as of a day — open invoices, unused credits, journals and the balance, in rupees and in
+ * their own currency. Null for somebody who can't see payments.
+ */
+export async function customerBalanceSummary(params?: { asOf?: string; search?: string }) {
+  const user = await requireModuleUser("receivables");
+  if (!(await viewerHas("payments.view"))) return null;
+  return toPlain(await balanceSummaryFor(user.id, "AR", params));
+}
+
+/**
+ * The AR aging report (owner, 21 Oct 2026 — src/lib/receivables/aging.ts): what was open on each invoice at
+ * the end of a day, in columns by how far past due (or how old) it was, in chosen intervals. Null for
+ * somebody who may not see what customers owe.
+ */
+export async function receivablesAgingReport(params?: AgingParams) {
+  const user = await requireModuleUser("receivables");
+  if (!(await viewerHas("payments.view"))) return null;
+  return toPlain(await agingReportFor(user.id, "AR", params));
+}
+
+/** The same report as a workbook, with every invoice behind it (src/lib/receivables/aging-export.ts). */
+export async function exportReceivablesAging(params?: AgingParams): Promise<ActionResult<ExportPayload>> {
+  const user = await requireModuleUser("receivables");
+  if (!(await viewerHas("payments.view"))) return { ok: false, error: "You can't see what customers owe." };
+  return exportAging(user, "AR", params);
 }
 
 /** Issued credit notes for a customer that still have an unapplied balance. */

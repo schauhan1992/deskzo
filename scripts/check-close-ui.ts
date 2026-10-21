@@ -500,7 +500,7 @@ async function run(scratchUrl: string) {
       side: "AR",
       month: M2,
       documents: [
-        { id: "i1", docNumber: "INV-1", docType: "INVOICE", companyId: "c1", companyName: "Acme", currency: "INR", rate: 1, total: 10000, allocated: 0, credited: 0, applied: 0, posted: 0, hasEntry: false, entryNumbers: [] },
+        { id: "i1", docNumber: "INV-1", docType: "INVOICE", companyId: "c1", companySeq: 1, companyName: "Acme", currency: "INR", rate: 1, total: 10000, allocated: 0, credited: 0, applied: 0, posted: 0, hasEntry: false, entryNumbers: [] },
       ],
       payments: [],
       ledger: 1000,

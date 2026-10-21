@@ -1136,11 +1136,12 @@ export async function CompanyDetail({
                   <div className="font-medium text-text">{formatCurrency(asVendor.outstanding)}</div>
                 </div>
                 <div>
+                  {/* Net against net, both in rupees: what they owe us after their payments on account, less what we owe them after ours. */}
                   <div className="text-xs text-muted">Net</div>
-                  <div className={statement.outstanding - asVendor.outstanding >= 0 ? "font-medium text-text" : "font-medium text-danger"}>
-                    {statement.outstanding - asVendor.outstanding >= 0
-                      ? `They owe us ${formatCurrency(statement.outstanding - asVendor.outstanding)}`
-                      : `We owe them ${formatCurrency(asVendor.outstanding - statement.outstanding)}`}
+                  <div className={statement.netPosition - asVendor.outstanding >= 0 ? "font-medium text-text" : "font-medium text-danger"}>
+                    {statement.netPosition - asVendor.outstanding >= 0
+                      ? `They owe us ${formatCurrency(statement.netPosition - asVendor.outstanding)}`
+                      : `We owe them ${formatCurrency(asVendor.outstanding - statement.netPosition)}`}
                   </div>
                 </div>
               </CardContent>

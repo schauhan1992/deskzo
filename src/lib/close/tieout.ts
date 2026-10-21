@@ -41,6 +41,7 @@ export type TieOutDocument = {
   /** VENDOR_CREDIT: a distributor's or an OEM's credit note (src/actions/vendor-credit.ts), on the payables side — it reads as a credit note does. */
   docType: "INVOICE" | "CREDIT_NOTE" | "BILL" | "VENDOR_CREDIT";
   companyId: string;
+  companySeq: number;
   companyName: string;
   currency: string;
   /** The rate its posting used (`bookingRate`). */
@@ -58,6 +59,9 @@ export type TieOutDocument = {
   /** Whether any posting of its own stood in the ledger then. */
   hasEntry: boolean;
   entryNumbers: string[];
+  /** Its date and due date (typed days, UTC midnight), for the aging report (src/lib/receivables/aging.ts); a vendor credit note's date. */
+  issueDate?: Date;
+  dueDate?: Date | null;
 };
 
 export type TieOutPayment = {
@@ -237,11 +241,39 @@ export function tieOut(input: TieOutInput): CheckOutcome<TieOutDetail> {
 /** Entries a person wrote: manual journals and opening balances, and reversals of those — not a cancellation's or a deletion's. */
 const PERSON_SOURCES: JournalSource[] = ["MANUAL", "OPENING"];
 
+/**
+ * A person's entry, or the reversal of one — what moves a party's balance besides its documents and
+ * payments: an opening balance, a write-off journal. The tie-out lists them as causes; the balance
+ * summaries count them.
+ */
+export const PERSON_ENTRY = {
+  source: { in: PERSON_SOURCES },
+  OR: [{ reversesId: null }, { reverses: { source: { in: PERSON_SOURCES } } }],
+} satisfies Prisma.JournalEntryWhereInput;
+
 type LineRow = { debit: Prisma.Decimal; credit: Prisma.Decimal };
 
-/** Reads, as the ledger and the documents stood at the month end, what `tieOut` needs. */
-export async function loadTieOut(side: TieOutSide, month: Date): Promise<TieOutInput> {
-  const { from, to } = monthWindow(month);
+/**
+ * What narrows the subledger to what one person may see, for the balance summaries
+ * (src/lib/receivables/balance-summary.ts): their documents, their payments, the vendors whose credit notes
+ * they reach. The close reads it whole.
+ */
+export type SubledgerScope = {
+  documents?: Prisma.TradeDocumentWhereInput;
+  payments?: Prisma.PaymentWhereInput;
+  vendors?: Prisma.CompanyWhereInput;
+};
+
+/**
+ * The documents and payments the ageing is made of, as they stood just before `to` — the tie-out's at a
+ * month end, and the customer and vendor balance summaries' at any day's end, so the two can't count by
+ * different rules. `accountId` is Accounts Receivable's (or Payable's), null in books never set up.
+ */
+export async function subledgerAt(
+  side: TieOutSide,
+  to: Date,
+  scope: SubledgerScope = {},
+): Promise<{ accountId: string | null; documents: TieOutDocument[]; payments: TieOutPayment[] }> {
   const account = await db.ledgerAccount.findUnique({
     where: { systemKey: side === "AR" ? SYSTEM_ACCOUNTS.AR : SYSTEM_ACCOUNTS.AP },
     select: { id: true },
@@ -251,14 +283,19 @@ export async function loadTieOut(side: TieOutSide, month: Date): Promise<TieOutI
 
   const docs = await db.tradeDocument.findMany({
     where: {
-      docType: { in: side === "AR" ? ["INVOICE", "CREDIT_NOTE"] : ["BILL"] },
-      status: { not: "DRAFT" },
-      issueDate: { lt: to },
+      AND: [
+        {
+          docType: { in: side === "AR" ? ["INVOICE", "CREDIT_NOTE"] : ["BILL"] },
+          status: { not: "DRAFT" },
+          issueDate: { lt: to },
+        },
+        scope.documents ?? {},
+      ],
     },
     select: {
       id: true, docNumber: true, docType: true, status: true, companyId: true, currency: true, exchangeRate: true, total: true,
-      origin: true, paidBefore: true,
-      company: { select: { name: true } },
+      origin: true, paidBefore: true, issueDate: true, dueDate: true,
+      company: { select: { name: true, companySeq: true } },
       payments: { where: { payment: { paidOn: { lt: to } } }, select: { amount: true } },
       creditsReceived: { where: { createdAt: { lt: to }, creditNote: { issueDate: { lt: to }, status: { not: "DRAFT" } } }, select: { amount: true } },
       creditsApplied: { where: { createdAt: { lt: to }, invoice: { issueDate: { lt: to } } }, select: { amount: true } },
@@ -309,6 +346,7 @@ export async function loadTieOut(side: TieOutSide, month: Date): Promise<TieOutI
       docNumber: d.docNumber,
       docType: d.docType as TieOutDocument["docType"],
       companyId: d.companyId,
+      companySeq: d.company.companySeq,
       companyName: d.company.name,
       currency: d.currency,
       rate: bookingRate(d),
@@ -320,6 +358,8 @@ export async function loadTieOut(side: TieOutSide, month: Date): Promise<TieOutI
       posted: posting?.posted ?? 0,
       hasEntry: !!posting,
       entryNumbers: posting?.entryNumbers ?? [],
+      issueDate: d.issueDate,
+      dueDate: d.dueDate,
     });
   }
   /**
@@ -329,10 +369,10 @@ export async function loadTieOut(side: TieOutSide, month: Date): Promise<TieOutI
    */
   if (side === "AP") {
     const credits = await db.vendorCredit.findMany({
-      where: { form: "CREDIT_NOTE", date: { lt: to } },
+      where: { form: "CREDIT_NOTE", date: { lt: to }, ...(scope.vendors ? { vendor: scope.vendors } : {}) },
       select: {
-        id: true, reference: true, vendorId: true, total: true, cancelledAt: true,
-        vendor: { select: { name: true } },
+        id: true, reference: true, vendorId: true, total: true, cancelledAt: true, date: true,
+        vendor: { select: { name: true, companySeq: true } },
         applications: { where: { createdAt: { lt: to } }, select: { amount: true } },
       },
     });
@@ -363,6 +403,7 @@ export async function loadTieOut(side: TieOutSide, month: Date): Promise<TieOutI
         docNumber: c.reference,
         docType: "VENDOR_CREDIT",
         companyId: c.vendorId,
+        companySeq: c.vendor.companySeq,
         companyName: c.vendor.name,
         currency: "INR",
         rate: 1,
@@ -373,13 +414,15 @@ export async function loadTieOut(side: TieOutSide, month: Date): Promise<TieOutI
         posted: posting?.posted ?? 0,
         hasEntry: !!posting,
         entryNumbers: posting?.entryNumbers ?? [],
+        issueDate: c.date,
+        dueDate: null,
       });
     }
   }
   const live = new Set(documents.map((d) => d.id));
 
   const paymentRows = await db.payment.findMany({
-    where: { direction: side === "AR" ? "RECEIVED" : "PAID", paidOn: { lt: to } },
+    where: { AND: [{ direction: side === "AR" ? "RECEIVED" : "PAID", paidOn: { lt: to } }, scope.payments ?? {}] },
     select: {
       id: true, paymentSeq: true, companyId: true, currency: true, exchangeRate: true, amount: true,
       company: { select: { companySeq: true, name: true } },
@@ -400,8 +443,17 @@ export async function loadTieOut(side: TieOutSide, month: Date): Promise<TieOutI
     // invoice settle dollars but spend rupees (`takenFromPayment`).
     applied: round2(p.allocations.filter((a) => a.documentId && live.has(a.documentId)).reduce((t, a) => t + takenFromPayment(a), 0)),
   }));
+  return { accountId: account?.id ?? null, documents, payments };
+}
 
-  if (!account) {
+/** Reads, as the ledger and the documents stood at the month end, what `tieOut` needs. */
+export async function loadTieOut(side: TieOutSide, month: Date): Promise<TieOutInput> {
+  const { from, to } = monthWindow(month);
+  const { accountId, documents, payments } = await subledgerAt(side, to);
+  // Owed-positive: a receivable is a debit balance, a payable a credit one.
+  const owed = (l: LineRow) => (side === "AR" ? Number(l.debit) - Number(l.credit) : Number(l.credit) - Number(l.debit));
+
+  if (!accountId) {
     return {
       side, month, documents, payments, ledger: 0,
       manualInMonth: [], manualBefore: { count: 0, amount: 0 },
@@ -410,7 +462,7 @@ export async function loadTieOut(side: TieOutSide, month: Date): Promise<TieOutI
   }
 
   const balance = await db.journalLine.aggregate({
-    where: { accountId: account.id, entry: { date: { lt: to } } },
+    where: { accountId, entry: { date: { lt: to } } },
     _sum: { debit: true, credit: true },
   });
   const ledger = round2(
@@ -431,29 +483,26 @@ export async function loadTieOut(side: TieOutSide, month: Date): Promise<TieOutI
     return [...map.values()].sort((a, b) => a.date.getTime() - b.date.getTime());
   };
   const entrySelect = { id: true, entryNumber: true, date: true, narration: true } as const;
-  const manualEntry = {
-    source: { in: PERSON_SOURCES },
-    OR: [{ reversesId: null }, { reverses: { source: { in: PERSON_SOURCES } } }],
-  } satisfies Prisma.JournalEntryWhereInput;
+  const manualEntry = PERSON_ENTRY;
 
   const [manualLines, manualBeforeLines, partylessLines, orphanLines] = await Promise.all([
     db.journalLine.findMany({
-      where: { accountId: account.id, entry: { ...manualEntry, date: { gte: from, lt: to } } },
+      where: { accountId, entry: { ...manualEntry, date: { gte: from, lt: to } } },
       select: { debit: true, credit: true, entry: { select: entrySelect } },
     }),
     db.journalLine.findMany({
-      where: { accountId: account.id, entry: { ...manualEntry, date: { lt: from } } },
+      where: { accountId, entry: { ...manualEntry, date: { lt: from } } },
       select: { debit: true, credit: true, entry: { select: entrySelect } },
     }),
     db.journalLine.findMany({
-      where: { accountId: account.id, companyId: null, entry: { date: { lt: to } } },
+      where: { accountId, companyId: null, entry: { date: { lt: to } } },
       select: { debit: true, credit: true, entry: { select: entrySelect } },
     }),
     // A payment's entries once the payment is gone: the foreign key let go of it (SetNull), and unless
     // the entry was reversed by the month end it still moves the account with no receipt behind it.
     db.journalLine.findMany({
       where: {
-        accountId: account.id,
+        accountId,
         entry: {
           source: { in: ["PAYMENT", "FX"] },
           paymentId: null, expenseId: null, payrollRunId: null, reversesId: null,

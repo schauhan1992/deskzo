@@ -25,6 +25,7 @@ import {
 } from "../src/lib/finance/dashboard";
 import { financialYearBounds } from "../src/lib/ledger/period";
 import { settleInvoice } from "../src/lib/receivables";
+import { bookingRate } from "../src/lib/ledger/posting";
 import { SYSTEM_ACCOUNTS } from "../src/lib/ledger/chart";
 import { PERIODS, resolvePeriod, type PeriodKey } from "../src/lib/finance/periods";
 import { indiaClock } from "../src/lib/time/zone";
@@ -323,10 +324,12 @@ async function run(
     ok(`  neither half is negative`, data.current >= 0 && data.overdue >= 0, `${inr(data.current)} / ${inr(data.overdue)}`);
   }
 
-  // Recomputed from the documents, the way the receivables screen does it.
+  // Recomputed from the documents, the way the receivables screen does it: in rupees, each invoice's
+  // balance at the rate it was raised at (a dollar balance was added as rupees until 21 Oct 2026), and
+  // what an imported invoice had settled before Deskzo counted as paid.
   const invoices = await db.tradeDocument.findMany({
     where: { docType: "INVOICE", direction: "SALES", status: { notIn: ["DRAFT", "CANCELLED", "PAID"] } },
-    select: { total: true, payments: { select: { amount: true } }, creditsReceived: { select: { amount: true } } },
+    select: { total: true, paidBefore: true, currency: true, exchangeRate: true, payments: { select: { amount: true } }, creditsReceived: { select: { amount: true } } },
   });
   const expected = invoices.reduce(
     (t, i) =>
@@ -335,7 +338,9 @@ async function run(
         money(i.total),
         i.payments.reduce((a, p) => a + money(p.amount), 0),
         i.creditsReceived.reduce((a, c) => a + money(c.amount), 0),
-      ).balance,
+        money(i.paidBefore),
+      ).balance *
+        bookingRate(i),
     0,
   );
   ok(

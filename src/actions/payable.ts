@@ -10,17 +10,19 @@ import { postExchangeDifferenceToLedger, postPaymentToLedger } from "@/lib/ledge
 import { bookingRate, settlementRateError } from "@/lib/ledger/posting";
 import { formatMoney, formatRate, isBaseCurrency } from "@/lib/currency";
 import { hasEffectivePermission } from "@/actions/permission";
-import { documentAccess, mayAccess, mayAddTo, paymentAccess } from "@/lib/authz/access";
+import { documentAccess, mayAccess, mayAddTo } from "@/lib/authz/access";
 import { ensureHeadOffice } from "@/lib/branches/identity";
-import { calendarDayRange } from "@/lib/time/zone";
+import { balanceSummaryFor } from "@/lib/receivables/balance-summary";
+import { partyStatement } from "@/lib/receivables/statement";
+import { agingReportFor, type AgingParams } from "@/lib/receivables/aging";
+import { exportAging } from "@/lib/receivables/aging-export";
+import type { ExportPayload } from "@/actions/data-export";
 import {
   agingBucket,
   daysOverdue,
   emptyAging,
   settleInvoice,
-  withRunningBalance,
   type AgingBucket,
-  type LedgerEntry,
 } from "@/lib/receivables";
 import type { ActionResult } from "@/actions/company";
 
@@ -262,6 +264,8 @@ export async function payablesAging(params?: { search?: string }) {
       issueDate: true,
       dueDate: true,
       total: true,
+      currency: true,
+      exchangeRate: true,
       company: { select: { id: true, companySeq: true, name: true } },
       ...billSettlementInclude,
     },
@@ -269,17 +273,31 @@ export async function payablesAging(params?: { search?: string }) {
 
   const byVendor = new Map<
     string,
-    { id: string; companySeq: number; name: string; buckets: Record<AgingBucket, number>; total: number; oldest: number; billCount: number }
+    {
+      id: string;
+      companySeq: number;
+      name: string;
+      buckets: Record<AgingBucket, number>;
+      total: number;
+      oldest: number;
+      billCount: number;
+      /** What of it is owed in other currencies, as the bills are written. */
+      foreign: Record<string, number>;
+    }
   >();
 
   for (const bill of bills) {
     const settlement = settlementOf(bill);
     if (settlement.balance < 0.01) continue;
+    // In rupees, at the rate the bill was booked at — what Accounts Payable holds for it (it was added as
+    // written, a $500 bill as ₹500, until 21 Oct 2026).
+    const rupees = Math.round(settlement.balance * bookingRate(bill) * 100) / 100;
     const row =
       byVendor.get(bill.company.id) ??
-      { id: bill.company.id, companySeq: bill.company.companySeq, name: bill.company.name, buckets: emptyAging(), total: 0, oldest: 0, billCount: 0 };
-    row.buckets[agingBucket(bill.dueDate, bill.issueDate, asOf)] += settlement.balance;
-    row.total += settlement.balance;
+      { id: bill.company.id, companySeq: bill.company.companySeq, name: bill.company.name, buckets: emptyAging(), total: 0, oldest: 0, billCount: 0, foreign: {} };
+    row.buckets[agingBucket(bill.dueDate, bill.issueDate, asOf)] += rupees;
+    row.total += rupees;
+    if (!isBaseCurrency(bill.currency)) row.foreign[bill.currency] = (row.foreign[bill.currency] ?? 0) + settlement.balance;
     row.oldest = Math.max(row.oldest, daysOverdue(bill.dueDate, bill.issueDate, asOf));
     row.billCount += 1;
     byVendor.set(bill.company.id, row);
@@ -298,69 +316,59 @@ export async function payablesAging(params?: { search?: string }) {
   return toPlain({ rows, totals, asOf });
 }
 
-/** A vendor's account: bills credit what we owe, payments out debit it back down. */
+/**
+ * The Vendor Balance Summary (owner, 21 Oct 2026; src/lib/receivables/balance-summary.ts): what we owe each
+ * vendor as of a day — open bills, unused credits (payments not set against a bill, vendor credit notes),
+ * journals and the balance, in rupees and in their own currency. Null for somebody who can't see payments.
+ */
+export async function vendorBalanceSummary(params?: { asOf?: string; search?: string }) {
+  const user = await payablesViewer();
+  if (!user) return null;
+  return toPlain(await balanceSummaryFor(user.id, "AP", params));
+}
+
+/**
+ * The AP aging report (owner, 21 Oct 2026 — src/lib/receivables/aging.ts; Zoho's "AP Aging Summary By Bill
+ * Due Date"): what was open on each bill at the end of a day, in columns by how far past due (or how old)
+ * it was, in chosen intervals.
+ */
+export async function payablesAgingReport(params?: AgingParams) {
+  const user = await payablesViewer();
+  if (!user) return null;
+  return toPlain(await agingReportFor(user.id, "AP", params));
+}
+
+/** The same report as a workbook, with every bill behind it (src/lib/receivables/aging-export.ts). */
+export async function exportPayablesAging(params?: AgingParams): Promise<ActionResult<ExportPayload>> {
+  const user = await payablesViewer();
+  if (!user) return { ok: false, error: "You can't see what we owe vendors." };
+  return exportAging(user, "AP", params);
+}
+
+/**
+ * A vendor's account, in rupees with each foreign line at its own rate (src/lib/receivables/statement.ts):
+ * bills credit what we owe, payments out and vendor credit notes debit it back down, and any exchange
+ * difference and journal naming them. `outstanding` is the net — what Accounts Payable holds for them, and
+ * their row in the Vendor Balance Summary; `currencies`, what is open in each other currency.
+ *
+ * A vendor out of reach answers as one that doesn't exist; reached, their whole account, as the summary
+ * counts it.
+ */
 export async function vendorStatement(companyId: string, opts?: { from?: string; to?: string }) {
   const user = await payablesViewer();
-  // A vendor out of reach answers as one that doesn't exist; its bills and payments are then narrowed
-  // as their own lists are, for when those are set narrower than the vendor.
   if (!user || !(await mayAccess(user.id, "vendors", "view", companyId))) return null;
-  const [billScope, paymentScope] = await Promise.all([documentAccess(user.id, "view"), paymentAccess(user.id, "view")]);
-  // A bill's and a payment's dates are typed days held at UTC midnight: From and To are those days,
-  // both ends in.
-  const dateFilter = calendarDayRange(opts?.from, opts?.to) ?? undefined;
-
-  const [company, bills, payments] = await Promise.all([
-    db.company.findUnique({ where: { id: companyId }, select: { id: true, name: true } }),
-    db.tradeDocument.findMany({
-      where: { AND: [{ companyId, docType: "BILL", status: { notIn: ["DRAFT", "CANCELLED"] }, ...(dateFilter ? { issueDate: dateFilter } : {}) }, billScope] },
-      orderBy: { issueDate: "asc" },
-      select: { id: true, docNumber: true, issueDate: true, total: true, paidBefore: true, reference: true },
-    }),
-    db.payment.findMany({
-      where: { AND: [{ companyId, direction: "PAID", ...(dateFilter ? { paidOn: dateFilter } : {}) }, paymentScope] },
-      orderBy: { paidOn: "asc" },
-      select: { id: true, amount: true, paidOn: true, method: true, reference: true },
-    }),
-  ]);
+  const company = await db.company.findUnique({ where: { id: companyId }, select: { id: true, name: true } });
   if (!company) return null;
-
-  // A bill increases what we owe, so it's a credit to the vendor's account; paying it debits back. One
-  // brought from the old system came across with what was left on it (src/lib/documents/imported.ts).
-  const across = (b: { total: Prisma.Decimal; paidBefore: Prisma.Decimal }) => Number(b.total) - Number(b.paidBefore);
-  const entries: Omit<LedgerEntry, "balance">[] = [
-    ...bills.map((b) => ({
-      id: b.id,
-      date: b.issueDate,
-      kind: "INVOICE" as const,
-      reference: b.docNumber,
-      description: (b.reference ? `Bill · ref ${b.reference}` : "Bill") + (Number(b.paidBefore) > 0 ? ` (${Number(b.paidBefore).toLocaleString("en-IN")} paid before Deskzo)` : ""),
-      debit: 0,
-      credit: across(b),
-      href: `/documents/${b.id}`,
-    })),
-    ...payments.map((p) => ({
-      id: p.id,
-      date: p.paidOn,
-      kind: "PAYMENT" as const,
-      reference: p.reference ?? p.method.replaceAll("_", " "),
-      description: "Payment made",
-      debit: Number(p.amount),
-      credit: 0,
-      href: null,
-    })),
-  ].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-  const ledger = withRunningBalance(entries);
-  const billed = bills.reduce((t, b) => t + across(b), 0);
-  const paid = payments.reduce((t, p) => t + Number(p.amount), 0);
-
+  const statement = await partyStatement("AP", companyId, opts);
   return toPlain({
     company,
-    entries: ledger,
-    billed,
-    paid,
-    // Negative here would mean we've paid more than we've been billed — an advance to the vendor.
-    outstanding: Math.round((billed - paid) * 100) / 100,
+    entries: statement.lines,
+    billed: statement.invoiced,
+    paid: statement.received,
+    credited: statement.credited,
+    // Net of payments and credit notes not yet set against a bill: negative is an advance to the vendor.
+    outstanding: statement.balance,
+    currencies: statement.currencies,
   });
 }
 

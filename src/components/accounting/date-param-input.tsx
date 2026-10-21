@@ -3,8 +3,11 @@
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { Input, Label } from "@/components/ui/input";
 
-/** A date that lives in the URL, so a report at a particular date is a link somebody can send. */
-export function DateParamInput({ paramName, label }: { paramName: string; label: string }) {
+/**
+ * A date that lives in the URL, so a report at a particular date is a link somebody can send. `fallback`:
+ * the day the report shows when the URL names none, so the box says it rather than standing empty.
+ */
+export function DateParamInput({ paramName, label, fallback }: { paramName: string; label: string; fallback?: string }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -26,7 +29,7 @@ export function DateParamInput({ paramName, label }: { paramName: string; label:
         id={paramName}
         type="date"
         className="h-9 w-auto"
-        defaultValue={searchParams.get(paramName) ?? ""}
+        defaultValue={searchParams.get(paramName) ?? fallback ?? ""}
         onChange={(e) => set(e.target.value)}
       />
     </div>

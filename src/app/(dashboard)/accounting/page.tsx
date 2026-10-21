@@ -35,7 +35,7 @@ import { WidgetGrid, type GridItem } from "@/components/dashboard/widget-grid";
 import { getPageLayout, setPageLayout } from "@/actions/page-layout";
 import { getPageLayoutDefinition } from "@/lib/page-layouts";
 import type { ReactNode } from "react";
-import { isModuleEntitled } from "@/lib/modules-access";
+import { isModuleEntitled, moduleAccessFor } from "@/lib/modules-access";
 import { closeOverview } from "@/actions/close";
 import { CloseOverviewCard } from "@/components/close/close-overview-card";
 
@@ -105,6 +105,8 @@ export default async function AccountingOverviewPage() {
         href="/receivables"
         newHref={(await can(viewer.id, "documents.issue")) ? "/documents/new?type=INVOICE" : undefined}
         newLabel="New"
+        balancesHref={(await moduleAccessFor(viewer.id, "receivables")) === "available" ? "/receivables?view=balances" : undefined}
+        balancesLabel="Customer balances as of a date"
       />
     ),
     payables: (
@@ -115,6 +117,8 @@ export default async function AccountingOverviewPage() {
         href="/payables"
         newHref="/purchase/bills"
         newLabel="New"
+        balancesHref={(await moduleAccessFor(viewer.id, "payables")) === "available" ? "/payables?view=balances" : undefined}
+        balancesLabel="Vendor balances as of a date"
       />
     ),
     statIncome: <Stat label="Income this year" value={pl.totalIncome} href="/accounting/profit-loss" />,

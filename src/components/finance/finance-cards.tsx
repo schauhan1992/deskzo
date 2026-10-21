@@ -412,6 +412,8 @@ export function OutstandingCard({
   href,
   newHref,
   newLabel,
+  balancesHref,
+  balancesLabel,
 }: {
   title: string;
   subtitle: string;
@@ -419,6 +421,9 @@ export function OutstandingCard({
   href: string;
   newHref?: string;
   newLabel?: string;
+  /** The balance summary as of a day (Receivables' or Payables'), for somebody who may open it. */
+  balancesHref?: string;
+  balancesLabel?: string;
 }) {
   const pct = data.total > 0 ? (data.current / data.total) * 100 : 0;
 
@@ -455,6 +460,11 @@ export function OutstandingCard({
           <Legend dot="bg-brand" label="Current" value={data.current} />
           <Legend dot="bg-warning" label="Overdue" value={data.overdue} tone={data.overdue > 0 ? "text-warning" : undefined} />
         </div>
+        {balancesHref && (
+          <Link href={balancesHref} className="block text-xs font-medium text-brand hover:underline">
+            {balancesLabel ?? "Balances as of a date"} →
+          </Link>
+        )}
       </CardContent>
     </Card>
   );

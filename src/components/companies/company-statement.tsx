@@ -2,6 +2,7 @@ import Link from "next/link";
 import { customerStatement } from "@/actions/receivable";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
+import { formatMoney } from "@/lib/currency";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { AGING_BUCKETS } from "@/lib/receivables";
 import { FollowUpHistory } from "@/components/collections/follow-up-history";
@@ -13,17 +14,35 @@ const KIND_TONE = {
   INVOICE: "blue",
   PAYMENT: "green",
   CREDIT_NOTE: "amber",
+  EXCHANGE: "default",
+  JOURNAL: "brand",
+  OPENING: "default",
 } as const;
 
 const KIND_LABEL = {
   INVOICE: "Invoice",
   PAYMENT: "Payment",
   CREDIT_NOTE: "Credit note",
+  EXCHANGE: "Exchange difference",
+  JOURNAL: "Journal",
+  OPENING: "Brought forward",
 } as const;
 
+/** A rupee figure, with what a foreign line was written for under it. */
+function Money({ value, foreign }: { value: number; foreign?: { currency: string; amount: number } | null }) {
+  return (
+    <>
+      {formatCurrency(value)}
+      {foreign && <div className="text-xs text-subtle">{formatMoney(foreign.amount, foreign.currency)}</div>}
+    </>
+  );
+}
+
 /**
- * A statement of account: every invoice, payment and credit note in date order with a running
- * balance, the aging of what's still open, and the invoices making it up.
+ * A statement of account: every invoice, payment, credit note, exchange difference and journal in date
+ * order with a running balance, the aging of what's still open, and the invoices making it up — in rupees,
+ * each line at its own rate with a foreign one's own amount under it, and what is open in each other
+ * currency below the figures (owner, 21 Oct 2026).
  */
 export function CompanyStatement({ statement }: { statement: Statement }) {
   return (
@@ -52,7 +71,7 @@ export function CompanyStatement({ statement }: { statement: Statement }) {
 
       {/* Two different questions — what's owed on invoices, and what's sitting on account — so the
           net is spelled out rather than leaving the reader to reconcile them. */}
-      {(statement.unappliedPayments > 0 || statement.unappliedCredits > 0) && (
+      {(statement.unappliedPayments > 0 || statement.unappliedCredits > 0 || statement.journals !== 0) && (
         <Card
           className={`px-4 py-3 text-sm ${
             statement.netPosition < 0 ? "border-warning/40 bg-warning-bg text-warning" : "text-muted"
@@ -65,15 +84,50 @@ export function CompanyStatement({ statement }: { statement: Statement }) {
               </span>{" "}
               — {formatCurrency(statement.unappliedPayments)} in unapplied payments and{" "}
               {formatCurrency(statement.unappliedCredits)} in unapplied credit notes, against{" "}
-              {formatCurrency(statement.outstanding)} still owed. Apply it to an invoice to clear it down.
+              {formatCurrency(statement.outstanding)} still owed
+              {statement.journals !== 0 && <> and {formatCurrency(statement.journals)} in opening balances and journals</>}. Apply it to an invoice to
+              clear it down.
             </>
           ) : (
             <>
-              <span className="font-medium">{formatCurrency(statement.netPosition)} net owed</span> after{" "}
-              {formatCurrency(statement.unappliedPayments + statement.unappliedCredits)} of unapplied payments and
-              credit notes.
+              <span className="font-medium">{formatCurrency(statement.netPosition)} net owed</span>
+              {statement.unappliedPayments + statement.unappliedCredits > 0 && (
+                <> after {formatCurrency(statement.unappliedPayments + statement.unappliedCredits)} of unapplied payments and credit notes</>
+              )}
+              {statement.journals !== 0 && <>, with {formatCurrency(statement.journals)} in opening balances and journals</>}.
             </>
           )}
+        </Card>
+      )}
+
+      {statement.currencies.length > 0 && (
+        <Card>
+          <CardHeader className="text-sm font-medium text-text">
+            In other currencies
+            <span className="ml-2 text-xs font-normal text-subtle">What is open in each, as the invoices and payments are written — the rupee figures above include it at each one&apos;s own rate.</span>
+          </CardHeader>
+          <CardContent className="p-0">
+            <table className="w-full text-sm">
+              <thead className="border-y border-line bg-surface-sunken text-left text-xs uppercase tracking-wide text-muted">
+                <tr>
+                  <th className="px-5 py-2">Currency</th>
+                  <th className="px-3 py-2 text-right">Open on invoices</th>
+                  <th className="px-3 py-2 text-right">On account</th>
+                  <th className="px-5 py-2 text-right">Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {statement.currencies.map((c) => (
+                  <tr key={c.currency} className="border-b border-line last:border-0">
+                    <td className="px-5 py-2 font-medium text-text">{c.currency}</td>
+                    <td className="px-3 py-2 text-right text-muted">{c.open ? formatMoney(c.open, c.currency) : "—"}</td>
+                    <td className="px-3 py-2 text-right text-muted">{c.unused ? formatMoney(c.unused, c.currency) : "—"}</td>
+                    <td className="px-5 py-2 text-right font-medium text-text">{formatMoney(c.balance, c.currency)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
         </Card>
       )}
 
@@ -137,7 +191,10 @@ export function CompanyStatement({ statement }: { statement: Statement }) {
                         <Badge tone="default">Not due</Badge>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-right font-medium text-text">{formatCurrency(invoice.balance, invoice.currency)}</td>
+                    <td className="px-3 py-2 text-right font-medium text-text">
+                      {formatCurrency(invoice.balance, invoice.currency)}
+                      {invoice.currency !== "INR" && <div className="text-xs font-normal text-subtle">{formatCurrency(invoice.rupees)}</div>}
+                    </td>
                     {statement.canLogFollowUps && (
                       <td className="px-5 py-2 text-right">
                         <LogFollowUpButton
@@ -176,7 +233,7 @@ export function CompanyStatement({ statement }: { statement: Statement }) {
         <CardHeader className="text-sm font-medium text-text">
           Statement of account
           <span className="ml-2 text-xs font-normal text-subtle">
-            Running balance — a negative figure means they&apos;re in credit with us.
+            In rupees, each line at its own rate — a negative balance means they&apos;re in credit with us.
           </span>
         </CardHeader>
         <CardContent className={statement.ledger.length === 0 ? undefined : "p-0"}>
@@ -213,10 +270,10 @@ export function CompanyStatement({ statement }: { statement: Statement }) {
                       )}
                     </td>
                     <td className="px-3 py-2 text-right text-muted">
-                      {entry.debit > 0 ? formatCurrency(entry.debit) : "—"}
+                      {entry.debit > 0 ? <Money value={entry.debit} foreign={entry.foreign} /> : "—"}
                     </td>
                     <td className="px-3 py-2 text-right text-muted">
-                      {entry.credit > 0 ? formatCurrency(entry.credit) : "—"}
+                      {entry.credit > 0 ? <Money value={entry.credit} foreign={entry.foreign} /> : "—"}
                     </td>
                     <td className="px-3 py-2 text-right font-medium text-text">{formatCurrency(entry.balance)}</td>
                   </tr>

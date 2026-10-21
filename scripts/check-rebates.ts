@@ -236,7 +236,7 @@ function pure() {
     by(payout, "BANK")?.debit === 500 && by(payout, "BANK")?.accountIdOverride === "acct-hdfc" && by(payout, "PURCHASE_REBATES")?.credit === 500 && !by(payout, "AP") && balanced(payout.lines),
   );
   const doc = (over: Partial<TieOutDocument>): TieOutDocument => ({
-    id: "d", docNumber: "CN-1", docType: "VENDOR_CREDIT", companyId: "ingram", companyName: "Ingram", currency: "INR", rate: 1,
+    id: "d", docNumber: "CN-1", docType: "VENDOR_CREDIT", companyId: "ingram", companySeq: 1, companyName: "Ingram", currency: "INR", rate: 1,
     total: 188.8, allocated: 0, credited: 0, applied: 0, posted: -188.8, hasEntry: true, entryNumbers: [], ...over,
   });
   ok("the tie-out reads a vendor credit note as a credit note: −188.80 open, −88.80 once 100 is set against a bill", openInRupees(doc({})) === -188.8 && openInRupees(doc({ applied: 100 })) === -88.8);

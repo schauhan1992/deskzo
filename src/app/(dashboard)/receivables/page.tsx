@@ -1,5 +1,10 @@
 import Link from "next/link";
-import { agingReport } from "@/actions/receivable";
+import { notFound } from "next/navigation";
+import { agingReport, customerBalanceSummary, receivablesAgingReport } from "@/actions/receivable";
+import { BalanceSummaryReport, BalanceViews } from "@/components/receivables/balance-summary-report";
+import { AgingDocumentsView, AgingReportView } from "@/components/receivables/aging-report";
+import type { AgingParams } from "@/lib/receivables/aging";
+import { formatMoney } from "@/lib/currency";
 import { isModuleEnabled } from "@/actions/module";
 import { Badge, Card } from "@/components/ui/card";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
@@ -21,13 +26,48 @@ const PROMISE_FILTERS = [
 /**
  * Accounts receivable, aged. One row per customer with something outstanding, bucketed by how long
  * past due each of their invoices is — the report a collections call is made from — with the last
- * follow-up anybody logged and the promise that matters most.
+ * follow-up anybody logged and the promise that matters most. In rupees, each invoice at its own rate.
+ *
+ * `?view=balances`: the Customer Balance Summary (owner, 21 Oct 2026) — each customer's balance as of a day,
+ * with unused credits and journals beside the open invoices, in rupees and their own currency.
  */
-export default async function ReceivablesPage({ searchParams }: { searchParams: Promise<{ q?: string; promise?: string }> }) {
+export default async function ReceivablesPage({ searchParams }: { searchParams: Promise<AgingParams & { q?: string; promise?: string; view?: string; asOf?: string; docs?: string }> }) {
   const enabled = await isModuleEnabled("receivables");
   if (!enabled) return <ModuleDisabledNotice moduleKey="receivables" />;
 
   const params = await searchParams;
+  // The AR aging report (owner, 21 Oct 2026): as of a day, by due date or invoice date, in chosen intervals.
+  if (params.view === "aging") {
+    const report = await receivablesAgingReport(params);
+    if (!report) notFound();
+    return (
+      <div className="animate-fade-rise">
+        <div>
+          <h1 className="text-xl font-semibold text-text">Receivables</h1>
+          <p className="mt-1 text-sm text-muted">What was open on each invoice at the end of a day, by how far past due — or how old — it was then. Click a figure to see its invoices.</p>
+        </div>
+        <BalanceViews base="/receivables" current="aging" q={params.q} />
+        {params.docs ? <AgingDocumentsView report={report} base="/receivables" /> : <AgingReportView report={report} base="/receivables" statementTab="statement" />}
+      </div>
+    );
+  }
+  if (params.view === "balances") {
+    const summary = await customerBalanceSummary({ asOf: params.asOf, search: params.q });
+    if (!summary) notFound();
+    return (
+      <div className="animate-fade-rise">
+        <div>
+          <h1 className="text-xl font-semibold text-text">Receivables</h1>
+          <p className="mt-1 text-sm text-muted">
+            What each customer owed at the end of a day: their open invoices, less payments and credit notes not yet set against one, with
+            opening balances and journals — the balance Accounts Receivable holds for them.
+          </p>
+        </div>
+        <BalanceViews base="/receivables" current="balances" q={params.q} />
+        <BalanceSummaryReport summary={summary} statementTab="statement" />
+      </div>
+    );
+  }
   const promise = params.promise === "broken" || params.promise === "week" ? params.promise : undefined;
   const [{ rows, totals }, clock] = await Promise.all([agingReport({ search: params.q, promise }), workspaceClock()]);
 
@@ -44,6 +84,8 @@ export default async function ReceivablesPage({ searchParams }: { searchParams: 
           notes applied against them.
         </p>
       </div>
+
+      <BalanceViews base="/receivables" current="aged" q={params.q} />
 
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Card className="px-4 py-3">
@@ -126,6 +168,11 @@ export default async function ReceivablesPage({ searchParams }: { searchParams: 
                     {row.invoiceCount} open invoice(s)
                     {row.oldest > 0 && <Badge tone={row.oldest > 90 ? "red" : "amber"}>{row.oldest}d overdue</Badge>}
                   </div>
+                  {Object.keys(row.foreign).length > 0 && (
+                    <div className="mt-0.5 text-xs text-subtle">
+                      Includes {Object.entries(row.foreign).map(([currency, amount]) => formatMoney(amount, currency)).join(" and ")}
+                    </div>
+                  )}
                 </td>
                 {AGING_BUCKETS.map((b) => (
                   <td

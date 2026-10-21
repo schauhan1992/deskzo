@@ -1,5 +1,10 @@
 import Link from "next/link";
-import { payablesAging } from "@/actions/payable";
+import { notFound } from "next/navigation";
+import { payablesAging, payablesAgingReport, vendorBalanceSummary } from "@/actions/payable";
+import { BalanceSummaryReport, BalanceViews } from "@/components/receivables/balance-summary-report";
+import { AgingDocumentsView, AgingReportView } from "@/components/receivables/aging-report";
+import type { AgingParams } from "@/lib/receivables/aging";
+import { formatMoney } from "@/lib/currency";
 import { isModuleEnabled } from "@/actions/module";
 import { Badge, Card } from "@/components/ui/card";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
@@ -10,13 +15,49 @@ import { companyPath } from "@/lib/record-links";
 
 /**
  * Accounts payable, aged. One row per vendor we still owe, bucketed by how long past due each of
- * their bills is — the mirror of receivables, and the report a payment run is planned from.
+ * their bills is — the mirror of receivables, and the report a payment run is planned from. In rupees,
+ * each bill at its own rate.
+ *
+ * `?view=balances`: the Vendor Balance Summary (owner, 21 Oct 2026) — what we owed each vendor as of a day,
+ * with unused credits and journals beside the open bills, in rupees and their own currency.
  */
-export default async function PayablesPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
+export default async function PayablesPage({ searchParams }: { searchParams: Promise<AgingParams & { q?: string; view?: string; asOf?: string; docs?: string }> }) {
   const enabled = await isModuleEnabled("payables");
   if (!enabled) return <ModuleDisabledNotice moduleKey="payables" />;
 
   const params = await searchParams;
+  // The AP aging report (owner, 21 Oct 2026): as of a day, by due date or bill date, in chosen intervals.
+  if (params.view === "aging") {
+    const report = await payablesAgingReport(params);
+    if (!report) notFound();
+    return (
+      <div className="animate-fade-rise">
+        <div>
+          <h1 className="text-xl font-semibold text-text">Payables</h1>
+          <p className="mt-1 text-sm text-muted">What was open on each bill at the end of a day, by how far past due — or how old — it was then. Click a figure to see its bills.</p>
+        </div>
+        <BalanceViews base="/payables" current="aging" q={params.q} />
+        {params.docs ? <AgingDocumentsView report={report} base="/payables" /> : <AgingReportView report={report} base="/payables" />}
+      </div>
+    );
+  }
+  if (params.view === "balances") {
+    const summary = await vendorBalanceSummary({ asOf: params.asOf, search: params.q });
+    if (!summary) notFound();
+    return (
+      <div className="animate-fade-rise">
+        <div>
+          <h1 className="text-xl font-semibold text-text">Payables</h1>
+          <p className="mt-1 text-sm text-muted">
+            What we owed each vendor at the end of a day: their open bills, less payments and vendor credit notes not yet set against one,
+            with opening balances and journals — the balance Accounts Payable holds for them.
+          </p>
+        </div>
+        <BalanceViews base="/payables" current="balances" q={params.q} />
+        <BalanceSummaryReport summary={summary} />
+      </div>
+    );
+  }
   const { rows, totals } = await payablesAging({ search: params.q });
   const overdue = totals.total - totals.buckets.current;
 
@@ -29,6 +70,8 @@ export default async function PayablesPage({ searchParams }: { searchParams: Pro
           them, the same way invoices do on the other side.
         </p>
       </div>
+
+      <BalanceViews base="/payables" current="aged" q={params.q} />
 
       <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Card className="px-4 py-3">
@@ -85,6 +128,11 @@ export default async function PayablesPage({ searchParams }: { searchParams: Pro
                     {row.billCount} bill(s)
                     {row.oldest > 0 && ` · oldest ${row.oldest} day(s) overdue`}
                   </div>
+                  {Object.keys(row.foreign).length > 0 && (
+                    <div className="mt-0.5 text-xs text-subtle">
+                      Includes {Object.entries(row.foreign).map(([currency, amount]) => formatMoney(amount, currency)).join(" and ")}
+                    </div>
+                  )}
                 </td>
                 {AGING_BUCKETS.map((b) => (
                   <td key={b.key} className="px-4 py-2.5 text-right tabular-nums text-muted">

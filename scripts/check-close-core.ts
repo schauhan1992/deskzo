@@ -232,7 +232,7 @@ ok("  no run, a draft run, or a locked unposted run fails; locked and posted pas
 ok("flux: a flagged row without a note fails; with one passes", !checkFluxExplained({ month: jun, rows: [{ accountId: "x", code: "5", name: "Rent", changePrev: 30000, flagged: true, explained: false }] }).ok && checkFluxExplained({ month: jun, rows: [{ accountId: "x", code: "5", name: "Rent", changePrev: 30000, flagged: true, explained: true }] }).ok);
 
 section("The receivables tie-out, by hand");
-const docBase = { companyId: "c", companyName: "Acme", posted: 0, hasEntry: true, entryNumbers: ["JV/1"], credited: 0, applied: 0, allocated: 0 };
+const docBase = { companyId: "c", companySeq: 1, companyName: "Acme", posted: 0, hasEntry: true, entryNumbers: ["JV/1"], credited: 0, applied: 0, allocated: 0 };
 const inv: TieOutDocument = { ...docBase, id: "i1", docNumber: "INV-1", docType: "INVOICE", currency: "INR", rate: 1, total: 11800, allocated: 5000, credited: 1180, posted: 11800 };
 const usd: TieOutDocument = { ...docBase, id: "i2", docNumber: "INV-2", docType: "INVOICE", currency: "USD", rate: 83.47, total: 118.44, allocated: 50, posted: 9886.19 };
 const cn: TieOutDocument = { ...docBase, id: "c1", docNumber: "CN-1", docType: "CREDIT_NOTE", currency: "INR", rate: 1, total: 1180, applied: 1180, posted: -1180 };

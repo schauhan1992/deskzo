@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { SYSTEM_ACCOUNTS } from "@/lib/ledger/chart";
 import { settleInvoice } from "@/lib/receivables";
+import { bookingRate } from "@/lib/ledger/posting";
 import { bucketOf } from "@/lib/analytics/types";
 import { financialYearStartOf, financialYearWindow } from "@/lib/india-time";
 import { indiaClock } from "@/lib/time/zone";
@@ -274,6 +275,7 @@ export type Outstanding = { total: number; current: number; overdue: number; cou
  * Balance rather than face value: an invoice half paid is half outstanding, and the settlement
  * arithmetic — payments, credit notes, and never going below zero on an overpayment — already lives
  * in `settleInvoice`. Reimplementing it here is how two screens come to disagree about a debt.
+ * In rupees, each document's balance at the rate it was raised at, as the ledger holds it.
  */
 async function outstandingOf(docType: "INVOICE" | "BILL", direction: "SALES" | "PURCHASE"): Promise<Outstanding> {
   const asOf = new Date();
@@ -282,6 +284,8 @@ async function outstandingOf(docType: "INVOICE" | "BILL", direction: "SALES" | "
     select: {
       total: true,
       paidBefore: true,
+      currency: true,
+      exchangeRate: true,
       dueDate: true,
       issueDate: true,
       payments: { select: { amount: true } },
@@ -295,13 +299,15 @@ async function outstandingOf(docType: "INVOICE" | "BILL", direction: "SALES" | "
   let overdue = 0;
   let count = 0;
   for (const row of rows) {
-    const { balance } = settleInvoice(
+    const { balance: owed } = settleInvoice(
       money(row.total),
       row.payments.reduce((t, p) => t + money(p.amount), 0),
       row.creditsReceived.reduce((t, c) => t + money(c.amount), 0) + row.vendorCredits.reduce((t, c) => t + money(c.amount), 0),
       money(row.paidBefore),
     );
-    if (balance <= 0) continue;
+    if (owed <= 0) continue;
+    // At the document's own rate: a $292.76 balance was counted as ₹292.76 until 21 Oct 2026.
+    const balance = owed * bookingRate(row);
     count += 1;
     const due = new Date(row.dueDate ?? row.issueDate);
     if (due < asOf) overdue += balance;

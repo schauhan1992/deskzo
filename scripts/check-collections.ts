@@ -692,7 +692,8 @@ async function main() {
     ok("  a read-only viewer sees the same history, and no Follow up", auditorText.includes("Met the CFO") && !auditorText.html.includes(">Follow up</button>"));
     as(sales);
     const strangerStatement = await receivable.customerStatement(strangerCo.id);
-    ok("  and a customer outside the viewer's accounts shows no follow-ups at all", strangerStatement?.followUps.length === 0);
+    // Out of reach answers as missing (21 Oct 2026, as a vendor's statement always did): no follow-ups, and no figures.
+    ok("  and a customer outside the viewer's accounts has no statement at all", strangerStatement === null);
   } finally {
     // The tasks switch first: whatever else failed, it goes back as it was.
     await (async () => {

@@ -80,17 +80,24 @@ export function daysOverdue(dueDate: Date | string | null, issueDate: Date | str
   return Math.max(Math.floor((asOf.getTime() - due.getTime()) / (1000 * 60 * 60 * 24)), 0);
 }
 
-/** A running-balance statement line: invoices debit the account, payments and credits reduce it. */
+/**
+ * A running-balance statement line: invoices debit the account, payments and credits reduce it. In
+ * rupees, each at its own rate (src/lib/receivables/statement.ts); `foreign` is what a line in another
+ * currency was written for. EXCHANGE is the difference the ledger books when a foreign document settles
+ * at another rate, JOURNAL an opening balance or journal entry naming the party, OPENING what a statement
+ * for a period brings forward.
+ */
 export type LedgerEntry = {
   id: string;
   date: Date;
-  kind: "INVOICE" | "PAYMENT" | "CREDIT_NOTE";
+  kind: "INVOICE" | "PAYMENT" | "CREDIT_NOTE" | "EXCHANGE" | "JOURNAL" | "OPENING";
   reference: string;
   description: string;
   debit: number;
   credit: number;
   balance: number;
   href: string | null;
+  foreign?: { currency: string; amount: number } | null;
 };
 
 /** Sorts by date and carries the running balance down, which is what makes a statement readable. */
