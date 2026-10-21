@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/card";
 import { SearchParamInput } from "@/components/ui/search-param-input";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
 import { DateParamInput } from "@/components/accounting/date-param-input";
+import { DateRangePicker } from "@/components/ui/date-range-picker";
 import { AgingExportButton } from "@/components/receivables/aging-export-button";
 import { formatCurrency } from "@/lib/utils";
 import { formatMoney } from "@/lib/currency";
@@ -21,6 +22,8 @@ export function agingQuery(s: AgingSettings, extra: Record<string, string | numb
   const q: Record<string, string | number | undefined> = {
     view: "aging",
     asOf: s.asOf,
+    from: s.datedFrom ?? undefined,
+    to: s.datedTo ?? undefined,
     by: s.basis === "date" ? "date" : undefined,
     iv: s.interval === DEFAULT_INTERVAL ? undefined : s.interval,
     show: s.show === "count" ? "count" : undefined,
@@ -30,11 +33,22 @@ export function agingQuery(s: AgingSettings, extra: Record<string, string | numb
   return Object.fromEntries(Object.entries(q).filter(([, v]) => v !== undefined && v !== "").map(([k, v]) => [k, String(v)]));
 }
 
-/** "As of 21 Oct 2026 · by due date · 4 × 30 days" — what the report is, in a line. */
+/** "invoices dated 1 Apr 2026 – 30 Apr 2026", or null when every date is in. */
+export function agingDatedPhrase(report: AgingReport): string | null {
+  const words = AGING_WORDS[report.side];
+  const { datedFrom: from, datedTo: to } = report.settings;
+  if (from && to) return `${words.docs} dated ${formatCalendarDay(from)} – ${formatCalendarDay(to)}`;
+  if (from) return `${words.docs} dated from ${formatCalendarDay(from)}`;
+  if (to) return `${words.docs} dated up to ${formatCalendarDay(to)}`;
+  return null;
+}
+
+/** "As of 21 Oct 2026 · invoices dated … · by due date · 4 × 30 days" — what the report is, in a line. */
 export function agingDescription(report: AgingReport) {
   const words = AGING_WORDS[report.side];
   const s = report.settings;
-  return `As of ${formatCalendarDay(s.asOf)} · aged by ${s.basis === "due" ? "due date" : words.date} · ${intervalLabel(s.interval)}`;
+  const dated = agingDatedPhrase(report);
+  return `As of ${formatCalendarDay(s.asOf)}${dated ? ` · ${dated}` : ""} · aged by ${s.basis === "due" ? "due date" : words.date} · ${intervalLabel(s.interval)}`;
 }
 
 /**
@@ -87,6 +101,8 @@ export function AgingReportView({ report, base, statementTab }: { report: AgingR
       <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-3">
         <SearchParamInput paramName="q" placeholder={`Search ${words.party.toLowerCase()} name…`} />
         <DateParamInput paramName="asOf" label="As of" fallback={s.asOf} />
+        {/* From one day to another (owner, 21 Oct 2026): only the invoices dated then, still aged as of the day above. */}
+        <DateRangePicker fromParam="from" toParam="to" label={`${words.Doc}s dated`} resetParams={[]} />
         <SelectParamFilter paramName="by" label="Aging by" allLabel="Due date" options={[{ value: "date", label: words.Doc + " date" }]} resetParams={[]} />
         <SelectParamFilter
           paramName="iv"
@@ -108,6 +124,12 @@ export function AgingReportView({ report, base, statementTab }: { report: AgingR
           <AgingExportButton side={report.side} params={agingQuery(s, { view: undefined })} />
         </div>
       </div>
+      {s.datedTo && s.datedTo > s.asOf && (
+        <p className="mt-2 text-xs text-muted">
+          {words.Doc}s dated after {formatCalendarDay(s.asOf)} hadn&apos;t been raised as of that day, so they aren&apos;t counted — set As of to{" "}
+          {formatCalendarDay(s.datedTo)} or later to include them.
+        </p>
+      )}
 
       <Card className="mt-4 overflow-x-auto p-0">
         <table className="w-full text-sm">
@@ -156,6 +178,7 @@ export function AgingReportView({ report, base, statementTab }: { report: AgingR
               <tr>
                 <td colSpan={report.columns.length + 3} className="px-4 py-10 text-center text-subtle">
                   {words.none} at {formatCalendarDay(s.asOf)}
+                  {agingDatedPhrase(report) ? ` among ${agingDatedPhrase(report)}` : ""}
                   {s.search ? ` for a ${words.party.toLowerCase()} matching “${s.search}”` : ""}.
                 </td>
               </tr>

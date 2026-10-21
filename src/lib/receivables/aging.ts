@@ -18,6 +18,9 @@ import { workspaceClock } from "@/lib/time/workspace";
  *   · In rupees at each document's own rate, as Accounts Receivable (Payable) holds it; what is left in
  *     any other currency, as written, beside it — Zoho's "(FCY)".
  *   · Every document behind a figure (the details view), so each amount on the summary opens its list.
+ *   · Optionally only the invoices (bills) **dated** from one day to another (owner, 21 Oct 2026) — "April's
+ *     invoices, and what was still open on them as of today". Their age and what was left on them are still
+ *     as of the As of day; one dated after it hadn't been raised yet then, so isn't counted.
  *
  * Only invoices and bills are aged: payments not set against anything and credit notes not used are the
  * Balance summary's (src/lib/receivables/balance-summary.ts), and an invoice paid more than it was for
@@ -134,6 +137,12 @@ export function ageDocuments(input: { documents: TieOutDocument[]; asOf: string;
   return out.sort((a, b) => b.age - a.age || a.party.localeCompare(b.party, "en", { sensitivity: "base" }) || a.docNumber.localeCompare(b.docNumber));
 }
 
+/** Only the documents dated from `from` to `to` (YYYY-MM-DD, both ends in; either may be open) — pure. */
+export function datedWithin(documents: AgedDocument[], from: string | null, to: string | null): AgedDocument[] {
+  if (!from && !to) return documents;
+  return documents.filter((d) => (!from || d.issueDate >= from) && (!to || d.issueDate <= to));
+}
+
 export type AgingRow = {
   id: string;
   companySeq: number;
@@ -179,10 +188,13 @@ export function summariseAging(documents: AgedDocument[], columns: number): { ro
 }
 
 /** The report's settings, as the address carries them. */
-export type AgingParams = { asOf?: string; by?: string; iv?: string; show?: string; q?: string; party?: string; col?: string };
+export type AgingParams = { asOf?: string; from?: string; to?: string; by?: string; iv?: string; show?: string; q?: string; party?: string; col?: string };
 
 export type AgingSettings = {
   asOf: string;
+  /** Only documents dated from this day to that one (either may be open); null — every one. */
+  datedFrom: string | null;
+  datedTo: string | null;
   basis: AgingBasis;
   interval: AgingIntervalKey;
   show: "amount" | "count";
@@ -194,14 +206,22 @@ export type AgingSettings = {
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
-/** The address's settings, each checked; anything else falls back — today, the due date, 4 × 30, amounts. */
+const readDay = (value: string | undefined) => (value && DAY.test(value) && indiaClock.endOfDay(value) ? value : null);
+
+/** The address's settings, each checked; anything else falls back — today, every date, the due date, 4 × 30, amounts. */
 export function readAgingParams(params: AgingParams | undefined, today: string): AgingSettings {
-  const asOf = params?.asOf && DAY.test(params.asOf) && indiaClock.endOfDay(params.asOf) ? params.asOf : today;
+  const asOf = readDay(params?.asOf) ?? today;
+  let datedFrom = readDay(params?.from);
+  let datedTo = readDay(params?.to);
+  // Typed the wrong way round, it means the same days.
+  if (datedFrom && datedTo && datedFrom > datedTo) [datedFrom, datedTo] = [datedTo, datedFrom];
   const interval = (AGING_INTERVALS.find((i) => i.key === params?.iv)?.key ?? DEFAULT_INTERVAL) as AgingIntervalKey;
   const party = params?.party && /^\d{1,9}$/.test(params.party) ? Number(params.party) : null;
   const column = params?.col && /^\d{1,2}$/.test(params.col) ? Number(params.col) : null;
   return {
     asOf,
+    datedFrom,
+    datedTo,
     basis: params?.by === "date" ? "date" : "due",
     interval,
     show: params?.show === "count" ? "count" : "amount",
@@ -228,7 +248,7 @@ export async function loadAging(side: AgingSide, settings: AgingSettings, scope:
   // Only documents are aged: no payments, no vendor credit notes (an empty `in` reads nothing).
   const { documents } = await subledgerAt(side, to, { documents: scope, payments: { id: { in: [] } }, vendors: { id: { in: [] } } });
   const columns = agingColumns(settings.basis, settings.interval);
-  let aged = ageDocuments({ documents, asOf: settings.asOf, basis: settings.basis, columns });
+  let aged = datedWithin(ageDocuments({ documents, asOf: settings.asOf, basis: settings.basis, columns }), settings.datedFrom, settings.datedTo);
   if (settings.search) {
     const s = settings.search.toLowerCase();
     aged = aged.filter((d) => d.party.toLowerCase().includes(s));
