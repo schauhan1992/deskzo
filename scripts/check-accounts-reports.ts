@@ -311,7 +311,7 @@ async function run(scratchName: string) {
     data: {
       docNumber: "ZZACR-DRAFT-1", docType: "INVOICE", direction: "SALES", status: "DRAFT", companyId: customer.id, createdById: owner.id,
       issueDate: new Date(Date.now() - 60_000), currency: "INR", exchangeRate: 1, branchId: ho.id, gstRegistrationId: reg.id, placeOfSupplyCode: "29",
-      buyerGstin: "29AAACY5555Y1Z2", gstTreatment: "REGISTERED_BUSINESS",
+      buyerGstin: "29AAACY5555Y1Z2", gstTreatment: "REGISTERED_REGULAR",
       subtotal: 4500, taxableValue: 4500, cgstAmount: 405, sgstAmount: 405, total: 5310,
       lines: { create: [{ name: "Zz Widget", itemId: widget.id, hsnCode: "84713010", unit: "PCS", quantity: 30, unitPrice: 150, taxRatePercent: 18, taxableValue: 4500, cgstAmount: 405, sgstAmount: 405, lineTotal: 5310, sortOrder: 0 }] },
     },
@@ -324,7 +324,7 @@ async function run(scratchName: string) {
     data: {
       docNumber: "ZZACR-BILL-DRAFT", docType: "BILL", direction: "PURCHASE", status: "DRAFT", companyId: vendor.id, createdById: owner.id,
       issueDate: new Date(Date.now() - 120_000), currency: "INR", exchangeRate: 1, branchId: ho.id, gstRegistrationId: reg.id, placeOfSupplyCode: "29",
-      sellerGstin: "29AAACV7777V1Z9", reference: "VND-7781", gstTreatment: "REGISTERED_BUSINESS",
+      sellerGstin: "29AAACV7777V1Z9", reference: "VND-7781", gstTreatment: "REGISTERED_REGULAR",
       subtotal: 6000, taxableValue: 6000, cgstAmount: 540, sgstAmount: 540, total: 7080,
       lines: { create: [{ name: "Zz Widget", itemId: widget.id, hsnCode: "84713010", unit: "PCS", quantity: 50, unitPrice: 120, taxRatePercent: 18, taxableValue: 6000, cgstAmount: 540, sgstAmount: 540, lineTotal: 7080, sortOrder: 0 }] },
     },
@@ -445,7 +445,7 @@ async function run(scratchName: string) {
   const layerValue = fromPaise(layers.reduce((t, l) => t + valuePaise(toMilli(Number(l.remaining)), toCost4(Number(l.unitCost))), 0));
   const aging = await as(accountant, () => stockReports.stockReport("aging", {}));
   const bucketSum = aging.status === "ok" ? round2(Object.entries(aging.table.totals ?? {}).filter(([k]) => k.startsWith("b_")).reduce((t, [, v]) => t + Number(v), 0)) : NaN;
-  ok("aging's buckets add up to the cost layers' value", close(bucketSum, layerValue) && close(Number(aging.table?.totals?.value ?? NaN), layerValue), `${bucketSum} vs ${layerValue}`);
+  ok("aging's buckets add up to the cost layers' value", close(bucketSum, layerValue) && aging.status === "ok" && close(Number(aging.table.totals?.value ?? NaN), layerValue), `${bucketSum} vs ${layerValue}`);
   ok("  the forty-day-old widgets are in 31–60 days", aging.status === "ok" && Number(aging.table.totals?.["b_31-60"]) > 0);
   const reorder = await as(accountant, () => stockReports.stockReport("reorder", {}));
   ok("low stock lists the bolts (8 against a reorder level of 20), not the widgets", reorder.status === "ok" && reorder.table.rows.some((r) => (r.cells.item as { text: string }).text === "Zz Bolt" && r.cells.onHand === 8) && !reorder.table.rows.some((r) => (r.cells.item as { text: string }).text === "Zz Widget"));
