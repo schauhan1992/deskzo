@@ -37,6 +37,12 @@ export type PermissionDefinition = {
    */
   superAdminOnly?: boolean;
   /**
+   * Only an admin or the super admin may grant this, to a role or to a person (src/lib/authz/guards.ts) —
+   * for a door the owner wants opened by the people at the top and nobody else, however far
+   * `permissions.manage` has been handed down.
+   */
+  adminOnly?: boolean;
+  /**
    * The holder may not exercise this on a record they created or own. Separation of duties as a
    * property of the permission rather than a rule each action has to remember.
    */
@@ -264,6 +270,21 @@ export const PERMISSION_REGISTRY = [
     defaultRoles: ["MANAGEMENT"],
     group: "People & HR",
     tier: "sensitive",
+  },
+  {
+    /**
+     * The file manager (owner, 21 Oct 2026): "only admin and superadmin can allow this to employees".
+     * Nobody holds it by role; an admin holds it as they hold everything, and gives it to a person from
+     * People › File manager, or to a role.
+     */
+    key: "files.view",
+    label: "Use the file manager",
+    description:
+      "Open People › File manager to see and download your own payslips, letters (offer, appointment, letter of intent, salary certificate and the rest) and documents — those an admin has switched on. Only an admin or the super admin can give it.",
+    defaultRoles: [],
+    group: "People & HR",
+    delegable: false,
+    adminOnly: true,
   },
   {
     key: "visitors.view",

@@ -13,6 +13,7 @@ import { attachToPayslips } from "@/lib/hr/incentive-payout";
 import { hasEffectivePermission } from "@/actions/permission";
 import { dateOnly, daysInMonth, monthLabel, monthRange } from "@/lib/hr/calendar";
 import { lossOfPayDays } from "@/lib/hr/loss-of-pay";
+import { hiddenFileIds, isFileHidden } from "@/lib/hr/file-visibility";
 import { computePayslip, salaryPartsInMonth } from "@/lib/hr/payroll";
 import { DEFAULT_SPLIT_RULES, STRUCTURE_EXTRAS_READ, componentsOfStructure, type ComponentDefault, type SplitRules } from "@/lib/hr/salary-split";
 import { formatCalendarDay } from "@/lib/time/zone";
@@ -930,9 +931,11 @@ export async function saveTaxDeclaration(input: unknown): Promise<ActionResult<n
 
 export async function myPayslips() {
   const user = await requireModuleUser("payroll");
+  // One an admin has switched off in the file manager is kept from them here too (src/lib/hr/file-visibility.ts).
+  const hidden = await hiddenFileIds(user.id, "PAYSLIP");
   return toPlain(
     await db.payslip.findMany({
-      where: { userId: user.id, run: { status: { in: ["LOCKED", "PAID"] } } },
+      where: { userId: user.id, run: { status: { in: ["LOCKED", "PAID"] } }, ...(hidden.size ? { id: { notIn: [...hidden] } } : {}) },
       orderBy: [{ run: { year: "desc" } }, { run: { month: "desc" } }],
       include: { run: { select: { month: true, year: true, status: true, paidAt: true } } },
     }),
@@ -958,8 +961,11 @@ export async function getPayslip(id: string) {
     },
   });
   if (!slip) return null;
-  if (slip.userId !== user.id && !(await hasEffectivePermission(user.id, "payroll.manage"))) return null;
+  const payroll = await hasEffectivePermission(user.id, "payroll.manage");
+  if (slip.userId !== user.id && !payroll) return null;
   // Drafts are working figures — nobody but payroll should see one and think it is their pay.
   if (slip.run.status === "DRAFT" && slip.userId === user.id) return null;
+  // Switched off for them in the file manager: theirs to read only once it's switched back on.
+  if (slip.userId === user.id && !payroll && (await isFileHidden("PAYSLIP", slip.id))) return null;
   return toPlain(slip);
 }

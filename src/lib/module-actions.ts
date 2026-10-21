@@ -126,6 +126,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "employee-docs.ts": ["hr"],
   // HR's own letter templates and the signature on letters — HR's, like the letters (employee-docs.ts).
   "letter-templates.ts": ["hr"],
+  // The file manager: everybody's payslips, letters and documents, and who sees which (src/actions/file-manager.ts).
+  "file-manager.ts": ["hr"],
   "eway.ts": ["sales_documents"],
   "expense.ts": ["expenses"],
   "feedback-public.ts": "public",

@@ -341,4 +341,4 @@ export function canConvert(status: CandidateStatus) {
  * Lives here rather than beside the action that uses it because a `"use server"` module publishes
  * every export as a client-callable endpoint, and all of them must be async functions.
  */
-export const CANDIDATE_LETTERS: LetterType[] = ["OFFER", "INTERNSHIP", "CONTRACT_AGREEMENT"];
+export const CANDIDATE_LETTERS: LetterType[] = ["LETTER_OF_INTENT", "OFFER", "INTERNSHIP", "CONTRACT_AGREEMENT"];

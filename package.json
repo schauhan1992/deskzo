@@ -168,6 +168,7 @@
     "check:board-attendance": "tsx scripts/check-board-attendance.ts",
     "check:short-leave": "tsx scripts/check-short-leave.ts",
     "check:salary-letters": "tsx scripts/check-salary-letters.ts",
+    "check:file-manager": "tsx scripts/check-file-manager.ts",
     "check:tasks-advanced": "tsx scripts/check-tasks-advanced.ts",
     "check:tv-screens": "tsx scripts/check-tv-screens.ts",
     "check:vendor-banking": "tsx scripts/check-vendor-banking.ts",

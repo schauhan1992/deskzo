@@ -15,6 +15,7 @@ import { monthlyGross } from "@/lib/hr/payroll";
 import { STRUCTURE_EXTRAS_READ, componentsOfStructure, ctcOfStructure } from "@/lib/hr/salary-split";
 import { mergeLetterTemplate } from "@/lib/hr/letter-templates";
 import { notMigratedYet } from "@/lib/not-migrated";
+import { hiddenFileIds, isFileHidden } from "@/lib/hr/file-visibility";
 import { letterNumberFor, renderLetter, subjectFor, type LetterPayload } from "@/lib/hr/letters";
 import { computeGratuity, serviceYears } from "@/lib/hr/settlement";
 import { getOrganisation, letterSignatureImage, letterSignatureSettings } from "@/lib/organisation";
@@ -276,18 +277,21 @@ export async function deleteEmploymentHistory(id: string): Promise<ActionResult<
 // ─── Letters ──────────────────────────────────────────────────────────────────
 
 export async function listEmployeeLetters(userId: string) {
-  const { canRead } = await access(userId);
+  const { canRead, manage, isSelf } = await access(userId);
   if (!canRead) return [];
+  // A letter an admin has switched off in the file manager is kept from the person it's for.
+  const hidden = isSelf && !manage ? await hiddenFileIds(userId, "LETTER") : new Set<string>();
+  const where = { userId, ...(hidden.size ? { id: { notIn: [...hidden] } } : {}) };
   const select = {
     id: true, type: true, letterNumber: true, subject: true, issuedOn: true,
     status: true, createdAt: true, issuedBy: { select: { name: true } },
   } as const;
   try {
     // The template's name where it came from one, shown instead of "From a template".
-    return toPlain(await db.employeeLetter.findMany({ where: { userId }, orderBy: { createdAt: "desc" }, select: { ...select, templateName: true } }));
+    return toPlain(await db.employeeLetter.findMany({ where, orderBy: { createdAt: "desc" }, select: { ...select, templateName: true } }));
   } catch (err) {
     if (!notMigratedYet(err)) throw err;
-    return toPlain((await db.employeeLetter.findMany({ where: { userId }, orderBy: { createdAt: "desc" }, select })).map((l) => ({ ...l, templateName: null })));
+    return toPlain((await db.employeeLetter.findMany({ where, orderBy: { createdAt: "desc" }, select })).map((l) => ({ ...l, templateName: null })));
   }
 }
 
@@ -521,10 +525,12 @@ export async function getLetter(id: string) {
     include: { user: { select: { id: true, userSeq: true, name: true } }, issuedBy: { select: { name: true } } },
   });
   if (!letter) return null;
-  const { manage, canRead } = await access(letter.userId);
+  const { manage, canRead, user } = await access(letter.userId);
   if (!canRead) return null;
   // A draft is HR's working copy — the employee sees a letter once it has been issued.
   if (letter.status === "DRAFT" && !manage) return null;
+  // Switched off for them in the file manager.
+  if (!manage && letter.userId === user.id && (await isFileHidden("LETTER", letter.id))) return null;
   return toPlain({ ...letter, ...(await letterExtras(id)) });
 }
 

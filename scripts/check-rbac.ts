@@ -158,6 +158,11 @@ ok(
   "those are granted one at a time by a person, never by a profile",
 );
 ok(
+  "No preset hands out an admin-only key",
+  ROLE_PRESETS.every((p) => p.permissions.every((k) => getPermissionDefinition(k)?.adminOnly !== true)),
+  "an admin or the super admin gives those to a person — the file manager, for one",
+);
+ok(
   "Every preset targets a role that exists",
   ROLE_PRESETS.every((p) => (SYSTEM_ROLE_KEYS as readonly string[]).includes(p.role)),
 );
@@ -165,14 +170,15 @@ ok(
 // Every key a preset is ALLOWED to contain should be reachable through one, or the preset list
 // stops describing the job functions it claims to.
 //
-// Two exemptions, and the second was a contradiction this check used to contain: a superAdminOnly
+// Three exemptions, and the second was a contradiction this check used to contain: a superAdminOnly
 // key is forbidden from appearing in any preset by the assertion above, while this one demanded it
 // appear in at least one. No key could satisfy both. Administration keys are exempt for the
-// original reason — they are granted to a person one at a time, never handed out by a profile.
+// original reason — they are granted to a person one at a time, never handed out by a profile. And an
+// adminOnly key is an admin's to give a person (the file manager), so no profile carries it either.
 const presetCovered = new Set(ROLE_PRESETS.flatMap((p) => p.permissions as readonly string[]));
 const uncovered = PERMISSIONS.filter(
   // Sections are held by every role until unticked, and no preset touches them (src/lib/permissions.ts).
-  (p) => permissionGroup(p) !== "Administration" && p.superAdminOnly !== true && p.everyone !== true && !presetCovered.has(p.key),
+  (p) => permissionGroup(p) !== "Administration" && p.superAdminOnly !== true && p.adminOnly !== true && p.everyone !== true && !presetCovered.has(p.key),
 ).map((p) => p.key);
 ok("Every non-admin permission appears in at least one preset", uncovered.length === 0, uncovered.join(", ") || "all covered");
 

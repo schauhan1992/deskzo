@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { ClipboardPen, Trophy, DoorOpen, CalendarClock as CalendarClockIcon, MessagesSquare, ClipboardCheck, KeyRound, FolderKanban, BarChart4, StickyNote, MessageCircle, Building2, CalendarDays, Fingerprint, IdCard, Plane, Target, UserRound, Package, PackageCheck, CalendarClock, Banknote, Users, Ticket, Truck, CheckSquare, Handshake, ShoppingCart, HandCoins, Store, FileText, FileCheck2, Receipt, ReceiptText, FileMinus2, ClipboardList, MapPin, Wallet, Scale, BookOpen, NotebookPen, ListTree, TrendingUp, Landmark, PhoneCall, Globe, LayoutList, BadgeCheck, UserPlus, PartyPopper, Waves, Boxes, FileSpreadsheet, Percent, Lock, Laptop, Gauge, MessageSquareQuote, Star, Megaphone, Route, ShieldBan, MailCheck, ScanSearch, Inbox, BellRing, Tags, ShieldCheck, Mail, Send, ListPlus, Combine, CalendarRange, Layers, Hourglass, ListChecks, PiggyBank, Coins, WalletCards, PenLine, MailPlus, CalendarCheck, Workflow, History as RunHistory, LayoutTemplate, Cable } from "lucide-react";
+import { ClipboardPen, Trophy, DoorOpen, CalendarClock as CalendarClockIcon, MessagesSquare, ClipboardCheck, KeyRound, FolderKanban, BarChart4, StickyNote, MessageCircle, Building2, CalendarDays, Fingerprint, IdCard, Plane, Target, UserRound, Package, PackageCheck, CalendarClock, Banknote, Users, Ticket, Truck, CheckSquare, Handshake, ShoppingCart, HandCoins, Store, FileText, FileCheck2, Receipt, ReceiptText, FileMinus2, ClipboardList, MapPin, Wallet, Scale, BookOpen, NotebookPen, ListTree, TrendingUp, Landmark, PhoneCall, Globe, LayoutList, BadgeCheck, UserPlus, PartyPopper, Waves, Boxes, FileSpreadsheet, Percent, Lock, Laptop, Gauge, MessageSquareQuote, Star, Megaphone, Route, ShieldBan, MailCheck, ScanSearch, Inbox, BellRing, Tags, ShieldCheck, Mail, Send, ListPlus, Combine, CalendarRange, Layers, Hourglass, ListChecks, PiggyBank, Coins, WalletCards, PenLine, MailPlus, CalendarCheck, Workflow, History as RunHistory, LayoutTemplate, Cable, FolderOpen } from "lucide-react";
 import type { PermissionKey } from "@/lib/permissions";
 import type { TermKey } from "@/lib/terms/dictionary";
 
@@ -371,6 +371,8 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
       { href: "/people/attendance", label: "Attendance", icon: CalendarDays },
       // Every letter, HR's own templates and the signature letters carry (owner, 21 Oct 2026).
       { href: "/people/letters", label: "Letters", icon: FileText, permission: "hr.manage" },
+      // Everyone's payslips, letters and documents (owner, 21 Oct 2026) — for whoever an admin has given it to.
+      { href: "/people/files", label: "File manager", icon: FolderOpen, permission: "files.view" },
       { href: "/people/celebrations", label: "Celebrations", icon: PartyPopper, permission: "hr.manage" },
       { href: "/people/devices", label: "Biometric", icon: Fingerprint, permission: "hr.manage" },
     ],

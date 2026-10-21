@@ -487,6 +487,7 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
   ShortLeavePolicy: { disposition: "specification", reason: "Configuration rather than records: the company's short leave length and monthly count, two numbers to set again in whatever comes next." },
   LetterTemplate: { disposition: "specification", reason: "Configuration rather than records: HR's own letter wording with its {{fields}}, text to set up again in whatever comes next. The letters drafted from it are archived with the other letters." },
   SalaryComponent: { disposition: "specification", reason: "Configuration rather than records: the company's own salary components and what a CTC split starts each at. The amounts people are paid are on their salary structures, archived." },
+  EmployeeFileVisibility: { disposition: "specification", reason: "Configuration rather than records: which of somebody's payslips and letters an admin switched off for them in the file manager. The payslips and letters themselves are archived." },
   SalarySplitRules: { disposition: "specification", reason: "Configuration rather than records: four numbers saying how a CTC is split into basic, HRA and fixed allowances." },
   EwayBill: {
     disposition: "archive",

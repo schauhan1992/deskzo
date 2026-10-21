@@ -6231,6 +6231,10 @@ model EmployeeLetter {
 
 enum LetterType {
   // Joining
+  /**
+   * A letter of intent: the company means to employ them, the formal offer to follow (owner, 21 Oct 2026).
+   */
+  LETTER_OF_INTENT
   OFFER
   APPOINTMENT
   INTERNSHIP
@@ -6261,6 +6265,37 @@ enum LetterType {
    * From one of HR's own templates (LetterTemplate).
    */
   CUSTOM
+}
+
+/**
+ * Whether the person a payslip or a letter belongs to sees it (owner, 21 Oct 2026: the file manager, where
+ * an admin turns each of somebody's documents on or off). No row is shown — as every payslip and letter
+ * always was; a row with `hidden` keeps it from them everywhere they would read it. An uploaded document
+ * has its own switch, `EmployeeDocument.visibleToEmployee`, which the file manager turns.
+ */
+model EmployeeFileVisibility {
+  kind   EmployeeFileKind
+  /**
+   * The payslip's or the letter's id.
+   */
+  refId  String
+  /**
+   * Whose it is — the file manager reads a person's switches together.
+   */
+  userId String
+  hidden Boolean          @default(true)
+
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+
+  @@id([kind, refId])
+  @@index([userId])
+  @@map("employee_file_visibility")
+}
+
+enum EmployeeFileKind {
+  PAYSLIP
+  LETTER
 }
 
 /**

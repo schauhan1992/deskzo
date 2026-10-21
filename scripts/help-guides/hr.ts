@@ -43,6 +43,10 @@ export const guide: SeedGuide = {
         "The HR administrator's permission: edit anyone's record, record exits, keep the holiday calendar, leave types, opening balances and office hours, issue letters, convert hired candidates, and see everyone's attendance and leave. Shows Letters, Celebrations and Biometric in the menu. It doesn't show anyone's pay. Management has it by default; the built-in HR and HR head roles start with it.",
       ),
       perm(
+        "files.view",
+        "Shows File manager in the menu: your own salary slips, salary certificates, offer and joining letters (the letter of intent too), other letters and documents, in folders — the ones an admin has switched on. Nobody has it by role; only an admin or the super admin can give it.",
+      ),
+      perm(
         "hiring.manage",
         "Shows Hiring in the menu. Add candidates, record offers sent, accepted or declined, send intake links, draft offer letters and file candidates' documents, without opening employee records. Converting a candidate into an employee needs Manage people records. Management has it by default; the built-in HR, HR head and Recruiter roles start with it.",
       ),
@@ -123,6 +127,16 @@ export const guide: SeedGuide = {
           runs("To issue a letter, pick it under ", { b: "Letters" }, " — a built-in one, or one of yours under ", { b: "Our templates" }, " — and select ", { b: "Draft" }, ". Edit the wording, tick or untick ", { b: "Add digital signature" }, ", select ", { b: "Save changes" }, ", then ", { b: "Issue" }, " and ", { b: "Print" }, "."),
         ),
         p(runs("An issued letter's wording is fixed because its number has been given out. To change it, select ", { b: "Revoke" }, " — it stays on record as withdrawn — and draft another. A letter is dated the day it's issued, and keeps the signature it was issued with.")),
+      ),
+      task(
+        "Give somebody the file manager, and choose what they see",
+        ol(
+          runs("As an admin or the super admin, open ", { b: "People › File manager" }, " and choose ", { b: "Employees" }, "."),
+          runs("Switch the file manager on beside each person who should have it, or select ", { b: "Give everyone" }, "."),
+          runs("Choose a name to see their files in folders: ", { b: "Salary slips" }, ", ", { b: "Salary certificates" }, ", ", { b: "Offer & joining letters" }, ", ", { b: "Other letters" }, " and ", { b: "Documents" }, "."),
+          runs("Open a folder and switch each file on or off, or select ", { b: "Show all" }, " or ", { b: "Hide all" }, " for the folder."),
+        ),
+        p("A file switched off is kept from the person everywhere — My HR, Payroll and their Letters card too — until it's switched back on. HR and payroll still see it. Each person sees only their own files, and a draft or withdrawn letter never."),
       ),
       task(
         "Make a letter template of your own",
