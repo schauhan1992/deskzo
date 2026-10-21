@@ -55,7 +55,7 @@ export const guide: SeedGuide = {
       p("Anybody whose role can view payments sees Payables and the Paid to vendor panel on a bill. Which vendors they see follows the record scope set for their role in Settings › Roles & Permissions."),
       ul(
         runs({ b: "Record payments" }, " — record a payment against a bill."),
-        runs({ b: "See backend rebates" }, " — open Payments › Vendor credits and each credit's page."),
+        runs({ b: "See backend rebates" }, " — open Accounts › Vendor credits and each credit's page."),
         runs({ b: "Manage rebate programmes and vendor credits" }, " — record a credit, set it against rebates or bills, take a settlement off, and cancel a credit."),
       ),
     ],
@@ -67,7 +67,7 @@ export const guide: SeedGuide = {
       perm("section.payables", "Shows Payables under Payments in the menu and lets people open its pages. Every role has it until an admin unticks it for one."),
       perm(
         "rebates.view",
-        "Shows Payments › Vendor credits and each credit's page, along with the backend rebates on orders. Management, Accounts and Purchase have it by default.",
+        "Shows Accounts › Vendor credits and each credit's page, along with the backend rebates on orders. Management, Accounts and Purchase have it by default.",
       ),
       perm("payments.record", "Record a payment against a vendor bill. Accounts and Management have it by default."),
       perm(
@@ -97,7 +97,7 @@ export const guide: SeedGuide = {
       task(
         "See what you owe",
         ol(
-          runs("Open ", { b: "Payments › Payables" }, ". The cards show the ", { b: "Total owed" }, ", what is ", { b: "Overdue" }, ", ", { b: "Not yet due" }, " and ", { b: "Over 90 days" }, "."),
+          runs("Open ", { b: "Accounts › Payables" }, ". The cards show the ", { b: "Total owed" }, ", what is ", { b: "Overdue" }, ", ", { b: "Not yet due" }, " and ", { b: "Over 90 days" }, "."),
           runs("Type in ", { b: "Search vendor name…" }, " to find one vendor."),
           "Select a vendor to open their page, and their bills from its Documents tab.",
         ),
@@ -105,7 +105,7 @@ export const guide: SeedGuide = {
       task(
         "Pay a vendor bill",
         ol(
-          runs("Open the issued bill under ", { b: "Purchase › Vendor Bills" }, "."),
+          runs("Open the issued bill under ", { b: "Accounts › Vendor Bills" }, "."),
           runs("In its ", { b: "Paid to vendor" }, " panel — ", { b: "Billed" }, ", ", { b: "Paid" }, ", ", { b: "Credited" }, " and ", { b: "Balance" }, " — select ", { b: "Record a payment" }, "."),
           runs(
             "Fill in the ",
@@ -133,7 +133,7 @@ export const guide: SeedGuide = {
       task(
         "Record a credit note or a rebate payout",
         ol(
-          runs("Open ", { b: "Payments › Vendor credits" }, " and select ", { b: "Record a credit" }, "."),
+          runs("Open ", { b: "Accounts › Vendor credits" }, " and select ", { b: "Record a credit" }, "."),
           runs("Under ", { b: "From" }, ", pick the distributor or OEM."),
           runs(
             "Under ",
@@ -185,7 +185,7 @@ export const guide: SeedGuide = {
       task(
         "Settle more of a credit, or cancel one",
         ol(
-          runs("Open the credit from ", { b: "Payments › Vendor credits" }, "."),
+          runs("Open the credit from ", { b: "Accounts › Vendor credits" }, "."),
           runs("Use ", { b: "Set more against rebates or bills" }, " to place what is left, or ", { b: "Take off" }, " beside a rebate or bill it was set against."),
           runs(
             "If it was recorded in error, select ",

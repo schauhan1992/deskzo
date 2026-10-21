@@ -13,22 +13,18 @@ import {
   LifeBuoy,
   MapPin,
   Megaphone,
-  Package,
-  Receipt,
   History,
+  CalendarClock,
   ScrollText,
   Settings as SettingsIcon,
   ShieldCheck,
-  ShoppingBag,
-  ShoppingCart,
   Telescope,
   TrendingUp,
   UserCog,
   KeyRound,
   Users,
-  Wallet,
 } from "lucide-react";
-import { MODULE_REGISTRY, navGroupRank, navPermissionKeys, type ModuleDefinition, type NavFact, type NavItem, type NAV_GROUP_ORDER } from "@/lib/modules";
+import { ACCOUNTS_SECTIONS, MODULE_REGISTRY, navGroupRank, navPermissionKeys, type ModuleDefinition, type NavFact, type NavItem, type NAV_GROUP_ORDER } from "@/lib/modules";
 import { PERMISSION_KEYS, isPermissionKey, sectionPermission } from "@/lib/permissions";
 import { BASE_MODULES, productByKey, productPlanKey } from "@/lib/products";
 
@@ -163,6 +159,8 @@ export type VisibleNavItem = {
   term?: NavItem["term"];
   /** Active only on this very address, never on one below it. */
   exact?: boolean;
+  /** The part of its group it is drawn in (`NavItem.section`) — Finance → Accounts' Sales, Inventory… */
+  section?: string;
 };
 
 export type VisibleNavSection = {
@@ -202,7 +200,7 @@ export function buildNavigation(access: NavAccess): VisibleNavSection[] {
     const items = mod.navItems
       // A link about a second module as well is shown only while that one is open too.
       .filter((i) => (!i.alsoNeeds || open.has(i.alsoNeeds)) && linkAllowed(i, ctx))
-      .map((i): VisibleNavItem => ({ href: i.href, label: i.label, ...(i.term ? { term: i.term } : {}) }));
+      .map((i): VisibleNavItem => ({ href: i.href, label: i.label, ...(i.term ? { term: i.term } : {}), ...(i.section ? { section: i.section } : {}) }));
     if (items.length === 0) continue;
     groups.set(mod.navGroup, [...(groups.get(mod.navGroup) ?? []), ...items]);
   }
@@ -210,7 +208,8 @@ export function buildNavigation(access: NavAccess): VisibleNavSection[] {
   const sorted: VisibleNavSection[] = Array.from(groups.entries())
     // Explicit order rather than the order the registry happens to declare them in.
     .sort(([a], [b]) => navGroupRank(a) - navGroupRank(b))
-    .map(([group, items]) => ({ group, items }));
+    // A split group's links in its parts' order, whichever module each came from; stable within a part.
+    .map(([group, items]) => ({ group, items: items.some((i) => i.section) ? [...items].sort((a, b) => sectionRank(a.section) - sectionRank(b.section)) : items }));
   // A Pipeline-only workspace: one section, the pipeline first (`simpleMenuFor`).
   const rank = (href: string) => {
     const i = SIMPLE_ORDER.indexOf(href);
@@ -230,6 +229,27 @@ export function buildNavigation(access: NavAccess): VisibleNavSection[] {
   })).filter((s) => s.items.length > 0);
 
   return [...modules, ...system];
+}
+
+/** Where a part sits in Finance → Accounts; a link with none goes last. */
+export function sectionRank(section: string | undefined): number {
+  const i = section ? (ACCOUNTS_SECTIONS as readonly string[]).indexOf(section) : -1;
+  return i === -1 ? ACCOUNTS_SECTIONS.length : i;
+}
+
+/**
+ * A split group's links in their parts, in order — what the sidebar, its rail and the breadcrumb draw.
+ * Links without a part come back as one part with no name.
+ */
+export function navParts<I extends { section?: string }>(items: readonly I[]): { section: string | null; items: I[] }[] {
+  const parts: { section: string | null; items: I[] }[] = [];
+  for (const item of items) {
+    const name = item.section ?? null;
+    const last = parts[parts.length - 1];
+    if (last && last.section === name) last.items.push(item);
+    else parts.push({ section: name, items: [item] });
+  }
+  return parts;
 }
 
 /** Whether the menu holds any module at all — false is the "no modules assigned" state. */
@@ -256,12 +276,8 @@ export function navIcon(href: string): LucideIcon {
 const GROUP_ICONS: Record<(typeof NAV_GROUP_ORDER)[number] | "Reports" | "Administration", LucideIcon> = {
   Sales: Handshake,
   Prospecting: Telescope,
-  "Quotes & Invoices": Receipt,
-  "Catalog & Stock": Package,
-  "Orders & Renewals": ShoppingCart,
-  Purchase: ShoppingBag,
-  Payments: Wallet,
-  Accounting: BookOpen,
+  Renewals: CalendarClock,
+  Accounts: BookOpen,
   Support: LifeBuoy,
   Delivery: FolderKanban,
   "Field Visits": MapPin,
@@ -285,7 +301,7 @@ export function navGroupIcon(group: string, firstHref?: string): LucideIcon {
  * The headings the sidebar sorts its sections under, in the order it draws them. A null label is the
  * top of the menu, under the dashboard, with no heading over it.
  */
-export const NAV_HEADINGS = [null, "Customers", "Sales & Catalogue", "Finance", "Operations", "Team", "Growth", "Admin"] as const;
+export const NAV_HEADINGS = [null, "Customers", "Finance", "Operations", "Team", "Growth", "Admin"] as const;
 export type NavHeading = (typeof NAV_HEADINGS)[number];
 
 /** Which heading each section sits under — every name in NAV_GROUP_ORDER has one, so none goes missing. */
@@ -294,12 +310,9 @@ const GROUP_HEADINGS: Record<(typeof NAV_GROUP_ORDER)[number] | "Reports" | "Adm
   Sales: "Customers",
   Prospecting: "Customers",
   Support: "Customers",
-  "Quotes & Invoices": "Sales & Catalogue",
-  "Catalog & Stock": "Sales & Catalogue",
-  "Orders & Renewals": "Sales & Catalogue",
-  Purchase: "Sales & Catalogue",
-  Payments: "Finance",
-  Accounting: "Finance",
+  Renewals: "Customers",
+  // Finance → Accounts: every finance module, in one group of parts (owner, 22 Oct 2026).
+  Accounts: "Finance",
   Delivery: "Operations",
   "Field Visits": "Operations",
   "IT Assets": "Operations",
@@ -318,6 +331,10 @@ const GROUP_HEADINGS: Record<(typeof NAV_GROUP_ORDER)[number] | "Reports" | "Adm
  * Only how the menu is laid out: what is in it is still `buildNavigation`'s alone.
  */
 export function headedNavigation<S extends { group: string }>(sections: readonly S[]): { heading: NavHeading; sections: S[] }[] {
-  const headingOf = (group: string): NavHeading => (group in GROUP_HEADINGS ? (GROUP_HEADINGS as Record<string, NavHeading>)[group]! : "Operations");
-  return NAV_HEADINGS.map((heading) => ({ heading, sections: sections.filter((s) => headingOf(s.group) === heading) })).filter((h) => h.sections.length > 0);
+  return NAV_HEADINGS.map((heading) => ({ heading, sections: sections.filter((s) => navHeadingOf(s.group) === heading) })).filter((h) => h.sections.length > 0);
+}
+
+/** The heading a section sits under — "Finance" for Accounts. A section no heading names goes under Operations. */
+export function navHeadingOf(group: string): NavHeading {
+  return group in GROUP_HEADINGS ? (GROUP_HEADINGS as Record<string, NavHeading>)[group]! : "Operations";
 }

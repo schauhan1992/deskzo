@@ -41,6 +41,8 @@ import { toPlain } from "@/lib/serialize";
 import { pageSlice } from "@/lib/pagination";
 import { orderBilling } from "@/lib/orders/billing";
 import type { ActionResult } from "@/actions/company";
+import { accountsSettings } from "@/lib/accounts/settings";
+import { releaseReservations, reserveStock } from "@/lib/inventory/reservations";
 import { listLeadMasker, maskLeadRefs } from "@/lib/leads/masking";
 import { checkTerms, recordDecision, MIN_REASON } from "@/lib/credit/guard";
 import type { CreditAssessment } from "@/lib/credit/engine";
@@ -484,6 +486,8 @@ export async function approveOrder(input: unknown): Promise<ActionResult<{ id: s
   }
 
   const nextStatus: OrderStatus = approved ? "APPROVED" : "REJECTED";
+  // Finance → Accounts (owner, 22 Oct 2026): read before the transaction — whether approving holds the stock.
+  const stockSettings = approved ? await accountsSettings() : null;
   await db.$transaction(async (tx) => {
     await tx.companyProduct.update({
       where: { id: orderId },
@@ -498,6 +502,14 @@ export async function approveOrder(input: unknown): Promise<ActionResult<{ id: s
       },
     });
     if (approved) await emitOrder(tx, "order.approved", orderId, user.id);
+    // Holds what is in stock for it, up to its quantity — an order for goods still to be bought isn't refused.
+    if (approved && stockSettings?.migrated && stockSettings.reserveOnOrderApproval && order.itemId) {
+      await reserveStock(
+        tx,
+        { itemId: order.itemId, quantity: order.quantity, sourceType: "ORDER", sourceId: orderId, userId: user.id, note: `Order ${formatOrderId(order.orderSeq)}`, partial: true },
+        stockSettings,
+      );
+    }
   });
 
   await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Order", entityId: orderId, entityLabel: formatOrderId(order.orderSeq) });
@@ -1054,12 +1066,15 @@ export async function fulfillOrder(orderId: string): Promise<ActionResult<null>>
     return { ok: false, error: "A higher price is waiting for sales to accept — settle that first." };
   }
 
+  const stockSettings = await accountsSettings();
   await db.$transaction(async (tx) => {
     await tx.companyProduct.update({
       where: { id: orderId },
       data: { orderStatus: "FULFILLED", fulfilledAt: new Date() },
     });
     await emitOrder(tx, "order.fulfilled", orderId, user.id);
+    // Delivered: whatever stock it still held is released (an invoice that issued it filled it already).
+    if (stockSettings.migrated) await releaseReservations(tx, "ORDER", orderId);
   });
 
   await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Order", entityId: orderId, entityLabel: formatOrderId(order.orderSeq) });
@@ -1144,6 +1159,7 @@ export async function cancelOrder(orderId: string, reason?: string): Promise<Act
   const now = new Date();
   let moved: number;
   let purchaseOrders: { cancelled: PoCancelledWithOrder[]; kept: PoKeptOnCancel[] } = { cancelled: [], kept: [] };
+  const stockSettings = await accountsSettings();
   try {
     moved = await db.$transaction(async (tx) => {
       const changed = await tx.companyProduct.updateMany({
@@ -1161,6 +1177,8 @@ export async function cancelOrder(orderId: string, reason?: string): Promise<Act
         },
       });
       if (changed.count !== 1) throw new Error("ORDER_MOVED_ON");
+      // The stock it held goes back (Finance → Accounts).
+      if (stockSettings.migrated) await releaseReservations(tx, "ORDER", orderId);
       const allocations = await tx.paymentAllocation.findMany({ where: { companyProductId: orderId }, select: { id: true, amount: true } });
       if (allocations.length > 0) await tx.paymentAllocation.deleteMany({ where: { id: { in: allocations.map((a) => a.id) } } });
       await tx.purchaseSaving.updateMany({ where: { companyProductId: orderId, cancelledAt: null }, data: { cancelledAt: now } });

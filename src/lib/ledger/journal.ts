@@ -69,7 +69,7 @@ type Tx = Prisma.TransactionClient;
  * `client` is the global client, or a posting's own transaction (see `resolveAccounts`).
  */
 export async function ensureChartOfAccounts(client: Pick<Tx, "ledgerAccount"> = db): Promise<void> {
-  const existing = await client.ledgerAccount.findMany({ select: { id: true, code: true, systemKey: true } });
+  const existing = await client.ledgerAccount.findMany({ select: { id: true, code: true, name: true, systemKey: true } });
   const haveCodes = new Set(existing.map((a) => a.code));
   const haveKeys = new Set(existing.filter((a) => a.systemKey).map((a) => a.systemKey));
 
@@ -81,13 +81,25 @@ export async function ensureChartOfAccounts(client: Pick<Tx, "ledgerAccount"> = 
     if (!seed.systemKey || haveKeys.has(seed.systemKey)) continue;
     const match = existing.find((a) => a.code === seed.code && !a.systemKey);
     if (!match) continue;
+    // A later system account takes over its code's account only when it is plainly the same one by name
+    // (chart.ts `adoptOnlySameName`); somebody's own account on that code keeps its meaning.
+    if (seed.adoptOnlySameName && match.name.trim().toLowerCase() !== seed.name.toLowerCase()) continue;
     await client.ledgerAccount.update({ where: { id: match.id }, data: { systemKey: seed.systemKey } });
     haveKeys.add(seed.systemKey);
   }
 
-  const missing = DEFAULT_CHART.filter(
-    (a) => !haveCodes.has(a.code) && !(a.systemKey && haveKeys.has(a.systemKey)),
-  );
+  // A later system account whose code is somebody's own account goes on the next free code beside it.
+  const relocated = DEFAULT_CHART.filter((a) => a.adoptOnlySameName && a.systemKey && !haveKeys.has(a.systemKey) && haveCodes.has(a.code)).map((a) => {
+    let n = Number(a.code) + 1;
+    while (haveCodes.has(String(n))) n += 1;
+    haveCodes.add(String(n));
+    return { ...a, code: String(n) };
+  });
+
+  const missing = [
+    ...DEFAULT_CHART.filter((a) => !haveCodes.has(a.code) && !(a.systemKey && haveKeys.has(a.systemKey))),
+    ...relocated,
+  ];
   if (missing.length === 0) return;
 
   // Parents first, so a child always finds its parent's id.
@@ -116,6 +128,16 @@ export async function ensureChartOfAccounts(client: Pick<Tx, "ledgerAccount"> = 
     });
     byCode.set(created.code, created.id);
   }
+}
+
+/**
+ * Holds a transaction-scoped lock on one posting's key (owner, 22 Oct 2026), so two requests posting the same
+ * document, payment or voucher at once take turns: the second waits until the first commits, then finds
+ * its entry and writes nothing. The checks below ("posted already if it has an entry") were right but read
+ * before writing, which two concurrent requests could both pass.
+ */
+export async function lockPosting(tx: Tx, key: string) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`deskzo:posting:${key}`}))`;
 }
 
 /**
@@ -250,8 +272,22 @@ export async function writeEntry(
     reversesId?: string | null;
     branchId?: string | null;
     gstRegistrationId?: string | null;
+    /**
+     * Finance → Accounts (owner, 22 Oct 2026): what this entry is the one posting of ("voucher:<id>",
+     * "stock:…"). Unique in the database; writing it again returns the entry already there rather than a
+     * second one, so a retried or double-clicked posting can't post twice.
+     */
+    postingKey?: string | null;
+    accountVoucherId?: string | null;
+    stockDocumentId?: string | null;
   },
 ) {
+  if (params.postingKey) {
+    // Two requests posting the same thing wait for each other here, and the second finds the first's entry.
+    await lockPosting(tx, params.postingKey);
+    const already = await tx.journalEntry.findUnique({ where: { postingKey: params.postingKey }, select: { id: true, entryNumber: true } });
+    if (already) return already;
+  }
   await assertPeriodOpen(tx, params.date);
   if (params.lines.length < 2) throw new Error("A journal entry needs at least two lines.");
   if (!hasOneSidedLines(params.lines)) throw new Error("A line carries either a debit or a credit, not both.");
@@ -274,6 +310,10 @@ export async function writeEntry(
       companyId: params.companyId ?? null,
       reversesId: params.reversesId ?? null,
       createdById: params.userId,
+      // Only where given, so a workspace whose database predates the columns still posts as it did.
+      ...(params.postingKey ? { postingKey: params.postingKey } : {}),
+      ...(params.accountVoucherId ? { accountVoucherId: params.accountVoucherId } : {}),
+      ...(params.stockDocumentId ? { stockDocumentId: params.stockDocumentId } : {}),
       lines: {
         create: params.lines.map((l, i) => ({
           accountId: l.accountId,
@@ -483,6 +523,7 @@ export async function postDocumentToLedger(
   documentId: string,
   userId: string,
 ): Promise<{ id: string; entryNumber: string } | null> {
+  await lockPosting(tx, `document:${documentId}`);
   const doc = await tx.tradeDocument.findUnique({ where: { id: documentId }, select: documentPostingSelect });
   if (!doc) return null;
   // Quotes, proformas and purchase orders are commitments, not transactions — nothing has happened
@@ -551,6 +592,7 @@ export async function postPaymentToLedger(
     },
   });
   if (!payment) return null;
+  await lockPosting(tx, `payment:${paymentId}`);
 
   // Its own posting, not an exchange difference or a cheque clearing that also names it. This runs as
   // the payment is recorded, before either can exist, so the first PAYMENT entry is the payment's.

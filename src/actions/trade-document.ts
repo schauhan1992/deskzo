@@ -52,6 +52,9 @@ import { createEInvoiceProvider, CANCELLATION_WINDOW_HOURS, isWithinCancellation
 import { approvalAfterEdit, approvalRequirement, mayIssue } from "@/lib/documents/approval";
 import { approvalDocumentFor, approvalPolicyFor } from "@/lib/documents/approval-policy";
 import type { ActionResult } from "@/actions/company";
+import { accountsSettings } from "@/lib/accounts/settings";
+import { applyTradeDocumentStock, reverseTradeDocumentStock } from "@/lib/inventory/documents";
+import { StockError } from "@/lib/inventory/engine";
 import { findTradeDocumentFor } from "@/lib/documents/load";
 import { viewerHas } from "@/actions/permission";
 import { releaseBillingMilestones, syncBillingMilestones } from "@/lib/projects/billing-sync";
@@ -67,6 +70,9 @@ import {
   stateCodeFromName,
   validateLinkedLead,
 } from "@/lib/documents/create-draft";
+
+/** Thrown inside the issue's transaction when another request issued the document first. */
+class AlreadyIssued extends Error {}
 
 function revalidateDocument(docType: TradeDocumentType, id?: string) {
   revalidatePath(documentListPath[docType]);
@@ -456,15 +462,31 @@ export async function issueTradeDocument(input: unknown): Promise<ActionResult<{
       })
     : existing.docNumber;
 
+  // Finance → Accounts (owner, 22 Oct 2026): read before the transaction, where a workspace not migrated yet
+  // gets nothing back rather than an aborted transaction.
+  const stockSettings = await accountsSettings();
+
   // Issuing and posting happen together: a document can't reach the customer without its ledger
   // entry, and an entry must never exist for a document that then failed to issue.
-  const posting = await db.$transaction(async (tx) => {
-    await tx.tradeDocument.update({ where: { id }, data: { status: "ISSUED", issuedAt: new Date(), ...snapshot } });
-    const posted = await postDocumentToLedger(tx, id, user.id);
-    // For Automate's workflows (src/lib/automate): issued, with its posting.
-    await emitDocumentIssued(tx, id, user.id);
-    return posted;
-  });
+  let posting: Awaited<ReturnType<typeof postDocumentToLedger>>;
+  try {
+    posting = await db.$transaction(async (tx) => {
+      // Only from a draft, in the same statement that checks it: two clicks on Issue at once issue it once,
+      // and the second is told so rather than posting it again.
+      const issued = await tx.tradeDocument.updateMany({ where: { id, status: "DRAFT" }, data: { status: "ISSUED", issuedAt: new Date(), ...snapshot } });
+      if (issued.count === 0) throw new AlreadyIssued();
+      const posted = await postDocumentToLedger(tx, id, user.id);
+      // Its goods out of stock, into it, or back — where Accounts settings say so (src/lib/inventory/documents.ts).
+      if (stockSettings.migrated) await applyTradeDocumentStock(tx, id, user.id, stockSettings);
+      // For Automate's workflows (src/lib/automate): issued, with its posting.
+      await emitDocumentIssued(tx, id, user.id);
+      return posted;
+    });
+  } catch (err) {
+    if (err instanceof AlreadyIssued) return { ok: false, error: "This document has already been issued." };
+    if (err instanceof StockError) return { ok: false, error: err.message };
+    throw err;
+  }
 
   await recordAudit({
     userId: user.id,
@@ -933,14 +955,22 @@ export async function setTradeDocumentStatus(id: string, status: TradeDocumentSt
     : document.status === "CANCELLED"
       ? { cancelReason: null, cancelledAt: null, cancelledById: null }
       : {};
-  await db.$transaction(async (tx) => {
-    await tx.tradeDocument.update({ where: { id }, data: { status, ...cancelled }, select: { id: true } });
-    // A cancelled document is reversed rather than unposted: the original entry stays in the
-    // journal and a dated reversal sits beside it, which is what an audit trail means.
-    if (status === "CANCELLED") await reverseDocumentPosting(tx, id, user.id);
-    // A project billing stage raised on it follows: paid, or released for a fresh invoice.
-    await syncBillingMilestones(id, tx);
-  });
+  const stockSettings = status === "CANCELLED" ? await accountsSettings() : null;
+  try {
+    await db.$transaction(async (tx) => {
+      await tx.tradeDocument.update({ where: { id }, data: { status, ...cancelled }, select: { id: true } });
+      // A cancelled document is reversed rather than unposted: the original entry stays in the
+      // journal and a dated reversal sits beside it, which is what an audit trail means.
+      if (status === "CANCELLED") await reverseDocumentPosting(tx, id, user.id);
+      // And so is what it did to stock (Finance → Accounts, src/lib/inventory/documents.ts).
+      if (status === "CANCELLED" && stockSettings?.migrated) await reverseTradeDocumentStock(tx, id, user.id, stockSettings);
+      // A project billing stage raised on it follows: paid, or released for a fresh invoice.
+      await syncBillingMilestones(id, tx);
+    });
+  } catch (err) {
+    if (err instanceof StockError) return { ok: false, error: err.message };
+    throw err;
+  }
   await recordAudit({
     userId: user.id,
     action: "UPDATE",

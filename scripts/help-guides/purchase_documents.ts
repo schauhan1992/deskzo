@@ -69,7 +69,7 @@ export const guide: SeedGuide = {
           " — record a vendor bill, and convert a purchase order into one. A bill posts to the books, so it stays with this permission rather than with purchase orders.",
         ),
         runs({ b: "Delete or cancel a sales document" }, " — cancel a vendor bill, mark it paid by hand, or delete a draft one."),
-        runs({ b: "Reconcile vendor statements" }, " — Purchase › Reconciliation."),
+        runs({ b: "Reconcile vendor statements" }, " — Accounts › Reconciliation."),
       ),
     ],
     permissions: [
@@ -83,7 +83,7 @@ export const guide: SeedGuide = {
       ),
       perm(
         "purchase.reconcile",
-        "Shows Purchase › Reconciliation: adding a vendor's statement, comparing it with your orders, and clearing each exception once it has been dealt with. Purchase, Accounts and Management have it by default.",
+        "Shows Accounts › Reconciliation: adding a vendor's statement, comparing it with your orders, and clearing each exception once it has been dealt with. Purchase, Accounts and Management have it by default.",
       ),
       perm(
         "purchase.raiseOrders",
@@ -119,7 +119,7 @@ export const guide: SeedGuide = {
       task(
         "Raise a purchase order",
         ol(
-          runs("Open ", { b: "Purchase › Purchase Orders" }, " and select ", { b: "New purchase order" }, "."),
+          runs("Open ", { b: "Accounts › Purchase Orders" }, " and select ", { b: "New purchase order" }, "."),
           runs("Under ", { b: "Vendor name" }, ", type to search and pick the vendor. Choose a ", { b: "Location on file" }, " to fill in their address and GST details, and check the ", { b: "Place of supply" }, "."),
           runs("Under ", { b: "Document details" }, ", set the ", { b: "Date" }, " and ", { b: "Due date" }, ", and the ", { b: "Buying branch" }, " if you have several."),
           runs("Fill in the ", { b: "Item table" }, " — item, ", { b: "Quantity" }, ", ", { b: "Rate" }, ", ", { b: "Discount" }, " and ", { b: "Tax" }, " on each line."),
@@ -147,7 +147,7 @@ export const guide: SeedGuide = {
             "For a bill with no purchase order behind it, select ",
             { b: "New vendor bill" },
             " on ",
-            { b: "Purchase › Vendor Bills" },
+            { b: "Accounts › Vendor Bills" },
             " and fill it in the same way. An issued bill is posted to the books and shows on Payables until it is paid.",
           ),
         ),
@@ -155,7 +155,7 @@ export const guide: SeedGuide = {
       task(
         "Pay a bill",
         ol(
-          runs("Open the issued bill under ", { b: "Purchase › Vendor Bills" }, "."),
+          runs("Open the issued bill under ", { b: "Accounts › Vendor Bills" }, "."),
           runs("In its ", { b: "Paid to vendor" }, " panel, select ", { b: "Record a payment" }, "."),
           runs("Fill in the ", { b: "Amount" }, ", ", { b: "Paid on" }, ", ", { b: "Method" }, " and ", { b: "Reference" }, ", then select ", { b: "Record payment" }, "."),
         ),
@@ -180,7 +180,7 @@ export const guide: SeedGuide = {
       task(
         "Reconcile a distributor's statement",
         ol(
-          runs("Open ", { b: "Purchase › Reconciliation" }, " and select ", { b: "Add a statement" }, "."),
+          runs("Open ", { b: "Accounts › Reconciliation" }, " and select ", { b: "Add a statement" }, "."),
           runs("Choose the ", { b: "Vendor" }, ", give it a ", { b: "Name" }, ", and set ", { b: "Period from" }, " and ", { b: "Period to" }, "."),
           runs(
             "Under ",
