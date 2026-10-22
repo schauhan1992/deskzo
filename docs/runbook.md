@@ -93,7 +93,7 @@ Migrations lift a workspace role's time limits while they run and put them back 
 | `PLATFORM_MASTER_KEY` | Without it no workspace's database address or keys can be opened — every workspace, and every backup of one, is unreadable. | Offline, in two places (a password manager with a break-glass entry and a sealed paper copy). Never with the database backups. |
 | The control plane | Holds every workspace's sealed address and key bundle, plans, subscriptions, staff. Losing it loses the keys to every workspace's backups. | Point-in-time recovery with the cluster, **and** a nightly `pg_dump` kept 30 days off the server. |
 | Workspace databases | The customers' data. | Cluster point-in-time recovery (base backup + WAL archive), plus each workspace's own scheduled backups in `BACKUP_DIR` (sealed, per workspace), copied off the server. |
-| `BACKUP_DIR` | The per-workspace archives a customer or staff restore from. | Synced off-site nightly. |
+| `BACKUP_DIR` | The per-workspace archives a customer or staff restore from. Encrypted on disk under a key derived from `PLATFORM_MASTER_KEY` for each workspace, so a copy is unreadable without that key — keep the two apart. Backups from before this release are encrypted by running `npm run db:backup -- --seal-existing --all-workspaces` once; until then they restore as they always did. | Synced off-site nightly. |
 | `SUPPORT_DIR` | Support requests' attachments and screen recordings. The requests themselves are in the control plane; their files are only here. | Synced off-site nightly with `BACKUP_DIR`. |
 | The reference database | Shared PIN and place data. | Re-loadable from source (`db:reference`, `db:geonames`); a dump is quicker. |
 

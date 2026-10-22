@@ -1,6 +1,14 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { Prisma, type PrismaClient } from "@prisma/client";
+import { SETUP_MODEL_NAMES } from "@/lib/reset-classes";
+
+/**
+ * EVERYTHING: a fresh workspace — only the super admin, the built-in roles and the backup log are left.
+ * KEEP_SETUP (owner, 22 Oct 2026): the business's records go, its setup stays — every person, the
+ * organisation, the catalogue, templates, automations (src/lib/reset-classes.ts); numbering restarts.
+ */
+export type ResetMode = "EVERYTHING" | "KEEP_SETUP";
 
 /**
  * The engine behind the workspace reset (owner, 22 Oct 2026 — src/lib/workspace-reset.ts, which decides who
@@ -32,14 +40,17 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 const tableOf = (model: string) => Prisma.dmmf.datamodel.models.find((m) => m.name === model)?.dbName ?? model;
 
 /** The tables left alone, and why — shown on the reset panel. */
-export function keptTables(): { table: string; what: string }[] {
-  return [
+export function keptTables(mode: ResetMode = "EVERYTHING"): { table: string; what: string }[] {
+  const always = [
     { table: tableOf("User"), what: "you — every other user is removed" },
     { table: tableOf("Role"), what: "the built-in roles — ones added since are removed" },
     { table: tableOf("Backup"), what: "the backup log, so a backup taken before the reset can be restored" },
     { table: tableOf("BackupSchedule"), what: "when backups are taken" },
     { table: tableOf("WorkspaceReset"), what: "the record of the reset — who asked, when, and the copy taken before" },
   ];
+  if (mode === "EVERYTHING") return always;
+  const listed = new Set(always.map((k) => k.table));
+  return [...always, ...SETUP_MODEL_NAMES.map((model) => ({ table: tableOf(model), what: model })).filter((k) => !listed.has(k.table))];
 }
 
 /**
@@ -130,8 +141,14 @@ export type ResetPlan = {
 };
 
 /** Which tables go how. Throws when a kept row can't let go of something that is going — nothing has been touched then. */
-export function planReset(tables: string[], edges: Edge[]): ResetPlan {
-  const kept = new Set([...keptTables().map((k) => k.table), "_prisma_migrations"]);
+export function planReset(tables: string[], edges: Edge[], mode: ResetMode = "EVERYTHING"): ResetPlan {
+  const kept = new Set([...keptTables(mode).map((k) => k.table), "_prisma_migrations"]);
+  // A many-to-many with no model of its own ("_DocumentApprover": a policy's approvers) stays when both of
+  // the tables it joins do — emptying it would leave every kept approval policy with nobody to approve.
+  for (const join of tables.filter((t) => t.startsWith("_") && !kept.has(t))) {
+    const parents = edges.filter((e) => e.child === join).map((e) => e.parent);
+    if (parents.length > 0 && parents.every((p) => kept.has(p))) kept.add(join);
+  }
   const wiped = tables.filter((t) => !kept.has(t));
 
   for (const e of edges) {
@@ -173,7 +190,7 @@ export type ResetOutcome = { tablesEmptied: number; usersRemoved: number };
  * Empties the database down to the super admin. One transaction; the caller decides who may, and
  * takes the backup first.
  */
-export async function resetAllData(client: PrismaClient, superAdminId: string): Promise<ResetOutcome> {
+export async function resetAllData(client: PrismaClient, superAdminId: string, mode: ResetMode = "EVERYTHING"): Promise<ResetOutcome> {
   return client.$transaction(
     async (tx) => {
       const admin = await tx.user.findUnique({ where: { id: superAdminId }, select: { id: true, isSuperAdmin: true, role: true } });
@@ -182,16 +199,18 @@ export async function resetAllData(client: PrismaClient, superAdminId: string): 
       await tx.$executeRawUnsafe(`SET LOCAL lock_timeout = '30s'`);
 
       const { tables, edges } = await schemaFacts(tx);
-      const plan = planReset(tables, edges);
+      const plan = planReset(tables, edges, mode);
       const kept = new Set(plan.kept);
       const users = tableOf("User");
+      const keepPeople = mode === "KEEP_SETUP";
 
       // 1. The kept rows let go of what is going: a department, a manager, whoever triggered a backup.
       for (const e of edges) {
         if (!kept.has(e.child)) continue;
         const [child, column] = [quote(e.child), quote(e.column)];
         if (e.parent === users) {
-          await tx.$executeRawUnsafe(`UPDATE ${child} SET ${column} = NULL WHERE ${column} IS NOT NULL AND ${column} <> $1`, superAdminId);
+          // Keeping the setup keeps everybody, so nothing lets go of a person.
+          if (!keepPeople) await tx.$executeRawUnsafe(`UPDATE ${child} SET ${column} = NULL WHERE ${column} IS NOT NULL AND ${column} <> $1`, superAdminId);
         } else if (!kept.has(e.parent)) {
           await tx.$executeRawUnsafe(`UPDATE ${child} SET ${column} = NULL WHERE ${column} IS NOT NULL`);
         }
@@ -201,12 +220,12 @@ export async function resetAllData(client: PrismaClient, superAdminId: string): 
       if (plan.truncate.length) await tx.$executeRawUnsafe(`TRUNCATE TABLE ${plan.truncate.map(quote).join(", ")} RESTART IDENTITY`);
       for (const t of plan.deleteInOrder) await tx.$executeRawUnsafe(`DELETE FROM ${quote(t)}`);
 
-      // 3. The people, then the roles only they had.
-      const usersRemoved = await tx.user.deleteMany({ where: { id: { not: superAdminId } } });
-      await tx.role.deleteMany({ where: { isSystem: false, key: { not: admin.role } } });
+      // 3. The people, then the roles only they had — unless the setup is kept, which keeps them all.
+      const usersRemoved = keepPeople ? { count: 0 } : await tx.user.deleteMany({ where: { id: { not: superAdminId } } });
+      if (!keepPeople) await tx.role.deleteMany({ where: { isSystem: false, key: { not: admin.role } } });
 
-      // 4. What a fresh install starts with.
-      for (const row of INSTALL_ROWS) await tx.$executeRawUnsafe(installStatement(row));
+      // 4. What a fresh install starts with, in the tables that were emptied — a kept one still has its own.
+      for (const row of INSTALL_ROWS) if (!kept.has(row.table)) await tx.$executeRawUnsafe(installStatement(row));
 
       return { tablesEmptied: plan.truncate.length + plan.deleteInOrder.length, usersRemoved: usersRemoved.count };
     },
@@ -215,7 +234,7 @@ export async function resetAllData(client: PrismaClient, superAdminId: string): 
 }
 
 /** How much is there — for the panel, so "reset" has a size before it is pressed. */
-export async function resetOverview(client: PrismaClient) {
+export async function resetOverview(client: PrismaClient, mode: ResetMode = "EVERYTHING") {
   const [users, companies, contacts, leads, orders, documents, payments, tickets] = await Promise.all([
     client.user.count(),
     client.company.count(),
@@ -227,6 +246,6 @@ export async function resetOverview(client: PrismaClient) {
     client.ticket.count(),
   ]);
   const { tables, edges } = await schemaFacts(client);
-  const plan = planReset(tables, edges);
+  const plan = planReset(tables, edges, mode);
   return { counts: { users, companies, contacts, leads, orders, documents, payments, tickets }, tables: plan.truncate.length + plan.deleteInOrder.length };
 }

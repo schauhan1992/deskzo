@@ -1,5 +1,5 @@
 import path from "node:path";
-import { copyFile, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
@@ -8,6 +8,8 @@ import { can } from "@/lib/authz/resolve";
 import { backupFingerprints, currentKeys } from "@/lib/tenancy/keys";
 import { readSidecar } from "@/lib/backup/sidecar";
 import { MissingChunkError, readManifest, reassemble } from "@/lib/backup/chunks";
+import { openBackupFileTo, SealedBackupError } from "@/lib/backup/at-rest";
+import { currentTenant } from "@/lib/tenancy/resolve";
 import {
   backupRoot,
   clearStaged,
@@ -98,7 +100,7 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
     }
 
     try {
-      await reassemble(root, manifest, staged);
+      await reassemble(root, manifest, staged, (await currentTenant()).id);
     } catch (err) {
       // A half-built dump in staging is worse than none — the confirmation screen would offer it as
       // restorable — so it goes, along with anything else this id had started to leave behind.
@@ -119,7 +121,14 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
         { status: 410 },
       );
     }
-    await copyFile(dumpPath, staged);
+    // Opened when it is encrypted at rest (src/lib/backup/at-rest.ts), copied when it is from before that.
+    try {
+      await openBackupFileTo((await currentTenant()).id, dumpPath, staged);
+    } catch (err) {
+      await clearStaged(stagedId);
+      if (err instanceof SealedBackupError) return NextResponse.json({ error: err.message }, { status: 410 });
+      throw err;
+    }
     dumpBytes = info.size;
   }
 

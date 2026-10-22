@@ -33,6 +33,7 @@
  */
 import "dotenv/config";
 import { spawn } from "node:child_process";
+import { rmSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import path from "node:path";
 import { parseDatabaseUrl, formatBytes } from "../src/lib/backup/policy";
@@ -43,6 +44,8 @@ import type { Tenant } from "../src/lib/tenancy/state";
 import { resolveDumpTool } from "../src/lib/backup/run";
 import { readSidecar } from "../src/lib/backup/sidecar";
 import { db } from "../src/lib/db";
+import { isSealedFile, openBackupFileTo } from "../src/lib/backup/at-rest";
+import { ensureRestoreDir, restoreDir } from "../src/lib/backup/maintenance";
 
 const CONFIRM = "--i-understand-this-replaces-everything";
 
@@ -85,6 +88,26 @@ async function restoreInto(tenant: Tenant, args: string[]) {
   }
 
   /**
+   * A backup encrypted at rest on the server (src/lib/backup/at-rest.ts) is opened first, into the restore
+   * folder, and that copy deleted however this ends — it is the whole business, unencrypted.
+   */
+  let dumpFile = target;
+  if (await isSealedFile(target)) {
+    await ensureRestoreDir();
+    const opened = path.join(await restoreDir(), `.opened-${Date.now()}.dump`);
+    process.on("exit", () => rmSync(opened, { force: true }));
+    say("  Opening the encrypted backup…");
+    try {
+      await openBackupFileTo(tenant.id, target, opened);
+    } catch (err) {
+      say(`\n  ${(err as Error).message}\n`);
+      process.exitCode = 1;
+      return;
+    }
+    dumpFile = opened;
+  }
+
+  /**
    * The magic bytes, before anything else.
    *
    * A custom-format dump starts `PGDMP`. Checking it here means a truncated download, a plain-SQL
@@ -92,7 +115,7 @@ async function restoreInto(tenant: Tenant, args: string[]) {
    * — which is the one moment in this script where stopping is no longer an option.
    */
   const head = Buffer.alloc(5);
-  const handle = await (await import("node:fs/promises")).open(target, "r");
+  const handle = await (await import("node:fs/promises")).open(dumpFile, "r");
   await handle.read(head, 0, 5, 0);
   await handle.close();
   if (head.toString("latin1") !== "PGDMP") {
@@ -178,7 +201,7 @@ async function restoreInto(tenant: Tenant, args: string[]) {
    * failure at this step is a failed restore rather than a destroyed one — the only moment that
    * matters is the one after the drop, and nothing unproven should happen on the far side of it.
    */
-  const staged = await stage(tool, target);
+  const staged = await stage(tool, dumpFile);
 
   /**
    * The schema is dropped rather than the database.

@@ -38,7 +38,7 @@
  */
 import "dotenv/config";
 import { spawn } from "node:child_process";
-import { open, readFile, stat } from "node:fs/promises";
+import { open, readFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { parseDatabaseUrl } from "../src/lib/backup/policy";
 import { controlDb } from "../src/lib/platform/control-db";
@@ -64,6 +64,7 @@ import { afterRestore } from "../src/lib/automate/restore";
 import { runBackup } from "../src/lib/backup/run";
 import { backupRoot } from "../src/lib/backup/maintenance";
 import { relistBackups } from "../src/lib/backup/relist";
+import { openBackupFileTo } from "../src/lib/backup/at-rest";
 import { reindexCurrentWorkspace } from "../src/lib/platform/email-index";
 import { resyncDeviceRoutes } from "../src/lib/platform/device-routes";
 
@@ -198,11 +199,18 @@ async function main(tenant: Tenant, id: string) {
       } finally {
         await db.$disconnect().catch(() => {});
       }
-      const back = await stageForTool(tool, safetyPath);
+      // The copy is encrypted at rest (src/lib/backup/at-rest.ts): opened beside the staged backup first.
+      const opened = await stagingPath(id, ".safety.dump");
+      await openBackupFileTo(tenant.id, safetyPath, opened);
       try {
-        await runRestore(tool, back.pathForTool, connection);
+        const back = await stageForTool(tool, opened);
+        try {
+          await runRestore(tool, back.pathForTool, connection);
+        } finally {
+          await back.cleanup();
+        }
       } finally {
-        await back.cleanup();
+        await rm(opened, { force: true }).catch(() => {});
       }
       await relistBackups(await backupRoot()).catch(() => null);
       status.rolledBack = true;

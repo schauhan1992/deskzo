@@ -73,13 +73,15 @@ async function main() {
 
   const edge = (child: string, parent: string, column = "x", notnull = false) => ({ child, parent, column, notnull });
   const plan = reset.planReset(
-    ["users", "roles", "backups", "_prisma_migrations", "departments", "companies", "contacts", "sites", "_OrderWatchers"],
-    [edge("users", "departments", "departmentId"), edge("departments", "sites", "siteId"), edge("contacts", "companies"), edge("companies", "users"), edge("_OrderWatchers", "users"), edge("users", "roles", "role", true)],
+    ["users", "roles", "backups", "_prisma_migrations", "departments", "companies", "contacts", "sites", "_OrderWatchers", "_RoleWatchers"],
+    // A many-to-many joins two tables, as Prisma makes one: an order and a person; a role and a person.
+    [edge("users", "departments", "departmentId"), edge("departments", "sites", "siteId"), edge("contacts", "companies"), edge("companies", "users"), edge("_OrderWatchers", "companies"), edge("_OrderWatchers", "users"), edge("_RoleWatchers", "roles"), edge("_RoleWatchers", "users"), edge("users", "roles", "role", true)],
   );
   ok("what a kept row points at is deleted, not truncated — and what that points at too", plan.deleteInOrder.join() === "departments,sites", plan.deleteInOrder.join());
   ok("  children before parents", plan.deleteInOrder.indexOf("departments") < plan.deleteInOrder.indexOf("sites"));
   ok("everything else is truncated at once, quoted names and all", plan.truncate.join() === "_OrderWatchers,companies,contacts", plan.truncate.join());
   ok("the kept tables and the migration log are left alone", ["users", "roles", "backups", "_prisma_migrations"].every((t) => plan.kept.includes(t)) && !plan.truncate.includes("users"));
+  ok("  and a many-to-many between two kept tables stays with them", plan.kept.includes("_RoleWatchers") && !plan.truncate.includes("_RoleWatchers"));
   const refusal = (() => {
     try {
       reset.planReset(["users", "departments"], [edge("users", "departments", "departmentId", true)]);
@@ -120,6 +122,22 @@ async function main() {
   }
   const unhandled = fixed.filter((f) => !kept.has(f.split(" ")[0]!));
   ok("every table a migration writes fixed rows into is kept or put back", unhandled.length === 0 && fixed.length >= 2, unhandled.join(", ") || fixed.join(", "));
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  section("Keep my setup: every table is setup or a record");
+
+  const classes = require("../src/lib/reset-classes") as typeof import("../src/lib/reset-classes");
+  const { Prisma } = require("@prisma/client") as typeof import("@prisma/client");
+  const models = Prisma.dmmf.datamodel.models.map((m) => m.name);
+  const setupNames = classes.SETUP_MODEL_NAMES;
+  const recordNames: readonly string[] = classes.RECORD_MODELS;
+  const neither = models.filter((m) => !setupNames.includes(m) && !recordNames.includes(m));
+  const both = models.filter((m) => setupNames.includes(m) && recordNames.includes(m));
+  const stale = [...setupNames, ...recordNames].filter((m) => !models.includes(m));
+  ok("every model is setup or a record — a new one can't be kept or wiped by accident", neither.length === 0, neither.join(", ") || `${models.length} models`);
+  ok("  none is both", both.length === 0, both.join(", "));
+  ok("  and none listed is gone", stale.length === 0, stale.join(", "));
+  ok("everything the Everything reset keeps, Keep my setup keeps too", reset.keptTables().every((k) => reset.keptTables("KEEP_SETUP").some((s) => s.table === k.table)));
 
   // ─────────────────────────────────────────────────────────────────────────────
   section("A reset, for real, in a scratch database");
@@ -207,6 +225,48 @@ async function main() {
     await scratch.company.delete({ where: { id: fresh.id } });
     const again = await reset.resetAllData(scratch, sa.id).then(() => "").catch((err: Error) => err.message);
     ok("resetting an empty database again is harmless", again === "" && (await scratch.user.count()) === 1, again);
+
+    section("Keep my setup, for real, in the same scratch database");
+    // Setup and records again: people, a role and its permission, a department, the catalogue, a holiday —
+    // and a company with a contact and a lead, a notification, an audit line, a document counter.
+    const team = await scratch.department.create({ data: { name: "ZZ Team" } });
+    await scratch.role.create({ data: { key: "ZZ_KEPT", name: "Kept" } });
+    await scratch.rolePermission.create({ data: { role: "ZZ_KEPT", permission: "leads.view" } });
+    const seller = await scratch.user.create({ data: { name: "Seller", email: `seller${MAIL}`, role: "ZZ_KEPT", passwordHash: "q".repeat(60), departmentId: team.id, managerId: sa.id } });
+    await scratch.userPermission.create({ data: { userId: seller.id, permission: "leads.view", allowed: true } });
+    const item = await scratch.item.create({ data: { name: "ZZ Widget", sku: "ZZ-W-1", type: "GOOD", sellingPrice: 100, createdById: seller.id } as never, select: { id: true } });
+    await scratch.holiday.create({ data: { name: "ZZ Day", date: new Date("2026-12-25T00:00:00Z") } as never });
+    const buyer = await scratch.company.create({ data: { name: "ZZ Buyer", normalizedName: "zz buyer", createdById: seller.id, ownerUserId: seller.id } });
+    await scratch.contact.create({ data: { companyId: buyer.id, name: "Asha" } });
+    await scratch.lead.create({ data: { companyId: buyer.id, title: "ZZ deal", ownerUserId: seller.id } as never });
+    await scratch.notification.create({ data: { userId: seller.id, type: "NOTE_REMINDER", title: "ZZ" } });
+    await scratch.auditLog.create({ data: { userId: seller.id, action: "CREATE", entityType: "Company", entityId: buyer.id, entityLabel: "ZZ Buyer" } });
+
+    const counted = async () => {
+      const out = new Map<string, number>();
+      for (const { tablename } of await scratch.$queryRaw<{ tablename: string }[]>`SELECT tablename::text AS tablename FROM pg_tables WHERE schemaname = current_schema()`) {
+        const [{ n }] = await scratch.$queryRawUnsafe<{ n: bigint }[]>(`SELECT count(*) AS n FROM "${tablename.replace(/"/g, '""')}"`);
+        out.set(tablename, Number(n));
+      }
+      return out;
+    };
+    const before = await counted();
+    const usersBefore = await scratch.user.count();
+    const kept = await reset.resetAllData(scratch, sa.id, "KEEP_SETUP");
+    ok("it resets, keeping everybody", kept.usersRemoved === 0 && (await scratch.user.count()) === usersBefore, JSON.stringify(kept));
+    const after = await counted();
+    const keptTables = new Set([...reset.keptTables("KEEP_SETUP").map((k) => k.table), "_prisma_migrations", "_DocumentApprover"]);
+    const changedSetup = [...keptTables].filter((t) => before.has(t) && before.get(t) !== after.get(t));
+    const leftRecords = [...after.entries()].filter(([t, n]) => !keptTables.has(t) && n > 0 && !reset.INSTALL_ROWS.some((r) => r.table === t));
+    ok("every setup table is exactly as it was", changedSetup.length === 0, changedSetup.map((t) => `${t}: ${before.get(t)} → ${after.get(t)}`).join(", "));
+    ok("every record table is empty", leftRecords.length === 0, leftRecords.map(([t, n]) => `${t}:${n}`).join(", "));
+    const sellerNow = await scratch.user.findUnique({ where: { id: seller.id } });
+    ok("a person keeps their role, department, manager and permissions", sellerNow?.role === "ZZ_KEPT" && sellerNow.departmentId === team.id && sellerNow.managerId === sa.id && (await scratch.userPermission.count({ where: { userId: seller.id } })) === 1 && (await scratch.rolePermission.count({ where: { role: "ZZ_KEPT" } })) === 1);
+    ok("the catalogue and the holiday list stay", !!(await scratch.item.findUnique({ where: { id: item.id } })) && (await scratch.holiday.count()) === 1);
+    ok("customers, contacts, leads, notifications and the audit log go", (await scratch.company.count()) === 0 && (await scratch.contact.count()) === 0 && (await scratch.lead.count()) === 0 && (await scratch.notification.count()) === 0 && (await scratch.auditLog.count()) === 0);
+    const firstAgain = await scratch.company.create({ data: { name: "First again", normalizedName: "first again", createdById: sa.id } });
+    ok("numbering starts again — the next company is COM-000001", firstAgain.companySeq === 1, firstAgain.companySeq);
+    await scratch.company.delete({ where: { id: firstAgain.id } });
   } finally {
     await scratch.$disconnect();
     try {

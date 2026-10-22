@@ -10,11 +10,11 @@ import type { ActionResult } from "@/actions/company";
  * admin schedules it, a day out; an admin who looks after backups can cancel it until it starts. Not
  * while viewing as somebody else — that would be somebody else's password confirming it.
  */
-export async function scheduleWorkspaceReset(input: { confirm: string; password: string; code?: string }): Promise<ActionResult<{ runAfter: Date }> & { needsCode?: boolean }> {
+export async function scheduleWorkspaceReset(input: { confirm: string; password: string; code?: string; mode?: "EVERYTHING" | "KEEP_SETUP" }): Promise<ActionResult<{ runAfter: Date }> & { needsCode?: boolean }> {
   const user = await requireUser();
   const blocked = await refuseWhileViewingAs();
   if (blocked) return { ok: false, error: blocked };
-  const outcome = await requestWorkspaceReset(user.id, { confirm: input?.confirm, password: input?.password, code: input?.code });
+  const outcome = await requestWorkspaceReset(user.id, { confirm: input?.confirm, password: input?.password, code: input?.code, mode: input?.mode });
   if (!outcome.ok) return { ok: false, error: outcome.error, needsCode: outcome.needsCode };
   revalidatePath("/settings/backups");
   return { ok: true, data: { runAfter: outcome.runAfter } };

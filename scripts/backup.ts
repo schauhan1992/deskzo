@@ -7,6 +7,8 @@
  *
  *   npm run db:backup                 take one now, whatever the schedule says
  *   npm run db:backup -- --if-due     take one only if the stored schedule says it is time
+ *   npm run db:backup -- --seal-existing   encrypt the backups already on disk (once, after the release that
+ *                                          encrypted backups at rest — src/lib/backup/at-rest.ts)
  *
  * Of the first workspace, unless `--workspace <slug>` names another or `--all-workspaces` asks for
  * every active one (each on its own schedule, into its own folder).
@@ -31,6 +33,9 @@ import "dotenv/config";
 import { runBackup } from "../src/lib/backup/run";
 import { runScheduledBackup } from "../src/lib/backup/scheduled";
 import { runDueWorkspaceReset } from "../src/lib/workspace-reset";
+import { sealExistingBackups } from "../src/lib/backup/seal-existing";
+import { backupRoot } from "../src/lib/backup/maintenance";
+import { currentTenant } from "../src/lib/tenancy/resolve";
 import { formatBytes } from "../src/lib/backup/policy";
 import { formatTimeOfDay } from "../src/lib/backup/schedule";
 import { db } from "../src/lib/db";
@@ -93,6 +98,12 @@ async function main() {
 }
 
 async function backupOne(args: string[]) {
+  if (args.includes("--seal-existing")) {
+    const sealed = await sealExistingBackups(await backupRoot(), (await currentTenant()).id);
+    console.log(`Encrypted ${sealed.dumps} full backup(s) and ${sealed.chunks} stored piece(s); ${sealed.already} already were.`);
+    return;
+  }
+
   const ifDue = args.includes("--if-due");
   const started = Date.now();
 

@@ -248,6 +248,9 @@ const NOT_YET_EVERYWHERE = {
   // before a restore or a reset, and the retention that keeps it), which tolerates a workspace not
   // migrated yet.
   backup: { reason: true, keepUntil: true },
+  // 20261122150000_workspace_reset_mode. Read by name in src/lib/workspace-reset.ts, which refuses to run a reset
+  // whose kind it can't read rather than guess it.
+  workspaceReset: { mode: true },
   // 20261112100000_automate_builder. Read by name in src/lib/automate (refs, the builder, converting
   // pipeline automations); Automate tolerates a workspace not migrated yet.
   automationWorkflow: { workflowSeq: true, migratedFrom: true },

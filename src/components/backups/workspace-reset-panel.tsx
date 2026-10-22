@@ -29,12 +29,13 @@ export function WorkspaceResetPanel({ state, canRestore }: { state: WorkspaceRes
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [askCode, setAskCode] = useState(false);
+  const [mode, setMode] = useState<"KEEP_SETUP" | "EVERYTHING">("KEEP_SETUP");
   const [result, setResult] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
   function schedule() {
     setResult(null);
     startTransition(async () => {
-      const r = await scheduleWorkspaceReset({ confirm, password, code });
+      const r = await scheduleWorkspaceReset({ confirm, password, code, mode });
       if (r.needsCode) setAskCode(true);
       if (!r.ok) {
         setResult({ tone: "error", text: r.error });
@@ -71,8 +72,11 @@ export function WorkspaceResetPanel({ state, canRestore }: { state: WorkspaceRes
               {state.scheduled.status === "RUNNING" ? "The reset is running now." : `A reset is scheduled for ${clock.dateTime(state.scheduled.runAfter)}.`}
             </p>
             <p className="mt-1">
-              {state.scheduled.requestedByName} asked for it on {clock.dateTime(state.scheduled.requestedAt)}. Every record, setting and account except
-              the super admin&apos;s will be removed; a copy of the workspace is taken first and kept 30 days.
+              {state.scheduled.requestedByName} asked for it on {clock.dateTime(state.scheduled.requestedAt)}.{" "}
+              {state.scheduled.mode === "KEEP_SETUP"
+                ? "Customers, leads, orders, documents, payments, tickets, tasks, stock, the ledger's entries and HR history will be removed; people, settings and the catalogue stay."
+                : "Every record, setting and account except the super admin's will be removed."}{" "}
+              A copy of the workspace is taken first and kept 30 days.
             </p>
             {state.scheduled.status === "SCHEDULED" && state.canCancel && (
               <Button variant="secondary" size="sm" className="mt-2" disabled={pending} onClick={cancel}>
@@ -83,11 +87,34 @@ export function WorkspaceResetPanel({ state, canRestore }: { state: WorkspaceRes
         ) : state.isSuperAdmin && state.overview ? (
           <>
             <p className="text-text">
-              Empties this workspace back to a fresh one: {state.overview.counts.users} users, {state.overview.counts.companies} companies,{" "}
-              {state.overview.counts.contacts} contacts, {state.overview.counts.leads} leads, {state.overview.counts.orders} orders,{" "}
-              {state.overview.counts.documents} quotes and invoices, {state.overview.counts.payments} payments and {state.overview.counts.tickets} tickets — all of
-              it, with every setting. Your own account stays, and so does the workspace itself: its address, plan and billing.
+              The workspace holds {state.overview.counts.users} people, {state.overview.counts.companies} companies, {state.overview.counts.contacts} contacts,{" "}
+              {state.overview.counts.leads} leads, {state.overview.counts.orders} orders, {state.overview.counts.documents} quotes and invoices,{" "}
+              {state.overview.counts.payments} payments and {state.overview.counts.tickets} tickets. Choose what goes:
             </p>
+            <div role="radiogroup" aria-label="What the reset removes" className="space-y-2">
+              {(
+                [
+                  {
+                    value: "KEEP_SETUP",
+                    title: "Clear my data, keep my setup",
+                    text: "Customers, contacts, leads, orders, quotes and invoices, payments, tickets, tasks, stock, the ledger's entries, chat, and HR history (attendance, leave taken, payslips, expense claims, letters) go. Everybody's account, roles and permissions, the organisation's details, the catalogue, pipelines, templates, automations, employee profiles and salary structures stay. Numbering starts again from 1.",
+                  },
+                  {
+                    value: "EVERYTHING",
+                    title: "Start completely fresh",
+                    text: "Everything goes — every record, every setting, every other person's account. Only your account stays, and the workspace itself: its address, plan and billing.",
+                  },
+                ] as const
+              ).map((o) => (
+                <label key={o.value} className={`flex cursor-pointer items-start gap-2 rounded-base border px-3 py-2 ${mode === o.value ? "border-danger/60 bg-danger-bg" : "border-line"}`}>
+                  <input type="radio" name="reset-mode" className="mt-1" checked={mode === o.value} onChange={() => setMode(o.value)} disabled={pending} />
+                  <span>
+                    <span className="font-medium text-text">{o.title}</span>
+                    <span className="mt-0.5 block text-xs text-muted">{o.text}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
             <ul className="list-disc space-y-0.5 pl-5 text-muted">
               <li>It runs a day after you ask, and every admin who looks after backups is told at once — any of them can cancel it until then.</li>
               <li>A copy of the workspace is taken just before and kept 30 days. Restoring it from this page undoes the reset.</li>

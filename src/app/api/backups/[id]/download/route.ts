@@ -11,6 +11,7 @@ import { archiveKeyMaterial, currentKeys } from "@/lib/tenancy/keys";
 import { currentTenant } from "@/lib/tenancy/resolve";
 import { readSidecar } from "@/lib/backup/sidecar";
 import { MissingChunkError, readManifest, reassemble } from "@/lib/backup/chunks";
+import { isSealedFile, openBackupFileTo, SealedBackupError } from "@/lib/backup/at-rest";
 import { backupRoot, ensureRestoreDir, restoreDir } from "@/lib/backup/maintenance";
 import { ARCHIVE_EXTENSION, PassphraseError, passphraseProblem, sealToStream } from "@/lib/backup/archive";
 
@@ -103,7 +104,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
      */
     rebuilt = path.join(await restoreDir(), `.rebuilt-${randomUUID()}.dump`);
     try {
-      await reassemble(root, manifest, rebuilt);
+      await reassemble(root, manifest, rebuilt, (await currentTenant()).id);
     } catch (err) {
       await rm(rebuilt, { force: true }).catch(() => {});
       // Its own answer rather than a 500: a pruned or half-copied store is a thing an operator can
@@ -123,6 +124,26 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
   }
 
+  // The sidecar sits beside the backup on the server, wherever the bytes to seal end up coming from.
+  const sidecarOf = dumpPath;
+
+  /**
+   * Encrypted at rest (src/lib/backup/at-rest.ts): opened into `.restore/` like a chunked one, under the
+   * same rule — this request made it, so this request deletes it.
+   */
+  if (row.kind !== "INCREMENTAL" && (await isSealedFile(dumpPath))) {
+    await ensureRestoreDir();
+    rebuilt = path.join(await restoreDir(), `.rebuilt-${randomUUID()}.dump`);
+    try {
+      await openBackupFileTo((await currentTenant()).id, dumpPath, rebuilt);
+    } catch (err) {
+      await rm(rebuilt, { force: true }).catch(() => {});
+      if (err instanceof SealedBackupError) return NextResponse.json({ error: err.message }, { status: 410 });
+      throw err;
+    }
+    dumpPath = rebuilt;
+  }
+
   /** Idempotent, because the stream's `close` and `error` usually both arrive. */
   let discarded = false;
   const discardRebuilt = async () => {
@@ -133,7 +154,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   // A chunked backup never had a sidecar — there was no file for one to sit beside — and the facts
   // it would have carried were recorded on the row when the dump was taken.
-  const sidecar = row.kind === "INCREMENTAL" ? null : await readSidecar(dumpPath);
+  const sidecar = row.kind === "INCREMENTAL" ? null : await readSidecar(sidecarOf);
 
   const [tenant, keys] = await Promise.all([currentTenant(), currentKeys()]);
   let sealed;

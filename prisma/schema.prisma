@@ -11967,6 +11967,8 @@ model BackupSchedule {
 model WorkspaceReset {
   id              String               @id @default(cuid())
   status          WorkspaceResetStatus @default(SCHEDULED)
+  /** What goes: everything but the super admin, or the records with the setup kept (src/lib/reset-classes.ts). Read by name. */
+  mode            WorkspaceResetMode   @default(EVERYTHING)
   requestedById   String
   requestedByName String
   requestedAt     DateTime             @default(now())
@@ -11982,6 +11984,11 @@ model WorkspaceReset {
 
   @@index([status, runAfter])
   @@map("workspace_resets")
+}
+
+enum WorkspaceResetMode {
+  EVERYTHING
+  KEEP_SETUP
 }
 
 enum WorkspaceResetStatus {

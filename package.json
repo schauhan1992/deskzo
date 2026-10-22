@@ -110,6 +110,7 @@
     "db:backup": "tsx scripts/backup.ts",
     "db:restore": "tsx scripts/restore.ts",
     "check:backup": "tsx scripts/check-backup.ts",
+    "check:backup-at-rest": "tsx scripts/check-backup-at-rest.ts",
     "check:reconcile": "tsx scripts/check-reconcile.ts",
     "check:portal": "tsx scripts/check-portal.ts",
     "db:seed:portal": "tsx prisma/seed-portal.ts",

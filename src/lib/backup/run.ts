@@ -2,12 +2,14 @@ import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { mkdir, readdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
 import { db } from "@/lib/db";
 import { writeSidecar, sidecarPath } from "@/lib/backup/sidecar";
 import { collectGarbage, manifestExists, manifestPath, storeDump, writeManifest } from "@/lib/backup/chunks";
 import type { BackupKind } from "@prisma/client";
 import { backupRoot } from "@/lib/backup/maintenance";
 import { currentKeys } from "@/lib/tenancy/keys";
+import { sealingStream } from "@/lib/backup/at-rest";
 import { currentTenant } from "@/lib/tenancy/resolve";
 import { RUNNING_PRESUMED_DEAD_MINUTES } from "@/lib/backup/schedule";
 import {
@@ -201,7 +203,9 @@ export async function runBackup(options?: {
      * 41% uncompressed on the same change. Compression is applied per chunk in the store instead,
      * so nothing is given up but the similarity is kept.
      */
-    await dump(tool, connection, workingPath, kind === "FULL" ? 6 : 0);
+    // A full backup is encrypted as it is written (src/lib/backup/at-rest.ts): no plain copy reaches the disk.
+    // A chunked one's working file is plain for the moment it takes to split it, and its pieces are encrypted.
+    await dump(tool, connection, workingPath, kind === "FULL" ? 6 : 0, kind === "FULL" ? tenant.id : null);
     const { size } = await stat(workingPath);
 
     /**
@@ -229,7 +233,7 @@ export async function runBackup(options?: {
         keepUntil: options?.keepUntil?.toISOString() ?? null,
       });
     } else {
-      const manifest = await storeDump(directory, workingPath);
+      const manifest = await storeDump(directory, workingPath, tenant.id);
       await writeManifest(directory, record.id, {
         ...manifest,
         takenAt: startedAt.toISOString(),
@@ -279,7 +283,7 @@ export async function runBackup(options?: {
   }
 }
 
-function dump(tool: DumpTool, connection: Connection, target: string, compress = 6): Promise<void> {
+function dump(tool: DumpTool, connection: Connection, target: string, compress = 6, sealFor: string | null = null): Promise<void> {
   /**
    * Custom format, compressed. It is what `pg_restore` can read selectively and in parallel, and it
    * is a third the size of plain SQL — which matters when the thing has to be copied off the box.
@@ -332,7 +336,9 @@ function dump(tool: DumpTool, connection: Connection, target: string, compress =
      * production is never the tested one.
      */
     const out = createWriteStream(target);
-    child.stdout.pipe(out);
+    // Through the cipher when it is to be encrypted; either way, finished only once every byte is on disk.
+    const written = sealFor ? pipeline(child.stdout, sealingStream(sealFor), out) : pipeline(child.stdout, out);
+    written.catch(() => {});
 
     let stderr = "";
     child.stderr.on("data", (chunk) => {
@@ -341,9 +347,10 @@ function dump(tool: DumpTool, connection: Connection, target: string, compress =
 
     child.on("error", (err) => reject(new Error(`Could not run ${tool.command}: ${err.message}`)));
     child.on("close", (code) => {
-      out.end();
-      if (code === 0) resolve();
-      else reject(new Error(stderr.trim() || `pg_dump exited with code ${code}.`));
+      written.then(
+        () => (code === 0 ? resolve() : reject(new Error(stderr.trim() || `pg_dump exited with code ${code}.`))),
+        (err: unknown) => reject(err instanceof Error ? err : new Error(String(err))),
+      );
     });
   });
 }

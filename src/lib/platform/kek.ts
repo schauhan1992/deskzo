@@ -80,6 +80,16 @@ export function platformHmac(tenantId: string, purpose: SignPurpose): Hmac {
   return createHmac("sha256", key);
 }
 
+/**
+ * A key the platform derives for one workspace and one purpose, never stored. "backup-at-rest": what a
+ * workspace's backups are encrypted under on the server (src/lib/backup/at-rest.ts) — derived rather than
+ * kept in its key bundle, so a restore that installs another server's keys doesn't strand the backups
+ * already taken here, and nobody without PLATFORM_MASTER_KEY can read one off the disk.
+ */
+export function platformKeyFor(tenantId: string, purpose: "backup-at-rest"): Buffer {
+  return Buffer.from(hkdfSync("sha256", platformKey(), "deskzo/platform-key", `${purpose}|${tenantId}`, 32));
+}
+
 /** Whether signatures can be made and checked here at all. */
 export function platformKeyConfigured(): boolean {
   return !!process.env.PLATFORM_MASTER_KEY?.trim();

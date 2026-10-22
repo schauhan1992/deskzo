@@ -5,7 +5,7 @@ import { notifyUser } from "@/lib/notify";
 import { PEOPLE_ONLY } from "@/lib/people";
 import { runBackup } from "@/lib/backup/run";
 import { restoreInProgress } from "@/lib/backup/maintenance";
-import { resetAllData, resetOverview } from "@/lib/data-reset";
+import { resetAllData, resetOverview, type ResetMode } from "@/lib/data-reset";
 import { workspaceAccountsReset } from "@/lib/platform/account-hooks";
 import { forgetAutomationUser } from "@/lib/automation-user";
 import { resyncDeviceRoutes } from "@/lib/platform/device-routes";
@@ -15,8 +15,14 @@ import { confirmIdentity, type IdentityProof } from "@/lib/security/confirm-iden
 import { workspaceClock } from "@/lib/time/workspace";
 
 /**
- * Resetting a workspace to a fresh one (owner, 22 Oct 2026): everything goes but the super admin's
- * account and the workspace itself — its address, plan and billing, which live in the platform, not here.
+ * Resetting a workspace (owner, 22 Oct 2026), one of two ways:
+ *
+ *   · **Everything** — a fresh workspace: everything goes but the super admin's account and the workspace
+ *     itself (its address, plan and billing, which live in the platform, not here).
+ *   · **Keep my setup** — the records go (customers, leads, orders, documents, payments, tickets, tasks,
+ *     stock, the ledger's entries, HR history) and the setup stays: every person, the organisation, the
+ *     catalogue, templates, automations, employees' profiles (src/lib/reset-classes.ts). Numbering restarts.
+ *
  * Built on the reset engine (src/lib/data-reset.ts) and the safety copy a restore takes, with the rails a
  * customer's own button needs:
  *
@@ -79,10 +85,29 @@ async function platformAudit(action: string, detail: Record<string, unknown>) {
 /** A moment as the workspace reads its own clock. */
 const when = async (d: Date) => (await workspaceClock()).dateTime(d);
 
-export type ResetRequest = { confirm?: unknown } & IdentityProof;
+export type ResetRequest = { confirm?: unknown; mode?: unknown } & IdentityProof;
+
+const MODE_WORDS: Record<ResetMode, string> = {
+  EVERYTHING: "every record, setting and account except the super admin's",
+  KEEP_SETUP: "every customer, lead, order, document, payment, ticket and task, the stock, the ledger's entries and HR history — people, settings and the catalogue stay",
+};
+
+/**
+ * Which kind of reset a record asks for — read by name, since a workspace not migrated yet has no such
+ * column. Null when it can't be read: the caller refuses rather than guess, because guessing "everything"
+ * for a "keep my setup" would remove every person.
+ */
+async function modeOf(id: string): Promise<ResetMode | null> {
+  try {
+    const row = await db.workspaceReset.findUnique({ where: { id }, select: { mode: true } });
+    return row?.mode ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /** The super admin asks for the reset: checked, then scheduled a day out, and every admin told. */
-export async function requestWorkspaceReset(userId: string, input: ResetRequest): Promise<{ ok: true; runAfter: Date } | { ok: false; error: string; needsCode?: boolean }> {
+export async function requestWorkspaceReset(userId: string, input: ResetRequest): Promise<{ ok: true; runAfter: Date; mode: ResetMode } | { ok: false; error: string; needsCode?: boolean }> {
   const user = await db.user.findUnique({ where: { id: userId }, select: { id: true, name: true, isSuperAdmin: true } });
   if (!user?.isSuperAdmin) return { ok: false, error: "Only the workspace's super admin can reset it." };
   const tenant = await currentTenant();
@@ -93,20 +118,24 @@ export async function requestWorkspaceReset(userId: string, input: ResetRequest)
   const proved = await confirmIdentity(user.id, input, "a workspace reset");
   if (!proved.ok) return proved;
 
+  const mode: ResetMode = input.mode === "KEEP_SETUP" ? "KEEP_SETUP" : "EVERYTHING";
   const runAfter = new Date(Date.now() + RESET_WAIT_HOURS * HOUR);
-  const reset = await db.workspaceReset.create({ data: { requestedById: user.id, requestedByName: user.name, runAfter }, select: { id: true } });
-  await recordAudit({ userId: user.id, action: "CREATE", entityType: "WorkspaceReset", entityId: reset.id, entityLabel: `Workspace reset scheduled for ${await when(runAfter)}` });
-  await platformAudit("workspace.reset.scheduled", { resetId: reset.id, by: user.name, runAfter: runAfter.toISOString() });
+  // Named only for "keep my setup": a workspace not migrated yet can't record it, and must refuse it then
+  // rather than schedule a reset that would remove everybody.
+  const reset = await db.workspaceReset.create({ data: { requestedById: user.id, requestedByName: user.name, runAfter, ...(mode === "KEEP_SETUP" ? { mode } : {}) }, select: { id: true } });
+  const label = mode === "KEEP_SETUP" ? "Workspace reset (keeping the setup)" : "Workspace reset";
+  await recordAudit({ userId: user.id, action: "CREATE", entityType: "WorkspaceReset", entityId: reset.id, entityLabel: `${label} scheduled for ${await when(runAfter)}` });
+  await platformAudit("workspace.reset.scheduled", { resetId: reset.id, by: user.name, runAfter: runAfter.toISOString(), mode });
   for (const admin of await admins()) {
     await notifyUser({
       userId: admin.id,
       type: "SECURITY_ALERT",
       title: "The workspace is going to be reset",
-      message: `${user.name} asked to reset this workspace. On ${await when(runAfter)} every record, setting and account except theirs will be removed (a copy is kept 30 days). If this wasn't meant, cancel it from Settings › Backups before then.`,
+      message: `${user.name} asked to reset this workspace. On ${await when(runAfter)} ${MODE_WORDS[mode]} will be removed (a copy is kept 30 days). If this wasn't meant, cancel it from Settings › Backups before then.`,
       link: "/settings/backups",
     });
   }
-  return { ok: true, runAfter };
+  return { ok: true, runAfter, mode };
 }
 
 /** Any admin who looks after backups, or the super admin, calls it off — while it hasn't started. */
@@ -125,7 +154,7 @@ export async function cancelWorkspaceReset(userId: string): Promise<{ ok: true }
   return { ok: true };
 }
 
-export type ResetRun = { ran: false; reason: string } | { ran: true; ok: true; backup: string; tablesEmptied: number; usersRemoved: number } | { ran: true; ok: false; error: string };
+export type ResetRun = { ran: false; reason: string } | { ran: true; ok: true; backup: string; mode: ResetMode; tablesEmptied: number; usersRemoved: number } | { ran: true; ok: false; error: string };
 
 /**
  * Runs the workspace's reset if one is due — from the backup tick, in the workspace in hand. Claimed by a
@@ -156,11 +185,13 @@ export async function runDueWorkspaceReset(now = new Date()): Promise<ResetRun> 
 
   const superAdmin = await db.user.findFirst({ where: { isSuperAdmin: true }, select: { id: true } });
   if (!superAdmin) return fail("The workspace has no super admin to keep.");
+  const mode = await modeOf(due.id);
+  if (!mode) return fail("Which kind of reset this is couldn't be read, so nothing was reset. Run the workspace's migrations, then ask again.");
 
   const safety = await runBackup({
     kind: "FULL",
     triggeredById: due.requestedById,
-    reason: "Before resetting the workspace",
+    reason: mode === "KEEP_SETUP" ? "Before resetting the workspace (setup kept)" : "Before resetting the workspace",
     keepUntil: new Date(now.getTime() + RESET_SAFETY_COPY_DAYS * 24 * HOUR),
   });
   if (!safety.ok) return fail(`A safety copy couldn't be taken, so nothing was reset: ${safety.error}`);
@@ -168,7 +199,7 @@ export async function runDueWorkspaceReset(now = new Date()): Promise<ResetRun> 
 
   let outcome;
   try {
-    outcome = await resetAllData(await getTenantDb(), superAdmin.id);
+    outcome = await resetAllData(await getTenantDb(), superAdmin.id, mode);
   } catch (err) {
     return fail(`The reset failed and nothing was changed: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -186,17 +217,24 @@ export async function runDueWorkspaceReset(now = new Date()): Promise<ResetRun> 
     action: "DELETE",
     entityType: "Workspace",
     entityId: due.id,
-    entityLabel: `Workspace reset — ${outcome.tablesEmptied} tables emptied, ${outcome.usersRemoved} users removed; the copy taken before is ${safety.filename}`,
+    entityLabel: `Workspace reset${mode === "KEEP_SETUP" ? ", setup kept" : ""} — ${outcome.tablesEmptied} tables emptied, ${outcome.usersRemoved} users removed; the copy taken before is ${safety.filename}`,
   });
-  await platformAudit("workspace.reset.done", { resetId: due.id, backup: safety.filename, ...outcome });
+  await platformAudit("workspace.reset.done", { resetId: due.id, backup: safety.filename, mode, ...outcome });
   await notifyUser({
     userId: superAdmin.id,
     type: "SECURITY_ALERT",
     title: "The workspace was reset",
-    message: `Everything but your account was removed. The workspace as it was is kept 30 days as ${safety.filename} — restore it from Settings › Backups to undo the reset.`,
+    message: `${mode === "KEEP_SETUP" ? "The records were removed; people, settings and the catalogue stayed." : "Everything but your account was removed."} The workspace as it was is kept 30 days as ${safety.filename} — restore it from Settings › Backups to undo the reset.`,
     link: "/settings/backups",
   });
-  return { ran: true, ok: true, backup: safety.filename, ...outcome };
+  // Everybody kept was told it was coming; tell them it happened.
+  if (mode === "KEEP_SETUP") {
+    for (const admin of await admins()) {
+      if (admin.id === superAdmin.id) continue;
+      await notifyUser({ userId: admin.id, type: "SECURITY_ALERT", title: "The workspace's records were reset", message: "Customers, leads, orders, documents, payments, tickets, tasks and HR history were removed; people, settings and the catalogue stayed.", link: "/settings/backups" });
+    }
+  }
+  return { ran: true, ok: true, backup: safety.filename, mode, ...outcome };
 }
 
 /** What the Backups page shows about resetting, for this person. Null when they may neither ask nor cancel. */
@@ -212,6 +250,7 @@ export async function workspaceResetState(userId: string) {
     return null;
   }
   const scheduled = rows.find((r) => r.status === "SCHEDULED" || r.status === "RUNNING") ?? null;
+  const scheduledMode = scheduled ? await modeOf(scheduled.id) : null;
   const last = rows.find((r) => r.status === "DONE" || r.status === "FAILED" || r.status === "CANCELLED") ?? null;
   const undo = last?.status === "DONE" && last.backupFilename ? await db.backup.findFirst({ where: { filename: last.backupFilename, status: "SUCCEEDED" }, select: { id: true, filename: true, sizeBytes: true, startedAt: true } }) : null;
   const tenant = await currentTenant();
@@ -221,7 +260,7 @@ export async function workspaceResetState(userId: string) {
     slug: tenant.slug,
     blockers: isSuperAdmin && !scheduled ? await resetBlockers() : [],
     overview: isSuperAdmin && !scheduled ? await resetOverview(await getTenantDb()) : null,
-    scheduled: scheduled && { id: scheduled.id, status: scheduled.status, requestedByName: scheduled.requestedByName, requestedAt: scheduled.requestedAt, runAfter: scheduled.runAfter },
+    scheduled: scheduled && { id: scheduled.id, status: scheduled.status, mode: scheduledMode, requestedByName: scheduled.requestedByName, requestedAt: scheduled.requestedAt, runAfter: scheduled.runAfter },
     last: last && { status: last.status, requestedByName: last.requestedByName, cancelledByName: last.cancelledByName, finishedAt: last.finishedAt ?? last.cancelledAt, error: last.error, backupFilename: last.backupFilename },
     undo: undo && { id: undo.id, filename: undo.filename, sizeBytes: undo.sizeBytes === null ? null : Number(undo.sizeBytes), startedAt: undo.startedAt },
   };

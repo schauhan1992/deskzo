@@ -4,7 +4,8 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/p
 import path from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { createGunzip, createGzip } from "node:zlib";
+import { createGunzip, createGzip, gunzipSync } from "node:zlib";
+import { isSealed, openBuffer, sealBuffer } from "@/lib/backup/at-rest";
 
 /**
  * Storing the same database forty times without storing it forty times.
@@ -204,13 +205,23 @@ async function chunkExists(root: string, hash: string): Promise<boolean> {
  * promises bytes it does not contain, and every future backup that sees the name would skip
  * writing the real thing.
  */
-async function putChunk(root: string, hash: string, data: Buffer): Promise<number> {
+async function putChunk(root: string, hash: string, data: Buffer, sealFor: string | null): Promise<number> {
   const target = chunkPath(root, hash);
   if (await chunkExists(root, hash)) return 0;
 
   await mkdir(path.dirname(target), { recursive: true });
   const temp = `${target}.${process.pid}.tmp`;
-  await pipeline(Readable.from([data]), createGzip({ level: 6 }), createWriteStream(temp));
+  if (sealFor) {
+    // Compressed, then encrypted (src/lib/backup/at-rest.ts) — encrypted bytes don't compress. The name
+    // stays the hash of the plain piece, so an unchanged piece is still found and not stored twice.
+    const parts: Buffer[] = [];
+    await pipeline(Readable.from([data]), createGzip({ level: 6 }), async function* (source) {
+      for await (const piece of source) parts.push(piece as Buffer);
+    });
+    await writeFile(temp, sealBuffer(sealFor, Buffer.concat(parts)));
+  } else {
+    await pipeline(Readable.from([data]), createGzip({ level: 6 }), createWriteStream(temp));
+  }
   await rename(temp, target);
   return (await stat(target)).size;
 }
@@ -220,7 +231,7 @@ async function putChunk(root: string, hash: string, data: Buffer): Promise<numbe
  *
  * The dump file itself is untouched; the caller decides whether to keep or delete it.
  */
-export async function storeDump(root: string, dumpPath: string): Promise<Manifest> {
+export async function storeDump(root: string, dumpPath: string, sealFor: string | null = null): Promise<Manifest> {
   await mkdir(chunkDir(root), { recursive: true });
   await mkdir(manifestDir(root), { recursive: true });
 
@@ -237,7 +248,7 @@ export async function storeDump(root: string, dumpPath: string): Promise<Manifes
     whole.update(piece);
     totalBytes += piece.length;
     const hash = createHash("sha256").update(piece).digest("hex");
-    const written = await putChunk(root, hash, piece);
+    const written = await putChunk(root, hash, piece, sealFor);
     if (written > 0) {
       newBytes += written;
       newChunks += 1;
@@ -308,7 +319,7 @@ export class MissingChunkError extends Error {
  * incompletely or corrupted is caught here — before the file reaches a restore, which is the last
  * place anybody wants to discover it.
  */
-export async function reassemble(root: string, manifest: Manifest, outPath: string): Promise<void> {
+export async function reassemble(root: string, manifest: Manifest, outPath: string, tenantId: string | null = null): Promise<void> {
   const out = createWriteStream(outPath);
   const whole = createHash("sha256");
 
@@ -317,11 +328,19 @@ export async function reassemble(root: string, manifest: Manifest, outPath: stri
       const file = chunkPath(root, hash);
       if (!(await stat(file).catch(() => null))) throw new MissingChunkError(hash);
 
-      const parts: Buffer[] = [];
-      await pipeline(createReadStream(file), createGunzip(), async function* (source) {
-        for await (const piece of source) parts.push(piece as Buffer);
-      });
-      const data = Buffer.concat(parts);
+      // An encrypted piece (src/lib/backup/at-rest.ts) is opened first; one from before is read as it was.
+      const stored = await readFile(file);
+      let data: Buffer;
+      if (isSealed(stored)) {
+        if (!tenantId) throw new Error("This backup's pieces are encrypted, and no workspace was named to open them.");
+        data = gunzipSync(openBuffer(tenantId, stored));
+      } else {
+        const parts: Buffer[] = [];
+        await pipeline(createReadStream(file), createGunzip(), async function* (source) {
+          for await (const piece of source) parts.push(piece as Buffer);
+        });
+        data = Buffer.concat(parts);
+      }
 
       const actual = createHash("sha256").update(data).digest("hex");
       if (actual !== hash) {
