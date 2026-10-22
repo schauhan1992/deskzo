@@ -7,7 +7,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { createTaskSchema, updateTaskSchema, type CreateTaskInput, type UpdateTaskInput } from "@/lib/validation/task";
-import { createTask, updateTask, toggleTaskDone, deleteTask } from "@/actions/task";
+import { createTask, updateTask, setTaskStatus, deleteTask } from "@/actions/task";
 import { Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton, RowActions } from "@/components/ui/icon-button";
@@ -19,6 +19,8 @@ import { formatTicketId } from "@/lib/tickets";
 import { companyPath, leadPath, ticketPath } from "@/lib/record-links";
 import { taskDue } from "@/lib/task-due";
 import type { Clock } from "@/lib/time/zone";
+import { STATUS_LABELS, STATUS_TONES, TASK_STATUSES, effectiveStatus, type TaskStatusKey } from "@/lib/tasks/rules";
+import { useStatusMove } from "@/components/tasks/status-note";
 
 type AssignableUser = { id: string; name: string; role: string };
 
@@ -35,7 +37,11 @@ export type TaskRow = {
   company: { id: string; name: string; companySeq: number } | null;
   lead: { id: string; title: string; leadSeq: number } | null;
   ticket: { id: string; ticketSeq: number; title: string } | null;
-  /** Given to the viewer by somebody else: theirs to tick off, not to change or delete (src/lib/tasks/rules.ts). */
+  /** To do, In progress, Need help, Done or Cancelled (src/lib/tasks/rules.ts) — read with `done`. */
+  status?: TaskStatusKey | null;
+  /** Why it's stuck or cancelled: the note its move left (owner, 22 Oct 2026). */
+  statusNote?: { text: string; by: string; at: Date | string } | null;
+  /** Given to the viewer by somebody else: theirs to move along, not to change or delete (src/lib/tasks/rules.ts). */
   workOnly?: boolean;
   /** What the viewer may do with it (src/lib/tasks/server.ts, taskRights), where the list was given it. */
   canWork?: boolean;
@@ -48,7 +54,7 @@ type EditFormValues = z.input<typeof updateTaskSchema>;
 
 /** Overdue or due today by the workspace's calendar, not the browser's. */
 function dueBadge(task: TaskRow, clock: Clock) {
-  if (task.done) return <Badge tone="green">Done</Badge>;
+  if (task.done) return null;
   if (!task.dueDate) return null;
   const due = taskDue(task.dueDate, clock).key;
   const today = clock.today();
@@ -194,6 +200,16 @@ export function TaskList({
   const [deleteTarget, setDeleteTarget] = useState<TaskRow | null>(null);
   const [isPending, startTransition] = useTransition();
   const [serverError, setServerError] = useState<string | null>(null);
+  const [moveError, setMoveError] = useState<string | null>(null);
+  // Moving a task: whoever it's for, and whoever may change it. Need help and Cancelled ask for their note first.
+  const { move, dialog: noteDialog } = useStatusMove((taskId, status, note) =>
+    startTransition(async () => {
+      setMoveError(null);
+      const result = await setTaskStatus(taskId, status, note);
+      if (!result.ok) setMoveError(result.error);
+      router.refresh();
+    }),
+  );
   const {
     register,
     handleSubmit,
@@ -208,7 +224,7 @@ export function TaskList({
     },
   });
 
-  const columnCount = 5 + (showLinkedRecord ? 1 : 0);
+  const columnCount = 6 + (showLinkedRecord ? 1 : 0);
 
   async function onSubmit(values: CreateTaskInput) {
     setServerError(null);
@@ -230,13 +246,6 @@ export function TaskList({
     router.refresh();
   }
 
-  function toggleDone(task: TaskRow) {
-    startTransition(async () => {
-      await toggleTaskDone(task.id);
-      router.refresh();
-    });
-  }
-
   function confirmDelete() {
     if (!deleteTarget) return;
     const id = deleteTarget.id;
@@ -249,11 +258,17 @@ export function TaskList({
 
   return (
     <div className="space-y-3">
+      {moveError && (
+        <p role="alert" className="text-sm text-danger">
+          {moveError}
+        </p>
+      )}
       <div className="overflow-x-auto rounded-md border border-line">
         <table className="w-full text-sm">
           <thead className="border-b border-line bg-surface-sunken text-left text-xs uppercase tracking-wide text-muted">
             <tr>
               <th className="px-3 py-2.5">Task</th>
+              <th className="px-3 py-2.5">Status</th>
               <th className="px-3 py-2.5">Due</th>
               <th className="px-3 py-2.5">Assigned to</th>
               {showLinkedRecord && <th className="px-3 py-2.5">Related to</th>}
@@ -265,6 +280,7 @@ export function TaskList({
             {tasks.map((task) => {
               const canDelete = task.canDelete ?? (!task.workOnly && (canDeleteAny || task.createdBy.id === currentUserId || task.assignedTo?.id === currentUserId));
               const canChange = task.canChange ?? !task.workOnly;
+              const status = effectiveStatus({ done: task.done, status: task.status ?? null });
 
               if (editingId === task.id) {
                 return <EditTaskForm key={task.id} task={task} users={users} columnCount={columnCount} onClose={() => setEditingId(null)} />;
@@ -273,26 +289,33 @@ export function TaskList({
               return (
                 <tr key={task.id} className="border-b border-line last:border-0 hover:bg-surface-sunken">
                   <td className="px-3 py-2.5">
-                    <div className="flex items-start gap-2">
-                      {/*
-                        One of these per row, so the name has to say which task — "checkbox, checked"
-                        eleven times over tells a screen-reader user nothing about what they ticked.
-                      */}
-                      <input
-                        type="checkbox"
-                        checked={task.done}
-                        onChange={() => toggleDone(task)}
-                        disabled={isPending || task.canWork === false}
-                        aria-label={`Done: ${task.title}`}
-                        className="mt-1 h-4 w-4 rounded border-line-strong"
-                      />
-                      <div>
-                        <div className={task.done ? "font-medium text-subtle line-through" : "font-medium text-text"}>
-                          {task.title}
-                        </div>
-                        {task.description && <div className="text-muted">{task.description}</div>}
+                    <div className={task.done ? "font-medium text-subtle line-through" : "font-medium text-text"}>{task.title}</div>
+                    {task.description && <div className="text-muted">{task.description}</div>}
+                    {task.statusNote && (
+                      <div className={`mt-1 text-xs ${status === "NEED_HELP" ? "text-danger" : "text-muted"}`}>
+                        {task.statusNote.text} <span className="text-subtle">— {task.statusNote.by}, {clock.dateTimeShort(task.statusNote.at)}</span>
                       </div>
-                    </div>
+                    )}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {task.canWork === false ? (
+                      <Badge tone={STATUS_TONES[status]}>{STATUS_LABELS[status]}</Badge>
+                    ) : (
+                      // One of these per row, so the name says which task.
+                      <Select
+                        aria-label={`Status: ${task.title}`}
+                        value={status}
+                        disabled={isPending}
+                        onChange={(e) => move(task.id, e.target.value as TaskStatusKey, task.title)}
+                        className="h-8 w-36 text-sm"
+                      >
+                        {TASK_STATUSES.map((s) => (
+                          <option key={s} value={s}>
+                            {STATUS_LABELS[s]}
+                          </option>
+                        ))}
+                      </Select>
+                    )}
                   </td>
                   <td className="px-3 py-2.5">
                     <div className="text-muted">{task.dueDate ? taskDue(task.dueDate, clock).label : "—"}</div>
@@ -375,6 +398,8 @@ export function TaskList({
             </div>
           </form>
         ))}
+
+      {noteDialog}
 
       <Dialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="Delete task">
         <p className="text-sm text-muted">

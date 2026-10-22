@@ -280,7 +280,13 @@ async function main() {
     ok("the old tick closes it as Done", viaTick?.done === true && viaTick.status === "DONE");
     if (ticked.ok) await tasks.toggleTaskDone(ticked.data.id);
     ok("  and opens it again as To do", ticked.ok && (await db.task.findUniqueOrThrow({ where: { id: ticked.data.id } })).status === "TODO");
-    ok("Cancelled closes it without XP", future.ok && (await tasks.setTaskStatus(futureId, "CANCELLED")).ok && (await db.task.findUniqueOrThrow({ where: { id: futureId } })).done === true);
+    ok("Cancelled without a reason is refused, and it stays open", future.ok && !(await tasks.setTaskStatus(futureId, "CANCELLED")).ok && !(await tasks.setTaskStatus(futureId, "CANCELLED", "  no ")).ok && (await db.task.findUniqueOrThrow({ where: { id: futureId } })).done === false);
+    const cancelled = await tasks.setTaskStatus(futureId, "CANCELLED", "The offsite moved to next quarter");
+    ok(
+      "Cancelled with its reason closes it without XP, the reason kept as a comment",
+      future.ok && cancelled.ok && (await db.task.findUniqueOrThrow({ where: { id: futureId } })).done === true && (await db.taskComment.count({ where: { taskId: futureId, body: "Cancelled: The offsite moved to next quarter" } })) === 1,
+      said(cancelled),
+    );
     ok("a status that isn't one is refused", !(await tasks.setTaskStatus(taskId, "MAYBE")).ok);
 
     section("A task given, not set");
@@ -292,17 +298,41 @@ async function main() {
     ok("  nor delete it", !(await tasks.deleteTask(taskId)).ok && (await db.task.count({ where: { id: taskId } })) === 1);
     ok("  nor add or remove its steps", !(await extras.addChecklistItem(taskId, "My own step")).ok && (!step2.ok || !(await extras.deleteChecklistItem(step2.data.id)).ok));
     ok("  but moves it along and ticks its steps", (await tasks.setTaskStatus(taskId, "IN_PROGRESS")).ok && (!step2.ok || (await extras.toggleChecklistItem(step2.data.id)).ok));
+    // Need help (owner, 22 Oct 2026): what help, required; kept as a comment, and whoever set it told.
+    const toldBefore = await db.notification.count({ where: { userId: manager.id, type: "TASK_COMMENT" } });
+    ok("  asking for help without saying what: refused, as it was", !(await tasks.setTaskStatus(taskId, "NEED_HELP", " ")).ok && (await db.task.findUniqueOrThrow({ where: { id: taskId } })).status === "IN_PROGRESS");
+    const stuck = await tasks.setTaskStatus(taskId, "NEED_HELP", "Which image sizes do we keep?");
+    const stuckRow = await db.task.findUniqueOrThrow({ where: { id: taskId } });
+    ok(
+      "  saying what: Need help, still open, the note a comment by them, whoever set it told",
+      stuck.ok &&
+        stuckRow.status === "NEED_HELP" &&
+        !stuckRow.done &&
+        (await db.taskComment.count({ where: { taskId, userId: worker.id, body: "Needs help: Which image sizes do we keep?" } })) === 1 &&
+        (await db.notification.count({ where: { userId: manager.id, type: "TASK_COMMENT" } })) === toldBefore + 1,
+      said(stuck),
+    );
     const given = await extras.getTaskPanel(taskId);
     ok("the panel says so: work it, don't change it", given?.workOnly === true && given.canWork && !given.canChange && !given.canDelete);
     ok("the list marks it for them", (await tasks.listTasks({ search: TAG })).find((t) => t.id === taskId)?.workOnly === true);
     actorId = manager.id;
     ok("  and not for whoever set it", (await tasks.listTasks({ search: TAG })).find((t) => t.id === taskId)?.workOnly === false);
+    const stuckListed = (await tasks.listTasks({ search: TAG })).find((t) => t.id === taskId);
+    ok("  whoever set it sees what help is needed, on the task's row", stuckListed?.statusNote?.text === "Needs help: Which image sizes do we keep?" && stuckListed.statusNote.by === worker.name, JSON.stringify(stuckListed?.statusNote));
+    ok("  under Need help, and not under To do", (await listed({ status: "need_help" })).includes(taskId) && !(await listed({ status: "todo" })).includes(taskId) && !(await listed({ status: "upcoming" })).includes(taskId));
+    ok("  an edit that cancels it asks why too", !(await tasks.updateTask({ id: taskId, title: `${TAG} Optimise image processing`, assignedToUserId: worker.id, status: "CANCELLED" })).ok && (await db.task.findUniqueOrThrow({ where: { id: taskId } })).status === "NEED_HELP");
     ok("  who still changes it", (await tasks.updateTask({ id: taskId, title: `${TAG} Optimise image processing`, assignedToUserId: worker.id, dueDate: nextWeek, xp: 50 })).ok);
     await tasks.setTaskStatus(taskId, "DONE");
 
     actorId = worker.id;
     const mine = await tasks.createTask({ title: `${TAG} My own list`, assignedToUserId: worker.id });
     ok("a task somebody set for themselves is theirs to change", mine.ok && (await tasks.updateTask({ id: mine.data.id, title: `${TAG} My own list, renamed`, assignedToUserId: worker.id })).ok);
+    const helpEdit = mine.ok ? await tasks.updateTask({ id: mine.data.id, title: `${TAG} My own list, renamed`, assignedToUserId: worker.id, status: "NEED_HELP", statusNote: "Stuck on the export" }) : null;
+    ok(
+      "  an edit to Need help with what help: moved, and the note kept",
+      !!helpEdit?.ok && mine.ok && (await db.task.findUniqueOrThrow({ where: { id: mine.data.id } })).status === "NEED_HELP" && (await db.taskComment.count({ where: { taskId: mine.data.id, body: "Needs help: Stuck on the export" } })) === 1,
+      helpEdit ? said(helpEdit) : "",
+    );
     // The worker reports to the manager now; the worker sets the manager a task.
     await db.user.update({ where: { id: worker.id }, data: { managerId: manager.id } });
     const upward = await tasks.createTask({ title: `${TAG} Sign this off`, assignedToUserId: manager.id });

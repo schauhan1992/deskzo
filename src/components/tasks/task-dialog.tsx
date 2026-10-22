@@ -9,6 +9,8 @@ import { Dialog } from "@/components/ui/dialog";
 import { Input, Select, Textarea } from "@/components/ui/input";
 import { TaskAboutPicker, aboutIds, type About } from "@/components/tasks/task-about-picker";
 import {
+  NOTE_FOR,
+  NOTE_MIN,
   PRIORITY_LABELS,
   REMINDER_REPEAT_LABELS,
   REPEAT_LABELS,
@@ -89,6 +91,9 @@ export function TaskDialog({
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState(task?.title ?? "");
   const [status, setStatus] = useState<TaskStatusKey>(task?.status ?? "TODO");
+  // Moved to Need help or Cancelled here, the edit asks why too (src/lib/tasks/rules.ts, NOTE_FOR).
+  const [statusNote, setStatusNote] = useState("");
+  const noteNeeded = !!task && status !== task.status ? NOTE_FOR[status] : undefined;
   const [priority, setPriority] = useState<TaskPriorityKey>(task?.priority ?? "MEDIUM");
   const [departmentId, setDepartmentId] = useState(task?.departmentId ?? "");
   const [challengeId, setChallengeId] = useState(task?.challengeId ?? "");
@@ -154,6 +159,10 @@ export function TaskDialog({
 
   function save() {
     setError(null);
+    if (noteNeeded && statusNote.trim().length < NOTE_MIN) {
+      setError(noteNeeded.missing);
+      return;
+    }
     const fields = {
       title,
       description,
@@ -176,7 +185,7 @@ export function TaskDialog({
       const aboutChanged = JSON.stringify(aboutIds(about)) !== JSON.stringify(aboutIds(aboutOf(task)));
       const checklist = steps.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
       const result = task
-        ? await updateTask({ id: task.id, ...fields, ...(aboutChanged ? { about: aboutIds(about) } : {}) })
+        ? await updateTask({ id: task.id, ...fields, ...(noteNeeded ? { statusNote } : {}), ...(aboutChanged ? { about: aboutIds(about) } : {}) })
         : await createTask({ ...fields, ...(madeOnRecord ? link : aboutIds(about)), steps: checklist, ...(remindAt ? { remindAt, remindRepeat } : {}) });
       if (!result.ok) {
         setError(result.error);
@@ -236,6 +245,13 @@ export function TaskDialog({
               ))}
             </Select>
           </Field>
+          {noteNeeded && (
+            <div className="col-span-2 sm:col-span-3">
+              <Field label={noteNeeded.label} required>
+                <Textarea aria-label={noteNeeded.label} value={statusNote} onChange={(e) => setStatusNote(e.target.value)} placeholder={noteNeeded.placeholder} disabled={pending} />
+              </Field>
+            </div>
+          )}
           <Field label="Team">
             <Select aria-label="Team" value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} disabled={pending}>
               <option value="">Any team</option>

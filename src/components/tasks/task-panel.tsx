@@ -48,6 +48,7 @@ import {
   type TaskStatusKey,
 } from "@/lib/tasks/rules";
 import { TaskDialog, type TaskFormOptions } from "@/components/tasks/task-dialog";
+import { useStatusMove } from "@/components/tasks/status-note";
 
 /**
  * One task in full (owner, 16 Oct 2026): where it stands and who it's for, then its checklist, files,
@@ -87,6 +88,8 @@ export function TaskPanel({ taskId, onClose, options }: { taskId: string; onClos
       setVersion((v) => v + 1);
       router.refresh();
     });
+  // Need help and Cancelled ask for their note first (src/components/tasks/status-note.tsx).
+  const { move, dialog: noteDialog } = useStatusMove((id, status, note) => run(() => setTaskStatus(id, status, note)));
 
   if (panel === undefined) {
     return (
@@ -128,7 +131,7 @@ export function TaskPanel({ taskId, onClose, options }: { taskId: string; onClos
             <Select
               aria-label="Move to"
               value={status}
-              onChange={(e) => run(() => setTaskStatus(panel.id, e.target.value))}
+              onChange={(e) => move(panel.id, e.target.value as TaskStatusKey, panel.title)}
               disabled={pending}
               className="h-8 w-40 text-sm"
             >
@@ -353,6 +356,7 @@ export function TaskPanel({ taskId, onClose, options }: { taskId: string; onClos
         </Section>
       </div>
 
+      {noteDialog}
       {editing && (
         <TaskDialog
           open

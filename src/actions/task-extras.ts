@@ -7,12 +7,11 @@ import { refuseWhileViewingAs } from "@/lib/session";
 import { can } from "@/lib/authz/resolve";
 import { taskAccess, type AccessAction } from "@/lib/authz/access";
 import { leadsSeenBy } from "@/lib/leads/shown";
-import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
 import { PEOPLE_ONLY } from "@/lib/people";
 import { workspaceClock } from "@/lib/time/workspace";
 import { chatFileType } from "@/lib/chat/rules";
-import { ADVANCED, givenToWork, storedDay, workableTask } from "@/lib/tasks/server";
+import { ADVANCED, givenToWork, postTaskComment, storedDay, workableTask } from "@/lib/tasks/server";
 import { COMMENT_MAX, ONLY_WORKS, TASK_FILE_MAX_BYTES, TASK_REMINDER_REPEATS, type TaskReminderRepeatKey } from "@/lib/tasks/rules";
 import type { ActionResult } from "@/actions/company";
 
@@ -182,13 +181,7 @@ export async function addTaskComment(taskId: string, body: string): Promise<Acti
   const text = String(body ?? "").trim();
   if (!text) return { ok: false, error: "Write the comment first." };
   if (text.length > COMMENT_MAX) return { ok: false, error: `A comment is at most ${COMMENT_MAX.toLocaleString("en-IN")} characters.` };
-  const comment = await db.taskComment.create({ data: { taskId: task.id, userId: user.id, body: text }, select: { id: true } });
-  const name = (await db.user.findUnique({ where: { id: user.id }, select: { name: true } }))?.name ?? "Somebody";
-  for (const to of new Set([task.assignedToUserId, task.createdByUserId].filter((v): v is string => !!v && v !== user.id))) {
-    // Whoever set it finds it under "Set by me"; whoever it's for, on their own list.
-    const link = to === task.assignedToUserId ? "/tasks" : "/tasks?assignedTo=byme";
-    await notifyUser({ userId: to, type: "TASK_COMMENT", title: `${name} commented on "${task.title}"`, message: text.slice(0, 200), link });
-  }
+  const comment = await postTaskComment(task, user.id, text);
   touched();
   return { ok: true, data: comment };
 }
