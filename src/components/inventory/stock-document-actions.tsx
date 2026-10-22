@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { StockDocumentStatus, StockDocumentType } from "@prisma/client";
 import {
+  adjacentStockDocument,
   approveStockDocument,
   cancelStockDocument,
   postStockDocument,
@@ -16,6 +17,9 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Label, Textarea } from "@/components/ui/input";
 import { ActionNoticeRegion, type NoticeTone } from "@/components/ui/action-notice";
+import { stockStatusLabel, stockTypeLabel } from "@/components/inventory/labels";
+import { shortcutNotice, useShortcuts } from "@/components/shortcuts/use-shortcuts";
+import { copyVoucher, type StockVoucherCopy } from "@/lib/shortcuts/clipboard";
 
 /**
  * What can be done with a stock voucher from its page, by its status and what the viewer holds. Every button
@@ -27,12 +31,15 @@ export function StockDocumentActions({
   status,
   needsApproval,
   can,
+  copySource,
 }: {
   id: string;
   type: StockDocumentType;
   status: StockDocumentStatus;
   needsApproval: boolean;
   can: { edit: boolean; post: boolean; approve: boolean; cancel: boolean; receive: boolean };
+  /** What F12 copies of it — no ids of the voucher itself, no serial numbers (src/lib/shortcuts/clipboard.ts). */
+  copySource: Omit<StockVoucherCopy, "copiedAt">;
 }) {
   const router = useRouter();
   const formId = useId();
@@ -60,13 +67,45 @@ export function StockDocumentActions({
 
   const moved = status === "POSTED" || status === "IN_TRANSIT";
   const isDraft = status === "DRAFT";
+  const kind = stockTypeLabel[type].toLowerCase();
+
+  function neighbour(direction: "previous" | "next") {
+    void adjacentStockDocument(id, direction).then((found) => {
+      if (found) router.push(`/items/stock/${found.id}`);
+      else shortcutNotice(`This is the ${direction === "previous" ? "first" : "last"} ${kind} in the list.`);
+    });
+  }
+
+  function askToCancel() {
+    if (status === "CANCELLED") return shortcutNotice(`This ${kind} is already cancelled.`);
+    if (!can.cancel) return shortcutNotice(`Cancelling this ${kind} isn't yours to do.`);
+    setCancelling(true);
+  }
+
+  // BUSY's keys on a stock voucher's page (src/lib/shortcuts/busy.ts, scope "record"). Deleting never deletes:
+  // a draft is cancelled, a posted one cancelled and reversed — both kept on record.
+  useShortcuts("record", {
+    "previous-record": () => neighbour("previous"),
+    "next-record": () => neighbour("next"),
+    modify: () => {
+      if (!isDraft) return shortcutNotice(`Only a draft can be modified — this one is ${stockStatusLabel[status].toLowerCase()}.`);
+      if (!can.edit) return shortcutNotice(`Modifying this ${kind} isn't yours to do.`);
+      router.push(`/items/stock/${id}/edit`);
+    },
+    "delete-record": askToCancel,
+    "cancel-record": askToCancel,
+    "copy-record": () => {
+      const kept = copyVoucher({ ...copySource, copiedAt: new Date().toISOString() });
+      shortcutNotice(kept ? `Copied ${copySource.copiedFrom} — Alt + F12 on a new ${kind} fills it in.` : "This browser won't keep a copy (private window or blocked storage).");
+    },
+  });
 
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap justify-end gap-2">
         {isDraft && can.edit && (
           <Link href={`/items/stock/${id}/edit`}>
-            <Button variant="secondary" size="sm">
+            <Button variant="secondary" size="sm" aria-keyshortcuts="Alt+M" title="Edit (Alt+M)">
               Edit
             </Button>
           </Link>
@@ -116,7 +155,7 @@ export function StockDocumentActions({
           </Button>
         )}
         {status !== "CANCELLED" && can.cancel && (
-          <Button variant={moved ? "danger" : "ghost"} size="sm" disabled={pending} onClick={() => setCancelling(true)}>
+          <Button variant={moved ? "danger" : "ghost"} size="sm" disabled={pending} onClick={() => setCancelling(true)} aria-keyshortcuts="F8 Alt+X" title={`${moved ? "Cancel & reverse" : "Cancel"} (F8 or Alt+X)`}>
             {moved ? "Cancel & reverse" : "Cancel"}
           </Button>
         )}

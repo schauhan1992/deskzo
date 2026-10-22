@@ -16,6 +16,8 @@ import { dayTiming, officeDayMinutes, officeHoursOrRefusal, workedMinutesOf, typ
 import { monthShortLeaves } from "@/lib/hr/short-leave";
 import { spanWords, timingWithShortLeave } from "@/lib/hr/short-leave-rules";
 import type { ActionResult } from "@/actions/company";
+import { clockPolicyFor, recordClock, type ClockOutcome, type ClockPolicy, type ClockRefusal } from "@/lib/hr/clock";
+import { readReading } from "@/lib/hr/geofence";
 
 /**
  * Daily attendance: clocking in and out, and the month grid HR reads it from.
@@ -58,46 +60,45 @@ export async function myToday() {
   return row ? toPlain(row) : null;
 }
 
-export async function clockIn(): Promise<ActionResult<{ at: string }>> {
+/**
+ * A clocking's answer: the action's own, and where it was refused for the office's location, why — so the screen
+ * can say so in its own words and offer to ask for an exception (src/lib/hr/clock.ts).
+ */
+export type ClockResult<T> = { ok: true; data: T } | { ok: false; error: string; code?: ClockRefusal; canRequestException?: boolean; distanceM?: number };
+
+const refusedClock = (outcome: Extract<ClockOutcome, { ok: false }>) => ({
+  ok: false as const,
+  error: outcome.error,
+  code: outcome.code,
+  canRequestException: outcome.canRequestException,
+  ...(outcome.distanceM !== undefined ? { distanceM: outcome.distanceM } : {}),
+});
+
+/**
+ * Clocking in from the web. `location` is what the browser read — needed only where the person's office enforces
+ * its location, and checked on the server whatever it says (src/lib/hr/clock.ts, the app's door too).
+ */
+export async function clockIn(location?: unknown): Promise<ClockResult<{ at: string }>> {
   const user = await requireModuleUser("hr");
-  const now = new Date();
-  const today = (await workspaceClock()).calendarDate(now);
-
-  const existing = await db.attendanceDay.findUnique({ where: { userId_date: { userId: user.id, date: today } } });
-  if (existing?.checkInAt) {
-    return { ok: false, error: "You're already clocked in today." };
-  }
-  // Leave already booked for today wins: clocking in on approved leave is almost always a mistake,
-  // and silently overwriting it would quietly hand back a day of leave that was already deducted.
-  if (existing && (existing.status === "ON_LEAVE" || existing.status === "HALF_DAY") && existing.leaveRequestId) {
-    return { ok: false, error: "You're on approved leave today. Cancel the leave first if you're working." };
-  }
-
-  await db.attendanceDay.upsert({
-    where: { userId_date: { userId: user.id, date: today } },
-    create: { userId: user.id, date: today, status: "PRESENT", checkInAt: now },
-    update: { status: "PRESENT", checkInAt: now },
-  });
-  revalidatePath("/people/attendance");
-  return { ok: true, data: { at: now.toISOString() } };
+  const outcome = await recordClock({ userId: user.id, action: "in", reading: readReading(asRecord(location)) });
+  if (!outcome.ok) return refusedClock(outcome);
+  return { ok: true, data: { at: outcome.at.toISOString() } };
 }
 
-export async function clockOut(): Promise<ActionResult<{ minutes: number }>> {
+export async function clockOut(location?: unknown): Promise<ClockResult<{ minutes: number }>> {
   const user = await requireModuleUser("hr");
-  const now = new Date();
-  const today = (await workspaceClock()).calendarDate(now);
-
-  const existing = await db.attendanceDay.findUnique({ where: { userId_date: { userId: user.id, date: today } } });
-  if (!existing?.checkInAt) return { ok: false, error: "You haven't clocked in today." };
-
-  const minutes = minutesBetween(existing.checkInAt, now);
-  await db.attendanceDay.update({
-    where: { id: existing.id },
-    data: { checkOutAt: now, workedMinutes: minutes },
-  });
-  revalidatePath("/people/attendance");
-  return { ok: true, data: { minutes } };
+  const outcome = await recordClock({ userId: user.id, action: "out", reading: readReading(asRecord(location)) });
+  if (!outcome.ok) return refusedClock(outcome);
+  return { ok: true, data: { minutes: outcome.minutes ?? 0 } };
 }
+
+/** The attendance rule that applies to the person signed in — whether their clock-in needs their location. */
+export async function myClockPolicy(): Promise<ClockPolicy> {
+  const user = await requireModuleUser("hr");
+  return clockPolicyFor(user.id);
+}
+
+const asRecord = (v: unknown): Record<string, unknown> | null => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null);
 
 /**
  * HR or a manager setting a day directly.

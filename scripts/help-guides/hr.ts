@@ -59,6 +59,10 @@ export const guide: SeedGuide = {
         "Decide anyone's leave request or attendance correction, not only those of people who report to you — for whoever covers while a manager is away. Never your own. Management has it by default; the built-in HR and HR head roles start with it.",
       ),
       perm(
+        "hr.approveAttendanceExceptions",
+        "Shows Attendance exceptions in the menu. Approve or refuse somebody's request to clock in or out away from their office's GPS area, grant them one for up to a week, and revoke one not yet used — never your own. Management has it by default; the built-in HR, HR manager and HR head roles start with it.",
+      ),
+      perm(
         "people.handover",
         "Shows Hand over work on a person's record, to move their accounts, leads, tickets, open quotes, equipment and reports to colleagues. It never changes their own attendance, leave or pay records. Management has it by default; the built-in HR and HR head roles start with it.",
       ),
@@ -73,6 +77,7 @@ export const guide: SeedGuide = {
         runs("Fill in each person's employee record: open ", { b: "People › People" }, ", open the person and select ", { b: "Edit record" }, ". The ", { b: "No HR record" }, " count at the top shows logins that don't have one yet."),
         runs("If you are moving from another system partway through the year, enter what people carried in and had already taken on ", { b: "People › Leave" }, " › ", { b: "Opening balances →" }, "."),
         runs("If you want late, left early and overtime marked, set the office hours on ", { b: "People › Attendance" }, ". If you have biometric terminals, register them in ", { b: "Settings › Biometric terminals" }, "."),
+        runs("If people must be at the office to clock in, set each office's location and radius in ", { b: "Settings › People › Attendance locations" }, " and turn on ", { b: "Require GPS to clock in and out here" }, ". Until you do, clocking in works as it always has."),
       ),
       p(runs("To bring many employee records in at once, use ", { b: "Settings › Import & export" }, ". To give somebody HR's permissions, an admin gives them the built-in HR role, or ticks the permissions for their role in ", { b: "Settings › Roles & Permissions" }, ".")),
     ],
@@ -117,6 +122,26 @@ export const guide: SeedGuide = {
           runs("Select ", { b: "Send request" }, "."),
         ),
         p("Nothing changes until your manager approves it. Leave isn't corrected here: withdraw the leave request instead."),
+      ),
+      task(
+        "Clock in at an office that checks your location",
+        ol(
+          runs("Select ", { b: "Clock in" }, " (or ", { b: "Clock out" }, ") in the {siteName} app's Today screen, or on ", { b: "People › My HR" }, "."),
+          runs("Allow location when the phone or browser asks — only while you're using it. It is read once, at the tap, never in the background."),
+          runs("{siteName} checks you are inside your office's area and clocks you in. If you're outside, your location isn't accurate enough, or location is off, it says so and records nothing."),
+          runs("Working somewhere else today? Select ", { b: "Ask to clock in away from the office" }, " (", { b: "Ask for an exception" }, " on the web), choose a reason, say what happened and send it. Once it is approved, clock in again."),
+        ),
+        p("Your office is your own branch, or the head office if you don't have one. An approved exception counts once each way, for that day."),
+      ),
+      task(
+        "Approve, grant or revoke an attendance exception",
+        ol(
+          runs("Open ", { b: "People › Attendance exceptions" }, ". Requests waiting are at the top, with the reason and how far from the office the person was when refused. They're on the app's Approvals screen too."),
+          runs("Select ", { b: "Approve" }, " or ", { b: "Refuse" }, ", with a note if you like. The person is told."),
+          runs("To let somebody clock in away from the office before they ask — a client visit, a site — fill in ", { b: "Grant an exception" }, ": the person, clock in, out or both, the reason and the days, up to a week, and select ", { b: "Grant exception" }, "."),
+          runs("Under ", { b: "History" }, ", ", { b: "Revoke" }, " takes back one not yet used, with your reason."),
+        ),
+        p("Nobody can approve, grant or revoke their own. Every exception keeps who asked, who decided, when it was used, and the clockings it allowed are marked as exceptions in attendance."),
       ),
       task(
         "Keep an employee record up to date",
@@ -220,6 +245,12 @@ export const guide: SeedGuide = {
         note("These terminals' protocol carries no authentication. Keep the server reachable only from the office network or over a VPN.", "warning"),
       ),
       setting(
+        "Attendance locations",
+        "Settings › People › Attendance locations",
+        p(runs("For each office: its ", { b: "Latitude" }, " and ", { b: "Longitude" }, " (paste them from a map, or stand in the office and select ", { b: "Use this device's location" }, "), the ", { b: "Allowed radius" }, " — 100 m to start — and the ", { b: "Least accuracy accepted" }, " — 50 m. ", { b: "Require GPS to clock in and out here" }, " makes clocking in and out need the phone or browser inside the area; ", { b: "Allow exceptions" }, " lets people refused ask to clock in anyway. {siteName}, not the phone, decides whether a location is inside.")),
+        note("GPS can be faked on a phone set up to do it. {siteName} refuses a location the phone itself marks as simulated, but the check shows where the phone says it is — not proof that the person is there.", "warning"),
+      ),
+      setting(
         "Office hours",
         "People › Attendance",
         p(runs("Select ", { b: "Set office hours" }, " (or ", { b: "Change" }, "), enter when the day ", { b: "Starts" }, " and ", { b: "Ends" }, " and the ", { b: "Grace (minutes)" }, ", and select ", { b: "Save" }, ". The grid then marks late, left early and overtime, and totals hours worked against hours expected. ", { b: "Clear office hours" }, " turns this off.")),
@@ -258,7 +289,7 @@ export const guide: SeedGuide = {
       ),
       qa(
         "Why won't it let me clock in?",
-        p("Either you've already clocked in today, or you're on approved leave today. If you are working after all, withdraw the leave first."),
+        p("Either you've already clocked in today, or you're on approved leave today — withdraw the leave first if you're working after all. Where your office checks location, it also says when you're outside its area, your location isn't accurate enough, or location is switched off; ask for an exception if you're working elsewhere."),
       ),
       qa(
         "Punches from our biometric terminal aren't showing.",

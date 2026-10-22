@@ -7,7 +7,9 @@ import { UnitsManager } from "@/components/inventory/units-manager";
 import { Card, CardContent } from "@/components/ui/card";
 
 /** Units of measure (owner, 22 Oct 2026), under Finance → Accounts › Masters. */
-export default async function UnitsPage() {
+export default async function UnitsPage({ searchParams }: { searchParams: Promise<{ new?: string }> }) {
+  // `?new=1` — the New master menu (src/lib/shortcuts/busy.ts) — opens with a new one.
+  const startNew = (await searchParams).new === "1";
   if (!(await isModuleEnabled("items"))) return <ModuleDisabledNotice moduleKey="items" />;
   const caps = await inventoryCapabilities();
   if (!caps.view) notFound();
@@ -24,7 +26,7 @@ export default async function UnitsPage() {
       </div>
       <Card>
         <CardContent>
-          <UnitsManager units={units} canManage={caps.manage} />
+          <UnitsManager units={units} canManage={caps.manage} startNew={startNew} />
         </CardContent>
       </Card>
     </div>

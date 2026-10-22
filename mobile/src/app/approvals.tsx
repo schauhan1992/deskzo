@@ -19,6 +19,7 @@ const KIND: Record<ApprovalKind, string> = {
   workflow: "Approval",
   order: "Order",
   device: "New device",
+  "attendance-exception": "Clock-in away from the office",
 };
 
 export default function ApprovalsScreen() {

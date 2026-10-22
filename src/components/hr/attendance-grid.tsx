@@ -14,17 +14,16 @@ import {
   Flag,
   Hourglass,
   House,
-  LogIn,
-  LogOut,
   Timer,
   Umbrella,
   X,
   type LucideIcon,
 } from "lucide-react";
 import type { attendanceMonth } from "@/actions/attendance";
-import { clockIn, clockOut, markAttendance, saveOfficeHours } from "@/actions/attendance";
+import { markAttendance, saveOfficeHours } from "@/actions/attendance";
 import { attendanceLocations } from "@/actions/attendance-location";
-import { Badge, Card, CardContent } from "@/components/ui/card";
+import { ClockButtons } from "@/components/hr/clock-buttons";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select } from "@/components/ui/input";
@@ -382,22 +381,7 @@ function OfficeHoursDialog({ hours, onClose }: { hours: OfficeHours | null; onCl
 
 /** Today's clock, for the signed-in user. */
 function ClockCard({ today }: { today: TodayRow }) {
-  const router = useRouter();
   const clock = useClock();
-  const [pending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-
-  function run(fn: () => Promise<{ ok: boolean; error?: string }>) {
-    setError(null);
-    startTransition(async () => {
-      const result = await fn();
-      if (!result.ok) {
-        setError(result.error ?? "That didn't work.");
-        return;
-      }
-      router.refresh();
-    });
-  }
 
   // The workspace's time of day, not the browser's.
   const time = (value: Date | string | null) => (value ? clock.time(value) : null);
@@ -420,23 +404,10 @@ function ClockCard({ today }: { today: TodayRow }) {
           ) : (
             <span className="text-muted">You haven&apos;t clocked in today.</span>
           )}
-          {error && <span className="ml-2 text-danger">{error}</span>}
         </div>
 
         <div className="flex gap-2">
-          {!today?.checkInAt ? (
-            <Button size="sm" disabled={pending} onClick={() => run(() => clockIn())}>
-              <LogIn className="mr-1.5 h-3.5 w-3.5" />
-              Clock in
-            </Button>
-          ) : !today.checkOutAt ? (
-            <Button size="sm" variant="secondary" disabled={pending} onClick={() => run(() => clockOut())}>
-              <LogOut className="mr-1.5 h-3.5 w-3.5" />
-              Clock out
-            </Button>
-          ) : (
-            <Badge tone="green">Done for the day</Badge>
-          )}
+          <ClockButtons today={today} />
         </div>
       </CardContent>
     </Card>
@@ -513,8 +484,8 @@ function MarkDialog({
 }
 
 /**
- * Where the person clocked in or out from the Deskzo app that day (owner, 18 Oct 2026) — the phone's location at
- * that moment, when it shared one. Nothing when they used the web, or the phone didn't share.
+ * Where the person clocked in or out that day (owner, 18 Oct 2026) — the phone's or browser's location at that
+ * moment, when it shared one, and how it was checked against their office (22 Oct 2026). Nothing when none was kept.
  */
 function ClockedFrom({ userId, date }: { userId: string; date: string }) {
   const clock = useClock();
@@ -532,15 +503,31 @@ function ClockedFrom({ userId, date }: { userId: string; date: string }) {
   if (!places || places.length === 0) return null;
   return (
     <div className="space-y-1.5">
-      <p className="text-sm font-medium text-text">From the Deskzo app</p>
+      <p className="text-sm font-medium text-text">Where they clocked</p>
       <ul className="space-y-1 text-sm text-muted">
         {places.map((p) => (
           <li key={`${p.kind}-${p.at}`}>
             Clocked {p.kind === "IN" ? "in" : "out"} at {clock.time(p.at)}
-            {p.accuracyM !== null ? ` (within ${p.accuracyM} m)` : ""} —{" "}
-            <a className="text-brand hover:underline" href={`https://www.google.com/maps?q=${p.latitude},${p.longitude}`} target="_blank" rel="noopener noreferrer">
-              see on a map
-            </a>
+            {p.accuracyM !== null ? ` (within ${p.accuracyM} m)` : ""}
+            {p.latitude !== null && p.longitude !== null && (
+              <>
+                {" "}—{" "}
+                <a className="text-brand hover:underline" href={`https://www.google.com/maps?q=${p.latitude},${p.longitude}`} target="_blank" rel="noopener noreferrer">
+                  see on a map
+                </a>
+              </>
+            )}
+            {/* How it was checked against the office (src/lib/hr/clock.ts) — an exception is said as one, never as "at the office". */}
+            {p.check === "INSIDE" && (
+              <span className="ml-1 text-success">· at {p.office ?? "the office"}{p.distanceM !== null ? `, ${p.distanceM} m from its point` : ""}</span>
+            )}
+            {p.check === "EXCEPTION" && (
+              <span className="ml-1 text-warning">
+                · under an approved exception{p.exceptionReason ? ` (${p.exceptionReason})` : ""}
+                {p.distanceM !== null ? `, ${p.distanceM} m from ${p.office ?? "the office"}` : ", no location"}
+              </span>
+            )}
+            {p.check === "NOT_ENFORCED" && p.distanceM !== null && <span className="ml-1">· {p.distanceM} m from {p.office ?? "the office"}</span>}
           </li>
         ))}
       </ul>

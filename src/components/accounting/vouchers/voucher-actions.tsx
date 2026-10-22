@@ -3,15 +3,29 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { VoucherStatus } from "@prisma/client";
-import { approveVoucher, cancelVoucher, postVoucher, returnVoucher, reverseVoucher, submitVoucher } from "@/actions/vouchers";
+import type { VoucherStatus, VoucherType } from "@prisma/client";
+import { adjacentVoucher, approveVoucher, cancelVoucher, postVoucher, returnVoucher, reverseVoucher, submitVoucher } from "@/actions/vouchers";
 import { useClock } from "@/components/time/clock-provider";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { ActionNotice } from "@/components/ui/action-notice";
+import { shortcutNotice, useShortcuts } from "@/components/shortcuts/use-shortcuts";
+import { copyVoucher, type VoucherCopy } from "@/lib/shortcuts/clipboard";
+import { voucherStatusLabels } from "@/lib/accounts/vouchers";
 
 type Step = "post" | "cancel" | "reverse" | "return" | null;
+
+type Choice = { id: string; name: string };
+
+/** What F12 copies of this voucher — what its form would have typed. */
+export type VoucherCopySource = {
+  type: VoucherType;
+  narration: string;
+  reference: string;
+  company: Choice | null;
+  lines: { accountId: string; debit: number; credit: number; company: Choice | null; departmentId: string | null; branchId: string | null; narration: string | null }[];
+};
 
 /**
  * What can be done to a voucher from where it stands, for this person (owner, 22 Oct 2026). The server asks
@@ -26,6 +40,7 @@ export function VoucherActions({
   can,
   approvalRequired,
   isCreator,
+  copySource,
 }: {
   id: string;
   number: string;
@@ -33,6 +48,7 @@ export function VoucherActions({
   can: { create: boolean; approve: boolean; post: boolean };
   approvalRequired: boolean;
   isCreator: boolean;
+  copySource: VoucherCopySource;
 }) {
   const router = useRouter();
   const clock = useClock();
@@ -62,9 +78,75 @@ export function VoucherActions({
   const approved = status === "APPROVED";
   const mayPost = can.post && ((draft && !approvalRequired) || approved);
   const mayCancel = (can.create || can.approve) && (draft || waiting || approved);
+  const mayReverse = status === "POSTED" && can.post;
+  const stands = voucherStatusLabels[status].toLowerCase();
+
+  /** Page Up / Page Down: the voucher listed above or below this one. */
+  function go(direction: "previous" | "next") {
+    void adjacentVoucher(id, direction).then((next) =>
+      next ? router.push(`/accounting/vouchers/${next}`) : shortcutNotice(direction === "previous" ? "This is the first voucher in the list." : "This is the last voucher in the list."),
+    );
+  }
+
+  // BUSY's keys on a voucher's page (src/lib/shortcuts/busy.ts, scope "record"). Nothing here deletes: F8 cancels
+  // a voucher not yet in the books, and reverses one that is.
+  useShortcuts("record", {
+    "previous-record": () => go("previous"),
+    "next-record": () => go("next"),
+    modify: () => {
+      if (!draft) return shortcutNotice(`Only a draft is modified — this one is ${stands}.${status === "POSTED" ? " A posted voucher is put right by reversing it." : ""}`);
+      if (!can.create) return shortcutNotice("Modifying vouchers needs “Write vouchers”.");
+      router.push(`/accounting/vouchers/${id}/edit`);
+    },
+    "delete-record": () => {
+      if (mayCancel) return setStep("cancel");
+      if (mayReverse) return setStep("reverse");
+      shortcutNotice(
+        status === "POSTED"
+          ? "Reversing a posted voucher needs “Write and reverse journal entries”."
+          : status === "CANCELLED" || status === "REVERSED"
+            ? `It's already ${stands} — and stays on record.`
+            : "Cancelling vouchers needs “Write vouchers” or “Approve vouchers”.",
+      );
+    },
+    "cancel-record": () => {
+      if (mayCancel) return setStep("cancel");
+      shortcutNotice(
+        status === "POSTED"
+          ? "A posted voucher isn't cancelled — it's reversed (F8)."
+          : status === "CANCELLED" || status === "REVERSED"
+            ? `It's already ${stands}.`
+            : "Cancelling vouchers needs “Write vouchers” or “Approve vouchers”.",
+      );
+    },
+    "copy-record": () => {
+      const parties = new Map<string, Choice>();
+      for (const c of [copySource.company, ...copySource.lines.map((l) => l.company)]) if (c) parties.set(c.id, c);
+      const copy: VoucherCopy = {
+        kind: "voucher",
+        type: copySource.type,
+        narration: copySource.narration,
+        reference: copySource.reference,
+        companyId: copySource.company?.id ?? null,
+        lines: copySource.lines.map((l) => ({
+          accountId: l.accountId,
+          debit: l.debit ? String(l.debit) : "",
+          credit: l.credit ? String(l.credit) : "",
+          companyId: l.company?.id ?? null,
+          departmentId: l.departmentId,
+          branchId: l.branchId,
+          narration: l.narration ?? "",
+        })),
+        copiedFrom: number,
+        copiedAt: new Date().toISOString(),
+        parties: [...parties.values()],
+      };
+      shortcutNotice(copyVoucher(copy) ? `Copied ${number} — Alt + F12 on a new voucher fills it in.` : "This browser won't keep a copy — its storage is turned off.");
+    },
+  });
   const buttons = [
     draft && can.create && (
-      <Link key="edit" href={`/accounting/vouchers/${id}/edit`} className="inline-flex h-9 items-center rounded-base border border-line-strong bg-surface px-3.5 text-sm font-medium text-text shadow-sm hover:bg-surface-sunken">
+      <Link key="edit" href={`/accounting/vouchers/${id}/edit`} title="Modify (Alt+M)" aria-keyshortcuts="Alt+M" className="inline-flex h-9 items-center rounded-base border border-line-strong bg-surface px-3.5 text-sm font-medium text-text shadow-sm hover:bg-surface-sunken">
         Edit
       </Link>
     ),
@@ -89,12 +171,12 @@ export function VoucherActions({
       </Button>
     ),
     status === "POSTED" && can.post && (
-      <Button key="reverse" variant="secondary" disabled={pending} onClick={() => setStep("reverse")}>
+      <Button key="reverse" variant="secondary" disabled={pending} onClick={() => setStep("reverse")} title="Reverse (F8)" aria-keyshortcuts="F8">
         Reverse
       </Button>
     ),
     mayCancel && (
-      <Button key="cancel" variant="ghost" disabled={pending} onClick={() => setStep("cancel")}>
+      <Button key="cancel" variant="ghost" disabled={pending} onClick={() => setStep("cancel")} title="Cancel voucher (Alt+X, F8)" aria-keyshortcuts="Alt+X F8">
         Cancel voucher
       </Button>
     ),

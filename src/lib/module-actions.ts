@@ -53,6 +53,7 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "app-devices.ts": "core",
   "asset.ts": ["accounting"],
   "attendance.ts": ["hr"],
+  "attendance-exceptions.ts": ["hr"],
   "attendance-location.ts": ["hr"],
   "auth.ts": "core",
   "backup.ts": "core",
@@ -154,6 +155,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "item-category.ts": ["items"],
   "item.ts": ["items"],
   "inventory.ts": ["items"],
+  // BUSY's Alt + L / Alt + I / Ctrl + D pickers (src/components/shortcuts): each function asks its own module.
+  "quick-pick.ts": ["accounting", "items"],
   // The lead pipeline is a module of its own since 14 Oct 2026 — sold with Pipeline, CRM and One.
   "lead-assignment.ts": ["leads"],
   "lead-capture.ts": ["leads"],

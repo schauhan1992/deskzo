@@ -568,6 +568,36 @@ async function run(scratchName: string) {
   const emptyTracking = await inventory.setItemTracking(L.id, { trackBatches: true, trackExpiry: true, trackSerials: false, reorderQuantity: 5 });
   ok("  but can with none", emptyTracking.ok, emptyTracking.ok ? "" : emptyTracking.error);
 
+  // ── Page Up / Page Down, and pasting (src/lib/shortcuts/busy.ts) ────────────────────────────────
+  section("The voucher above and below, as the list shows them");
+  // A day either side, so the list has a newer and an older one by date as well as by number.
+  await draft(clerk, { type: "GRN", date: "2026-10-16", warehouseId: "wh_main", companyId: vendor.id, lines: [{ itemId: A.id, quantity: 1, unitCost: 100 }] });
+  await draft(clerk, { type: "GRN", date: "2026-10-14", warehouseId: "wh_main", companyId: vendor.id, lines: [{ itemId: A.id, quantity: 1, unitCost: 100 }] });
+  const grnList = await db.stockDocument.findMany({ where: { type: "GRN" }, orderBy: [{ date: "desc" }, { number: "desc" }], select: { id: true, number: true } });
+  as(clerk);
+  const middle = grnList[1]!;
+  const above = await inventory.adjacentStockDocument(middle.id, "previous");
+  const below = await inventory.adjacentStockDocument(middle.id, "next");
+  ok("Page Up is the one listed above (newer), Page Down the one below (older)", grnList.length >= 3 && above?.id === grnList[0]!.id && below?.id === grnList[2]!.id, { list: grnList.map((g) => g.number), above: above?.number, below: below?.number });
+  const walked: string[] = [grnList[0]!.id];
+  for (let i = 0; i < grnList.length; i += 1) {
+    const next = await inventory.adjacentStockDocument(walked[walked.length - 1]!, "next");
+    if (!next) break;
+    walked.push(next.id);
+  }
+  ok("  Page Down from the top walks the whole list in order", walked.join() === grnList.map((g) => g.id).join(), walked.length);
+  ok("  nothing above the first, nothing below the last", (await inventory.adjacentStockDocument(grnList[0]!.id, "previous")) === null && (await inventory.adjacentStockDocument(grnList[grnList.length - 1]!.id, "next")) === null);
+  const transfers = await db.stockDocument.findMany({ where: { type: "TRANSFER" }, select: { id: true } });
+  const fromTransfer = await Promise.all(transfers.flatMap((t) => [inventory.adjacentStockDocument(t.id, "previous"), inventory.adjacentStockDocument(t.id, "next")]));
+  const neighbourTypes = await db.stockDocument.findMany({ where: { id: { in: fromTransfer.filter((x) => x).map((x) => x!.id) } }, select: { type: true } });
+  ok("  only vouchers of the same kind — a transfer's neighbours are transfers", transfers.length > 0 && neighbourTypes.every((t) => t.type === "TRANSFER"), { transfers: transfers.length, neighbours: neighbourTypes.length });
+  const outsider = await user("Hr", "HR");
+  as(outsider);
+  ok("  somebody who may not see stock gets nothing", (await inventory.adjacentStockDocument(middle.id, "next")) === null && (await inventory.stockPasteContext({ itemIds: [A.id], companyId: vendor.id })).items.length === 0);
+  as(clerk);
+  const paste = await inventory.stockPasteContext({ itemIds: [A.id, service.id, "no-such-item"], companyId: vendor.id });
+  ok("pasting finds the copied goods that keep stock, and the vendor — not a service or a missing item", paste.items.map((i) => i.id).join() === A.id && paste.company?.id === vendor.id, paste);
+
   // ── Integrity ──────────────────────────────────────────────────────────────────────────────────
   section("Everything agrees");
   const entries = await db.journalEntry.findMany({ where: { source: "INVENTORY" }, select: { entryNumber: true, lines: { select: { debit: true, credit: true } } } });

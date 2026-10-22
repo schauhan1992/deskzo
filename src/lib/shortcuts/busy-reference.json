@@ -1,0 +1,1138 @@
+{
+  "sources": {
+    "faq": "https://busy.in/faqs/what-shortcut-keys-available-in-busy-answerid-68791/",
+    "guide": "https://busy.in/shortcut-keys-busy-software/",
+    "pdf": "https://content.busy.in/wp-content/uploads/2024/03/Busy-Software-Shortcut-Keys.pdf",
+    "tipsFaq": "https://busy.in/faqs/upgrade-visit-renewal/learn-busy/4/",
+    "help": "In BUSY, open Help → Shortcut Keys to confirm mappings for the installed version."
+  },
+  "shortcuts": [
+    {
+      "id": "help-online",
+      "keys": "F1",
+      "action": "Online help",
+      "category": "General",
+      "where": "General; current screen help may depend on focus",
+      "confidence": "official-faq",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "help",
+        "online help",
+        "support"
+      ]
+    },
+    {
+      "id": "add-account",
+      "keys": "Alt/Ctrl + F1",
+      "action": "Add new account",
+      "category": "General",
+      "where": "General / master creation",
+      "note": "The current web guide lists Ctrl+F1; FAQ and PDF list Alt/Ctrl+F1. Verify your BUSY release.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "account",
+        "new account",
+        "ledger master"
+      ]
+    },
+    {
+      "id": "add-item",
+      "keys": "Alt/Ctrl + F2",
+      "action": "Add item",
+      "category": "General",
+      "where": "General / master creation",
+      "note": "The current web guide lists Ctrl+F2; FAQ and PDF list Alt/Ctrl+F2. Verify your BUSY release.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "item",
+        "stock item",
+        "product"
+      ]
+    },
+    {
+      "id": "add-master",
+      "keys": "F3",
+      "action": "Add new master",
+      "category": "General",
+      "where": "General; also available in some data-entry grids",
+      "confidence": "official-faq",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "master",
+        "create master",
+        "new master"
+      ]
+    },
+    {
+      "id": "add-voucher",
+      "keys": "Alt/Ctrl + F3",
+      "action": "Add voucher",
+      "category": "General",
+      "where": "General / voucher creation",
+      "note": "The current web guide lists Ctrl+F3; FAQ and PDF list Alt/Ctrl+F3.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "voucher",
+        "new voucher",
+        "transaction"
+      ]
+    },
+    {
+      "id": "add-payment",
+      "keys": "Alt/Ctrl + F5",
+      "action": "Add payment voucher",
+      "category": "General",
+      "where": "General / voucher creation",
+      "note": "The current web guide lists Ctrl+F5; an older FAQ also mentions F5 in a different quick-tip context.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "payment",
+        "payment voucher"
+      ]
+    },
+    {
+      "id": "add-receipt",
+      "keys": "Alt/Ctrl + F6",
+      "action": "Add receipt voucher",
+      "category": "General",
+      "where": "General / voucher creation",
+      "note": "The current web guide lists Ctrl+F6.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "receipt",
+        "receipt voucher"
+      ]
+    },
+    {
+      "id": "add-journal",
+      "keys": "Alt/Ctrl + F7",
+      "action": "Add journal voucher",
+      "category": "General",
+      "where": "General / voucher creation",
+      "note": "The current web guide lists Ctrl+F7.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "journal",
+        "journal voucher"
+      ]
+    },
+    {
+      "id": "add-sales",
+      "keys": "Alt/Ctrl + F8",
+      "action": "Add sales voucher",
+      "category": "General",
+      "where": "General / voucher creation",
+      "note": "The current web guide lists Ctrl+F8.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "sales",
+        "sale",
+        "invoice"
+      ]
+    },
+    {
+      "id": "add-purchase",
+      "keys": "Alt/Ctrl + F9",
+      "action": "Add purchase voucher",
+      "category": "General",
+      "where": "General / voucher creation",
+      "note": "The current web guide lists Ctrl+F9.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "purchase",
+        "purchase voucher",
+        "bill"
+      ]
+    },
+    {
+      "id": "calculator",
+      "keys": "F10",
+      "action": "Calculator",
+      "category": "General",
+      "where": "General",
+      "confidence": "official-faq",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "calculator",
+        "calculate"
+      ]
+    },
+    {
+      "id": "balance-sheet",
+      "keys": "Alt/Ctrl + B",
+      "action": "Balance Sheet",
+      "category": "General",
+      "where": "Reports",
+      "note": "The current web guide lists Ctrl+B.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "balance sheet",
+        "assets",
+        "liabilities"
+      ]
+    },
+    {
+      "id": "trial-balance",
+      "keys": "Alt/Ctrl + T",
+      "action": "Trial Balance (grouped)",
+      "category": "General",
+      "where": "Reports",
+      "note": "Ctrl+Alt+T is also listed as Transactions Menu in the menu-navigation guide; context may differ.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq",
+        "pdf",
+        "guide"
+      ],
+      "searchTerms": [
+        "trial balance",
+        "account balance"
+      ]
+    },
+    {
+      "id": "stock-status",
+      "keys": "Alt/Ctrl + S",
+      "action": "Stock Status (grouped)",
+      "category": "General",
+      "where": "Inventory / reports",
+      "note": "Ctrl+S is listed by the current guide. FAQ also lists Alt/Ctrl+S for searching a call by call number during voucher entry; treat as context-dependent.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "stock status",
+        "inventory",
+        "stock"
+      ]
+    },
+    {
+      "id": "account-summary",
+      "keys": "Alt/Ctrl + A",
+      "action": "Account Summary / Accounts Monthly Summary",
+      "category": "General",
+      "where": "Reports",
+      "note": "Current guide says Account Summary; older official PDF says Accounts Monthly Summary. Ctrl+Alt+A is also listed for Administration Menu.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "account summary",
+        "monthly summary",
+        "accounts"
+      ]
+    },
+    {
+      "id": "account-ledger",
+      "keys": "Alt/Ctrl + L",
+      "action": "Account Ledger",
+      "category": "General",
+      "where": "Reports",
+      "note": "The current web guide lists Ctrl+L.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "account ledger",
+        "ledger",
+        "account statement"
+      ]
+    },
+    {
+      "id": "item-summary",
+      "keys": "Alt/Ctrl + I",
+      "action": "Item Summary / Item Monthly Summary",
+      "category": "General",
+      "where": "Inventory reports",
+      "note": "Current guide says Item Summary; official PDF says Item Monthly Summary.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "item summary",
+        "monthly item summary",
+        "inventory"
+      ]
+    },
+    {
+      "id": "stock-ledger",
+      "keys": "Ctrl + D",
+      "action": "Stock Ledger / Item Ledger",
+      "category": "General",
+      "where": "Inventory reports",
+      "note": "Conflicts with the official FAQ, which lists Ctrl+D for batch deletion of vouchers/masters. Confirm the exact action in the installed version before use.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq",
+        "guide"
+      ],
+      "searchTerms": [
+        "stock ledger",
+        "item ledger",
+        "inventory",
+        "batch deletion"
+      ]
+    },
+    {
+      "id": "gst-summary",
+      "keys": "Alt/Ctrl + G",
+      "action": "GST Summary",
+      "category": "General",
+      "where": "GST reports",
+      "note": "The older official PDF lists Item Ledger for the same key family. Confirm version and context.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq",
+        "pdf"
+      ],
+      "searchTerms": [
+        "GST",
+        "tax summary",
+        "item ledger"
+      ]
+    },
+    {
+      "id": "item-ledger",
+      "keys": "Alt/Ctrl + G",
+      "action": "Item Ledger",
+      "category": "Context-specific / verify",
+      "where": "Inventory reports",
+      "note": "Listed in the older official PDF; the official FAQ lists the same key family for GST Summary.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "pdf",
+        "faq"
+      ],
+      "searchTerms": [
+        "item ledger",
+        "inventory ledger",
+        "GST summary"
+      ]
+    },
+    {
+      "id": "switch-user",
+      "keys": "Alt/Ctrl + U",
+      "action": "Switch User",
+      "category": "General",
+      "where": "User / session",
+      "note": "Older PDF also lists Alt/Ctrl+U for Utilities and Alt+Ctrl+U for Switch User.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq",
+        "pdf",
+        "guide"
+      ],
+      "searchTerms": [
+        "switch user",
+        "change user",
+        "utilities",
+        "logout"
+      ]
+    },
+    {
+      "id": "utilities",
+      "keys": "Alt/Ctrl + U",
+      "action": "Utilities",
+      "category": "Context-specific / verify",
+      "where": "Utilities / general menu",
+      "note": "Listed in the older official PDF; the same key family is listed for Switch User in the official FAQ/current guide.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "pdf",
+        "faq",
+        "guide"
+      ],
+      "searchTerms": [
+        "utilities",
+        "switch user",
+        "tools"
+      ]
+    },
+    {
+      "id": "switch-user-old-pdf",
+      "keys": "Alt + Ctrl + U",
+      "action": "Switch User",
+      "category": "Context-specific / verify",
+      "where": "User / session",
+      "note": "Exact modifier combination shown in the older official PDF. Do not conflate this with the PDF's Alt/Ctrl+U Utilities entry.",
+      "confidence": "official-pdf",
+      "sources": [
+        "pdf"
+      ],
+      "searchTerms": [
+        "switch user",
+        "change user",
+        "session"
+      ]
+    },
+    {
+      "id": "configuration",
+      "keys": "Alt/Ctrl + F",
+      "action": "Configuration",
+      "category": "General",
+      "where": "Configuration",
+      "confidence": "official-faq",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "configuration",
+        "settings",
+        "master configuration"
+      ]
+    },
+    {
+      "id": "lock-program",
+      "keys": "Alt/Ctrl + K",
+      "action": "Lock Program",
+      "category": "General",
+      "where": "Application security",
+      "confidence": "official-faq",
+      "sources": [
+        "faq"
+      ],
+      "searchTerms": [
+        "lock",
+        "lock program",
+        "security"
+      ]
+    },
+    {
+      "id": "batch-delete",
+      "keys": "Ctrl + Alt + D",
+      "action": "Batch deletion of vouchers / masters",
+      "category": "Context-specific / verify",
+      "where": "Data maintenance",
+      "note": "Conflicts with the current official web guide, which lists Ctrl+Alt+D for Display Menu. Deletion is destructive: verify selection and your BUSY version.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq",
+        "guide"
+      ],
+      "destructive": true,
+      "searchTerms": [
+        "batch deletion",
+        "delete vouchers",
+        "delete masters",
+        "display menu"
+      ]
+    },
+    {
+      "id": "data-import-export",
+      "keys": "Alt/Ctrl + E",
+      "action": "Data Export / Import",
+      "category": "General",
+      "where": "Data tools",
+      "confidence": "official-faq",
+      "sources": [
+        "faq",
+        "pdf"
+      ],
+      "searchTerms": [
+        "export",
+        "import",
+        "data transfer"
+      ]
+    },
+    {
+      "id": "notes-manager",
+      "keys": "Alt/Ctrl + N",
+      "action": "Notes Manager",
+      "category": "General",
+      "where": "Notes / utilities",
+      "confidence": "official-faq",
+      "sources": [
+        "faq",
+        "pdf"
+      ],
+      "searchTerms": [
+        "notes",
+        "notes manager"
+      ]
+    },
+    {
+      "id": "switch-tax-type",
+      "keys": "F12",
+      "action": "Switch Tax Type",
+      "category": "Context-specific / verify",
+      "where": "General tax context",
+      "note": "The same key is listed for Copy Voucher/Master to clipboard during voucher entry. Action depends on the active screen.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq"
+      ],
+      "searchTerms": [
+        "tax type",
+        "GST",
+        "F12",
+        "switch tax"
+      ]
+    },
+    {
+      "id": "implementation-notes",
+      "keys": "Ctrl + Alt + Shift + N",
+      "action": "Input Implementation Notes",
+      "category": "General",
+      "where": "Implementation / notes",
+      "confidence": "official-faq",
+      "sources": [
+        "faq"
+      ],
+      "searchTerms": [
+        "implementation notes",
+        "notes"
+      ]
+    },
+    {
+      "id": "query-transactions",
+      "keys": "Alt/Ctrl + Q",
+      "action": "Query on Transactions",
+      "category": "General",
+      "where": "Transaction query / reporting",
+      "confidence": "official-pdf",
+      "sources": [
+        "pdf"
+      ],
+      "searchTerms": [
+        "query",
+        "transactions",
+        "search transactions"
+      ]
+    },
+    {
+      "id": "vat-summary",
+      "keys": "Alt + V",
+      "action": "VAT Summary",
+      "category": "General",
+      "where": "Legacy VAT reporting",
+      "note": "Listed in an older official PDF; availability depends on release and tax configuration.",
+      "confidence": "official-pdf",
+      "sources": [
+        "pdf"
+      ],
+      "searchTerms": [
+        "VAT",
+        "tax summary"
+      ]
+    },
+    {
+      "id": "save-voucher",
+      "keys": "F2",
+      "action": "Save Master / Voucher",
+      "category": "Voucher entry",
+      "where": "Master or voucher form",
+      "confidence": "official-faq",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "save",
+        "save voucher",
+        "save master"
+      ]
+    },
+    {
+      "id": "narration-bom-help",
+      "keys": "F4",
+      "action": "Standard Narration / BOM Help",
+      "category": "Voucher entry",
+      "where": "Voucher entry / item grid",
+      "confidence": "official-faq",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "narration",
+        "BOM",
+        "bill of materials"
+      ]
+    },
+    {
+      "id": "record-list",
+      "keys": "F5",
+      "action": "List of Records",
+      "category": "Voucher entry",
+      "where": "Current voucher form / record selector",
+      "note": "An older official FAQ quick-tip also says F5 for Payment Voucher; the dedicated shortcut list uses Alt/Ctrl+F5 for payment voucher.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "records",
+        "record list",
+        "payment"
+      ]
+    },
+    {
+      "id": "change-voucher-type",
+      "keys": "F6",
+      "action": "Change Voucher Type",
+      "category": "Voucher entry",
+      "where": "Voucher entry",
+      "note": "F6 is also the key family for adding a receipt voucher in a general/menu context.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "change voucher",
+        "voucher type",
+        "receipt"
+      ]
+    },
+    {
+      "id": "repeat-last-value",
+      "keys": "F7 / Alt + R",
+      "action": "Repeat Last Value",
+      "category": "Voucher entry",
+      "where": "Voucher field / grid",
+      "confidence": "official-faq",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "repeat",
+        "last value",
+        "duplicate value"
+      ]
+    },
+    {
+      "id": "delete-master-voucher",
+      "keys": "F8",
+      "action": "Delete Selected Master / Voucher",
+      "category": "Voucher entry",
+      "where": "Selected master or voucher",
+      "note": "Destructive action. Confirm the selected record before using.",
+      "confidence": "official-faq",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "destructive": true,
+      "searchTerms": [
+        "delete",
+        "remove voucher",
+        "delete master"
+      ]
+    },
+    {
+      "id": "delete-grid-row",
+      "keys": "F9",
+      "action": "Delete Selected Row in Grid",
+      "category": "Voucher entry",
+      "where": "Active data-entry grid",
+      "note": "Destructive action. Confirm the selected row before using.",
+      "confidence": "official-faq",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "destructive": true,
+      "searchTerms": [
+        "delete row",
+        "grid",
+        "remove row"
+      ]
+    },
+    {
+      "id": "pick-order-data",
+      "keys": "F11",
+      "action": "Pick Data from Orders / Challans",
+      "category": "Voucher entry",
+      "where": "Voucher entry",
+      "note": "An older official FAQ quick-tip also says F11 changes the financial year; verify the active context/version.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "orders",
+        "challan",
+        "pick data",
+        "financial year"
+      ]
+    },
+    {
+      "id": "modify-master",
+      "keys": "Alt/Ctrl + M",
+      "action": "Modify Master",
+      "category": "Voucher entry",
+      "where": "Master / voucher workflow",
+      "note": "FAQ/PDF list Alt/Ctrl+M to modify a master. The current guide lists Alt+P for printing a record; other Alt+P meanings are context-specific.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "modify master",
+        "edit master",
+        "print record"
+      ]
+    },
+    {
+      "id": "pending-batches",
+      "keys": "Alt + P",
+      "action": "Show Pending Batches",
+      "category": "Voucher entry",
+      "where": "Voucher entry / batch context",
+      "note": "Other BUSY sources list Alt+P for printing a record/voucher or MRP-wise stock, depending on context.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "pending batches",
+        "print",
+        "MRP",
+        "stock"
+      ]
+    },
+    {
+      "id": "pending-orders",
+      "keys": "Alt + O",
+      "action": "Show Pending Orders",
+      "category": "Voucher entry",
+      "where": "Voucher entry / order context",
+      "confidence": "official-faq",
+      "sources": [
+        "faq",
+        "pdf"
+      ],
+      "searchTerms": [
+        "pending orders",
+        "orders"
+      ]
+    },
+    {
+      "id": "print-record",
+      "keys": "Alt + P",
+      "action": "Print Record",
+      "category": "Current screen / navigation",
+      "where": "Current record / screen",
+      "note": "The same key is also listed for Pending Batches and MRP-wise Stock in other contexts/sources.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "guide",
+        "faq",
+        "pdf"
+      ],
+      "searchTerms": [
+        "print record",
+        "print",
+        "pending batches",
+        "MRP-wise stock"
+      ]
+    },
+    {
+      "id": "mrp-wise-stock",
+      "keys": "Alt + P",
+      "action": "Show MRP-wise Stock",
+      "category": "Current screen / navigation",
+      "where": "Inventory / stock context",
+      "note": "Older official PDF mapping; the same key is also listed for printing and pending batches in other contexts/sources.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "pdf",
+        "guide",
+        "faq"
+      ],
+      "searchTerms": [
+        "MRP",
+        "stock",
+        "print record",
+        "pending batches"
+      ]
+    },
+    {
+      "id": "pending-challans",
+      "keys": "Alt + C",
+      "action": "Show Pending Challans",
+      "category": "Voucher entry",
+      "where": "Voucher entry / challan context",
+      "confidence": "official-pdf",
+      "sources": [
+        "pdf"
+      ],
+      "searchTerms": [
+        "pending challans",
+        "challan"
+      ]
+    },
+    {
+      "id": "previous-record",
+      "keys": "Page Up",
+      "action": "Previous Record",
+      "category": "Current screen / navigation",
+      "where": "Record navigation",
+      "confidence": "official-faq",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "previous",
+        "previous record",
+        "back"
+      ]
+    },
+    {
+      "id": "next-record",
+      "keys": "Page Down",
+      "action": "Next Record",
+      "category": "Current screen / navigation",
+      "where": "Record navigation",
+      "confidence": "official-faq",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "next",
+        "next record",
+        "forward"
+      ]
+    },
+    {
+      "id": "print-voucher",
+      "keys": "Alt/Ctrl + P",
+      "action": "Print Voucher / Document",
+      "category": "Voucher entry",
+      "where": "Voucher / document",
+      "note": "Ctrl+Alt+P is also listed for Printing Menu; Alt+P has other context-specific meanings.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq",
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "print",
+        "print voucher",
+        "document",
+        "printing menu"
+      ]
+    },
+    {
+      "id": "copy-voucher",
+      "keys": "F12",
+      "action": "Copy Voucher / Master to Clipboard",
+      "category": "Voucher entry",
+      "where": "Voucher / master editing",
+      "note": "F12 is also listed as Switch Tax Type in a general context.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq",
+        "pdf"
+      ],
+      "searchTerms": [
+        "copy voucher",
+        "clipboard",
+        "duplicate",
+        "F12"
+      ]
+    },
+    {
+      "id": "paste-voucher",
+      "keys": "Alt + F12",
+      "action": "Copy Voucher / Master from Clipboard; copy voucher from XML",
+      "category": "Voucher entry",
+      "where": "Voucher / master editing",
+      "confidence": "official-faq",
+      "sources": [
+        "faq",
+        "pdf"
+      ],
+      "searchTerms": [
+        "paste",
+        "clipboard",
+        "XML",
+        "copy from clipboard"
+      ]
+    },
+    {
+      "id": "cancel-activate-voucher",
+      "keys": "Alt/Ctrl + X",
+      "action": "Cancel / Activate Voucher",
+      "category": "Voucher entry",
+      "where": "Selected voucher",
+      "note": "Current web guide lists Alt+X. Confirm the active record before toggling status.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq",
+        "guide"
+      ],
+      "searchTerms": [
+        "cancel",
+        "activate",
+        "voucher status"
+      ]
+    },
+    {
+      "id": "call-search",
+      "keys": "Alt/Ctrl + S",
+      "action": "Search a Call by Call Number",
+      "category": "Context-specific / verify",
+      "where": "Call-related voucher / screen",
+      "note": "The same key family is listed for Stock Status in general shortcuts. Only use in the call-related context.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "faq"
+      ],
+      "searchTerms": [
+        "call number",
+        "search call",
+        "stock status"
+      ]
+    },
+    {
+      "id": "payment-voucher-quick-tip",
+      "keys": "F5",
+      "action": "Add Payment Voucher",
+      "category": "Context-specific / verify",
+      "where": "Quick-tip FAQ / context-sensitive",
+      "note": "A separate official BUSY quick-tip FAQ says F5 for Payment Voucher. The dedicated shortcut FAQ lists Alt/Ctrl+F5, while the current guide lists Ctrl+F5. Verify this on the active screen/version.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "tipsFaq",
+        "faq",
+        "guide"
+      ],
+      "searchTerms": [
+        "payment",
+        "payment voucher",
+        "quick tip"
+      ]
+    },
+    {
+      "id": "change-financial-year",
+      "keys": "F11",
+      "action": "Change Financial Year",
+      "category": "Context-specific / verify",
+      "where": "Company / financial-year context",
+      "note": "A separate official BUSY quick-tip FAQ lists F11 for changing financial year. The dedicated shortcut FAQ and PDF use F11 for picking order/challan data during voucher entry.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "tipsFaq",
+        "faq",
+        "pdf"
+      ],
+      "searchTerms": [
+        "financial year",
+        "year",
+        "F11",
+        "orders",
+        "challan"
+      ]
+    },
+    {
+      "id": "main-menu",
+      "keys": "Ctrl + Alt + M",
+      "action": "Main Menu",
+      "category": "Menu navigation",
+      "where": "Menu navigation",
+      "note": "Also appears as Alt/Ctrl+M for Modify Master in voucher context.",
+      "confidence": "official-guide",
+      "sources": [
+        "guide"
+      ],
+      "searchTerms": [
+        "main menu",
+        "menu"
+      ]
+    },
+    {
+      "id": "administration-menu",
+      "keys": "Ctrl + Alt + A",
+      "action": "Administration Menu",
+      "category": "Menu navigation",
+      "where": "Menu navigation",
+      "note": "Alt/Ctrl+A is also listed for Account Summary / Accounts Monthly Summary.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "administration",
+        "admin menu",
+        "account summary"
+      ]
+    },
+    {
+      "id": "transactions-menu",
+      "keys": "Ctrl + Alt + T",
+      "action": "Transactions Menu",
+      "category": "Menu navigation",
+      "where": "Menu navigation",
+      "note": "Alt/Ctrl+T is also listed for Trial Balance in reporting context.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "guide",
+        "pdf"
+      ],
+      "searchTerms": [
+        "transactions menu",
+        "transaction",
+        "trial balance"
+      ]
+    },
+    {
+      "id": "display-menu",
+      "keys": "Ctrl + Alt + D",
+      "action": "Display Menu",
+      "category": "Menu navigation",
+      "where": "Menu navigation",
+      "note": "Official FAQ lists Ctrl+Alt+D for batch deletion. This mapping conflicts; verify before use.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "guide",
+        "faq"
+      ],
+      "searchTerms": [
+        "display menu",
+        "batch deletion"
+      ]
+    },
+    {
+      "id": "printing-menu",
+      "keys": "Ctrl + Alt + P",
+      "action": "Printing Menu",
+      "category": "Menu navigation",
+      "where": "Menu navigation",
+      "note": "Alt/Ctrl+P is also listed for printing the current voucher/document.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "guide",
+        "faq"
+      ],
+      "searchTerms": [
+        "printing menu",
+        "print"
+      ]
+    },
+    {
+      "id": "help-menu",
+      "keys": "Ctrl + Alt + H",
+      "action": "Help Menu",
+      "category": "Menu navigation",
+      "where": "Menu navigation",
+      "confidence": "official-guide",
+      "sources": [
+        "guide"
+      ],
+      "searchTerms": [
+        "help menu",
+        "help"
+      ]
+    },
+    {
+      "id": "favourites-menu",
+      "keys": "Ctrl + Alt + F",
+      "action": "Favourites Menu",
+      "category": "Menu navigation",
+      "where": "Menu navigation",
+      "note": "Alt/Ctrl+F is also listed for Configuration. Context/version may change the action.",
+      "confidence": "conflicting-official-sources",
+      "sources": [
+        "guide",
+        "faq",
+        "pdf"
+      ],
+      "searchTerms": [
+        "favourites",
+        "favourites menu",
+        "configuration"
+      ]
+    }
+  ]
+}

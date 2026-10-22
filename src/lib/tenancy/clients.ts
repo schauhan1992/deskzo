@@ -301,7 +301,11 @@ const NOT_YET_EVERYWHERE = {
   // src/lib/banking/organisation-accounts.ts, which fall back when the column is not there yet.
   // and 20261121100000_letter_signatures_templates: read by name in src/lib/organisation.ts (the letter signature).
   organisationSettings: { vendorCodePrefix: true, letterSignatureDataUrl: true, letterSignByDefault: true },
-  branch: { defaultBankAccountId: true },
+  // and 20261122120000_geo_attendance: the office's point and attendance rule, read by name in src/lib/hr/clock.ts
+  // and src/actions/attendance-locations.ts, which treat a workspace without them as enforcing nothing.
+  branch: { defaultBankAccountId: true, latitude: true, longitude: true, geofenceRadiusM: true, geoMaxAccuracyM: true, geofenceEnforced: true, geoExceptionsAllowed: true },
+  // 20261122120000_geo_attendance: how a clocking's location was checked — written and read by name in src/lib/hr/clock.ts.
+  attendanceLocation: { check: true, branchId: true, distanceM: true, radiusM: true, mocked: true, exceptionId: true },
   // and 20261029120000_document_cancel_reason_pi_issued: read by name in src/lib/documents/cancellation.ts.
   // and 20261122110000_finance_accounts: the warehouse its goods leave or arrive in (src/lib/inventory/documents.ts).
   tradeDocument: { bankAccountId: true, cancelReason: true, cancelledAt: true, cancelledById: true, paidBefore: true, warehouseId: true },

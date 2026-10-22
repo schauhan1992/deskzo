@@ -14,6 +14,7 @@ import { currentTenant } from "@/lib/tenancy/resolve";
 import { canBroadcastNotes } from "@/actions/note";
 import { Sidebar } from "@/components/layout/sidebar";
 import { NavBreadcrumb } from "@/components/layout/nav-breadcrumb";
+import { ShortcutsProvider } from "@/components/shortcuts/shortcuts-provider";
 import { SideRail } from "@/components/layout/side-rail";
 import { CreateMenu } from "@/components/layout/create-menu";
 import { NotificationBell } from "@/components/layout/notification-bell";
@@ -346,7 +347,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 <span className="block truncate text-[11px] text-subtle">{viewer?.roleRef.name ?? shownUser?.role}</span>
               </span>
             </Link>
+            {/* Its id is how BUSY's switch-user and lock keys sign out (src/components/shortcuts). */}
             <form
+              id="deskzo-sign-out"
               action={async () => {
                 "use server";
                 // Cleared first: the ticket is bound to this admin's id, so leaving it behind would
@@ -387,6 +390,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <NavBreadcrumb navigation={navigation} />
           {children}
         </main>
+        {/* BUSY's shortcut keys, over whatever page this is (src/lib/shortcuts/busy.ts). */}
+        <ShortcutsProvider navigation={navigation} />
         {today && <CelebrationSplash moments={today.moments} />}
         {wishes.length > 0 && (
           <Suspense fallback={null}>

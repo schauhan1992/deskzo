@@ -58,6 +58,25 @@ export default async function StockVoucherPage({ params }: { params: Promise<{ i
             status={doc.status}
             needsApproval={doc.needsApproval}
             can={{ ...doc.can, receive: caps.transfer }}
+            copySource={{
+              kind: "stock",
+              type: doc.type,
+              warehouseId: doc.warehouseId,
+              toWarehouseId: doc.toWarehouseId,
+              companyId: doc.companyId,
+              reference: doc.reference ?? "",
+              reason: doc.reason ?? "",
+              notes: doc.notes ?? "",
+              lines: doc.lines.map((l) => ({
+                itemId: l.item.id,
+                itemName: l.item.name,
+                quantity: String(isCount ? (l.countedQty ?? "") : l.quantity),
+                unitCost: l.unitCost == null ? "" : String(l.unitCost),
+                batchNo: l.batchNo ?? l.batch?.batchNo ?? "",
+                note: l.note ?? "",
+              })),
+              copiedFrom: doc.number,
+            }}
           />
         </div>
       </div>

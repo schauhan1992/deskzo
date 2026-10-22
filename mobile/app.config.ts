@@ -64,7 +64,7 @@ const config: ExpoConfig = {
     [
       "expo-location",
       {
-        locationWhenInUsePermission: "Deskzo saves where you are when you clock in or out, with your attendance. Only then — never in the background.",
+        locationWhenInUsePermission: "Deskzo checks you are at your office, and saves where you are with your attendance, when you clock in or out. Only then — never in the background.",
         locationAlwaysAndWhenInUsePermission: false,
         locationAlwaysPermission: false,
         motionUsagePermission: false,

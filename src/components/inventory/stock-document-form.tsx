@@ -13,6 +13,7 @@ import {
   saveStockDocument,
   searchStockItems,
   searchVendors,
+  stockPasteContext,
   type SaveStockDocumentInput,
 } from "@/actions/inventory";
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,8 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { ActionNotice } from "@/components/ui/action-notice";
 import { qty, rupees, stockTypeHint, stockTypeLabel, stockTypeNew } from "@/components/inventory/labels";
+import { focusedLine, shortcutNotice, useShortcuts } from "@/components/shortcuts/use-shortcuts";
+import { copiedVoucher, copyVoucher } from "@/lib/shortcuts/clipboard";
 
 /**
  * Writing a stock voucher (owner, 22 Oct 2026): one form for the five kinds, showing each the columns it
@@ -120,6 +123,12 @@ export function StockDocumentForm({
   const needsVendor = type === "GRN" || type === "PURCHASE_RETURN";
   const reasonRequired = type === "ADJUSTMENT" || type === "PURCHASE_RETURN";
 
+  const linesRef = useRef<HTMLDivElement>(null);
+  /** What the form held when it opened — F5 asks before leaving anything else behind. */
+  const snapshot = () =>
+    JSON.stringify([date, warehouseId, toWarehouseId, vendor?.id, purchaseOrder?.id, reference, reason, notes, lines.map((l) => ({ ...l, key: "" }))]);
+  const [opened] = useState(snapshot);
+
   const patch = (key: string, change: Partial<FormLine>) => setLines((all) => all.map((l) => (l.key === key ? { ...l, ...change } : l)));
   const remove = (key: string) => setLines((all) => (all.length > 1 ? all.filter((l) => l.key !== key) : [emptyLine()]));
   /** Whether a line brings stock in — its batch is typed, rather than picked from what's on hand. */
@@ -219,6 +228,144 @@ export function StockDocumentForm({
       router.refresh();
     });
   }
+
+  /** A field inside the lines: the line it's on, and its column (`data-field`). */
+  function lineInFocus() {
+    const at = focusedLine();
+    return at && linesRef.current?.contains(document.activeElement) && lines[at.index] ? { ...at, line: lines[at.index]! } : null;
+  }
+
+  /** Focus a line's first field, after React has drawn it. */
+  function focusLine(index: number) {
+    requestAnimationFrame(() => linesRef.current?.querySelector<HTMLElement>(`[data-line="${index}"] input, [data-line="${index}"] select`)?.focus());
+  }
+
+  // BUSY's keys on a stock voucher's form (src/lib/shortcuts/busy.ts, scope "form"). A stock voucher keeps its
+  // kind and has no list of narrations, so F4 and F6 aren't this form's.
+  useShortcuts("form", {
+    save: () => {
+      if (!pending && !loading) submit();
+    },
+    "record-list": () => {
+      if (snapshot() !== opened && !window.confirm("Leave this voucher without saving it?")) return;
+      router.push(isGrn ? "/items/receipts" : `/items/stock?type=${type}`);
+    },
+    repeat: () => {
+      const at = lineInFocus();
+      if (!at?.field) return shortcutNotice("Put the cursor in a line's field to repeat the one above it.");
+      const above = lines[at.index - 1];
+      if (!above) return shortcutNotice("Nothing above to repeat.");
+      const sameItem = !!above.item && above.item.id === at.line.item?.id;
+      const change: Partial<FormLine> | null =
+        at.field === "item"
+          ? { ...emptyLine(above.item), key: at.line.key }
+          : at.field === "quantity"
+            ? isCount
+              ? { countedQty: above.countedQty }
+              : { quantity: above.quantity }
+            : at.field === "rejected"
+              ? { rejectedQty: above.rejectedQty }
+              : at.field === "unitCost"
+                ? { unitCost: above.unitCost }
+                : at.field === "batch"
+                  ? { batchNo: above.batchNo, ...(sameItem ? { batchId: above.batchId } : {}) }
+                  : at.field === "mfg"
+                    ? { mfgDate: above.mfgDate }
+                    : at.field === "expiry"
+                      ? { expiryDate: above.expiryDate }
+                      : at.field === "note"
+                        ? { note: above.note }
+                        : null;
+      if (!change) return shortcutNotice("Serial numbers are each line's own — they aren't repeated.");
+      patch(at.line.key, change);
+    },
+    "delete-row": () => {
+      const at = lineInFocus();
+      if (!at) return shortcutNotice("Put the cursor on the line to delete.");
+      remove(at.line.key);
+      focusLine(Math.max(0, Math.min(at.index, lines.length - 2)));
+    },
+    "pick-orders": () => {
+      if (!isGrn) return shortcutNotice("Pending orders are picked on a goods receipt.");
+      // Focusing the box lists the open purchase orders; choosing one brings in what is still to come.
+      document.getElementById(`${id}-po`)?.focus();
+    },
+    "pending-batches": () => {
+      const at = lineInFocus();
+      const item = at?.line.item;
+      if (!at || !item) return shortcutNotice("Put the cursor on a line with an item, to see its batches.");
+      if (!item.trackBatches) return shortcutNotice(`${item.name} doesn't keep batches.`);
+      if (incoming(at.line)) return shortcutNotice("This line brings stock in — type its batch number.");
+      const select = linesRef.current?.querySelector<HTMLSelectElement>(`[data-line="${at.index}"] [data-field="batch"] select`);
+      if (!select) return;
+      select.focus();
+      try {
+        select.showPicker();
+      } catch {
+        // Not every browser opens a select's list from code; it is focused, and the arrow keys choose.
+      }
+    },
+    "copy-voucher": () => {
+      const kept = copyVoucher({
+        kind: "stock",
+        type,
+        warehouseId,
+        toWarehouseId: type === "TRANSFER" ? toWarehouseId || null : null,
+        companyId: needsVendor ? (vendor?.id ?? null) : null,
+        reference,
+        reason,
+        notes,
+        lines: lines
+          .filter((l) => l.item)
+          .map((l) => ({ itemId: l.item!.id, itemName: l.item!.name, quantity: isCount ? l.countedQty : l.quantity, unitCost: l.unitCost, batchNo: l.batchNo, note: l.note })),
+        copiedFrom: initial.number ?? `a new ${stockTypeLabel[type].toLowerCase()}`,
+        copiedAt: new Date().toISOString(),
+      });
+      shortcutNotice(kept ? "Copied — Alt + F12 on a new stock voucher of the same kind fills it in." : "This browser won't keep a copy (private window or blocked storage).");
+    },
+    "paste-voucher": () => {
+      const copy = copiedVoucher("stock");
+      if (!copy) return shortcutNotice("Nothing copied yet — F12 on a stock voucher copies it.");
+      if (copy.type !== type) {
+        return shortcutNotice(`The copy is a ${stockTypeLabel[copy.type as StockDocumentType]?.toLowerCase() ?? "different kind of voucher"}; this is a ${stockTypeLabel[type].toLowerCase()}.`);
+      }
+      if (snapshot() !== opened && !window.confirm(`Replace what's on this form with ${copy.copiedFrom}?`)) return;
+      setLoading("Filling it in from the copy…");
+      void stockPasteContext({ itemIds: copy.lines.map((l) => l.itemId), companyId: copy.companyId })
+        .then(({ items, company }) => {
+          if (warehouses.some((w) => w.id === copy.warehouseId)) setWarehouseId(copy.warehouseId);
+          if (type === "TRANSFER" && copy.toWarehouseId && warehouses.some((w) => w.id === copy.toWarehouseId)) setToWarehouseId(copy.toWarehouseId);
+          if (needsVendor) {
+            setPurchaseOrder(null);
+            setVendor(company);
+          }
+          setReference(copy.reference);
+          setReason(copy.reason);
+          setNotes(copy.notes);
+          const filled = copy.lines.flatMap((l) => {
+            const item = items.find((i) => i.id === l.itemId);
+            if (!item) return [];
+            const formItem: FormItem = { ...item, costPrice: item.costPrice == null ? null : Number(item.costPrice) };
+            return [
+              {
+                ...emptyLine(formItem),
+                ...(isCount ? { countedQty: l.quantity } : { quantity: l.quantity }),
+                unitCost: l.unitCost,
+                batchNo: l.batchNo,
+                note: l.note,
+              },
+            ];
+          });
+          setLines(filled.length ? filled : [emptyLine()]);
+          const skipped = copy.lines.length - filled.length;
+          setError(null);
+          shortcutNotice(
+            `Filled in from ${copy.copiedFrom}${skipped ? ` — ${skipped} line(s) left out: their items no longer keep stock here` : ""}. Nothing is saved until F2.`,
+          );
+        })
+        .finally(() => setLoading(null));
+    },
+  });
 
   const others = warehouses.filter((w) => w.id !== warehouseId);
   const hasBatchOrSerial = lines.some((l) => l.item?.trackBatches || l.item?.trackSerials);
@@ -328,7 +475,7 @@ export function StockDocumentForm({
           {loading && <p className="text-xs text-muted">{loading}</p>}
           {isAdjustment && <p className="text-xs text-muted">A positive quantity is stock found; a negative one is stock missing, damaged or written off.</p>}
           {isCount && <p className="text-xs text-muted">Enter what was counted. Posting compares it with what the books say at that moment, and adjusts by the difference.</p>}
-          <div className="overflow-x-auto">
+          <div ref={linesRef} className="overflow-x-auto">
             <table className="w-full min-w-[720px] text-sm">
               <thead className="text-left text-xs uppercase tracking-wide text-muted">
                 <tr>
@@ -345,6 +492,7 @@ export function StockDocumentForm({
                 {lines.map((l, i) => (
                   <LineRow
                     key={l.key}
+                    index={i}
                     n={i + 1}
                     line={l}
                     type={type}
@@ -377,15 +525,22 @@ export function StockDocumentForm({
             Cancel
           </Button>
         </Link>
-        <Button type="button" onClick={submit} disabled={pending || !!loading}>
+        <Button type="button" onClick={submit} disabled={pending || !!loading} aria-keyshortcuts="F2" title="Save draft (F2)">
           {pending ? "Saving…" : "Save draft"}
         </Button>
       </div>
+      {/* BUSY's keys on this form — the whole list is "?" (src/components/shortcuts). */}
+      <p className="text-right text-xs text-subtle">
+        F2 save · F5 list · F7 repeat the line above · F9 delete a line
+        {isGrn && " · F11 pick a purchase order"}
+        {(type === "TRANSFER" || isAdjustment || type === "PURCHASE_RETURN") && " · Alt+P batches on hand"} · F12 copy · Alt+F12 paste · ? all keys
+      </p>
     </div>
   );
 }
 
 function LineRow({
+  index,
   n,
   line,
   type,
@@ -395,6 +550,7 @@ function LineRow({
   onChange,
   onRemove,
 }: {
+  index: number;
   n: number;
   line: FormLine;
   type: StockDocumentType;
@@ -427,8 +583,8 @@ function LineRow({
 
   return (
     <>
-      <tr className="border-t border-line align-top">
-        <td className="py-2 pr-2">
+      <tr data-line={index} className="border-t border-line align-top">
+        <td data-field="item" className="py-2 pr-2">
           <ItemPicker inputId={`${id}-item`} label={`Line ${n} item`} value={item} onChange={(it) => onChange({ ...emptyLine(it), key: line.key })} />
           {item && (
             <div className="mt-1 text-xs text-subtle">
@@ -453,7 +609,7 @@ function LineRow({
           </td>
         )}
         {isCount && <td className="px-2 py-2 text-right tabular-nums text-muted">{line.systemQty == null ? "—" : qty(line.systemQty)}</td>}
-        <td className="px-2 py-2">
+        <td data-field="quantity" className="px-2 py-2">
           <Input
             aria-label={`Line ${n} ${isCount ? "counted" : "quantity"}`}
             type="number"
@@ -471,12 +627,12 @@ function LineRow({
           )}
         </td>
         {isGrn && (
-          <td className="px-2 py-2">
+          <td data-field="rejected" className="px-2 py-2">
             <Input aria-label={`Line ${n} rejected`} type="number" step="0.001" min={0} className="w-24" value={line.rejectedQty} onChange={(e) => onChange({ rejectedQty: e.target.value })} />
           </td>
         )}
         {(isGrn || isAdjustment) && (
-          <td className="px-2 py-2">
+          <td data-field="unitCost" className="px-2 py-2">
             <Input
               aria-label={`Line ${n} unit cost`}
               type="number"
@@ -498,27 +654,27 @@ function LineRow({
         </td>
       </tr>
       {item && (item.trackBatches || (item.trackSerials && !isCount)) && (
-        <tr className="align-top">
+        <tr data-line={index} className="align-top">
           <td colSpan={7} className="pb-3">
             <div className="flex flex-wrap items-end gap-3 rounded-base bg-surface-sunken px-3 py-2">
               {item.trackBatches && incoming && (
                 <>
-                  <div className="space-y-1">
+                  <div data-field="batch" className="space-y-1">
                     <Label htmlFor={`${id}-bn`} className="text-xs">Batch no.</Label>
                     <Input id={`${id}-bn`} className="h-8 w-36" value={line.batchNo} onChange={(e) => onChange({ batchNo: e.target.value })} />
                   </div>
-                  <div className="space-y-1">
+                  <div data-field="mfg" className="space-y-1">
                     <Label htmlFor={`${id}-mfg`} className="text-xs">Made on</Label>
                     <Input id={`${id}-mfg`} type="date" className="h-8 w-40" value={line.mfgDate} onChange={(e) => onChange({ mfgDate: e.target.value })} />
                   </div>
-                  <div className="space-y-1">
+                  <div data-field="expiry" className="space-y-1">
                     <Label htmlFor={`${id}-exp`} className="text-xs">Expires on{item.trackExpiry ? "" : " (optional)"}</Label>
                     <Input id={`${id}-exp`} type="date" className="h-8 w-40" value={line.expiryDate} onChange={(e) => onChange({ expiryDate: e.target.value })} />
                   </div>
                 </>
               )}
               {item.trackBatches && !incoming && (
-                <div className="space-y-1">
+                <div data-field="batch" className="space-y-1">
                   <Label htmlFor={`${id}-batch`} className="text-xs">Batch</Label>
                   <Select id={`${id}-batch`} className="h-8 w-64" value={line.batchId} onChange={(e) => onChange({ batchId: e.target.value })}>
                     <option value="">{isCount ? "Choose the batch counted…" : "First to expire, automatically"}</option>
@@ -532,7 +688,7 @@ function LineRow({
                 </div>
               )}
               {item.trackSerials && !isCount && (
-                <div className="min-w-[260px] flex-1 space-y-1">
+                <div data-field="serials" className="min-w-[260px] flex-1 space-y-1">
                   <Label htmlFor={`${id}-sn`} className="text-xs">
                     Serial numbers — one per unit ({serialCount} given)
                   </Label>

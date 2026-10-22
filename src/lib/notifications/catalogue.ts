@@ -103,6 +103,8 @@ export const NOTIFICATION_CATALOGUE: NotificationDefinition[] = [
   { type: "LEAVE_DECIDED", label: "My leave is decided", when: "Your leave request is approved or rejected.", group: "people" },
   { type: "REGULARISATION_REQUESTED", label: "Attendance needs my approval", when: "Somebody asks to correct their attendance.", group: "people" },
   { type: "REGULARISATION_DECIDED", label: "My attendance fix is decided", when: "Your correction is approved or rejected.", group: "people" },
+  { type: "ATTENDANCE_EXCEPTION_REQUESTED", label: "A clock-in away from the office needs my approval", when: "Somebody asks to clock in or out away from their office's GPS area — for whoever approves attendance exceptions.", group: "people" },
+  { type: "ATTENDANCE_EXCEPTION_DECIDED", label: "My clock-in away from the office is decided", when: "Your attendance exception is approved, refused, granted to you, or revoked.", group: "people" },
   { type: "LETTER_ISSUED", label: "A letter is issued to me", when: "HR issues you an offer, confirmation or any other letter.", group: "people" },
   { type: "BIRTHDAY_TODAY", label: "Somebody's birthday", when: "A colleague has a birthday today.", group: "people" },
   { type: "WORK_ANNIVERSARY", label: "A work anniversary", when: "A colleague reaches a year with the company.", group: "people" },

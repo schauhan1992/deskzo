@@ -30,10 +30,10 @@ const blank: Draft = { code: "", name: "", branchId: "", address: "", isDefault:
  * The warehouses stock is kept in (owner, 22 Oct 2026) — a code, a name, the branch it belongs to, and which
  * one is the default. A warehouse holding stock can't be closed; it's emptied by a transfer first.
  */
-export function WarehousesManager({ warehouses, branches, canManage }: { warehouses: Warehouse[]; branches: { id: string; name: string }[]; canManage: boolean }) {
+export function WarehousesManager({ warehouses, branches, canManage, startNew = false }: { warehouses: Warehouse[]; branches: { id: string; name: string }[]; canManage: boolean; startNew?: boolean }) {
   const router = useRouter();
   const id = useId();
-  const [editing, setEditing] = useState<Draft | null>(null);
+  const [editing, setEditing] = useState<Draft | null>(startNew && canManage ? { ...blank } : null);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 

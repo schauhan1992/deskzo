@@ -372,6 +372,10 @@ enum NotificationType {
   LEAVE_DECIDED
   REGULARISATION_REQUESTED
   REGULARISATION_DECIDED
+  /// Somebody asks to clock in or out away from their office (GPS attendance, owner 22 Oct 2026).
+  ATTENDANCE_EXCEPTION_REQUESTED
+  /// Their attendance location exception is approved, refused, granted or revoked.
+  ATTENDANCE_EXCEPTION_DECIDED
   BIRTHDAY_TODAY
   WORK_ANNIVERSARY
   WISHES
@@ -923,6 +927,10 @@ model User {
   appPairings          AppPairing[]       @relation("AppPairings")
   appCallRequests      AppCallRequest[]   @relation("AppCallRequests")
   attendanceLocations  AttendanceLocation[] @relation("AttendanceLocations")
+  attendanceExceptions          AttendanceException[] @relation("AttendanceExceptions")
+  attendanceExceptionsRequested AttendanceException[] @relation("AttendanceExceptionsRequested")
+  attendanceExceptionsDecided   AttendanceException[] @relation("AttendanceExceptionsDecided")
+  attendanceExceptionsRevoked   AttendanceException[] @relation("AttendanceExceptionsRevoked")
 
   @@index([departmentId])
   @@index([managerId])
@@ -2001,6 +2009,19 @@ model Branch {
   /// Retired rather than deleted once anything names it.
   active       Boolean @default(true)
 
+  /// Where the office is, for clocking in and out there (owner, 22 Oct 2026; src/lib/hr/geofence.ts). Both or
+  /// neither: an office without them can't be checked against, and says so rather than letting anywhere pass.
+  latitude             Float?
+  longitude            Float?
+  /// How far from that point counts as at the office, in metres.
+  geofenceRadiusM      Int     @default(100)
+  /// The least sure a phone or browser may be of where it is, in metres, for its reading to be taken.
+  geoMaxAccuracyM      Int     @default(50)
+  /// Clocking in and out of this office needs a location inside the radius — or an approved exception.
+  geofenceEnforced     Boolean @default(false)
+  /// Whether an approved exception may stand in for being at the office.
+  geoExceptionsAllowed Boolean @default(true)
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   createdById String?
@@ -2016,6 +2037,7 @@ model Branch {
   revenueSchedules    RevenueSchedule[]
   accountingSchedules AccountingSchedule[]
   warehouses          Warehouse[]
+  attendanceLocations AttendanceLocation[] @relation("AttendanceLocationBranch")
 
   @@index([active])
   @@index([gstRegistrationId])
@@ -6114,15 +6136,106 @@ model AttendanceLocation {
   date        DateTime               @db.Date
   kind        AttendanceLocationKind
   at          DateTime               @default(now())
-  latitude    Float
-  longitude   Float
+  /// Null only where an approved exception let somebody clock with no location at all (GPS unavailable).
+  latitude    Float?
+  longitude   Float?
   /// How sure the phone was, in metres.
   accuracyM   Int?
   appDeviceId String?
   appDevice   AppDevice?             @relation(fields: [appDeviceId], references: [id], onDelete: SetNull)
 
+  /// What the clocking was checked against and how it came out (owner, 22 Oct 2026) — null on rows from before.
+  check       AttendanceGeoCheck?
+  branchId    String?
+  branch      Branch?                @relation("AttendanceLocationBranch", fields: [branchId], references: [id], onDelete: SetNull)
+  /// From the office's point, in metres, where both were known.
+  distanceM   Int?
+  /// The office's radius at the time, in metres.
+  radiusM     Int?
+  /// The phone said the reading came from a mock-location provider (Android) or was simulated (iOS).
+  mocked      Boolean?
+  exceptionId String?
+  exception   AttendanceException?   @relation(fields: [exceptionId], references: [id], onDelete: SetNull)
+
   @@index([userId, date])
+  @@index([exceptionId])
   @@map("attendance_locations")
+}
+
+/// How a clocking's location was taken (owner, 22 Oct 2026).
+enum AttendanceGeoCheck {
+  /// Inside the office's radius, with a reading sure enough — the ordinary case where the office enforces it.
+  INSIDE
+  /// Accepted under an approved exception, not because the reading was inside — said so, never passed off as INSIDE.
+  EXCEPTION
+  /// The office doesn't enforce its location: kept for the record, wherever it was.
+  NOT_ENFORCED
+}
+
+/**
+ * Leave to clock in or out without being inside the office's radius (owner, 22 Oct 2026): working from an
+ * approved alternate site, GPS that won't settle, a correction. Asked for by the employee (PENDING, decided by
+ * somebody with "Approve attendance exceptions") or granted directly by such a person (APPROVED) — never by the
+ * employee for themselves. Good for the actions in `scope`, each once, between `validFrom` and `validUntil`;
+ * revoked while unused, it authorises nothing. Expired is not a status but a fact: an APPROVED one past
+ * `validUntil`.
+ */
+model AttendanceException {
+  id               String                    @id @default(cuid())
+  userId           String
+  user             User                      @relation("AttendanceExceptions", fields: [userId], references: [id], onDelete: Cascade)
+  scope            AttendanceExceptionScope
+  reasonCode       AttendanceExceptionReason
+  reason           String
+  status           AttendanceExceptionStatus @default(PENDING)
+  validFrom        DateTime
+  validUntil       DateTime
+  requestedById    String
+  requestedBy      User                      @relation("AttendanceExceptionsRequested", fields: [requestedById], references: [id], onDelete: NoAction)
+  requestedAt      DateTime                  @default(now())
+  /// The refused attempt a request came from — its distance and the phone's accuracy, never its coordinates.
+  attemptDistanceM Int?
+  attemptAccuracyM Int?
+  attemptProblem   String?
+  /// Who approved or rejected it, and when.
+  decidedById      String?
+  decidedBy        User?                     @relation("AttendanceExceptionsDecided", fields: [decidedById], references: [id], onDelete: SetNull)
+  decidedAt        DateTime?
+  decisionNote     String?
+  revokedById      String?
+  revokedBy        User?                     @relation("AttendanceExceptionsRevoked", fields: [revokedById], references: [id], onDelete: SetNull)
+  revokedAt        DateTime?
+  revokeReason     String?
+  /// When it was used to clock in and out — each once.
+  usedInAt         DateTime?
+  usedOutAt        DateTime?
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+  locations        AttendanceLocation[]
+
+  @@index([userId, status, validUntil])
+  @@index([status, requestedAt])
+  @@map("attendance_exceptions")
+}
+
+enum AttendanceExceptionScope {
+  IN
+  OUT
+  IN_AND_OUT
+}
+
+enum AttendanceExceptionReason {
+  ALTERNATE_LOCATION
+  GPS_UNAVAILABLE
+  CORRECTION
+  OTHER
+}
+
+enum AttendanceExceptionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  REVOKED
 }
 
 enum AttendanceLocationKind {
