@@ -5,10 +5,11 @@ import { hrCapabilities, listHolidays } from "@/actions/hr";
 import { leaveBalances, myLeaveRequests } from "@/actions/leave";
 import { myRegularisations, regularisationQueue } from "@/actions/regularisation";
 import { shortLeaveOverview } from "@/actions/short-leave";
-import { myToday } from "@/actions/attendance";
+import { myPunches, myToday } from "@/actions/attendance";
 import { myPayslips } from "@/actions/payroll";
 import { MyHr } from "@/components/hr/my-hr";
 import { MyHandover } from "@/components/hr/my-handover";
+import { MyPunches } from "@/components/hr/my-punches";
 import { handoverHistory } from "@/actions/handover";
 import { db } from "@/lib/db";
 import { dateOnly } from "@/lib/hr/calendar";
@@ -25,8 +26,9 @@ export default async function MyHrPage() {
   const clock = await workspaceClock();
   const now = new Date();
   const year = clock.parts(now).year;
+  const monthNumber = clock.parts(now).month + 1;
 
-  const [today, balances, leave, regularisations, queue, payslips, holidays, handovers, me, shortLeave] = await Promise.all([
+  const [today, balances, leave, regularisations, queue, payslips, holidays, handovers, me, shortLeave, punches] = await Promise.all([
     myToday(),
     leaveBalances(caps.userId),
     myLeaveRequests(),
@@ -48,6 +50,7 @@ export default async function MyHrPage() {
       select: { name: true, userSeq: true, employeeProfile: { select: { exitedOn: true } } },
     }),
     shortLeaveOverview(),
+    myPunches({ year, month: monthNumber }),
   ]);
 
   const todayDate = clock.calendarDate(now);
@@ -97,6 +100,10 @@ export default async function MyHrPage() {
               : null
           }
         />
+      </div>
+
+      <div className="mt-5">
+        <MyPunches days={punches} year={year} month={monthNumber} />
       </div>
     </div>
   );

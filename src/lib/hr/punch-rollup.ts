@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { dateOnly, toKey } from "@/lib/hr/calendar";
+import { clockFor } from "@/lib/time/zone";
 
 /**
  * Folding raw punches into attendance days.
@@ -20,6 +21,25 @@ import { dateOnly, toKey } from "@/lib/hr/calendar";
  *      unrecorded day as unrecorded rather than as an accusation.
  */
 
+/**
+ * The real moment a punch happened.
+ *
+ * A terminal sends its own wall-clock reading with no zone, and it is stored as read — "09:00" is kept as
+ * 09:00 UTC (src/lib/hr/iclock.ts). An attendance day's check-in and check-out are real instants, as a
+ * clock-in from the app is, and every screen shows them on the workspace's clock; so the reading is placed
+ * in the terminal's own zone first. Written as read, a 09:00 punch in India showed as 14:30.
+ */
+export function punchInstant(punchedAt: Date, zone: string | null | undefined): Date {
+  const at = clockFor(zone).at(
+    punchedAt.getUTCFullYear(),
+    punchedAt.getUTCMonth(),
+    punchedAt.getUTCDate(),
+    punchedAt.getUTCHours(),
+    punchedAt.getUTCMinutes(),
+  );
+  return new Date(at.getTime() + punchedAt.getUTCSeconds() * 1000 + punchedAt.getUTCMilliseconds());
+}
+
 export type RollupResult = {
   daysWritten: number;
   punchesProcessed: number;
@@ -33,7 +53,12 @@ export type RollupResult = {
  * arriving batch can contain a punch earlier than one already recorded, and an incremental update
  * would leave the check-in time wrong with nothing to show why.
  */
-export async function rollupPunches(options?: { userId?: string; from?: Date; to?: Date }): Promise<RollupResult> {
+export async function rollupPunches(options?: { userId?: string; from?: Date; to?: Date; rebuild?: boolean }): Promise<RollupResult> {
+  // Rebuilding: every day a mapped punch touches is worked out again, not only the new ones — how days
+  // written before a fix to these rules are put right. Leave and hand-corrected days are still left alone.
+  if (options?.rebuild) {
+    await db.biometricPunch.updateMany({ where: { userId: options.userId ?? { not: null }, processedAt: { not: null } }, data: { processedAt: null } });
+  }
   const pending = await db.biometricPunch.findMany({
     where: {
       processedAt: null,
@@ -92,15 +117,17 @@ async function rollupDay(userId: string, date: Date, skipped: RollupResult["skip
 
   const punches = await db.biometricPunch.findMany({
     where: { userId, punchedAt: { gte: dayStart, lte: dayEnd } },
-    select: { punchedAt: true },
+    select: { punchedAt: true, device: { select: { timezone: true } } },
     orderBy: { punchedAt: "asc" },
   });
   if (punches.length === 0) return false;
 
-  const checkInAt = punches[0].punchedAt;
+  const first = punches[0];
+  const last = punches[punches.length - 1];
+  const checkInAt = punchInstant(first.punchedAt, first.device.timezone);
   // A single punch means they clocked in and never clocked out. Recording the same stamp as both
   // would claim a zero-minute day, which reads as a bug rather than as the missing punch it is.
-  const checkOutAt = punches.length > 1 ? punches[punches.length - 1].punchedAt : null;
+  const checkOutAt = punches.length > 1 ? punchInstant(last.punchedAt, last.device.timezone) : null;
   const workedMinutes = checkOutAt
     ? Math.max(0, Math.round((checkOutAt.getTime() - checkInAt.getTime()) / 60000))
     : null;
