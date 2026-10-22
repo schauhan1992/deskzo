@@ -18,8 +18,6 @@ import { spanWords, timingWithShortLeave } from "@/lib/hr/short-leave-rules";
 import type { ActionResult } from "@/actions/company";
 import { clockPolicyFor, recordClock, type ClockOutcome, type ClockPolicy, type ClockRefusal } from "@/lib/hr/clock";
 import { readReading } from "@/lib/hr/geofence";
-import { punchInstant } from "@/lib/hr/punch-rollup";
-import { PUNCH_TYPE_LABELS, VERIFY_MODE_LABELS } from "@/lib/hr/iclock";
 
 /**
  * Daily attendance: clocking in and out, and the month grid HR reads it from.
@@ -393,63 +391,33 @@ export type MyPunchDay = {
   workedMinutes: number | null;
   /** Corrected by HR or a manager. */
   regularised: boolean;
-  punches: { at: string; type: string | null; verifiedBy: string | null; terminal: string }[];
 };
 
 /**
- * The signed-in person's own days for one month — in, out, hours, and every terminal punch behind them —
- * newest first, up to today (owner, 22 Oct 2026: everybody sees their own punches, when in and when out).
+ * The signed-in person's own days for one month — in, out and the hours between — newest first (owner,
+ * 22 Oct 2026: everybody sees their own attendance, when in and when out).
  *
- * Only ever the caller's own: there is no person to pass. A day is listed when something is known about it
- * — an attendance record or a punch.
+ * Only ever the caller's own: there is no person to pass. A day is listed when it has an attendance record;
+ * a terminal's punches become one (src/lib/hr/punch-rollup.ts), In the first of the day and Out the last.
  */
 export async function myPunches(params: { year: number; month: number }): Promise<MyPunchDay[]> {
   const user = await requireModuleUser("hr");
   const year = Math.min(2100, Math.max(2000, Math.trunc(params.year) || 2000));
   const month = Math.min(12, Math.max(1, Math.trunc(params.month) || 1));
   const { from, to } = monthRange(year, month);
-  // Punches are kept as the terminal's wall-clock reading, so the month is matched in that reading too.
-  const end = new Date(to.getTime() + 24 * 60 * 60 * 1000 - 1);
-
-  const [records, punches] = await Promise.all([
-    db.attendanceDay.findMany({
-      where: { userId: user.id, date: { gte: from, lte: to } },
-      select: { date: true, status: true, checkInAt: true, checkOutAt: true, workedMinutes: true, regularisedAt: true },
-    }),
-    db.biometricPunch.findMany({
-      where: { userId: user.id, punchedAt: { gte: from, lte: end } },
-      orderBy: { punchedAt: "asc" },
-      select: { punchedAt: true, punchType: true, verifyMode: true, device: { select: { name: true, timezone: true } } },
-    }),
-  ]);
-
-  const byDay = new Map<string, MyPunchDay>();
-  const dayOf = (key: string): MyPunchDay => {
-    let day = byDay.get(key);
-    if (!day) {
-      day = { date: key, status: null, checkInAt: null, checkOutAt: null, workedMinutes: null, regularised: false, punches: [] };
-      byDay.set(key, day);
-    }
-    return day;
-  };
-  for (const r of records) {
-    const day = dayOf(toKey(r.date));
-    day.status = r.status;
-    day.checkInAt = r.checkInAt ? r.checkInAt.toISOString() : null;
-    day.checkOutAt = r.checkOutAt ? r.checkOutAt.toISOString() : null;
-    day.workedMinutes = r.workedMinutes;
-    day.regularised = !!r.regularisedAt;
-  }
-  for (const p of punches) {
-    dayOf(toKey(dateOnly(p.punchedAt))).punches.push({
-      at: punchInstant(p.punchedAt, p.device.timezone).toISOString(),
-      type: p.punchType != null ? (PUNCH_TYPE_LABELS[p.punchType] ?? null) : null,
-      verifiedBy: p.verifyMode != null ? (VERIFY_MODE_LABELS[p.verifyMode] ?? null) : null,
-      terminal: p.device.name,
-    });
-  }
-
-  return [...byDay.values()].sort((a, b) => (a.date < b.date ? 1 : -1));
+  const records = await db.attendanceDay.findMany({
+    where: { userId: user.id, date: { gte: from, lte: to } },
+    orderBy: { date: "desc" },
+    select: { date: true, status: true, checkInAt: true, checkOutAt: true, workedMinutes: true, regularisedAt: true },
+  });
+  return records.map((r) => ({
+    date: toKey(r.date),
+    status: r.status,
+    checkInAt: r.checkInAt ? r.checkInAt.toISOString() : null,
+    checkOutAt: r.checkOutAt ? r.checkOutAt.toISOString() : null,
+    workedMinutes: r.workedMinutes,
+    regularised: !!r.regularisedAt,
+  }));
 }
 
 /**

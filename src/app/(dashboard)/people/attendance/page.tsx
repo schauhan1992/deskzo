@@ -47,7 +47,7 @@ export default async function AttendancePage({
     myPunches({ year, month }),
   ]);
   const filtered = data.rows.length !== data.totalPeople;
-  // Somebody who sees only themselves gets their own page: no team or person to pick, their punches first.
+  // Somebody who sees only themselves gets their own page: no team or person to pick, their in and out first.
   const own = data.scope === "self";
   const visible = data.visibleIds ? new Set(data.visibleIds) : null;
   const pickable = visible ? people.filter((p) => visible.has(p.id)) : people;
@@ -58,7 +58,7 @@ export default async function AttendancePage({
         <h1 className="text-xl font-semibold text-text">{own ? "My attendance" : "Manage attendance"}</h1>
         <p className="mt-1 text-sm text-muted">
           {own
-            ? `${monthLabel(month, year)}. When you came in and left each day, and every punch behind it.`
+            ? `${monthLabel(month, year)}. When you came in and left each day, and the hours in between.`
             : `${monthLabel(month, year)}. A dashed square is a working day nobody has recorded — not an absence.`}
           {!own && filtered && ` Showing ${data.rows.length} of ${data.totalPeople}.`}
         </p>

@@ -1,6 +1,6 @@
 "use client";
 
-import { Fingerprint } from "lucide-react";
+import { Clock } from "lucide-react";
 import type { MyPunchDay } from "@/actions/attendance";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { useClock } from "@/components/time/clock-provider";
@@ -34,9 +34,9 @@ function hoursWords(minutes: number | null) {
 }
 
 /**
- * The person's own days: when they came in, when they left, the hours between, and every punch on the
- * terminal behind them (src/actions/attendance.ts myPunches). Only ever their own — the action takes no
- * person. Times on the workspace's clock, as everywhere else.
+ * The person's own days: when they came in, when they left, and the hours between (src/actions/attendance.ts
+ * myPunches). Only ever their own — the action takes no person. The punches themselves aren't listed (owner,
+ * 22 Oct 2026): In is the first, Out the last. Times on the workspace's clock, as everywhere else.
  */
 export function MyPunches({ days, year, month }: { days: MyPunchDay[]; year: number; month: number }) {
   const clock = useClock();
@@ -45,8 +45,8 @@ export function MyPunches({ days, year, month }: { days: MyPunchDay[]; year: num
   return (
     <Card>
       <CardHeader className="flex items-center gap-2 text-sm font-medium text-text">
-        <Fingerprint className="h-4 w-4" aria-hidden />
-        My punches · {monthLabel(month, year)}
+        <Clock className="h-4 w-4" aria-hidden />
+        My in &amp; out · {monthLabel(month, year)}
       </CardHeader>
       {days.length === 0 ? (
         <CardContent>
@@ -70,21 +70,13 @@ export function MyPunches({ days, year, month }: { days: MyPunchDay[]; year: num
                     <span className="font-medium text-text">
                       {d.checkOutAt ? time(d.checkOutAt) : d.checkInAt ? "not yet" : "—"}
                     </span>
-                    {d.workedMinutes != null && ` · ${hoursWords(d.workedMinutes)}`}
+                    {d.workedMinutes != null && (
+                      <>
+                        {" · "}Total <span className="font-medium text-text">{hoursWords(d.workedMinutes)}</span>
+                      </>
+                    )}
                     {d.regularised && <span className="text-subtle"> · corrected</span>}
                   </p>
-                  {d.punches.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {d.punches.map((p, i) => (
-                        <span
-                          key={`${p.at}-${i}`}
-                          className="rounded-base border border-line bg-surface-sunken px-1.5 py-0.5 text-xs text-muted tabular-nums"
-                        >
-                          {clock.time(p.at)}
-                        </span>
-                      ))}
-                    </div>
-                  )}
                 </li>
               );
             })}
@@ -96,8 +88,7 @@ export function MyPunches({ days, year, month }: { days: MyPunchDay[]; year: num
                   <th className="px-4 py-2">Day</th>
                   <th className="px-4 py-2">In</th>
                   <th className="px-4 py-2">Out</th>
-                  <th className="px-4 py-2">Hours</th>
-                  <th className="px-4 py-2">Punches</th>
+                  <th className="px-4 py-2">Total hours</th>
                   <th className="px-4 py-2">Status</th>
                 </tr>
               </thead>
@@ -121,25 +112,6 @@ export function MyPunches({ days, year, month }: { days: MyPunchDay[]; year: num
                       </td>
                       <td className="px-4 py-2.5 whitespace-nowrap text-muted tabular-nums">
                         {hoursWords(d.workedMinutes)}
-                      </td>
-                      <td className="px-4 py-2.5">
-                        {d.punches.length === 0 ? (
-                          <span className="text-subtle">—</span>
-                        ) : (
-                          <div className="flex flex-wrap gap-1.5">
-                            {d.punches.map((p, i) => (
-                              <span
-                                key={`${p.at}-${i}`}
-                                title={[p.type, p.verifiedBy && `by ${p.verifiedBy.toLowerCase()}`, p.terminal]
-                                  .filter(Boolean)
-                                  .join(" · ")}
-                                className="rounded-base border border-line bg-surface-sunken px-1.5 py-0.5 text-xs text-muted tabular-nums"
-                              >
-                                {clock.time(p.at)}
-                              </span>
-                            ))}
-                          </div>
-                        )}
                       </td>
                       <td className="px-4 py-2.5 whitespace-nowrap">
                         {status ? (
