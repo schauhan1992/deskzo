@@ -49,7 +49,10 @@ export function ClockCard({
   const [lastPlace, setLastPlace] = useState<Place | null>(null);
   // Two taps at once are one clocking: the second does nothing while the first is on its way.
   const inFlight = useRef(false);
-  const action: "in" | "out" | null = !attendance.check_in_at ? "in" : !attendance.check_out_at ? "out" : null;
+  // Clocked out already, they can clock out again (owner, 22 Oct 2026): a terminal's punch during the day may have
+  // filled the clock-out, and the end of their day moves it on.
+  const action: "in" | "out" = !attendance.check_in_at ? "in" : "out";
+  const again = !!attendance.check_in_at && !!attendance.check_out_at;
   const required = !!policy?.required;
 
   async function clock(which: "in" | "out") {
@@ -95,7 +98,7 @@ export function ClockCard({
 
   const busy = state.kind === "locating" || state.kind === "sending";
   const exception = policy?.exception ?? null;
-  const exceptionUsable = exception?.status === "APPROVED" && action !== null && !(action === "in" ? exception.used_in : exception.used_out);
+  const exceptionUsable = exception?.status === "APPROVED" && !(action === "in" ? exception.used_in : exception.used_out);
   const canAsk =
     !!action &&
     !!policy?.exceptions_allowed &&
@@ -119,12 +122,13 @@ export function ClockCard({
 
       {action && (
         <Button
-          title={state.kind === "locating" ? "Getting your location…" : state.kind === "sending" ? "Checking…" : action === "in" ? "Clock in" : "Clock out"}
+          title={state.kind === "locating" ? "Getting your location…" : state.kind === "sending" ? "Checking…" : action === "in" ? "Clock in" : again ? "Clock out again" : "Clock out"}
           kind={action === "in" ? "primary" : "secondary"}
           busy={busy}
           onPress={() => void clock(action)}
         />
       )}
+      {again && !busy && <Text style={styles.small}>Clocking out again moves your clock-out to now.</Text>}
       {busy && <Text style={styles.small}>{state.kind === "locating" ? "Getting your location…" : "Checking your location with Deskzo…"}</Text>}
 
       {state.kind === "no_place" && (

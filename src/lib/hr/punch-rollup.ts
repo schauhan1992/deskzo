@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { dateOnly, toKey } from "@/lib/hr/calendar";
 import { clockFor } from "@/lib/time/zone";
+import { notMigratedYet } from "@/lib/not-migrated";
 
 /**
  * Folding raw punches into attendance days.
@@ -19,6 +20,10 @@ import { clockFor } from "@/lib/time/zone";
  *   3. Nothing is ever marked ABSENT. A missing punch is not proof of absence — they may have been
  *      at a customer site, or the terminal may have been unplugged — and this app already treats an
  *      unrecorded day as unrecorded rather than as an accusation.
+ *   4. A clocking from the app or the web the same day is never written over (owner, 22 Oct 2026): the day
+ *      runs from the earliest of the punches and the clockings to the latest. Clocked in on the phone at 09:30
+ *      and punched out at the terminal at 18:30 is in at 09:30 and out at 18:30 — not "in at 18:30", as when
+ *      the punches alone decided.
  */
 
 /**
@@ -85,7 +90,7 @@ export async function rollupPunches(options?: { userId?: string; from?: Date; to
   let daysWritten = 0;
 
   for (const { userId, date } of buckets.values()) {
-    const written = await rollupDay(userId, date, skipped);
+    const written = await rollupDay(userId, date, skipped, !!options?.rebuild);
     if (written) daysWritten += 1;
   }
 
@@ -97,13 +102,13 @@ export async function rollupPunches(options?: { userId?: string; from?: Date; to
   return { daysWritten, punchesProcessed: pending.length, skipped };
 }
 
-async function rollupDay(userId: string, date: Date, skipped: RollupResult["skipped"]): Promise<boolean> {
+async function rollupDay(userId: string, date: Date, skipped: RollupResult["skipped"], rebuild: boolean): Promise<boolean> {
   const dayStart = date;
   const dayEnd = new Date(date.getTime() + 24 * 60 * 60 * 1000 - 1);
 
   const existing = await db.attendanceDay.findUnique({
     where: { userId_date: { userId, date } },
-    select: { id: true, leaveRequestId: true, regularisedAt: true, status: true },
+    select: { id: true, leaveRequestId: true, regularisedAt: true, status: true, checkInAt: true, checkOutAt: true },
   });
 
   if (existing?.leaveRequestId) {
@@ -122,12 +127,29 @@ async function rollupDay(userId: string, date: Date, skipped: RollupResult["skip
   });
   if (punches.length === 0) return false;
 
-  const first = punches[0];
-  const last = punches[punches.length - 1];
-  const checkInAt = punchInstant(first.punchedAt, first.device.timezone);
-  // A single punch means they clocked in and never clocked out. Recording the same stamp as both
+  const punched = punches.map((p) => punchInstant(p.punchedAt, p.device.timezone));
+  // The app's and the web's clockings that day — each one kept by src/lib/hr/clock.ts, location or not.
+  const clocked = await db.attendanceLocation
+    .findMany({ where: { userId, date }, select: { at: true } })
+    .then((rows) => rows.map((c) => c.at))
+    .catch((err) => {
+      if (notMigratedYet(err)) return [] as Date[];
+      throw err;
+    });
+  // What the day already says counts too: a clocking from before each one was kept. Rebuilding — to put right
+  // days the punches alone once wrote wrong — only an earlier clock-in than every punch is taken from it, which
+  // no punch can have written.
+  const firstPunch = Math.min(...punched.map((d) => d.getTime()));
+  const already = rebuild
+    ? [existing?.checkInAt].filter((d): d is Date => !!d && d.getTime() < firstPunch)
+    : [existing?.checkInAt, existing?.checkOutAt].filter((d): d is Date => !!d);
+  const moments = [...punched, ...clocked, ...already].sort((a, b) => a.getTime() - b.getTime());
+
+  const checkInAt = moments[0]!;
+  const latest = moments[moments.length - 1]!;
+  // A single moment means they clocked in and never clocked out. Recording the same stamp as both
   // would claim a zero-minute day, which reads as a bug rather than as the missing punch it is.
-  const checkOutAt = punches.length > 1 ? punchInstant(last.punchedAt, last.device.timezone) : null;
+  const checkOutAt = latest.getTime() > checkInAt.getTime() ? latest : null;
   const workedMinutes = checkOutAt
     ? Math.max(0, Math.round((checkOutAt.getTime() - checkInAt.getTime()) / 60000))
     : null;

@@ -7,7 +7,8 @@
  *   · Against this workspace's database, through the app's real routes and the web's real actions:
  *       - an office that checks location: inside clocks in and out, recorded as INSIDE with its distance; outside,
  *         no location, a vague or simulated one, or one that isn't a place is refused and writes nothing;
- *       - the day's own rules come first, as they always did, and clocking out twice is now refused too;
+ *       - the day's own rules come first, as they always did; clocking out again moves the clock-out on;
+ *       - a terminal's punches merge with the app's clockings rather than writing over them;
  *       - exceptions: asked for from the phone, never decided, granted or revoked by the person themselves or by
  *         somebody without the permission; approved, it lets one clocking through, marked EXCEPTION, once —
  *         used, expired or revoked, it doesn't; an office that doesn't allow them refuses the asking;
@@ -167,6 +168,8 @@ async function cleanup() {
   await db.attendanceLocation.deleteMany({ where: { OR: [{ userId: { in: ids } }, { branchId: { in: branches } }] } });
   await db.attendanceException.deleteMany({ where: { id: { in: exceptions } } });
   await db.attendanceDay.deleteMany({ where: { userId: { in: ids } } });
+  await db.biometricPunch.deleteMany({ where: { OR: [{ userId: { in: ids } }, { device: { serialNumber: { startsWith: TAG } } }] } });
+  await db.biometricDevice.deleteMany({ where: { serialNumber: { startsWith: TAG } } });
   await db.user.deleteMany({ where: { id: { in: ids } } });
   await db.branch.deleteMany({ where: { id: { in: branches } } });
 }
@@ -299,7 +302,14 @@ async function main() {
     ok("clocking out from outside: refused, still clocked in", (await refusedWith(worker.id, { action: "out", ...reading(east(OFFICE, 400)) }, "outside_office")).pass && !(await db.attendanceDay.findFirst({ where: { userId: worker.id } }))?.checkOutAt);
     const out = await call<Clocked>(phone[worker.id]!, "POST", "/attendance", { action: "out", ...reading(east(OFFICE, 60), 20) });
     ok("clocking out inside: out, INSIDE, minutes worked", out.status === 200 && !!out.data.check_out_at && out.data.check === "INSIDE" && out.data.worked_minutes !== null, JSON.stringify(out.data ?? out.error));
-    ok("clocking out twice: refused — the second would have moved the time", (await refusedWith(worker.id, { action: "out", ...reading(OFFICE) }, "already_clocked_out")).pass && (await db.attendanceLocation.count({ where: { userId: worker.id } })) === 2);
+    const firstOut = (await db.attendanceDay.findFirst({ where: { userId: worker.id } }))!.checkOutAt!;
+    const outAgain = await call<Clocked>(phone[worker.id]!, "POST", "/attendance", { action: "out", ...reading(OFFICE) });
+    const afterAgain = (await db.attendanceDay.findFirst({ where: { userId: worker.id } }))!;
+    ok(
+      "clocking out again: allowed, the clock-out moved on, the clocking kept",
+      outAgain.status === 200 && afterAgain.checkOutAt!.getTime() >= firstOut.getTime() && (await db.attendanceLocation.count({ where: { userId: worker.id } })) === 3,
+      JSON.stringify(outAgain.error ?? ""),
+    );
 
     section("Two taps at once");
     const both = await Promise.all([0, 1].map(() => call<Clocked>(phone[twin.id]!, "POST", "/attendance", { action: "in", ...reading(OFFICE, 8) })));
@@ -410,10 +420,59 @@ async function main() {
     const bareAsk = await call(phone[jaipur.id]!, "POST", "/attendance/exception", { action: "in", reason_code: "OTHER", reason: "office not set up" });
     ok("  asking for an exception there: refused — HR must set the office first", bareAsk.status === 422 && bareAsk.error?.message === "Office location has not been configured. Please contact your administrator.", bareAsk.error?.message);
     const relaxedNone = await call<Clocked>(phone[pune.id]!, "POST", "/attendance", { action: "in" });
-    ok("an office that doesn't check: clocked in without a location, as before", relaxedNone.status === 200 && relaxedNone.data.check === "NOT_ENFORCED" && (await db.attendanceLocation.count({ where: { userId: pune.id } })) === 0);
+    const puneIn = await db.attendanceLocation.findMany({ where: { userId: pune.id }, select: { latitude: true, check: true } });
+    ok("an office that doesn't check: clocked in without a location, as before — the clocking kept, with no place", relaxedNone.status === 200 && relaxedNone.data.check === "NOT_ENFORCED" && puneIn.length === 1 && puneIn[0]!.latitude === null && puneIn[0]!.check === "NOT_ENFORCED");
     const relaxedOut = await call<Clocked>(phone[pune.id]!, "POST", "/attendance", { action: "out", ...reading(SITE, 30) });
-    const puneRow = await db.attendanceLocation.findFirst({ where: { userId: pune.id } });
+    const puneRow = await db.attendanceLocation.findFirst({ where: { userId: pune.id, kind: "OUT" } });
     ok("  and a location sent there is kept, the distance noted, NOT_ENFORCED", relaxedOut.status === 200 && puneRow?.check === "NOT_ENFORCED" && (puneRow.distanceM ?? 0) > 100_000, JSON.stringify(puneRow));
+
+    section("The app and the terminal on the same day");
+    // Clocked in on the phone, punched out at the terminal (owner, 22 Oct 2026): the punches used to decide the day
+    // alone — "in at 18:30", no out. Now the day runs from the earliest clocking or punch to the latest.
+    /* eslint-disable-next-line @typescript-eslint/no-require-imports */
+    const { rollupPunches } = require("../src/lib/hr/punch-rollup") as typeof import("../src/lib/hr/punch-rollup");
+    const istMinutes = (new Date().getUTCHours() * 60 + new Date().getUTCMinutes() + 330) % 1440;
+    if (istMinutes < 15) {
+      ok("(skipped — too close to midnight in India for a same-day test)", true);
+    } else {
+      const mixed = await person("Mixed", "SALES", null);
+      phone[mixed.id] = await pair(mixed.id, `${TAG} Mixed`);
+      const inRes = await call<Clocked>(phone[mixed.id]!, "POST", "/attendance", { action: "in" });
+      // The morning's clock-in, ten minutes back; the terminal's punch-out, five minutes back.
+      const morning = new Date(Date.now() - 10 * 60_000);
+      await db.attendanceDay.updateMany({ where: { userId: mixed.id }, data: { checkInAt: morning } });
+      await db.attendanceLocation.updateMany({ where: { userId: mixed.id }, data: { at: morning } });
+      const device = await db.biometricDevice.create({ data: { serialNumber: `${TAG}-TERM`, name: `${TAG} terminal`, timezone: "Asia/Kolkata" } });
+      const punchInstantAt = new Date(Date.now() - 5 * 60_000);
+      // The terminal sends its own wall clock with no zone; it is stored as read (src/lib/hr/iclock.ts).
+      const wall = new Date(punchInstantAt.getTime() + 330 * 60_000);
+      wall.setUTCSeconds(0, 0);
+      await db.biometricPunch.create({ data: { deviceId: device.id, deviceUserId: "zz-mixed", punchedAt: wall, raw: "zz", userId: mixed.id } });
+      await rollupPunches({ userId: mixed.id });
+      const merged = (await db.attendanceDay.findFirst({ where: { userId: mixed.id } }))!;
+      const punchMoment = new Date(wall.getTime() - 330 * 60_000);
+      ok(
+        "clocked in on the phone, punched out at the terminal: in when the phone said, out at the punch",
+        inRes.status === 200 && merged.checkInAt?.getTime() === morning.getTime() && merged.checkOutAt?.getTime() === punchMoment.getTime() && (merged.workedMinutes ?? 0) >= 4,
+        JSON.stringify({ in: merged.checkInAt, out: merged.checkOutAt, minutes: merged.workedMinutes }),
+      );
+      const today = await call<Today & { attendance: { check_out_at: string | null } }>(phone[mixed.id]!, "GET", "/today");
+      ok("  the phone sees the day clocked out", !!today.data.attendance?.check_out_at);
+      const outFromPhone = await call<Clocked>(phone[mixed.id]!, "POST", "/attendance", { action: "out" });
+      const afterPhone = (await db.attendanceDay.findFirst({ where: { userId: mixed.id } }))!;
+      ok(
+        "  and can still clock out from the phone: the clock-out moves to now",
+        outFromPhone.status === 200 && afterPhone.checkOutAt!.getTime() > punchMoment.getTime() && afterPhone.checkInAt!.getTime() === morning.getTime(),
+        JSON.stringify(outFromPhone.error ?? afterPhone.checkOutAt),
+      );
+      await rollupPunches({ userId: mixed.id, rebuild: true });
+      const rebuilt = (await db.attendanceDay.findFirst({ where: { userId: mixed.id } }))!;
+      ok(
+        "  reprocessing the terminal's punches keeps the phone's clock-in and clock-out",
+        rebuilt.checkInAt?.getTime() === morning.getTime() && rebuilt.checkOutAt?.getTime() === afterPhone.checkOutAt!.getTime(),
+        JSON.stringify({ in: rebuilt.checkInAt, out: rebuilt.checkOutAt }),
+      );
+    }
 
     section("The web's buttons");
     as(webby);
