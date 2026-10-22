@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Draws the Deskzo app's icons and Google Play graphics from one mark — a white D on the brand indigo
+ * Draws the Deskzo app's icons, and the Google Play and App Store graphics, from one mark — a white D on the brand indigo
  * (src/app/globals.css --brand), the web app's own mark (src/components/site/logo.tsx). The D is a shape,
  * not a letter, so it looks the same on every computer whatever fonts it has.
  *
@@ -8,6 +8,10 @@
  *
  * Uses sharp from the main project's node_modules (it comes with Next). Writes assets/ for the app and
  * store/graphics/ for the Play listing.
+ *
+ * The iPhone's icon is drawn on its own (owner, 22 Oct 2026): a full square with no transparency — the App Store
+ * refuses an icon with an alpha channel, and iOS rounds the corners itself — and the dark and tinted icons iOS 18
+ * offers, the D alone on nothing, for the system to put on its own dark or tinted ground.
  */
 const fs = require("node:fs");
 const path = require("node:path");
@@ -24,8 +28,9 @@ const D = '<path fill-rule="evenodd" d="M311 280h170a232 232 0 0 1 0 464h-170z M
 const mark = (fill, scale = 1) => `<g fill="${fill}" transform="translate(512 512) scale(${scale}) translate(-512 -512)">${D}</g>`;
 const svg = (w, h, body) => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${body}</svg>`);
 
-async function write(file, w, h, body) {
-  await sharp(svg(w, h, body)).png().toFile(file);
+async function write(file, w, h, body, { opaque = false } = {}) {
+  const image = sharp(svg(w, h, body));
+  await (opaque ? image.flatten({ background: BRAND }).removeAlpha() : image).png().toFile(file);
   console.log("wrote", path.relative(ROOT, file));
 }
 
@@ -39,6 +44,12 @@ async function write(file, w, h, body) {
   await write(path.join(ASSETS, "android-icon-monochrome.png"), 1024, 1024, mark("#000", 0.72));
   await write(path.join(ASSETS, "splash-icon.png"), 1024, 1024, mark(BRAND, 0.9));
   await write(path.join(ASSETS, "favicon.png"), 48, 48, `<rect width="48" height="48" rx="10" fill="${BRAND}"/><g transform="scale(0.046875)">${mark("#fff", 0.9)}</g>`);
+
+  // iOS (app.config.ts ios.icon): the light icon opaque, edge to edge; the dark one the D in the dark-mode indigo, and the
+  // tinted one in white, which iOS tints — both on nothing.
+  await write(path.join(ASSETS, "ios-icon.png"), 1024, 1024, `<rect width="1024" height="1024" fill="${BRAND}"/>${mark("#fff", 0.9)}`, { opaque: true });
+  await write(path.join(ASSETS, "ios-icon-dark.png"), 1024, 1024, mark("#A5B4FC", 0.9));
+  await write(path.join(ASSETS, "ios-icon-tinted.png"), 1024, 1024, mark("#fff", 0.9));
 
   // Google Play: the 512 icon (square — Play rounds it), and the 1024×500 feature graphic.
   await write(path.join(STORE, "play-icon-512.png"), 512, 512, `<rect width="512" height="512" fill="${BRAND}"/><g transform="scale(0.5)">${mark("#fff", 0.82)}</g>`);
