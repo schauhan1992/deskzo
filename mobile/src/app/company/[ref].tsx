@@ -124,6 +124,8 @@ export default function CompanyScreen() {
         </>
       )}
 
+      {me?.can.visits && <Button title="Plan a visit" kind="secondary" onPress={() => router.push({ pathname: "/new-visit", params: { company: company.ref, name: company.name } })} />}
+      {me?.can.calendar && <Button title="Schedule a meeting" kind="secondary" onPress={() => router.push({ pathname: "/new-meeting", params: { kind: "company", id: company.id, name: company.name } })} />}
       <Button title="Open on the web" kind="secondary" onPress={() => router.push({ pathname: "/web", params: { path: `/companies/${company.ref}` } })} />
     </ScrollView>
   );

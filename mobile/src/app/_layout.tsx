@@ -87,6 +87,14 @@ function Screens() {
         <Stack.Screen name="new-company" options={{ title: "New company" }} />
         <Stack.Screen name="new-contact" options={{ title: "New contact" }} />
         <Stack.Screen name="search" options={{ title: "Search" }} />
+        {/* Field work (22 Oct 2026): visits, claims and the calendar. */}
+        <Stack.Screen name="visits" options={{ title: "Visits" }} />
+        <Stack.Screen name="visit/[id]" options={{ title: "Visit" }} />
+        <Stack.Screen name="new-visit" options={{ title: "Plan a visit" }} />
+        <Stack.Screen name="expenses" options={{ title: "Expenses" }} />
+        <Stack.Screen name="new-expense" options={{ title: "New claim" }} />
+        <Stack.Screen name="meetings" options={{ title: "Calendar" }} />
+        <Stack.Screen name="new-meeting" options={{ title: "Schedule a meeting" }} />
         <Stack.Screen name="web" options={{ title: "Deskzo" }} />
       </Stack>
       {/* The workspace's screenshot allowance and watermark, over every screen. */}

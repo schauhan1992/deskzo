@@ -20,6 +20,10 @@ const NATIVE: Record<string, string> = {
   "/tasks": "/tasks",
   "/chat": "/chat",
   "/calls": "/calls",
+  // Field work (22 Oct 2026).
+  "/visits": "/visits",
+  "/expenses": "/expenses",
+  "/calendar": "/meetings",
 };
 
 export default function MoreScreen() {

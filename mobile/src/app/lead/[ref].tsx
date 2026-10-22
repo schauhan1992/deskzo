@@ -7,6 +7,7 @@ import { RangeCalendar } from "@/components/calendar";
 import { ActivityLine, ContactButtons, Detail, Field, Sheet, StagePill, money } from "@/components/sales";
 import { api, ApiError } from "@/lib/api";
 import { dayLabel } from "@/lib/format";
+import { useSession } from "@/lib/session";
 import type { LeadDetail, Stage } from "@/lib/sales-types";
 
 /**
@@ -29,6 +30,7 @@ const problemOf = (e: unknown, fallback: string) => (e instanceof ApiError || e 
 export default function LeadScreen() {
   const { ref } = useLocalSearchParams<{ ref: string }>();
   const router = useRouter();
+  const { me } = useSession();
   const [lead, setLead] = useState<LeadDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -117,6 +119,10 @@ export default function LeadScreen() {
       </View>
       <Card>{lead.activities.length === 0 ? <Notice>Nothing logged yet.</Notice> : lead.activities.map((a) => <ActivityLine key={a.id} activity={a} />)}</Card>
 
+      {me?.can.visits && lead.company?.ref && (
+        <Button title="Plan a visit" kind="secondary" onPress={() => router.push({ pathname: "/new-visit", params: { company: lead.company!.ref!, name: lead.company!.name, lead: lead.id } })} />
+      )}
+      {me?.can.calendar && <Button title="Schedule a meeting" kind="secondary" onPress={() => router.push({ pathname: "/new-meeting", params: { kind: "lead", id: lead.id, name: lead.company?.name ?? lead.title } })} />}
       <Button title="Open on the web" kind="secondary" onPress={() => router.push({ pathname: "/web", params: { path: `/leads/${lead.ref}` } })} />
 
       <StageSheet visible={sheet === "stage"} lead={lead} onClose={() => setSheet(null)} onMoved={(next) => (setSheet(null), setLead(next))} />

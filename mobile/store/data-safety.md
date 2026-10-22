@@ -2,7 +2,7 @@
 
 The answers below describe the app as built (mobile/, src/lib/app). Google counts data as **collected**
 when the app sends it off the phone, and **shared** when it is passed to a third party. If the app changes
-— call recordings, location at any time but clocking in and signing in — update this and the privacy page
+— call recordings, location at any time but clocking in, checking in and out of a visit, and signing in — update this and the privacy page
 (https://deskzo.com/privacy/app) first.
 
 ## Overview questions
@@ -29,17 +29,17 @@ when the app sends it off the phone, and **shared** when it is passed to a third
 
 | Question | Answer |
 |---|---|
-| Collected | **Yes** — the phone's position at the moment the user clocks in or out in the app, if they allow it; and once when they sign the app in, if their company requires location at sign-in (a security setting of the company's, applied to its website too). Never in the background (`ACCESS_BACKGROUND_LOCATION` is blocked in the build). |
-| Shared | **No** — it goes only to the user's company's Deskzo, kept with that day's attendance. |
-| Processed ephemerally | **No** — stored with the attendance. |
-| Required or optional | **Optional** — the user can refuse it; clocking in works without it. (Where the company requires location at sign-in, the app can't be signed in without it.) |
-| Purposes | **App functionality** (attendance: where somebody clocked in from, seen by them, their managers and HR); **Fraud prevention, security, and compliance** (where the company requires it, where somebody signed in from, in its security log). |
+| Collected | **Yes** — the phone's position at the moment the user clocks in or out in the app, or checks in at a customer's on a visit and checks out again (22 Oct 2026), if they allow it; and once when they sign the app in, if their company requires location at sign-in (a security setting of the company's, applied to its website too). Never in the background (`ACCESS_BACKGROUND_LOCATION` is blocked in the build). |
+| Shared | **No** — it goes only to the user's company's Deskzo, kept with that day's attendance, or with the visit. |
+| Processed ephemerally | **No** — stored with the attendance, or the visit. |
+| Required or optional | **Optional** — the user can refuse it; clocking in and checking in work without it. (Where the company requires location at sign-in, the app can't be signed in without it.) |
+| Purposes | **App functionality** (attendance: where somebody clocked in from, seen by them, their managers and HR; field visits: where somebody checked in and out of a customer's, seen by whoever may open that visit); **Fraud prevention, security, and compliance** (where the company requires it, where somebody signed in from, in its security log). |
 
 ### App activity → "Other user-generated content"
 
 | Question | Answer |
 |---|---|
-| Collected | **Yes** — what the user writes on the after-call card (outcome, notes, callback time, the lead); clocking in and out; tasks they add or tick off; leave they ask for; their decisions on what waits for their approval; the messages they send in team chat. |
+| Collected | **Yes** — what the user writes on the after-call card (outcome, notes, callback time, the lead); clocking in and out; visits they plan and write up, and meetings they schedule; tasks they add or tick off; leave they ask for; their decisions on what waits for their approval; the messages they send in team chat. |
 | Shared | **No** |
 | Processed ephemerally | **No** |
 | Required or optional | **Optional** — the card is the user's choice. |
@@ -59,11 +59,21 @@ when the app sends it off the phone, and **shared** when it is passed to a third
 
 | Question | Answer |
 |---|---|
-| Collected | **Yes** — only the photos and documents the user picks (or takes with the camera) to send in team chat. The app has no access to the photo library beyond Android's picker. |
-| Shared | **No** — they go to the user's company's Deskzo, to the people in that chat. |
-| Processed ephemerally | **No** — kept with the chat, as the company's retention setting says. |
+| Collected | **Yes** — only the photos and documents the user picks (or takes with the camera) to send in team chat, and the photo of a receipt they add to an expense claim (made smaller on the phone first). The app has no access to the photo library beyond Android's picker. |
+| Shared | **No** — they go to the user's company's Deskzo, to the people in that chat, or with the claim to those who approve and pay it. |
+| Processed ephemerally | **No** — kept with the chat, as the company's retention setting says, or with the claim. |
 | Required or optional | **Optional** |
 | Purposes | **App functionality** |
+
+### Financial info → "Other financial info"
+
+| Question | Answer |
+|---|---|
+| Collected | **Yes** — the expense claims the user makes in the app (22 Oct 2026): the amount, what it was for, when and how it was paid. No card or bank details. |
+| Shared | **No** — it goes only to the user's company's Deskzo, to those who approve and pay claims. |
+| Processed ephemerally | **No** — kept with the claim. |
+| Required or optional | **Optional** — claims are the user's choice. |
+| Purposes | **App functionality** (expense claims). |
 
 ### Device or other IDs
 
@@ -78,9 +88,9 @@ when the app sends it off the phone, and **shared** when it is passed to a third
 ## Not collected
 
 - **Personal info** — the user's name and email are shown from their Deskzo account; the app sends none.
-- **Location, at any other time** — read only when the user clocks in or out, or signs in where the company requires it (above). (The network address a phone connects from is kept with the device for the company's security log; it is not turned into a location.)
+- **Location, at any other time** — read only when the user clocks in or out, checks in or out of a visit, or signs in where the company requires it (above). (The network address a phone connects from is kept with the device for the company's security log; it is not turned into a location.)
 - **Audio** — calls are not recorded.
-- **Messages, Calendar, Files and docs, Web browsing, App info and performance, Financial, Health** — none.
+- **Messages, Calendar, Files and docs, Web browsing, App info and performance, Health** — none. (The app's calendar is the user's Deskzo calendar; the phone's own calendar is never read. Financial info: only the expense claims above — no payment details.)
 
 ## Security practices
 

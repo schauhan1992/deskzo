@@ -53,7 +53,7 @@ Everything here is what the app does today (Android: the day's work, calling, an
 > You sign in on your company's own Deskzo page — with its password, two-factor or single sign-on — or with a code from Settings on a computer. No new password. Your company's sign-in rules apply, and your administrators see the app in Security › Devices, can require their approval and can sign one out at any time. You can switch call sync off, or sign out, whenever you like.
 >
 > **What it doesn't do**
-> It doesn't record calls, read your messages or your phone's contacts, or show ads. It reads your location only when you clock in or out, if you allow it (or sign in, if your company asks for that) — never in the background.
+> It doesn't record calls, read your messages or your phone's contacts, or show ads. It reads your location only when you clock in or out, or check in and out of a customer visit, if you allow it (or sign in, if your company asks for that) — never in the background.
 >
 > You need a Deskzo account from your company to use the app. Learn more at deskzo.com.
 
@@ -63,7 +63,7 @@ Everything here is what the app does today (Android: the day's work, calling, an
 
 ## Content rating questionnaire
 
-A business productivity app: no violence, sexual content, profanity, controlled substances, gambling, or user-to-user sharing of content with strangers. It shares the user's location only with their own company (where they clocked in, seen by their managers and HR) — answer "Yes" to the question on sharing the user's location, "No" to the rest; the expected rating is Everyone / 3+.
+A business productivity app: no violence, sexual content, profanity, controlled substances, gambling, or user-to-user sharing of content with strangers. It shares the user's location only with their own company (where they clocked in, seen by their managers and HR; where they checked in on a visit, seen by whoever may open the visit) — answer "Yes" to the question on sharing the user's location, "No" to the rest; the expected rating is Everyone / 3+.
 
 ## Target audience and content
 

@@ -136,6 +136,7 @@
     "check:geo-attendance": "tsx scripts/check-geo-attendance.ts",
     "check:app-chat": "tsx scripts/check-app-chat.ts",
     "check:app-sales": "tsx scripts/check-app-sales.ts",
+    "check:app-field": "tsx scripts/check-app-field.ts",
     "check:pwa": "tsx scripts/check-pwa.ts",
     "check:call-report": "tsx scripts/check-call-report.ts",
     "check:reassign": "tsx scripts/check-reassign.ts",

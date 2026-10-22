@@ -12,10 +12,17 @@ emailed, a new lead, company or contact) and a search over all three. **More** l
 may open, as the web's menu does: what has a screen here opens natively, the rest as its web page, signed in
 as the phone — until it has a screen of its own. Online only: nothing is kept on the phone.
 
+Field work next (22 Oct 2026): **visits** — today's on the Today screen, checked in at the customer's door and
+written up on leaving, each with where the phone was if it says (kept with the visit for whoever may open it);
+planned from a company or a lead — **expense claims** with a photo of the receipt, made small enough on the
+phone (`src/lib/receipt.ts`) and sent as a form; a receipt is needed over the amount an administrator sets in
+Settings › Expense approvals — and the person's **calendar**, with meetings scheduled from a lead, company or
+visit.
+
 It talks only to Deskzo's `/api/app/*` (`src/lib/app` and `src/app/api/app` in the main project); the
 server's suites `npm run check:phone-app` (pairing, calling, the pages), `npm run check:app-daily` (the
-everyday screens) and `npm run check:app-sales` (the sales screens, and notifications pushed to the phone)
-cover everything the app relies on.
+everyday screens) `npm run check:app-sales` (the sales screens, and notifications pushed to the phone) and
+`npm run check:app-field` (visits, claims and meetings) cover everything the app relies on.
 
 ## How it is put together
 

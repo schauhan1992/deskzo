@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { canonicalise, parseRecordRef } from "@/lib/record-url";
 import { getVisit } from "@/actions/visit";
+import { mapLink, visitPlaces } from "@/lib/visits/locations";
 import { reachesPerson } from "@/lib/authz/access";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { VisitActions } from "@/components/visits/visit-actions";
@@ -58,6 +59,9 @@ export default async function VisitDetailPage({ params, searchParams }: { params
   // The visit goes into the calendar of whoever is making it, and only they put it there.
   const calendarEnabled = await isModuleEnabled("calendar");
   const canCalendar = calendarEnabled && visit.userId === userId && visit.status === "PLANNED";
+
+  // Where the phone was as they checked in and out, from the Deskzo app (owner, 22 Oct 2026) — to whoever may open the visit.
+  const places = await visitPlaces(visit.id);
 
   const claimed = visit.expenses.reduce((sum, e) => sum + e.amount, 0);
   const duration = visitDuration(visit.checkInAt, visit.checkOutAt);
@@ -171,6 +175,21 @@ export default async function VisitDetailPage({ params, searchParams }: { params
               <Row label="Office" value={visit.location?.label ?? "Not on file"} />
               <Row label="Address" value={visit.address ?? "—"} />
               <Row label="Distance" value={visit.distanceKm !== null ? `${visit.distanceKm} km` : "—"} />
+              {places.map((p) => (
+                <div key={`${p.kind}-${p.at}`} className="flex items-start justify-between gap-3 text-muted">
+                  <span className="shrink-0">{p.kind === "IN" ? "Checked in from" : "Checked out from"}</span>
+                  <span className="text-right">
+                    <a href={mapLink(p)} target="_blank" rel="noopener noreferrer" className="text-brand hover:underline">
+                      On the map
+                    </a>
+                    <span className="block text-xs text-subtle">
+                      {p.accuracyM !== null ? `within ${p.accuracyM} m · ` : ""}
+                      {stamp(p.at)}
+                      {p.mocked ? " · the phone said its location was simulated" : ""}
+                    </span>
+                  </span>
+                </div>
+              ))}
             </CardContent>
           </Card>
 

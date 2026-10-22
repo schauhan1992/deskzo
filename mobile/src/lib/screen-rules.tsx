@@ -35,6 +35,14 @@ const CUSTOMER_SCREENS = new Set([
   "new-lead",
   "new-company",
   "new-contact",
+  // Field work (22 Oct 2026): the customer it was with, what it cost, and the calendar.
+  "visits",
+  "visit",
+  "new-visit",
+  "expenses",
+  "new-expense",
+  "meetings",
+  "new-meeting",
 ]);
 /** Never watermarked: signing in, and the web pages, which draw the website's own. */
 const NEVER = new Set(["pair", "signed-in", "web"]);
