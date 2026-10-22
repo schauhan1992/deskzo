@@ -2,7 +2,7 @@
 
 The answers below describe the app as built (mobile/, src/lib/app). Google counts data as **collected**
 when the app sends it off the phone, and **shared** when it is passed to a third party. If the app changes
-— push notifications through Firebase, call recordings, location at any time but clocking in and signing in — update this and the privacy page
+— call recordings, location at any time but clocking in and signing in — update this and the privacy page
 (https://deskzo.com/privacy/app) first.
 
 ## Overview questions
@@ -69,8 +69,8 @@ when the app sends it off the phone, and **shared** when it is passed to a third
 
 | Question | Answer |
 |---|---|
-| Collected | **Yes** — the phone's own sign-in (an identifier Deskzo makes when it is paired), with its model and the app's version. |
-| Shared | **No** |
+| Collected | **Yes** — the phone's own sign-in (an identifier Deskzo makes when it is paired), with its model and the app's version; and, if the user allows notifications, the phone's Firebase Cloud Messaging address (22 Oct 2026), so their company's Deskzo can notify them. |
+| Shared | **No** — Google's Firebase Cloud Messaging delivers the notifications as Deskzo's service provider, which Google doesn't count as sharing; a notification carries only its title and where it leads. |
 | Processed ephemerally | **No** |
 | Required or optional | **Required** — it is how the phone signs in. |
 | Purposes | **App functionality**, **Fraud prevention, security, and compliance** (administrators see and can sign out a company's paired phones). |

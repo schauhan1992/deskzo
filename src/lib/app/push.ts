@@ -55,14 +55,40 @@ async function googleToken(account: ServiceAccount): Promise<string> {
   return json.access_token;
 }
 
+/** The channel the app's notifications arrive on (mobile/src/lib/push.ts). */
+const APP_CHANNEL = "deskzo";
+
+type PushOptions = {
+  /** Dropped after this long undelivered — two minutes unless said: a ring is no use later, a notice is. */
+  ttlSeconds?: number;
+  /**
+   * What the phone shows by itself, even with the app closed (the app's `deskzo` channel); without it, a data
+   * message only the open app reads.
+   */
+  shown?: { title: string; body?: string };
+  /** One shown with the same tag replaces the last — a new ring the one before it. */
+  tag?: string;
+};
+
 /**
- * A data message to one phone, delivered at once (high priority; dropped after two minutes unless `ttlSeconds` says
- * otherwise — a ring is no use later, a notice is): "sent";
- * "gone" when the address no longer reaches the app (uninstalled, or another Firebase project's) and should
- * be forgotten; "failed"; or "off" when pushes aren't set up here.
+ * A message to one phone, delivered at once (high priority): "sent"; "gone" when the address no longer reaches the
+ * app (uninstalled, or another Firebase project's) and should be forgotten; "failed"; or "off" when pushes aren't
+ * set up here.
  */
-export async function pushToPhone(pushToken: string, data: Record<string, string>, ttlSeconds = 120): Promise<"sent" | "gone" | "failed" | "off"> {
-  const message = { message: { token: pushToken, data, android: { priority: "HIGH", ttl: `${ttlSeconds}s` } } };
+export async function pushToPhone(pushToken: string, data: Record<string, string>, options: PushOptions = {}): Promise<"sent" | "gone" | "failed" | "off"> {
+  const { ttlSeconds = 120, shown, tag } = options;
+  const message = {
+    message: {
+      token: pushToken,
+      data,
+      ...(shown ? { notification: { title: shown.title, ...(shown.body ? { body: shown.body } : {}) } } : {}),
+      android: {
+        priority: "HIGH",
+        ttl: `${ttlSeconds}s`,
+        ...(shown ? { notification: { channel_id: APP_CHANNEL, ...(tag ? { tag } : {}) } } : {}),
+      },
+    },
+  };
   const verdict = (status: number) => (status >= 200 && status < 300 ? "sent" : status === 404 || status === 403 ? "gone" : "failed");
   if (testSend) return verdict(await testSend(message));
   const account = serviceAccount();
@@ -93,10 +119,31 @@ export async function pushNoticeToPhones(userId: string, notice: { id: string; t
   const phones = await db.appDevice.findMany({ where: { userId, pushToken: { not: null }, device: { status: "APPROVED" } }, select: { id: true, pushToken: true } });
   let sent = 0;
   for (const phone of phones) {
-    // Kept for a phone that's off for a while — six hours — not the two minutes a ring is.
-    const verdict = await pushToPhone(phone.pushToken!, { type: "notice", notice: notice.id, kind: notice.type, title: notice.title.slice(0, 160), link: notice.link ?? "" }, 6 * 3600);
+    // Shown by the phone itself, the title only; kept for a phone that's off for a while — six hours — not the two
+    // minutes a ring is.
+    const title = notice.title.slice(0, 160);
+    const verdict = await pushToPhone(phone.pushToken!, { type: "notice", notice: notice.id, kind: notice.type, title, link: notice.link ?? "" }, { ttlSeconds: 6 * 3600, shown: { title } });
     if (verdict === "sent") sent += 1;
     if (verdict === "gone") await db.appDevice.update({ where: { id: phone.id }, data: { pushToken: null } }).catch(() => {});
   }
   return sent;
+}
+
+/**
+ * A chat message on the other members' phones (owner, 22 Oct 2026): who and where — "New message from Asha", "Asha in
+ * Sales team" — never what, as the app's own chat banner; the message stays in the chat. One a chat on the phone, the
+ * latest replacing the last; kept an hour. The caller leaves out whoever muted the chat.
+ */
+export async function pushChatToPhones(userIds: string[], chat: { id: string; title: string }): Promise<number> {
+  if (userIds.length === 0 || (!testSend && !pushConfigured())) return 0;
+  const phones = await db.appDevice.findMany({ where: { userId: { in: userIds }, pushToken: { not: null }, device: { status: "APPROVED" } }, select: { id: true, pushToken: true } });
+  const title = chat.title.slice(0, 160);
+  const verdicts = await Promise.all(
+    phones.map(async (phone) => {
+      const verdict = await pushToPhone(phone.pushToken!, { type: "chat", chat: chat.id, title, link: `/chat?c=${chat.id}` }, { ttlSeconds: 3600, shown: { title }, tag: `chat-${chat.id}` });
+      if (verdict === "gone") await db.appDevice.update({ where: { id: phone.id }, data: { pushToken: null } }).catch(() => {});
+      return verdict;
+    }),
+  );
+  return verdicts.filter((v) => v === "sent").length;
 }

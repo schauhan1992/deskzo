@@ -234,6 +234,29 @@ async function main() {
     const found = await call<{ chatId: string; messageId: string }[]>(bilalPhone, "GET", "/chat/search?q=quote");
     ok("searching Bilal's chats finds the quote", found.status === 200 && found.data.some((h) => h.messageId === sent.data.id));
     ok("  Chetan's search doesn't reach a chat he isn't in", !(await call<{ messageId: string }[]>(chetanPhone, "GET", "/chat/search?q=quote")).data.some((h) => h.messageId === sent.data.id));
+
+    section("On the phones (Firebase stood in for)");
+    /* eslint-disable-next-line @typescript-eslint/no-require-imports */
+    const push = require("../src/lib/app/push") as typeof import("../src/lib/app/push");
+    const pushed: { message: { token: string; data: Record<string, string>; notification?: { title: string; body?: string } } }[] = [];
+    push.setTestPush(async (message) => (pushed.push(message as (typeof pushed)[number]), 200));
+    await db.appDevice.updateMany({ where: { userId: bilal.id }, data: { pushToken: "fcm-zzappchat-bilal-0001" } });
+    const ping = new FormData();
+    ping.append("body", "The secret price is 42 lakh");
+    await call(ashaPhone, "POST", `/chat/${chatId}/messages`, ping);
+    const toBilal = pushed.find((p) => p.message.token === "fcm-zzappchat-bilal-0001");
+    ok(
+      "a message reaches Bilal's phone: who, never what, opening that chat",
+      pushed.length === 1 && toBilal?.message.data.type === "chat" && toBilal.message.data.chat === chatId && toBilal.message.notification?.title === `New message from ${asha.name}` && !JSON.stringify(pushed).includes("42 lakh"),
+      JSON.stringify(pushed),
+    );
+    ok("  and none to Asha's own phone", !pushed.some((p) => p.message.token !== "fcm-zzappchat-bilal-0001"));
+    await call(bilalPhone, "POST", `/chat/${chatId}/mute`, { hours: 1 });
+    const quiet = new FormData();
+    quiet.append("body", "anything else?");
+    await call(ashaPhone, "POST", `/chat/${chatId}/messages`, quiet);
+    ok("  once Bilal mutes the chat, nothing more on his phone", pushed.length === 1, pushed.length);
+    push.setTestPush(null);
   } finally {
     await cleanup();
   }

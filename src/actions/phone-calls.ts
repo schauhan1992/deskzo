@@ -93,7 +93,8 @@ export async function ringMyPhone(input: {
 
   let pushed = false;
   if (phone.pushToken) {
-    const sent = await pushToPhone(phone.pushToken, { type: "call", request: request.id, number: phoneNumber, label });
+    // Shown by the phone even with the app closed (owner, 22 Oct 2026); a tap opens Calls, where the ring waits.
+    const sent = await pushToPhone(phone.pushToken, { type: "call", request: request.id, number: phoneNumber, label }, { shown: { title: `Call ${label}`, body: phoneNumber }, tag: "deskzo-ring" });
     pushed = sent === "sent";
     if (sent === "gone") await db.appDevice.update({ where: { id: phone.id }, data: { pushToken: null } });
   }

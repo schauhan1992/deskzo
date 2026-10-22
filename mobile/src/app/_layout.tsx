@@ -1,11 +1,53 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Stack, useRouter, useSegments } from "expo-router";
+import * as Notifications from "expo-notifications";
 import { StatusBar } from "expo-status-bar";
 import { colors } from "@/components/ui";
 import { ChatBanner } from "@/components/chat/banner";
 import { ChatProvider } from "@/lib/chat";
 import { ScreenRules } from "@/lib/screen-rules";
 import { SessionProvider, useSession } from "@/lib/session";
+import { dataOf, onPushAddressChange, registerForPush, routeFor } from "@/lib/push";
+
+/**
+ * Notifications (src/lib/push.ts): once signed in, the phone's push address handed to Deskzo — asking the person
+ * first — and kept current; a tap on one, while the app was open or the tap that opened it, leads where it says.
+ */
+function PushSetup() {
+  const { paired, me } = useSession();
+  const router = useRouter();
+  const registered = useRef(false);
+
+  useEffect(() => {
+    if (!paired) {
+      registered.current = false;
+      return;
+    }
+    if (!me || registered.current) return;
+    registered.current = true;
+    void registerForPush();
+  }, [paired, me]);
+
+  useEffect(() => (paired ? onPushAddressChange() : undefined), [paired]);
+
+  useEffect(() => {
+    if (!paired) return;
+    const open = (response: Notifications.NotificationResponse) => {
+      if (response.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) return;
+      const to = routeFor(dataOf(response));
+      if (to) router.push(to);
+    };
+    void Notifications.getLastNotificationResponseAsync().then((response) => {
+      if (!response) return;
+      open(response);
+      void Notifications.clearLastNotificationResponseAsync();
+    });
+    const sub = Notifications.addNotificationResponseReceivedListener(open);
+    return () => sub.remove();
+  }, [paired, router]);
+
+  return null;
+}
 
 /**
  * The tabs — Today, Sales, Chat, Calls, More — and over them a conversation (full screen), approvals, leave,
@@ -51,6 +93,7 @@ function Screens() {
       <ScreenRules />
       {/* "New message" from a chat that isn't open — who, never what. */}
       <ChatBanner />
+      <PushSetup />
     </>
   );
 }
