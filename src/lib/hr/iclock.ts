@@ -55,7 +55,9 @@ export function parseAttlog(body: string): ParseResult {
     const line = rawLine.trim();
     if (!line) continue;
 
-    const parts = line.split(/\s*\t\s*|\s{2,}/).filter((p) => p !== "");
+    let parts = line.split(/\s*\t\s*|\s{2,}/).filter((p) => p !== "");
+    // Some builds separate every field with a single space — then the line is one "field" above.
+    if (parts.length < 3) parts = line.split(/\s+/).filter((p) => p !== "");
     if (parts.length < 2) {
       rejected.push({ line, why: "fewer than two fields" });
       continue;
