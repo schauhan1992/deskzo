@@ -22,7 +22,7 @@ export const guide: SeedGuide = {
     heading: "Tasks",
     summary: "Assignable to-dos with due dates, priorities and reminders — on a list or a board, with checklists, files, time logged and comments, and optionally linked to a customer, lead or ticket.",
     purpose: [
-      p("Tasks is where work that somebody has to do gets written down, given to a person and followed through. Each task has a status — To do, In progress, Need help, Done or Cancelled — a priority, a due date and, if you like, a start date, an estimate and a team."),
+      p("Tasks is where work that somebody has to do gets written down, given to a person and followed through. Each task has a status — To do, In progress, Need help, Complete or Cancelled — a priority, a due date and, if you like, a start date, an estimate and a team."),
       p("Inside a task you can tick off a checklist, attach files, log the time spent and talk it through in comments. A task can be about a customer, a lead or a ticket, and then it shows on that record's page too."),
       p("Tasks can repeat every day, week or month, and can carry XP: points the person earns by finishing on time, which show on the Performance board. Challenges group tasks under a shared goal."),
       note(runs("For something worth remembering that isn't anybody's job, use a sticky note instead — see ", ["Sticky Notes", "/help/sticky-notes"], ".")),
@@ -59,12 +59,12 @@ export const guide: SeedGuide = {
       task(
         "Move a task along",
         ul(
-          runs("Open a task and choose To do, In progress, Need help, Done or Cancelled from the status menu at the top."),
+          runs("Open a task and choose To do, In progress, Need help, Complete or Cancelled from the status menu at the top."),
           runs("Or switch to the board (the grid button beside the list button) and drag the task into another column."),
           runs("On a ticket, a company or a lead, use the ", { b: "Status" }, " menu on the task's row in its Tasks section."),
         ),
         p("Choosing Need help asks what help you need, and Cancelled asks why — the note is required. It's kept as a comment on the task, shown under the task on the record it belongs to, and whoever set the task and whoever it's for are told."),
-        p("A task whose start date is still to come shows as Upcoming. Moving a task back from Done takes back any XP it earned."),
+        p("A task whose start date is still to come shows as Upcoming. Moving a task back from Complete takes back any XP it earned."),
       ),
       task(
         "Work inside a task",
@@ -88,7 +88,7 @@ export const guide: SeedGuide = {
       ),
       task(
         "Make a task repeat",
-        p(runs("In the task form, open ", { b: "Repeat" }, ", choose ", { b: "Every day" }, ", ", { b: "Every week" }, " or ", { b: "Every month" }, ", and optionally ", { b: "Until (optional)" }, ". When the task is marked Done, the next one is made a day, week or month on, with its checklist unticked.")),
+        p(runs("In the task form, open ", { b: "Repeat" }, ", choose ", { b: "Every day" }, ", ", { b: "Every week" }, " or ", { b: "Every month" }, ", and optionally ", { b: "Until (optional)" }, ". When the task is marked Complete, the next one is made a day, week or month on, with its checklist unticked.")),
       ),
       task(
         "Set XP and run a challenge",
@@ -107,7 +107,7 @@ export const guide: SeedGuide = {
       setting(
         "Status and priority",
         "In each task",
-        p("Status is To do, In progress, Need help, Done or Cancelled; Done and Cancelled close the task, and Need help keeps it open. Need help and Cancelled each need a note. Priority is Low, Medium, High or Urgent."),
+        p("Status is To do, In progress, Need help, Complete or Cancelled; Complete and Cancelled close the task, and Need help keeps it open. Need help and Cancelled each need a note. Priority is Low, Medium, High or Urgent."),
       ),
       setting(
         "Start & estimate",

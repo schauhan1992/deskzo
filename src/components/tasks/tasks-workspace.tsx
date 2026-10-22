@@ -52,7 +52,7 @@ const BOARD: { status: TaskStatusKey; label: string; panel: string; title: strin
   { status: "TODO", label: "To do", panel: "bg-surface-sunken", title: "text-muted" },
   { status: "IN_PROGRESS", label: "In progress", panel: "bg-warning-bg", title: "text-warning" },
   { status: "NEED_HELP", label: "Need help", panel: "bg-danger-bg", title: "text-danger" },
-  { status: "DONE", label: "Done", panel: "bg-success-bg", title: "text-success" },
+  { status: "DONE", label: "Complete", panel: "bg-success-bg", title: "text-success" },
   { status: "CANCELLED", label: "Cancelled", panel: "bg-danger-bg", title: "text-danger" },
 ];
 

@@ -15,7 +15,7 @@ const VIEWS = [
   { value: "today", label: "Today" },
   { value: "overdue", label: "Overdue" },
   { value: "open", label: "All open" },
-  { value: "done", label: "Done" },
+  { value: "done", label: "Complete" },
 ] as const;
 
 type View_ = (typeof VIEWS)[number]["value"];
