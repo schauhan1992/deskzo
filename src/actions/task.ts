@@ -13,8 +13,8 @@ import { recordAudit } from "@/lib/audit";
 import { createTaskSchema, updateTaskSchema } from "@/lib/validation/task";
 import { workspaceClock } from "@/lib/time/workspace";
 import { calendarDayRange } from "@/lib/time/zone";
-import { ADVANCED, givenToWork, moveTask, taskRights, workableTask } from "@/lib/tasks/server";
-import { ONLY_WORKS, TASK_STATUSES, type TaskPriorityKey, type TaskRepeatKey, type TaskSort, type TaskStatusKey } from "@/lib/tasks/rules";
+import { ADVANCED, givenToWork, moveTask, postTaskComment, taskRights, workableTask } from "@/lib/tasks/server";
+import { NOTE_FOR, ONLY_WORKS, STATUS_LABELS, TASK_STATUSES, checkStatusNote, type TaskPriorityKey, type TaskRepeatKey, type TaskSort, type TaskStatusKey } from "@/lib/tasks/rules";
 import type { ActionResult } from "@/actions/company";
 
 function revalidateTaskPaths(task: { companyId: string | null; leadId: string | null; ticketId: string | null }) {
@@ -224,6 +224,8 @@ export async function updateTask(input: unknown): Promise<ActionResult<{ id: str
   const advanced = await advancedOf(data);
   if (!advanced.ok) return advanced;
   const fields = advanced.fields;
+  const statusNote = data.status && data.status !== existing.status ? checkStatusNote(data.status as TaskStatusKey, data.statusNote) : null;
+  if (statusNote && !statusNote.ok) return statusNote;
   const startDate = fields.startDate !== undefined ? fields.startDate : existing.startDate;
   if (startDate && dueDate && startDate > dueDate) return { ok: false, error: "A task can't start after it's due." };
 
@@ -248,8 +250,12 @@ export async function updateTask(input: unknown): Promise<ActionResult<{ id: str
     },
     select: { id: true, companyId: true, leadId: true, ticketId: true },
   });
-  // A status sent with the edit is a move: it earns, takes back and repeats as the status menu does.
-  if (data.status && data.status !== existing.status) await moveTask(data.id, data.status as TaskStatusKey);
+  // A status sent with the edit is a move: it earns, takes back and repeats as the status menu does — with the
+  // note Need help and Cancelled ask for, checked before anything was written.
+  if (data.status && data.status !== existing.status) {
+    await moveTask(data.id, data.status as TaskStatusKey);
+    if (statusNote?.text) await postTaskComment({ id: existing.id, title: data.title, assignedToUserId: newAssignee, createdByUserId: existing.createdByUserId }, user.id, statusNote.text);
+  }
 
   if (newAssignee && newAssignee !== existing.assignedToUserId && newAssignee !== user.id) {
     await notifyUser({
@@ -284,18 +290,22 @@ export async function toggleTaskDone(id: string): Promise<ActionResult<null>> {
 }
 
 /**
- * Moves a task to a status (owner, 16 Oct 2026): To do, In progress, Done or Cancelled. Done on time
- * earns its XP; done, a repeating task makes its next one.
+ * Moves a task to a status (owner, 16 Oct 2026): To do, In progress, Need help, Done or Cancelled. Done on
+ * time earns its XP; done, a repeating task makes its next one. Need help and Cancelled need `note` — what
+ * help, or why (owner, 22 Oct 2026) — left on the task as a comment, its maker and assignee told.
  */
-export async function setTaskStatus(id: string, status: string): Promise<ActionResult<{ nextTaskId: string | null }>> {
+export async function setTaskStatus(id: string, status: string, note?: string | null): Promise<ActionResult<{ nextTaskId: string | null }>> {
   const user = await requireModuleUser("tasks");
   if (!(TASK_STATUSES as readonly string[]).includes(status)) return { ok: false, error: "That isn't a status a task can have." };
+  const noted = checkStatusNote(status as TaskStatusKey, note);
+  if (!noted.ok) return noted;
   // Whoever it's assigned to moves it along, whatever their role may change (workableTask).
   const task = await workableTask(user.id, String(id ?? ""));
   if (!task) return { ok: false, error: "Task not found." };
   const moved = await moveTask(task.id, status as TaskStatusKey);
   if (!moved) return { ok: false, error: "Task not found." };
-  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Task", entityId: task.id, entityLabel: `${task.title} → ${status.toLowerCase().replace("_", " ")}` });
+  if (noted.text) await postTaskComment(task, user.id, noted.text);
+  await recordAudit({ userId: user.id, action: "UPDATE", entityType: "Task", entityId: task.id, entityLabel: `${task.title} → ${STATUS_LABELS[status as TaskStatusKey].toLowerCase()}` });
   revalidateTaskPaths(task);
   revalidatePath("/calls");
   return { ok: true, data: moved };
@@ -343,7 +353,7 @@ type TaskListParams = {
   companyId?: string;
   leadId?: string;
   ticketId?: string;
-  /** "upcoming" | "todo" | "in_progress" | "done" | "cancelled" | "open" (owner, 16 Oct 2026). */
+  /** "upcoming" | "todo" | "in_progress" | "need_help" | "done" | "cancelled" | "open" (owner, 16 Oct 2026). */
   status?: string;
   priority?: string;
   departmentId?: string;
@@ -364,10 +374,12 @@ function statusWhere(status: string | undefined, today: Date): Prisma.TaskWhereI
       return { done: true, status: "CANCELLED" };
     case "in_progress":
       return { done: false, status: "IN_PROGRESS" };
+    case "need_help":
+      return { done: false, status: "NEED_HELP" };
     case "upcoming":
-      return { done: false, NOT: { status: "IN_PROGRESS" }, startDate: { gt: today } };
+      return { done: false, NOT: { status: { in: ["IN_PROGRESS", "NEED_HELP"] } }, startDate: { gt: today } };
     case "todo":
-      return { done: false, NOT: { status: "IN_PROGRESS" }, OR: [{ startDate: null }, { startDate: { lte: today } }] };
+      return { done: false, NOT: { status: { in: ["IN_PROGRESS", "NEED_HELP"] } }, OR: [{ startDate: null }, { startDate: { lte: today } }] };
     default:
       return null;
   }
@@ -483,13 +495,31 @@ export async function myOpenTasks(): Promise<RailTask[]> {
   }));
 }
 
+/**
+ * The note behind each task that is stuck or cancelled (owner, 22 Oct 2026): the latest "Needs help: …" or
+ * "Cancelled: …" comment its move left (src/lib/tasks/rules.ts, statusNoteText) — one query for the page.
+ */
+async function statusNotes(rows: readonly { id: string; status?: string | null }[]): Promise<Map<string, { text: string; by: string; at: Date }>> {
+  const of = (status: TaskStatusKey) => rows.filter((r) => r.status === status).map((r) => r.id);
+  const wanted = (["NEED_HELP", "CANCELLED"] as const).map((status) => ({ ids: of(status), prefix: `${NOTE_FOR[status]!.prefix}:` })).filter((w) => w.ids.length > 0);
+  if (wanted.length === 0) return new Map();
+  const notes = await db.taskComment.findMany({
+    where: { OR: wanted.map((w) => ({ taskId: { in: w.ids }, body: { startsWith: w.prefix } })) },
+    orderBy: [{ taskId: "asc" }, { createdAt: "desc" }],
+    distinct: ["taskId"],
+    select: { taskId: true, body: true, createdAt: true, user: { select: { name: true } } },
+  });
+  return new Map(notes.map((n) => [n.taskId, { text: n.body, by: n.user.name, at: n.createdAt }]));
+}
+
 /** A row of the list, with its checklist's progress and whether the viewer starred it. */
-async function withProgress<T extends { id: string; stars: { userId: string }[]; assignedToUserId: string | null; createdByUserId: string }>(userId: string, rows: T[]) {
-  const [done, rights] = await Promise.all([checklistDone(rows.map((r) => r.id)), taskRights(userId, rows)]);
+async function withProgress<T extends { id: string; stars: { userId: string }[]; assignedToUserId: string | null; createdByUserId: string; status?: string | null }>(userId: string, rows: T[]) {
+  const [done, rights, notes] = await Promise.all([checklistDone(rows.map((r) => r.id)), taskRights(userId, rows), statusNotes(rows)]);
   return rows.map(({ stars, ...row }) => ({
     ...row,
     starred: stars.length > 0,
     checklistDone: done.get(row.id) ?? 0,
+    statusNote: notes.get(row.id) ?? null,
     // What the viewer may do with it — work it, change it, delete it, and whether it was given to them
     // (src/lib/tasks/server.ts, taskRights) — so the list offers only what the server will do.
     ...rights(row),

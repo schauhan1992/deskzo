@@ -84,6 +84,13 @@ export const INSTALL_ROWS = [
     from: 'INSERT INTO "industries"',
     to: 'lower(v.name));',
   },
+  {
+    // The GST unit quantity codes every workspace starts with (Finance → Accounts, src/lib/inventory).
+    table: "units_of_measure",
+    migration: "20261122110000_finance_accounts",
+    from: 'INSERT INTO "units_of_measure"',
+    to: 'ON CONFLICT ("code") DO NOTHING;',
+  },
 ] as const;
 
 function installStatement(row: (typeof INSTALL_ROWS)[number]): string {

@@ -118,7 +118,11 @@ export const taskCreateSchema = z
   })
   .strict();
 
-export const taskPatchSchema = taskCreateSchema.omit({ checklist: true, company: true, lead: true, ticket: true }).partial().strict();
+export const taskPatchSchema = taskCreateSchema
+  .omit({ checklist: true, company: true, lead: true, ticket: true })
+  .partial()
+  .extend({ status_note: z.string().trim().max(4900).optional().describe("Why — needed with status CANCELLED (the reason) or NEED_HELP (what help); kept as a comment on the task.") })
+  .strict();
 
 export const ticketCreateSchema = z
   .object({

@@ -225,6 +225,11 @@ export const ROLE_PRESETS: RolePreset[] = [
       "close.work",
       // The rebate behind a negative call — a manager sees it; an executive does not (owner, 1 Oct 2026).
       "rebates.view",
+      // Finance → Accounts (owner, 22 Oct 2026): stock in and between warehouses, and vouchers drafted for approval.
+      "inventory.view",
+      "inventory.receive",
+      "inventory.transfer",
+      "vouchers.create",
     ],
   },
   {
@@ -265,6 +270,16 @@ export const ROLE_PRESETS: RolePreset[] = [
       "rebates.view",
       "rebates.manage",
       "fields.seeRestricted",
+      // Finance → Accounts (owner, 22 Oct 2026): the whole of inventory and vouchers, and the settings.
+      "inventory.view",
+      "inventory.receive",
+      "inventory.transfer",
+      "inventory.adjust",
+      "inventory.approveAdjustments",
+      "inventory.manage",
+      "vouchers.create",
+      "vouchers.approve",
+      "accounts.configure",
     ],
   },
   // ─── Purchase ───────────────────────────────────────────────────────────────────────────────
@@ -280,7 +295,11 @@ export const ROLE_PRESETS: RolePreset[] = [
       // Whoever places the order with the distributor is who should be checking its monthly bill.
       "purchase.reconcile",
       // And the rebate and deal price the distributor agreed to, to buy at.
-      "rebates.view"],
+      "rebates.view",
+      // Goods in against the orders they placed, and between warehouses (Finance → Accounts, owner, 22 Oct 2026).
+      "inventory.view",
+      "inventory.receive",
+      "inventory.transfer"],
   },
   // ─── People & HR ────────────────────────────────────────────────────────────────────────────
   // The HR and Recruiter roles (owner, 8 Oct 2026). Neither sees customers: no account views here.
@@ -294,6 +313,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       "hr.viewAll",
       "hr.approveLeave",
       "hr.approveExpenses",
+      "hr.approveAttendanceExceptions",
       "hiring.manage",
       "people.handover",
       "engagement.manage",
@@ -311,6 +331,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       "hr.viewAll",
       "hr.approveLeave",
       "hr.approveExpenses",
+      "hr.approveAttendanceExceptions",
       "hiring.manage",
       "people.handover",
       "engagement.manage",
@@ -350,6 +371,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       "hr.viewAll",
       "hr.approveLeave",
       "hr.approveExpenses",
+      "hr.approveAttendanceExceptions",
       "hiring.manage",
       "people.handover",
       "engagement.manage",
@@ -453,6 +475,13 @@ export const ROLE_PRESETS: RolePreset[] = [
       "signatures.manage",
       // Putting the wins board on the office TVs (owner, 17 Oct 2026: Management and Admin).
       "wins.tv",
+      // Finance → Accounts (owner, 22 Oct 2026): stock across warehouses, and the second signature on
+      // adjustments and vouchers.
+      "inventory.view",
+      "inventory.receive",
+      "inventory.transfer",
+      "inventory.approveAdjustments",
+      "vouchers.approve",
     ],
   },
   {
@@ -489,7 +518,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     label: "Auditor (read-only)",
     description: "Sees everything and changes nothing — the activity log, the permission review screens, and company-wide figures. Grants no ability to act.",
     role: "MANAGEMENT",
-    permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, "activities.viewAll", "activity.viewAll", "activity.export", "permissions.view", "expenses.viewAll", "visits.viewAll", "performance.view", "hr.viewAll", "assets.viewAll", "feedback.viewAll", "marketing.viewAll", "targets.viewAll", "companies.viewAll", "data.exportCrm", "data.exportFinance"],
+    permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, "activities.viewAll", "activity.viewAll", "activity.export", "permissions.view", "expenses.viewAll", "visits.viewAll", "performance.view", "hr.viewAll", "assets.viewAll", "feedback.viewAll", "marketing.viewAll", "targets.viewAll", "companies.viewAll", "data.exportCrm", "data.exportFinance", "inventory.view"],
   },
 ];
 

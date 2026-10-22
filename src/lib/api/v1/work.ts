@@ -66,7 +66,7 @@ export async function listTasksApi(call: ApiCall): Promise<ApiAnswer> {
   const q = call.url.searchParams;
   const { page, pageSize } = paging(call.url, API_MAX_PAGE_SIZE, API_DEFAULT_PAGE_SIZE);
   const status = q.get("status")?.toLowerCase();
-  if (status && !["upcoming", "todo", "in_progress", "done", "cancelled", "open"].includes(status)) throw new ApiError(400, "invalid_request", "status is one of upcoming, todo, in_progress, done, cancelled, open.");
+  if (status && !["upcoming", "todo", "in_progress", "need_help", "done", "cancelled", "open"].includes(status)) throw new ApiError(400, "invalid_request", "status is one of upcoming, todo, in_progress, need_help, done, cancelled, open.");
   const assignee = q.get("assignee");
   const { rows, total } = await listTasksPaged({
     page,
@@ -134,11 +134,12 @@ export async function patchTaskApi(call: ApiCall): Promise<ApiAnswer> {
   if (!now) throw notFound("task");
   // The status moves as the person working it moves it — whoever it's given to may, whatever else they may change.
   if (input.status) {
-    const moved = await setTaskStatus(id, input.status);
+    const moved = await setTaskStatus(id, input.status, input.status_note);
     if (!moved.ok) throw refusedBy(moved);
   }
   const rest = { ...input };
   delete rest.status;
+  delete rest.status_note;
   if (Object.keys(rest).length) {
     const done = await updateTask({
       id,

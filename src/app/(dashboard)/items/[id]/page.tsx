@@ -10,6 +10,9 @@ import { formatItemId } from "@/lib/order-id";
 import { canonicalise, parseRecordRef } from "@/lib/record-url";
 import { db } from "@/lib/db";
 import { AdjustStockForm } from "@/components/items/adjust-stock-form";
+import { itemInventory, listWarehouses } from "@/actions/inventory";
+import { ItemStockBreakdown, ItemStockMovements, ItemTrackingCard } from "@/components/inventory/item-stock-panel";
+import { qty } from "@/components/inventory/labels";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { CustomFieldsCard } from "@/components/custom-fields/custom-fields-card";
 import { EditCustomFields } from "@/components/custom-fields/edit-custom-fields";
@@ -52,6 +55,9 @@ export default async function ItemDetailPage({ params, searchParams }: { params:
 
   const lowStock =
     item.trackInventory && item.reorderLevel !== null && item.stockQuantity <= item.reorderLevel;
+  // Finance → Accounts (owner, 22 Oct 2026): where the stock is, its value and how it's tracked — for whoever
+  // may see stock, in a workspace whose database has warehouses. Otherwise the page is as it was.
+  const [stock, warehouses] = item.trackInventory ? await Promise.all([itemInventory(item.id), listWarehouses()]) : [null, []];
 
   return (
     <div className="space-y-6">
@@ -120,43 +126,52 @@ export default async function ItemDetailPage({ params, searchParams }: { params:
                 {lowStock && <Badge tone="amber">Low stock</Badge>}
               </CardHeader>
               <CardContent className="space-y-4">
-                <AdjustStockForm itemId={item.id} />
+                <AdjustStockForm
+                  itemId={item.id}
+                  warehouses={warehouses.map((w) => ({ id: w.id, name: w.name, isDefault: w.isDefault }))}
+                  tracked={!!stock && (stock.item.trackBatches || stock.item.trackSerials)}
+                />
                 <div className="border-t border-line pt-3">
-                  <table className="w-full text-sm">
-                    <thead className="text-left text-xs uppercase tracking-wide text-muted">
-                      <tr>
-                        <th className="py-1.5">Date</th>
-                        <th className="py-1.5">Type</th>
-                        <th className="py-1.5">Change</th>
-                        <th className="py-1.5">Reason</th>
-                        <th className="py-1.5">By</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {item.stockMovements.map((m) => (
-                        <tr key={m.id} className="border-t border-line">
-                          <td className="py-1.5 text-muted">{clock.date(m.createdAt)}</td>
-                          <td className="py-1.5 text-muted">{m.type}</td>
-                          <td className={`py-1.5 font-medium ${m.quantityChange >= 0 ? "text-success" : "text-danger"}`}>
-                            {m.quantityChange >= 0 ? `+${m.quantityChange}` : m.quantityChange}
-                          </td>
-                          <td className="py-1.5 text-muted">{m.reason ?? "—"}</td>
-                          <td className="py-1.5 text-muted">{m.createdBy.name}</td>
-                        </tr>
-                      ))}
-                      {item.stockMovements.length === 0 && (
+                  {stock ? (
+                    <ItemStockMovements stock={stock} dateOf={(d) => clock.date(d)} />
+                  ) : (
+                    <table className="w-full text-sm">
+                      <thead className="text-left text-xs uppercase tracking-wide text-muted">
                         <tr>
-                          <td colSpan={5} className="py-4 text-center text-subtle">
-                            No stock movements yet.
-                          </td>
+                          <th className="py-1.5">Date</th>
+                          <th className="py-1.5">Type</th>
+                          <th className="py-1.5">Change</th>
+                          <th className="py-1.5">Reason</th>
+                          <th className="py-1.5">By</th>
                         </tr>
-                      )}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {item.stockMovements.map((m) => (
+                          <tr key={m.id} className="border-t border-line">
+                            <td className="py-1.5 text-muted">{clock.date(m.createdAt)}</td>
+                            <td className="py-1.5 text-muted">{m.type}</td>
+                            <td className={`py-1.5 font-medium ${m.quantityChange >= 0 ? "text-success" : "text-danger"}`}>
+                              {m.quantityChange >= 0 ? `+${m.quantityChange}` : m.quantityChange}
+                            </td>
+                            <td className="py-1.5 text-muted">{m.reason ?? "—"}</td>
+                            <td className="py-1.5 text-muted">{m.createdBy.name}</td>
+                          </tr>
+                        ))}
+                        {item.stockMovements.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="py-4 text-center text-subtle">
+                              No stock movements yet.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
               </CardContent>
             </Card>
           )}
+          {stock && <ItemTrackingCard stock={stock} />}
         </div>
 
         <div className="space-y-6">
@@ -177,13 +192,14 @@ export default async function ItemDetailPage({ params, searchParams }: { params:
             <Card>
               <CardHeader className="text-sm font-medium text-text">Stock on hand</CardHeader>
               <CardContent>
-                <div className="text-3xl font-semibold text-text">{item.stockQuantity}</div>
+                <div className="text-3xl font-semibold text-text">{qty(item.stockQuantity)}</div>
                 {item.reorderLevel !== null && (
                   <p className="mt-1 text-sm text-muted">Reorder level: {item.reorderLevel}</p>
                 )}
               </CardContent>
             </Card>
           )}
+          {stock && <ItemStockBreakdown stock={stock} />}
 
           <Card>
             <CardHeader className="text-sm font-medium text-text">Details</CardHeader>

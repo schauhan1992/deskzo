@@ -3,13 +3,13 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CalendarClock, Check, LogIn, LogOut, X } from "lucide-react";
+import { CalendarClock, Check, X } from "lucide-react";
 import type { BalanceRow, myLeaveRequests } from "@/actions/leave";
 import type { myRegularisations, regularisationQueue } from "@/actions/regularisation";
 import type { myPayslips } from "@/actions/payroll";
 import type { listHolidays } from "@/actions/hr";
-import { clockIn, clockOut } from "@/actions/attendance";
 import { cancelRegularisation, decideRegularisation, requestRegularisation } from "@/actions/regularisation";
+import { ClockButtons } from "@/components/hr/clock-buttons";
 import { Badge, Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -219,25 +219,10 @@ export function MyHr({
 }
 
 function ClockCard({ today }: { today: TodayRow }) {
-  const router = useRouter();
   const clock = useClock();
-  const [pending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
 
   // The workspace's time of day, not the browser's.
   const time = (v: Date | string | null) => (v ? clock.time(v) : null);
-
-  function run(fn: () => Promise<{ ok: boolean; error?: string }>) {
-    setError(null);
-    startTransition(async () => {
-      const result = await fn();
-      if (!result.ok) {
-        setError(result.error ?? "That didn't work.");
-        return;
-      }
-      router.refresh();
-    });
-  }
 
   return (
     <Card>
@@ -259,21 +244,8 @@ function ClockCard({ today }: { today: TodayRow }) {
             <span className="text-muted">Not clocked in.</span>
           )}
         </div>
-        {error && <p className="mt-1 text-xs text-danger">{error}</p>}
         <div className="mt-2">
-          {!today?.checkInAt ? (
-            <Button size="sm" disabled={pending} onClick={() => run(() => clockIn())}>
-              <LogIn className="mr-1.5 h-3.5 w-3.5" />
-              Clock in
-            </Button>
-          ) : !today.checkOutAt ? (
-            <Button size="sm" variant="secondary" disabled={pending} onClick={() => run(() => clockOut())}>
-              <LogOut className="mr-1.5 h-3.5 w-3.5" />
-              Clock out
-            </Button>
-          ) : (
-            <Badge tone="green">Done for the day</Badge>
-          )}
+          <ClockButtons today={today} />
         </div>
       </CardContent>
     </Card>

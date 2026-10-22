@@ -46,7 +46,7 @@ export const guide: SeedGuide = {
     ],
     permissions: [
       perm("orders.view", "Opens Orders and Renewals at all, and a customer's Products & Subscriptions and Renewals tabs. Profiling, Calling, Sales, Support, Management, Accounts and Purchase have it by default."),
-      perm("section.orders", "Shows Orders in the Orders & Renewals menu and lets people open its pages. Every role has it until an admin unticks it for one."),
+      perm("section.orders", "Shows Orders in the Accounts menu and lets people open its pages. Every role has it until an admin unticks it for one."),
       perm("orders.approve", "Approve or reject a punched order after checking its payment terms, decide its hand-off and a higher purchase price, and see everyone's purchase savings. Never on an order you punched. Accounts and Management have it by default."),
       perm("orders.process", "Purchase's permission: set the vendor, purchase price and our PO on an approved order, mark it fulfilled, settle a vendor PO left to cancel, and see your own purchase savings. Purchase and Management have it by default."),
       perm("performance.view", "Opens Purchase savings with everybody's figures, for people who look at the team's performance. Management has it by default."),
@@ -67,7 +67,7 @@ export const guide: SeedGuide = {
       task(
         "Punch an order",
         ol(
-          runs("Open ", { b: "Orders & Renewals › Orders" }, " and select ", { b: "Punch order" }, "."),
+          runs("Open ", { b: "Accounts › Orders" }, " and select ", { b: "Punch order" }, "."),
           runs("Under ", { b: "Customer" }, ", choose the customer and its ", { b: "Location" }, ". For a reseller you can also say which of their customers it's for. Add the ", { b: "Customer PO / invoice number" }, " if you have it."),
           runs("Under ", { b: "Product and price" }, ", choose the ", { b: "Product" }, ", the ", { b: "Quantity" }, " and the ", { b: "Sales price / unit" }, " — blank uses the list price. For a subscription, set the ", { b: "Start date" }, " and a ", { b: "Term" }, " or ", { b: "Expiry date" }, "."),
           runs("Check ", { b: "New or renewal?" }, " — marked Detected when it was worked out from the customer's orders."),

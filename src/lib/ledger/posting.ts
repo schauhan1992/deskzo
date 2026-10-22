@@ -1,6 +1,7 @@
 import type { JournalSource } from "@prisma/client";
 import { SYSTEM_ACCOUNTS, type SystemAccountKey } from "@/lib/ledger/chart";
 import { isBaseCurrency } from "@/lib/currency";
+import { entryTotalsPaise } from "@/lib/accounts/money";
 
 /** The sources a document's own posting is written under — not a reversal's, not an exchange difference's. */
 export const DOCUMENT_SOURCES = ["INVOICE", "CREDIT_NOTE", "BILL"] as const satisfies readonly JournalSource[];
@@ -47,16 +48,18 @@ function clean(lines: DraftLine[]): DraftLine[] {
     .filter((l) => l.debit !== 0 || l.credit !== 0);
 }
 
+/**
+ * An entry's two sides, added up in whole paise (src/lib/accounts/money.ts) rather than as floats: a long
+ * entry of fractional rupees summed in binary could round its way into, or out of, balance.
+ */
 export function entryTotals(lines: { debit: number; credit: number }[]) {
-  return {
-    debit: round2(lines.reduce((t, l) => t + l.debit, 0)),
-    credit: round2(lines.reduce((t, l) => t + l.credit, 0)),
-  };
+  const { debit, credit } = entryTotalsPaise(lines);
+  return { debit: debit / 100, credit: credit / 100 };
 }
 
-/** Whether an entry balances. A rounding difference of a paisa is still an unbalanced entry. */
+/** Whether an entry balances — to the paisa, exactly. A rounding difference of a paisa is still unbalanced. */
 export function isBalanced(lines: { debit: number; credit: number }[]) {
-  const { debit, credit } = entryTotals(lines);
+  const { debit, credit } = entryTotalsPaise(lines);
   return debit === credit && debit > 0;
 }
 

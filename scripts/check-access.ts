@@ -200,7 +200,12 @@ async function main() {
   ok("  Pune then Delhi six hours later is a flight", impossibleTravel({ ...pune, at: t0 }, { ...delhi, at: new Date(t0.getTime() + 6 * 3_600_000) }) === null);
   ok("  Pune then Mumbai at once is the location database, not travel", impossibleTravel({ ...pune, at: t0 }, { ...mumbai, at: t0 }) === null);
 
-  ok("only the access page may ask for a location", permissionsPolicyFor("/access").includes("geolocation=(self)") && permissionsPolicyFor("/dashboard").includes("geolocation=()") && permissionsPolicyFor("/login").includes("geolocation=()"));
+  ok("only the access page may ask for a location — and the pages that clock in by GPS", permissionsPolicyFor("/access").includes("geolocation=(self)") && permissionsPolicyFor("/dashboard").includes("geolocation=()") && permissionsPolicyFor("/login").includes("geolocation=()"));
+  ok(
+    "  clocking in and setting an office's point may; nothing beside or below them may",
+    ["/people/me", "/people/attendance", "/settings/attendance-locations"].every((p) => permissionsPolicyFor(p).includes("geolocation=(self)")) &&
+      ["/people", "/people/attendance/exceptions", "/people/me/x", "/settings"].every((p) => permissionsPolicyFor(p).includes("geolocation=()")),
+  );
 
   // ─────────────────────────────────────────────────────────────────────────────
   section("Where an address is");

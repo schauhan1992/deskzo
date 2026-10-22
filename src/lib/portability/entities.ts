@@ -483,6 +483,7 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
   AttendanceDay: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   AttendanceRegularisation: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   AttendanceLocation: { disposition: "archive", reason: "Where somebody clocked in or out from the Deskzo app — immutable history beside the attendance day, archived with it." },
+  AttendanceException: { disposition: "archive", reason: "Who was allowed to clock in or out away from their office, why, who decided and what it was used for — audit history beside the attendance days it allowed, archived with them." },
   ShortLeaveRequest: { disposition: "archive", reason: "Immutable history. Exported to the archive bundle rather than migrated: no target CRM has a place for it, and the retention obligation does not move with the software." },
   ShortLeavePolicy: { disposition: "specification", reason: "Configuration rather than records: the company's short leave length and monthly count, two numbers to set again in whatever comes next." },
   LetterTemplate: { disposition: "specification", reason: "Configuration rather than records: HR's own letter wording with its {{fields}}, text to set up again in whatever comes next. The letters drafted from it are archived with the other letters." },
@@ -499,6 +500,22 @@ export const MODEL_DISPOSITIONS: Record<string, { disposition: ModelDisposition;
     reason:
       "The list of couriers this business uses, with their GSTIN or TRANSIN. Reference data rather than records about a customer — the same disposition as CredentialTag, and rebuilt on the target in the few minutes it takes to type a dozen names.",
   },
+  // Finance → Accounts (owner, 22 Oct 2026): stock by warehouse, batch and serial, stock vouchers, and payment,
+  // receipt, contra and journal vouchers.
+  Warehouse: { disposition: "specification", reason: "Configuration rather than records: where this business keeps stock. Rebuilt on the target from the specification; the stock history that names it is archived." },
+  UnitOfMeasure: { disposition: "specification", reason: "Configuration rather than records: the units quantities are kept in. Rebuilt on the target." },
+  ItemUnit: { disposition: "specification", reason: "Configuration for Item: how many of its own unit another unit holds (a box of 12). Rebuilt with the catalogue." },
+  AccountsSettings: { disposition: "specification", reason: "Configuration rather than records: inventory accounting, costing, approvals and numbering. Described in the workflow specification." },
+  AccountsCounter: { disposition: "excluded", reason: "A running serial per voucher series and financial year — bookkeeping about the bookkeeping, as JournalCounter. A target system issues its own numbers." },
+  StockBalance: { disposition: "excluded", reason: "Derived: what the stock movements add up to per item, warehouse and batch. Rebuilt from the movements, which are archived." },
+  StockCostLayer: { disposition: "excluded", reason: "Derived: the FIFO layers the costing engine keeps from the receipts. Rebuilt from the archived movements; no target has a place for them." },
+  StockReservation: { disposition: "excluded", reason: "A hold on stock for an open order — working state that is released when the order ships or is cancelled, not a record to carry over." },
+  ItemBatch: { disposition: "archive", reason: "Immutable history: the batches received, with their manufacture and expiry dates. Archived with the stock movements that name them." },
+  ItemSerial: { disposition: "archive", reason: "Immutable history: each serial number received, and where it went. Archived with the stock movements that moved it." },
+  StockDocument: { disposition: "archive", reason: "Immutable history: goods receipts, transfers, adjustments, counts and purchase returns. Exported to the archive bundle rather than migrated; no target CRM has a place for them." },
+  StockDocumentLine: { disposition: "archive", reason: "Meaningless without its StockDocument, and archived with it." },
+  AccountVoucher: { disposition: "archive", reason: "Immutable history: payment, receipt, contra and journal vouchers and who approved and posted them. Archived with the journal entries they wrote." },
+  AccountVoucherLine: { disposition: "archive", reason: "Meaningless without its AccountVoucher, and archived with it." },
   JournalCounter: {
     disposition: "excluded",
     reason:

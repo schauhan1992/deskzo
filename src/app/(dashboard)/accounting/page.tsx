@@ -38,6 +38,8 @@ import type { ReactNode } from "react";
 import { isModuleEntitled, moduleAccessFor } from "@/lib/modules-access";
 import { closeOverview } from "@/actions/close";
 import { CloseOverviewCard } from "@/components/close/close-overview-card";
+import { accountsGlance } from "@/actions/accounts-reports";
+import { GlanceStrip } from "@/components/reports/accounts/glance-strip";
 
 export default async function AccountingOverviewPage() {
   const enabled = await isModuleEnabled("accounting");
@@ -59,7 +61,7 @@ export default async function AccountingOverviewPage() {
   // Twelve Indian months back from the start of this one (finance/dashboard.ts `cashWindowFrom`).
   const cashFrom = cashWindowFrom(now);
 
-  const [tb, pl, bs, org, books, strayExpenses, strayPayroll, ie, top, flow, ar, ap] = await Promise.all([
+  const [tb, pl, bs, org, books, strayExpenses, strayPayroll, ie, top, flow, ar, ap, glance] = await Promise.all([
     trialBalance(),
     profitAndLoss({ from: fy.from, to: fy.to }),
     balanceSheet(),
@@ -76,6 +78,8 @@ export default async function AccountingOverviewPage() {
     cashFlow(cashFrom, now),
     receivablesOutstanding(),
     payablesOutstanding(),
+    // Finance → Accounts: stock, what's overdue, and what waits for somebody — each card only for whoever may follow it.
+    accountsGlance(),
   ]);
 
   // Last month's close (Revenue & Close): only where the add-on is available, and null for anybody
@@ -210,6 +214,8 @@ export default async function AccountingOverviewPage() {
         subtitle={`Financial year ${fy.label} · ${indiaClock.date(pl.from)} to ${indiaClock.date(pl.to)}`}
         organisation={org.legalName}
       />
+
+      <GlanceStrip cards={glance} />
 
       <BalanceCheck
         balanced={tb.balanced}

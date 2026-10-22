@@ -142,11 +142,31 @@ export type Ring = { id: string; number: string; label: string; asked_at: string
 
 export type Attendance = { status: string | null; check_in_at: string | null; check_out_at: string | null; worked_minutes: number | null };
 
+/**
+ * Whether the person's office checks where they clock (src/lib/app/daily.ts locationOut on the server) — never where
+ * the office is. `exception` is one waiting for a decision, or approved and usable now.
+ */
+export type LocationPolicy = {
+  required: boolean;
+  configured: boolean;
+  office: string | null;
+  radius_m: number | null;
+  exceptions_allowed: boolean;
+  exception: { id: string; status: "APPROVED" | "PENDING"; scope: "IN" | "OUT" | "IN_AND_OUT"; valid_until: string | null; used_in: boolean; used_out: boolean } | null;
+};
+
+/** What clocking in or out answers: the day, how the location was checked, and the rule now. */
+export type Clocked = Attendance & { check: "INSIDE" | "EXCEPTION" | "NOT_ENFORCED" | null; distance_m: number | null; location: LocationPolicy };
+
+export type ExceptionReason = "ALTERNATE_LOCATION" | "GPS_UNAVAILABLE" | "CORRECTION" | "OTHER";
+
 export type Task = { id: string; title: string; due: string | null; status: string; priority: string | null; company: string | null; can_work: boolean };
 
 export type Today = {
   date: string;
   attendance: Attendance | null;
+  /** Absent from a server older than GPS attendance. */
+  location?: LocationPolicy | null;
   tasks: { due_today: Task[]; open: number; overdue: number } | null;
   approvals_waiting: number;
   leave: {
@@ -155,7 +175,7 @@ export type Today = {
   } | null;
 };
 
-export type ApprovalKind = "leave" | "correction" | "expense" | "workflow" | "order" | "device";
+export type ApprovalKind = "leave" | "correction" | "expense" | "workflow" | "order" | "device" | "attendance-exception";
 
 export type Approval = { kind: ApprovalKind; id: string; title: string; detail: string | null; from: string | null; asked_at: string | null; reason_to_reject: boolean };
 

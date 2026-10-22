@@ -1,10 +1,12 @@
-import { db } from "@/lib/db";
 import { ApiError } from "@/lib/api/handler";
 import { iso } from "@/lib/api/refs";
 import { can } from "@/lib/authz/resolve";
 import { moduleAccessFor } from "@/lib/modules-access";
 import { workspaceClock } from "@/lib/time/workspace";
-import { clockIn, clockOut, myToday } from "@/actions/attendance";
+import { myToday } from "@/actions/attendance";
+import { attendanceExceptionQueue, decideAttendanceException, requestAttendanceException } from "@/actions/attendance-exceptions";
+import { clockPolicyFor, recordClock, type ClockPolicy } from "@/lib/hr/clock";
+import { EXCEPTION_REASON_LABELS, EXCEPTION_SCOPE_LABELS, PROBLEM_SHORT, type Reading } from "@/lib/hr/geofence";
 import { decideLeave, leaveApprovalQueue, leaveBalances, myLeaveRequests } from "@/actions/leave";
 import { decideRegularisation, regularisationQueue } from "@/actions/regularisation";
 import { decideExpense, listExpensesPaged } from "@/actions/expense";
@@ -59,18 +61,54 @@ export function readLocation(body: Record<string, unknown>): PhoneLocation | nul
   return { latitude: lat, longitude: lng, accuracy: Number.isFinite(accuracy) && accuracy >= 0 ? Math.min(100_000, Math.round(accuracy)) : null };
 }
 
-/** Clocking in or out from the phone: the web's own action, with where the phone was when it shares that. */
-export async function clockFromPhone(userId: string, appDeviceId: string, action: "in" | "out", location: PhoneLocation | null) {
+/**
+ * Clocking in or out from the phone — the same door as the web's buttons (src/lib/hr/clock.ts), with where the phone
+ * was and which paired phone it is. A refusal is a 422 whose code says why (`outside_office`, `accuracy_low`,
+ * `office_not_configured` …) and whose fields say whether an exception may be asked for and, outside, how far away
+ * the server worked out the phone was — never the office's own point.
+ */
+export async function clockFromPhone(userId: string, appDeviceId: string, action: "in" | "out", reading: Reading | null | "invalid") {
   await needAppModule("hr", userId);
-  const result = action === "in" ? await clockIn() : await clockOut();
-  if (!result.ok) refused(result);
-  if (location) {
-    const clock = await workspaceClock();
-    await db.attendanceLocation.create({
-      data: { userId, date: clock.calendarDate(new Date()), kind: action === "in" ? "IN" : "OUT", latitude: location.latitude, longitude: location.longitude, accuracyM: location.accuracy, appDeviceId },
+  const outcome = await recordClock({ userId, action, reading, appDeviceId });
+  if (!outcome.ok) {
+    throw new ApiError(422, outcome.code, outcome.error, {
+      can_request_exception: String(outcome.canRequestException),
+      ...(outcome.distanceM !== undefined ? { distance_m: String(outcome.distanceM) } : {}),
     });
   }
-  return attendanceOut(await myToday());
+  return { ...attendanceOut(await myToday()), check: outcome.check, distance_m: outcome.distanceM, location: locationOut(await clockPolicyFor(userId)) };
+}
+
+/** The office's attendance rule as the app reads it — whether location is needed, never where the office is. */
+export function locationOut(policy: ClockPolicy) {
+  return {
+    required: policy.required,
+    configured: policy.configured,
+    office: policy.officeName,
+    radius_m: policy.radiusM,
+    exceptions_allowed: policy.exceptionsAllowed,
+    exception: policy.exception
+      ? { id: policy.exception.id, status: policy.exception.status, scope: policy.exception.scope, valid_until: iso(policy.exception.validUntil), used_in: policy.exception.usedIn, used_out: policy.exception.usedOut }
+      : null,
+  };
+}
+
+/**
+ * The person asks, from the phone, to clock in or out away from the office today — the web's own action, with
+ * where the phone was so the approver sees how far out it was.
+ */
+export async function requestExceptionFromPhone(userId: string, body: Record<string, unknown>) {
+  await needAppModule("hr", userId);
+  const action = body.action === "out" ? "out" : body.action === "in" ? "in" : null;
+  if (!action) throw new ApiError(400, "invalid_request", "Say whether it is to clock in or out.", { action: "Use in or out." });
+  const result = await requestAttendanceException({
+    scope: action === "in" ? "IN" : "OUT",
+    reasonCode: body.reason_code,
+    reason: body.reason,
+    location: { latitude: body.latitude, longitude: body.longitude, accuracy: body.accuracy, mocked: body.mocked },
+  });
+  if (!result.ok) refused(result);
+  return { id: result.data.id, location: locationOut(await clockPolicyFor(userId)) };
 }
 
 // ─── Today ────────────────────────────────────────────────────────────────────
@@ -98,9 +136,11 @@ export async function todayFor(userId: string) {
     hr ? leaveBalances(userId) : null,
     hr ? myLeaveRequests() : null,
   ]);
+  const location = hr ? locationOut(await clockPolicyFor(userId)) : null;
   return {
     date: today,
     attendance,
+    location,
     tasks: tasks ? { due_today: (dueToday ?? []).slice(0, 20).map(taskOut), open: counts?.open ?? 0, overdue: counts?.overdue ?? 0 } : null,
     approvals_waiting: approvals,
     leave: hr
@@ -132,7 +172,7 @@ export async function tasksFor(userId: string, view: string) {
 
 // ─── Approvals ────────────────────────────────────────────────────────────────
 
-export const APPROVAL_KINDS = ["leave", "correction", "expense", "workflow", "order", "device"] as const;
+export const APPROVAL_KINDS = ["leave", "correction", "expense", "workflow", "order", "device", "attendance-exception"] as const;
 export type ApprovalKind = (typeof APPROVAL_KINDS)[number];
 
 export type ApprovalItem = {
@@ -170,14 +210,16 @@ export async function approvalsFor(userId: string): Promise<ApprovalItem[]> {
     workflows ? getApprovalsInbox().then((i) => i.waiting.filter((w) => w.source === "workflow")) : [],
     orders && ordersApprove ? listOrdersPaged({ status: "PENDING_APPROVAL", page: 1, pageSize: 50 } as never).then((r) => r.rows) : [],
     devices ? listDevices({ status: "PENDING", pageSize: 50 }).then((r) => r?.rows ?? []) : [],
+    hr ? attendanceExceptionQueue() : [],
   ]);
-  const [leave, corrections, claims, steps, pendingOrders, pendingDevices] = lists as [
+  const [leave, corrections, claims, steps, pendingOrders, pendingDevices, exceptions] = lists as [
     Awaited<ReturnType<typeof leaveApprovalQueue>>["pending"],
     Awaited<ReturnType<typeof regularisationQueue>>,
     Awaited<ReturnType<typeof listExpensesPaged>>["rows"],
     Awaited<ReturnType<typeof getApprovalsInbox>>["waiting"],
     Awaited<ReturnType<typeof listOrdersPaged>>["rows"],
     NonNullable<Awaited<ReturnType<typeof listDevices>>>["rows"],
+    Awaited<ReturnType<typeof attendanceExceptionQueue>>,
   ];
   for (const l of leave) {
     items.push({ kind: "leave", id: l.id, title: `${l.user.name}: ${l.type.name}, ${l.days} day${Number(l.days) === 1 ? "" : "s"}`, detail: `${day(l.fromDate)}${day(l.toDate) !== day(l.fromDate) ? ` to ${day(l.toDate)}` : ""} · ${l.reason}`, from: l.user.name, asked_at: iso(l.createdAt), reason_to_reject: false });
@@ -201,6 +243,11 @@ export async function approvalsFor(userId: string): Promise<ApprovalItem[]> {
     if (d.user.id === userId) continue;
     items.push({ kind: "device", id: d.id, title: `${d.user.name}: a new device`, detail: `${d.label}${d.lastPlace ? ` · ${d.lastPlace}` : ""}`, from: d.user.name, asked_at: iso(d.firstSeenAt), reason_to_reject: false });
   }
+  for (const x of exceptions) {
+    if (x.user.id === userId) continue;
+    const refusedFor = x.attemptProblem ? ` · ${PROBLEM_SHORT[x.attemptProblem] ?? x.attemptProblem}${x.attemptDistanceM !== null ? `, ${x.attemptDistanceM} m away` : ""}` : "";
+    items.push({ kind: "attendance-exception", id: x.id, title: `${x.user.name}: ${EXCEPTION_SCOPE_LABELS[x.scope].toLowerCase()} away from the office`, detail: `${EXCEPTION_REASON_LABELS[x.reasonCode]} · ${x.reason}${refusedFor}`, from: x.user.name, asked_at: iso(x.requestedAt), reason_to_reject: false });
+  }
   return items.sort((a, b) => (a.asked_at ?? "").localeCompare(b.asked_at ?? ""));
 }
 
@@ -218,6 +265,8 @@ export async function decideFromPhone(kind: ApprovalKind, id: string, approve: b
             ? await decideWorkflowApproval(id, approve ? "approved" : "rejected", n ?? null)
             : kind === "order"
               ? await approveOrder({ orderId: id, approved: approve, notes: n })
-              : await decideDevice(id, approve ? "APPROVE" : "REJECT", n);
+              : kind === "device"
+                ? await decideDevice(id, approve ? "APPROVE" : "REJECT", n)
+                : await decideAttendanceException({ id, approve, note: n });
   if (!result.ok) refused(result);
 }

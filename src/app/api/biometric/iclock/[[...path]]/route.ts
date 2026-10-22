@@ -144,6 +144,8 @@ async function handleGet(request: Request, context: { params: Promise<{ path?: s
 
   // The opening handshake: the device asks what it should do and we answer with its settings.
   if (endpoint === "cdata") {
+    // Once per connection, not per poll: what the terminal says it is and speaks, for when uploads don't arrive.
+    console.info(`[biometric] ${serial} handshake ${url.searchParams.toString().slice(0, 300)}`);
     return text(handshakeResponse(device.serialNumber));
   }
 
@@ -173,6 +175,8 @@ async function handlePost(request: Request, context: { params: Promise<{ path?: 
 
   const endpoint = (path ?? []).join("/");
   await db.biometricDevice.update({ where: { id: device.id }, data: { lastSeenAt: new Date() } });
+  // Every upload, in one line: a terminal that is seen but whose punches never arrive is otherwise silent.
+  console.info(`[biometric] ${serial} POST /${endpoint} table=${url.searchParams.get("table") ?? "-"} bytes=${body.length}`);
 
   if (endpoint === "devicecmd") {
     // The result of a command we sent. Nothing sends commands yet, so this is just acknowledged.
@@ -186,6 +190,8 @@ async function handlePost(request: Request, context: { params: Promise<{ path?: 
     return text(ACK);
   }
   if (table !== "ATTLOG") {
+    // Kept to its first line, and cut short: a template or photo upload is long, and none of it is needed.
+    if (table === "OTHER" && body) console.info(`[biometric] ${serial} ignored table=${url.searchParams.get("table") ?? "-"}: ${body.split(/\r?\n/)[0]?.slice(0, 120)}`);
     // Photos and fingerprint templates land here. Refused on purpose — this app has no use for a
     // biometric template and every reason not to hold one.
     return text(ACK);
@@ -195,7 +201,10 @@ async function handlePost(request: Request, context: { params: Promise<{ path?: 
   if (rejected.length > 0) {
     console.warn(`[biometric] ${serial}: ${rejected.length} unreadable row(s), first: ${rejected[0].line}`);
   }
-  if (punches.length === 0) return text(ACK);
+  if (punches.length === 0) {
+    console.info(`[biometric] ${serial} ATTLOG with no readable punch${body ? `, first line: ${body.split(/\r?\n/)[0]?.slice(0, 200)}` : ""}`);
+    return text(ACK);
+  }
 
   // `skipDuplicates` is what makes a terminal re-sending its whole buffer a no-op. They do this
   // after a reboot, after a clock change, and whenever ATTLOGStamp is reset — routinely, in other
@@ -220,6 +229,8 @@ async function handlePost(request: Request, context: { params: Promise<{ path?: 
       punchesReceived: { increment: created.count },
     },
   });
+
+  console.info(`[biometric] ${serial} ATTLOG ${punches.length} punch(es), ${created.count} new`);
 
   if (created.count > 0) {
     await linkPunchesToUsers([...new Set(punches.map((p) => p.deviceUserId))]);

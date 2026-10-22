@@ -96,9 +96,11 @@ export const guide: SeedGuide = {
       perm("section.accounting", "Shows Accounting in the menu and lets people open its pages. Every role has it until an admin unticks it for one — each page then still needs its own permission below."),
       perm(
         "ledger.viewReports",
-        "Opens Overview, Journal, Trial Balance, Profit & Loss, Balance Sheet, Cash Flow and each account's ledger, and lets you read the Chart of Accounts and Close the Books. The Accounts and Management roles have it by default.",
+        "Opens Overview, Vouchers, Journal, Trial Balance, Profit & Loss, Balance Sheet, Cash Flow, the Day Book, Registers, the cash and bank books and each account's ledger, and lets you read the Chart of Accounts and Close the Books. The Accounts and Management roles have it by default.",
       ),
-      perm("ledger.post", "Shows New journal entry on the Journal and Reverse on its entries. No role has it by default."),
+      perm("ledger.post", "Shows New journal entry on the Journal and Reverse on its entries, and posts and reverses vouchers. No role has it by default."),
+      perm("vouchers.create", "Lets you write payment, receipt, contra and journal vouchers as drafts, change your drafts, and send them for approval. The Accounts and Management roles have it by default."),
+      perm("vouchers.approve", "Lets you approve somebody else's voucher, or send it back, where Accounts settings ask for approval. Never your own. Management has it by default."),
       perm(
         "ledger.manageAccounts",
         "Lets you add, edit, archive and delete accounts on the Chart of Accounts (and opens that page on its own). No role has it by default — an account's type decides which statement it lands in, so this reshapes every report.",
@@ -131,20 +133,20 @@ export const guide: SeedGuide = {
         runs(
           { b: "Bank accounts." },
           " Somebody with Manage finance records adds each real bank account on ",
-          { b: "Accounting › Banking" },
+          { b: "Accounts › Banking" },
           ", so each one gets its own ledger account and reconciles against its own statement.",
         ),
         runs(
           { b: "Opening balances." },
           " Somebody who may write journal entries posts them on ",
-          { b: "Accounting › Journal" },
+          { b: "Accounts › Journal" },
           " with the entry's ",
           { b: "Kind" },
           " set to ",
           { b: "Opening balance" },
           ".",
         ),
-        runs({ b: "Fixed assets." }, " Add the laptops and equipment the company owns on ", { b: "Accounting › Fixed Assets" }, ", so depreciation reaches the P&L every month."),
+        runs({ b: "Fixed assets." }, " Add the laptops and equipment the company owns on ", { b: "Accounts › Fixed Assets" }, ", so depreciation reaches the P&L every month."),
         runs({ b: "Access." }, " An admin grants the permissions above, role by role, in ", { b: "Settings › Roles & Permissions" }, "."),
       ),
     ],
@@ -152,7 +154,7 @@ export const guide: SeedGuide = {
       task(
         "Read the statements",
         ol(
-          runs("Open ", { b: "Accounting › Overview" }, " for this financial year's income, expenses, profit and total assets, and a line saying whether debits equal credits."),
+          runs("Open ", { b: "Accounts › Overview" }, " for this financial year's income, expenses, profit and total assets, and a line saying whether debits equal credits."),
           runs("Open ", { b: "Trial Balance" }, ", ", { b: "Profit & Loss" }, ", ", { b: "Balance Sheet" }, " or ", { b: "Cash Flow" }, " from the menu."),
           runs("Change the dates at the top right: ", { b: "As at" }, " on the trial balance and balance sheet, ", { b: "From" }, " and ", { b: "To" }, " on the P&L and cash flow. The P&L opens on the current financial year."),
           runs("With more than one branch, choose a ", { b: "Branch" }, " on the P&L to see that branch's figures. The balance sheet is always for the whole company."),
@@ -163,7 +165,7 @@ export const guide: SeedGuide = {
       task(
         "Write a journal entry",
         ol(
-          runs("Open ", { b: "Accounting › Journal" }, " and select ", { b: "New journal entry" }, "."),
+          runs("Open ", { b: "Accounts › Journal" }, " and select ", { b: "New journal entry" }, "."),
           runs("Set the ", { b: "Date" }, " and write a ", { b: "Narration" }, " — every entry needs one."),
           runs("Choose the ", { b: "Kind" }, ": ", { b: "Manual entry" }, " or ", { b: "Opening balance" }, "."),
           runs("On each line pick the ", { b: "Account" }, " and type a ", { b: "Debit" }, " or a ", { b: "Credit" }, " — one or the other, not both. ", { b: "Add line" }, " gives you more lines."),
@@ -173,9 +175,29 @@ export const guide: SeedGuide = {
         note("You can't post to a group (post to an account under it), to an archived account, or into a period the books are locked for.", "warning"),
       ),
       task(
+        "Write a payment, receipt, contra or journal voucher",
+        ol(
+          runs("Open ", { b: "Accounts › Vouchers" }, " and select ", { b: "New voucher" }, "."),
+          runs("Choose the kind: ", { b: "Payment" }, " (money out of a bank or cash account), ", { b: "Receipt" }, " (money in), ", { b: "Contra" }, " (between your own bank and cash accounts) or ", { b: "Journal" }, " (anything else, with no bank or cash line)."),
+          "Set the date, a narration and, if you like, a reference. Add the lines: an account and a debit or a credit on each. A receivable or payable line names the customer or vendor.",
+          runs("When the totals balance, save it. A draft changes nothing in the books."),
+          runs("Select ", { b: "Post" }, " — or, where vouchers need approval, ", { b: "Submit for approval" }, " and somebody else approves it first. Posting writes one journal entry, numbered in the voucher's own series (PMT/2026-27/0001)."),
+        ),
+        note("A posted voucher isn't edited or deleted. Reverse it: the reversal is a dated, opposite entry, and both stay on record.", "warning"),
+      ),
+      task(
+        "Read the day book, cash and bank books, and registers",
+        ul(
+          runs({ b: "Accounts › Day Book" }, " — every entry posted in a date range, whatever wrote it, with its lines."),
+          runs({ b: "Accounts › Cash & bank books" }, " — one cash or bank account's receipts and payments, with its opening and running balance."),
+          runs({ b: "Accounts › Registers" }, " — the sales and purchase registers with their GST (for one customer or vendor, if you pick one), the journal register, expenses by account and month, a GST summary of output against input tax, and who did what to each voucher."),
+        ),
+        p("Each opens the entries and documents behind it, and can be exported as CSV by somebody allowed to export finance data."),
+      ),
+      task(
         "Correct an entry with a reversal",
         ol(
-          runs("Find the entry in ", { b: "Accounting › Journal" }, ". Search by entry number or narration, or narrow by ", { b: "Source" }, ", ", { b: "From" }, " and ", { b: "To" }, "."),
+          runs("Find the entry in ", { b: "Accounts › Journal" }, ". Search by entry number or narration, or narrow by ", { b: "Source" }, ", ", { b: "From" }, " and ", { b: "To" }, "."),
           runs("Select ", { b: "Reverse" }, " on the entry."),
           "Say why it's being reversed — the reason is shown on the reversing entry.",
         ),
@@ -191,7 +213,7 @@ export const guide: SeedGuide = {
       task(
         "Reconcile a bank account",
         ol(
-          runs("Open ", { b: "Accounting › Banking" }, " and select the bank account (the default one is selected for you)."),
+          runs("Open ", { b: "Accounts › Banking" }, " and select the bank account (the default one is selected for you)."),
           runs(
             "Select ",
             { b: "Import a statement" },
@@ -232,7 +254,7 @@ export const guide: SeedGuide = {
       task(
         "Add a fixed asset and charge depreciation",
         ol(
-          runs("Open ", { b: "Accounting › Fixed Assets" }, " and select ", { b: "Add an asset" }, "."),
+          runs("Open ", { b: "Accounts › Fixed Assets" }, " and select ", { b: "Add an asset" }, "."),
           runs(
             "Fill in the ",
             { b: "Tag" },
@@ -274,7 +296,7 @@ export const guide: SeedGuide = {
       task(
         "Prepare the GST returns",
         ol(
-          runs("Open ", { b: "Accounting › GST Returns" }, ". It opens on last month, the one being filed."),
+          runs("Open ", { b: "Accounts › GST Returns" }, ". It opens on last month, the one being filed."),
           runs("Change the ", { b: "Month" }, " and ", { b: "Year" }, " if you need to. With more than one registration, choose the ", { b: "GST registration" }, " — a return is per GSTIN."),
           "Read the warnings at the top first. Red means the return shows more output tax than the ledger can support — find out why before filing. Amber means the ledger holds output tax the documents don't show, or lists the things the GST portal will reject.",
           runs("Under ", { b: "GSTR-3B — what's payable" }, ", check the output tax, the credit from vendor bills and expense claims, and what's payable in cash or carried forward under each head."),
@@ -285,7 +307,7 @@ export const guide: SeedGuide = {
       task(
         "Check the month's TDS",
         ol(
-          runs("Open ", { b: "Accounting › TDS" }, " and pick the month."),
+          runs("Open ", { b: "Accounts › TDS" }, " and pick the month."),
           runs(
             "Read ",
             { b: "We deducted, and owe" },
@@ -302,7 +324,7 @@ export const guide: SeedGuide = {
       task(
         "Lock a period and close the financial year",
         ol(
-          runs("Open ", { b: "Accounting › Close the Books" }, "."),
+          runs("Open ", { b: "Accounts › Close the Books" }, "."),
           runs("Under ", { b: "Period lock" }, ", pick a date in ", { b: "Lock everything up to and including" }, ", say ", { b: "Why" }, " and select ", { b: "Lock" }, ". You can only lock a period that has finished."),
           runs("When a financial year is over, it appears beside ", { b: "Ready to close:" }, " under ", { b: "Financial years" }, ". Select it, read what will happen, and select ", { b: "Close" }, " with the year."),
         ),
@@ -319,7 +341,7 @@ export const guide: SeedGuide = {
       task(
         "Pay back approved expense claims",
         ol(
-          runs("Open ", { b: "Accounting › Expense claims" }, ". ", { b: "To pay" }, " lists every approved claim owed to somebody — who claimed it, who approved it, and the ledger entry its approval posted."),
+          runs("Open ", { b: "Accounts › Expense claims" }, ". ", { b: "To pay" }, " lists every approved claim owed to somebody — who claimed it, who approved it, and the ledger entry its approval posted."),
           runs("Tick the claims you've paid, type the ", { b: "Payment reference" }, ", pick the day it was ", { b: "Paid on" }, " and select ", { b: "Mark paid" }, "."),
           runs("They move to ", { b: "Paid" }, ", and the payment is posted. The claimants are told."),
         ),
@@ -329,7 +351,7 @@ export const guide: SeedGuide = {
     settings: [
       setting(
         "Chart of accounts",
-        "Settings › Chart of accounts (opens Accounting › Chart of Accounts)",
+        "Settings › Chart of accounts (opens Accounts › Chart of Accounts)",
         p(
           runs(
             "The ledger accounts every posting lands in. Groups organise the statements; postings go to the accounts under them. ",
@@ -358,12 +380,12 @@ export const guide: SeedGuide = {
       ),
       setting(
         "Close the books",
-        "Settings › Close the books (opens Accounting › Close the Books)",
+        "Settings › Close the books (opens Accounts › Close the Books)",
         p("The period lock and the year-end close described in the task above. Nothing dated on or before the lock date can be posted, reversed or corrected — post the correction in an open period instead. Removing the lock makes everything postable again."),
       ),
       setting(
         "Bank accounts",
-        "Accounting › Banking",
+        "Accounts › Banking",
         p(
           runs(
             { b: "Add an account" },
@@ -392,6 +414,10 @@ export const guide: SeedGuide = {
       ),
     ],
     faq: [
+      qa(
+        "Do BUSY's shortcut keys work here?",
+        p("Yes. Alt + F5 a payment voucher, Alt + F6 a receipt, Alt + B the balance sheet, Alt + T the trial balance, Alt + L an account's ledger, F2 to save a voucher, F7 to repeat the line above, Page Up and Page Down from one voucher to the next — and the rest of BUSY's list. Press ? anywhere outside a text field to see every key, and what BUSY calls it. Where BUSY says Alt/Ctrl with a letter, use Alt: Ctrl with a letter stays the browser's."),
+      ),
       qa(
         "I can't see Accounting in the menu.",
         p(

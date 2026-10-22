@@ -1,21 +1,22 @@
 /**
  * The rules of advanced tasks (owner, 16 Oct 2026) — pure, for the screens, the actions and the checks.
  *
- *   · Status: To do, In progress, Done or Cancelled; an open task whose start day is still to come shows
- *     as Upcoming. `done` stays the one "closed" flag the rest of the app reads — Done and Cancelled set
+ *   · Status: To do, In progress, Need help, Done or Cancelled; an open task whose start day is still to come
+ *     shows as Upcoming. Need help and Cancelled each need a note saying why (owner, 22 Oct 2026), kept as a
+ *     comment on the task. `done` stays the one "closed" flag the rest of the app reads — Done and Cancelled set
  *     it — and a task closed through the old tick reads as Done whatever its status says.
  *   · XP: what a task is worth, earned by its assignee when it's done on or before its due day. Nobody
  *     sets the XP on a task that's theirs, so nobody awards themselves.
  *   · Repeats: done, a repeating task makes its next one, a day, a week or a month on.
  */
 
-export type TaskStatusKey = "TODO" | "IN_PROGRESS" | "DONE" | "CANCELLED";
+export type TaskStatusKey = "TODO" | "IN_PROGRESS" | "NEED_HELP" | "DONE" | "CANCELLED";
 export type ShownStatus = TaskStatusKey | "UPCOMING";
 export type TaskPriorityKey = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
 export type TaskRepeatKey = "DAILY" | "WEEKLY" | "MONTHLY";
 type Tone = "default" | "green" | "blue" | "red" | "amber" | "brand";
 
-export const TASK_STATUSES: readonly TaskStatusKey[] = ["TODO", "IN_PROGRESS", "DONE", "CANCELLED"];
+export const TASK_STATUSES: readonly TaskStatusKey[] = ["TODO", "IN_PROGRESS", "NEED_HELP", "DONE", "CANCELLED"];
 export const TASK_PRIORITIES: readonly TaskPriorityKey[] = ["LOW", "MEDIUM", "HIGH", "URGENT"];
 export const TASK_REPEATS: readonly TaskRepeatKey[] = ["DAILY", "WEEKLY", "MONTHLY"];
 
@@ -23,10 +24,34 @@ export const STATUS_LABELS: Record<ShownStatus, string> = {
   UPCOMING: "Upcoming",
   TODO: "To do",
   IN_PROGRESS: "In progress",
+  NEED_HELP: "Need help",
   DONE: "Done",
   CANCELLED: "Cancelled",
 };
-export const STATUS_TONES: Record<ShownStatus, Tone> = { UPCOMING: "blue", TODO: "default", IN_PROGRESS: "amber", DONE: "green", CANCELLED: "red" };
+export const STATUS_TONES: Record<ShownStatus, Tone> = { UPCOMING: "blue", TODO: "default", IN_PROGRESS: "amber", NEED_HELP: "red", DONE: "green", CANCELLED: "red" };
+
+/**
+ * The moves that need a note (owner, 22 Oct 2026): why it's cancelled; what help is needed. The note becomes a
+ * comment on the task, and its maker and its assignee are told — so whoever can help knows what is asked.
+ */
+export const NOTE_FOR: Partial<Record<TaskStatusKey, { label: string; placeholder: string; missing: string; prefix: string }>> = {
+  CANCELLED: { label: "Why is it cancelled?", placeholder: "e.g. The customer withdrew the request", missing: "Say why it's cancelled.", prefix: "Cancelled" },
+  NEED_HELP: { label: "What do you need help with?", placeholder: "e.g. I need the customer's admin login to finish this", missing: "Say what help you need.", prefix: "Needs help" },
+};
+export const NOTE_MIN = 3;
+
+/** Whether a move to `status` has the note it needs: the comment it leaves, null when it needs none, or why not. */
+export function checkStatusNote(status: TaskStatusKey, note: unknown): { ok: true; text: string | null } | { ok: false; error: string } {
+  const need = NOTE_FOR[status];
+  if (!need) return { ok: true, text: null };
+  const text = typeof note === "string" ? note.trim() : "";
+  if (text.length < NOTE_MIN) return { ok: false, error: need.missing };
+  if (text.length > COMMENT_MAX - 20) return { ok: false, error: `Keep it under ${(COMMENT_MAX - 20).toLocaleString("en-IN")} characters.` };
+  return { ok: true, text: statusNoteText(status, text) };
+}
+
+/** The comment a noted move leaves on the task: "Cancelled: …", "Needs help: …". */
+export const statusNoteText = (status: TaskStatusKey, note: string) => `${NOTE_FOR[status]?.prefix ?? STATUS_LABELS[status]}: ${note.trim()}`;
 export const PRIORITY_LABELS: Record<TaskPriorityKey, string> = { LOW: "Low", MEDIUM: "Medium", HIGH: "High", URGENT: "Urgent" };
 export const PRIORITY_TONES: Record<TaskPriorityKey, Tone> = { LOW: "default", MEDIUM: "blue", HIGH: "amber", URGENT: "red" };
 export const REPEAT_LABELS: Record<TaskRepeatKey, string> = { DAILY: "Every day", WEEKLY: "Every week", MONTHLY: "Every month" };

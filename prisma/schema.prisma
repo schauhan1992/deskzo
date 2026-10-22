@@ -234,6 +234,14 @@ enum StockMovementType {
   ADJUSTMENT
   RETURNED
   DAMAGED
+  /**
+   * Finance → Accounts (owner, 22 Oct 2026): the balance a warehouse started with, one warehouse's side of
+   * a transfer, and goods sent back to the vendor they came from.
+   */
+  OPENING
+  TRANSFER_IN
+  TRANSFER_OUT
+  PURCHASE_RETURN
 }
 
 enum TicketStatus {
@@ -364,6 +372,10 @@ enum NotificationType {
   LEAVE_DECIDED
   REGULARISATION_REQUESTED
   REGULARISATION_DECIDED
+  /// Somebody asks to clock in or out away from their office (GPS attendance, owner 22 Oct 2026).
+  ATTENDANCE_EXCEPTION_REQUESTED
+  /// Their attendance location exception is approved, refused, granted or revoked.
+  ATTENDANCE_EXCEPTION_DECIDED
   BIRTHDAY_TODAY
   WORK_ANNIVERSARY
   WISHES
@@ -659,6 +671,8 @@ model User {
   tradeDocumentsSold         TradeDocument[]          @relation("TradeDocumentSalesperson")
   tradeDocumentsCancelled    TradeDocument[]          @relation("TradeDocumentCancelledBy")
   journalEntriesCreated      JournalEntry[]           @relation("JournalCreatedBy")
+  stockDocumentsCreated      StockDocument[]          @relation("StockDocumentCreatedBy")
+  accountVouchersCreated     AccountVoucher[]         @relation("VoucherCreatedBy")
   ordersAccountsApproved     CompanyProduct[]         @relation("OrderAccountsApprovedBy")
   ordersPurchased            CompanyProduct[]         @relation("OrderPurchasedBy")
   ordersReleased             CompanyProduct[]         @relation("OrderReleasedBy")
@@ -913,6 +927,10 @@ model User {
   appPairings          AppPairing[]       @relation("AppPairings")
   appCallRequests      AppCallRequest[]   @relation("AppCallRequests")
   attendanceLocations  AttendanceLocation[] @relation("AttendanceLocations")
+  attendanceExceptions          AttendanceException[] @relation("AttendanceExceptions")
+  attendanceExceptionsRequested AttendanceException[] @relation("AttendanceExceptionsRequested")
+  attendanceExceptionsDecided   AttendanceException[] @relation("AttendanceExceptionsDecided")
+  attendanceExceptionsRevoked   AttendanceException[] @relation("AttendanceExceptionsRevoked")
 
   @@index([departmentId])
   @@index([managerId])
@@ -1121,6 +1139,8 @@ model Company {
   linkedCommissionParties CommissionPartyLink[]    @relation("CommissionPartyLinkCompany")
 
   journalEntries     JournalEntry[]        @relation("CompanyJournal")
+  stockDocuments     StockDocument[]       @relation("CompanyStockDocuments")
+  accountVouchers    AccountVoucher[]      @relation("VoucherParty")
   journalLines       JournalLine[]         @relation("JournalLineParty")
   calls              CallLog[]
   domainProfile      DomainProfile?
@@ -1989,6 +2009,19 @@ model Branch {
   /// Retired rather than deleted once anything names it.
   active       Boolean @default(true)
 
+  /// Where the office is, for clocking in and out there (owner, 22 Oct 2026; src/lib/hr/geofence.ts). Both or
+  /// neither: an office without them can't be checked against, and says so rather than letting anywhere pass.
+  latitude             Float?
+  longitude            Float?
+  /// How far from that point counts as at the office, in metres.
+  geofenceRadiusM      Int     @default(100)
+  /// The least sure a phone or browser may be of where it is, in metres, for its reading to be taken.
+  geoMaxAccuracyM      Int     @default(50)
+  /// Clocking in and out of this office needs a location inside the radius — or an approved exception.
+  geofenceEnforced     Boolean @default(false)
+  /// Whether an approved exception may stand in for being at the office.
+  geoExceptionsAllowed Boolean @default(true)
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   createdById String?
@@ -2003,6 +2036,8 @@ model Branch {
   documentSeries      DocumentSeries[]
   revenueSchedules    RevenueSchedule[]
   accountingSchedules AccountingSchedule[]
+  warehouses          Warehouse[]
+  attendanceLocations AttendanceLocation[] @relation("AttendanceLocationBranch")
 
   @@index([active])
   @@index([gstRegistrationId])
@@ -2388,6 +2423,15 @@ model TradeDocument {
   vendorCredits   VendorCreditApplication[] @relation("BillVendorCredits")
 
   journalEntries JournalEntry[] @relation("DocumentJournal")
+  /**
+   * Finance → Accounts (owner, 22 Oct 2026): the warehouse an invoice's goods leave from, or a bill's or
+   * credit note's arrive in — the default warehouse when not set. Read by name (NOT_YET_EVERYWHERE).
+   */
+  warehouseId              String?
+  warehouse                Warehouse?      @relation("DocumentWarehouse", fields: [warehouseId], references: [id])
+  stockMovements           StockMovement[] @relation("DocumentStockMovements")
+  stockReceipts            StockDocument[] @relation("StockDocumentPurchaseOrder")
+  stockDocumentsAgainstBill StockDocument[] @relation("StockDocumentBill")
   consignments   Consignment[]  @relation("ConsignmentDocument")
 
   /**
@@ -2773,7 +2817,23 @@ model Item {
   description     String?
   trackInventory  Boolean        @default(false)
   reorderLevel    Int?
-  stockQuantity   Int            @default(0)
+  /**
+   * On hand across every warehouse — kept by the stock engine (src/lib/inventory/engine.ts) as the sum of
+   * the item's `StockBalance` rows, in its base unit. Decimal since 22 Oct 2026, for goods sold by weight.
+   */
+  stockQuantity   Decimal        @default(0) @db.Decimal(14, 3)
+  /**
+   * Finance → Accounts (owner, 22 Oct 2026): what the item's stock records, each only where it's switched
+   * on — a batch (and its expiry), a serial or IMEI per unit. Read by name (NOT_YET_EVERYWHERE).
+   */
+  trackBatches    Boolean        @default(false)
+  trackExpiry     Boolean        @default(false)
+  trackSerials    Boolean        @default(false)
+  barcode         String?
+  /**
+   * How much to order when it falls to its reorder level.
+   */
+  reorderQuantity Decimal?       @db.Decimal(14, 3)
   active          Boolean        @default(true)
   createdById     String
   createdBy       User           @relation(fields: [createdById], references: [id])
@@ -2799,6 +2859,13 @@ model Item {
   tradeDocumentLines TradeDocumentLine[]
   assets             Asset[]
   revenueSchedules   RevenueSchedule[]
+  stockBalances      StockBalance[]
+  batches            ItemBatch[]
+  serials            ItemSerial[]
+  costLayers         StockCostLayer[]
+  reservations       StockReservation[]
+  unitConversions    ItemUnit[]
+  stockDocumentLines StockDocumentLine[]
 
   @@index([type])
   @@index([brandId])
@@ -3591,19 +3658,396 @@ model CreditNoteApplication {
   @@map("credit_note_applications")
 }
 
+/**
+ * The stock ledger: every change to what is on hand, one row each, never edited (owner, 22 Oct 2026).
+ *
+ * A movement says where (the warehouse, and the batch when the item keeps batches), how much (signed, in
+ * the item's base unit), at what cost, and why — the document, voucher or count it came from. A posting
+ * is made once: `idempotencyKey` is unique, so a retried invoice or a double-clicked receipt finds the
+ * movement already there instead of moving the stock twice. A correction is another movement that
+ * `reverses` this one. Written only by src/lib/inventory/engine.ts.
+ *
+ * Rows from before then carry no warehouse in the old workspace; the migration put them in the main
+ * warehouse and valued them at the item's cost price.
+ */
 model StockMovement {
   id              String            @id @default(cuid())
   itemId          String
   item            Item              @relation(fields: [itemId], references: [id], onDelete: Cascade)
   type            StockMovementType
-  quantityChange  Int
+  quantityChange  Decimal           @db.Decimal(14, 3)
   reason          String?
   createdByUserId String
   createdBy       User              @relation(fields: [createdByUserId], references: [id])
   createdAt       DateTime          @default(now())
 
+  warehouseId     String?
+  warehouse       Warehouse?        @relation(fields: [warehouseId], references: [id])
+  batchId         String?
+  batch           ItemBatch?        @relation(fields: [batchId], references: [id])
+  serialNumbers   String[]          @default([])
+  /**
+   * The day the stock moved, which reports cut off on — not when the row was written.
+   */
+  movementDate    DateTime          @default(now())
+  /**
+   * The cost of one unit as it moved, and the movement's value at cost, signed like the quantity.
+   */
+  unitCost        Decimal?          @db.Decimal(14, 4)
+  value           Decimal?          @db.Decimal(16, 2)
+  /**
+   * What moved it: a trade document (an invoice issued, a bill, a credit note), one of the stock
+   * vouchers, an item's opening stock, or a hand-recorded movement.
+   */
+  sourceType      StockSourceType?
+  sourceId        String?
+  sourceLineId    String?
+  tradeDocumentId String?
+  tradeDocument   TradeDocument?    @relation("DocumentStockMovements", fields: [tradeDocumentId], references: [id])
+  stockDocumentId String?
+  stockDocument   StockDocument?    @relation(fields: [stockDocumentId], references: [id])
+  idempotencyKey  String?           @unique
+  reversesId      String?           @unique
+  reverses        StockMovement?    @relation("StockMovementReversal", fields: [reversesId], references: [id])
+  reversedBy      StockMovement?    @relation("StockMovementReversal")
+  costLayers      StockCostLayer[]
+
   @@index([itemId])
+  @@index([itemId, warehouseId, movementDate])
+  @@index([movementDate])
+  @@index([sourceType, sourceId])
+  @@index([tradeDocumentId])
   @@map("stock_movements")
+}
+
+enum StockSourceType {
+  MANUAL
+  OPENING
+  SALES_INVOICE
+  CREDIT_NOTE
+  PURCHASE_BILL
+  GRN
+  TRANSFER
+  ADJUSTMENT
+  PHYSICAL_COUNT
+  PURCHASE_RETURN
+  MIGRATION
+}
+
+/**
+ * A place stock is kept — a godown, a shop's back room, a branch's store (owner, 22 Oct 2026). Usually one
+ * per branch, which is what gives a warehouse its GSTIN for a transfer; a branch can have several.
+ */
+model Warehouse {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  branchId  String?
+  branch    Branch?  @relation(fields: [branchId], references: [id])
+  address   String?
+  /**
+   * Where stock goes when nothing says otherwise — one at a time.
+   */
+  isDefault Boolean  @default(false)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  balances        StockBalance[]
+  movements       StockMovement[]
+  costLayers      StockCostLayer[]
+  reservations    StockReservation[]
+  serials         ItemSerial[]
+  documentsFrom   StockDocument[]    @relation("StockDocumentFrom")
+  documentsTo     StockDocument[]    @relation("StockDocumentTo")
+  tradeDocuments  TradeDocument[]    @relation("DocumentWarehouse")
+
+  @@map("warehouses")
+}
+
+/**
+ * What is on hand of one item in one warehouse (and one batch, for an item that keeps batches): the sum
+ * of its movements, kept as a row so a sale can check it and take it down under a lock rather than
+ * adding up the ledger. `value` is its cost — quantity × average cost, or what its FIFO layers hold.
+ */
+model StockBalance {
+  id          String     @id @default(cuid())
+  itemId      String
+  item        Item       @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  warehouseId String
+  warehouse   Warehouse  @relation(fields: [warehouseId], references: [id])
+  /**
+   * The batch's id, or "" for an item without batches — a key Postgres can hold unique, which a null can't.
+   */
+  batchKey    String     @default("")
+  batchId     String?
+  batch       ItemBatch? @relation(fields: [batchId], references: [id])
+  quantity    Decimal    @default(0) @db.Decimal(14, 3)
+  value       Decimal    @default(0) @db.Decimal(16, 2)
+  updatedAt   DateTime   @updatedAt
+
+  @@unique([itemId, warehouseId, batchKey])
+  @@index([warehouseId])
+  @@map("stock_balances")
+}
+
+/**
+ * One batch or lot of an item that keeps batches, with the dates that go with it.
+ */
+model ItemBatch {
+  id          String          @id @default(cuid())
+  itemId      String
+  item        Item            @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  batchNo     String
+  mfgDate     DateTime?       @db.Date
+  expiryDate  DateTime?       @db.Date
+  createdAt   DateTime        @default(now())
+
+  balances    StockBalance[]
+  movements   StockMovement[]
+  serials     ItemSerial[]
+  lines       StockDocumentLine[]
+
+  @@unique([itemId, batchNo])
+  @@index([expiryDate])
+  @@map("item_batches")
+}
+
+enum SerialStatus {
+  IN_STOCK
+  ISSUED
+  RETURNED_TO_VENDOR
+  SCRAPPED
+}
+
+/**
+ * One unit of an item that keeps serial numbers or IMEIs: where it is, and the movements that took it in
+ * and out. A serial is in stock in one warehouse at a time, so it can't be sold twice.
+ */
+model ItemSerial {
+  id             String       @id @default(cuid())
+  itemId         String
+  item           Item         @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  serialNo       String
+  status         SerialStatus @default(IN_STOCK)
+  warehouseId    String?
+  warehouse      Warehouse?   @relation(fields: [warehouseId], references: [id])
+  batchId        String?
+  batch          ItemBatch?   @relation(fields: [batchId], references: [id])
+  inMovementId   String?
+  outMovementId  String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([itemId, serialNo])
+  @@index([warehouseId, status])
+  @@map("item_serials")
+}
+
+/**
+ * A receipt of stock still (partly) on hand, oldest first: what FIFO costs an issue from, and what stock
+ * aging reads under either costing method.
+ */
+model StockCostLayer {
+  id          String        @id @default(cuid())
+  itemId      String
+  item        Item          @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  warehouseId String
+  warehouse   Warehouse     @relation(fields: [warehouseId], references: [id])
+  batchKey    String        @default("")
+  movementId  String?
+  movement    StockMovement? @relation(fields: [movementId], references: [id])
+  receivedAt  DateTime
+  quantity    Decimal       @db.Decimal(14, 3)
+  remaining   Decimal       @db.Decimal(14, 3)
+  unitCost    Decimal       @db.Decimal(14, 4)
+  createdAt   DateTime      @default(now())
+
+  @@index([itemId, warehouseId, batchKey, receivedAt])
+  @@map("stock_cost_layers")
+}
+
+enum ReservationStatus {
+  ACTIVE
+  RELEASED
+  CONSUMED
+}
+
+/**
+ * Stock held for a sales order before it ships: available is on hand less what is reserved. One per
+ * order, item and warehouse — reserving again finds it.
+ */
+model StockReservation {
+  id          String            @id @default(cuid())
+  itemId      String
+  item        Item              @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  warehouseId String
+  warehouse   Warehouse         @relation(fields: [warehouseId], references: [id])
+  quantity    Decimal           @db.Decimal(14, 3)
+  status      ReservationStatus @default(ACTIVE)
+  sourceType  String
+  sourceId    String
+  note        String?
+  createdById String
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@unique([sourceType, sourceId, itemId, warehouseId])
+  @@index([itemId, warehouseId, status])
+  @@map("stock_reservations")
+}
+
+enum StockDocumentType {
+  GRN
+  TRANSFER
+  ADJUSTMENT
+  PHYSICAL_COUNT
+  PURCHASE_RETURN
+}
+
+enum StockDocumentStatus {
+  DRAFT
+  PENDING_APPROVAL
+  IN_TRANSIT
+  POSTED
+  CANCELLED
+}
+
+/**
+ * Inventory's own vouchers (owner, 22 Oct 2026): a goods receipt (GRN) against a purchase order or on
+ * its own, a transfer between warehouses, an adjustment, a physical count, a return to a vendor. A draft
+ * until posted; posting writes its stock movements (and, under perpetual inventory, its journal entry)
+ * once, and a posted one is undone only by cancelling it, which writes the reversing movements.
+ */
+model StockDocument {
+  id              String              @id @default(cuid())
+  type            StockDocumentType
+  number          String              @unique
+  date            DateTime            @db.Date
+  status          StockDocumentStatus @default(DRAFT)
+  warehouseId     String
+  warehouse       Warehouse           @relation("StockDocumentFrom", fields: [warehouseId], references: [id])
+  /**
+   * A transfer's destination.
+   */
+  toWarehouseId   String?
+  toWarehouse     Warehouse?          @relation("StockDocumentTo", fields: [toWarehouseId], references: [id])
+  /**
+   * The vendor, on a receipt or a return.
+   */
+  companyId       String?
+  company         Company?            @relation("CompanyStockDocuments", fields: [companyId], references: [id])
+  purchaseOrderId String?
+  purchaseOrder   TradeDocument?      @relation("StockDocumentPurchaseOrder", fields: [purchaseOrderId], references: [id])
+  billId          String?
+  bill            TradeDocument?      @relation("StockDocumentBill", fields: [billId], references: [id])
+  /**
+   * The vendor's challan or invoice number on a receipt; a carrier's reference on a transfer.
+   */
+  reference       String?
+  reason          String?
+  notes           String?
+
+  createdById     String
+  createdBy       User                @relation("StockDocumentCreatedBy", fields: [createdById], references: [id])
+  submittedById   String?
+  submittedAt     DateTime?
+  approvedById    String?
+  approvedAt      DateTime?
+  postedById      String?
+  postedAt        DateTime?
+  /**
+   * A transfer leaves its source when dispatched and reaches its destination when received.
+   */
+  dispatchedAt    DateTime?
+  receivedAt      DateTime?
+  cancelledById   String?
+  cancelledAt     DateTime?
+  cancelReason    String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  lines           StockDocumentLine[]
+  movements       StockMovement[]
+  journalEntries  JournalEntry[]      @relation("StockDocumentJournal")
+
+  @@index([type, date])
+  @@index([status])
+  @@index([purchaseOrderId])
+  @@map("stock_documents")
+}
+
+model StockDocumentLine {
+  id              String        @id @default(cuid())
+  stockDocumentId String
+  stockDocument   StockDocument @relation(fields: [stockDocumentId], references: [id], onDelete: Cascade)
+  itemId          String
+  item            Item          @relation(fields: [itemId], references: [id])
+  sortOrder       Int           @default(0)
+  /**
+   * What moves, in the item's base unit: received and accepted on a receipt, sent on a transfer or a
+   * return, the signed change on an adjustment, the difference on a count (worked out when it posts).
+   */
+  quantity        Decimal       @db.Decimal(14, 3)
+  /**
+   * A receipt's quantities against its purchase order line.
+   */
+  orderedQty      Decimal?      @db.Decimal(14, 3)
+  receivedQty     Decimal?      @db.Decimal(14, 3)
+  rejectedQty     Decimal?      @db.Decimal(14, 3)
+  poLineId        String?
+  /**
+   * A count's quantities: what the books said when it was counted, and what was found.
+   */
+  systemQty       Decimal?      @db.Decimal(14, 3)
+  countedQty      Decimal?      @db.Decimal(14, 3)
+  /**
+   * The cost of one unit coming in — a receipt's price, an adjustment's value of found stock.
+   */
+  unitCost        Decimal?      @db.Decimal(14, 4)
+  unit            String?
+  batchId         String?
+  batch           ItemBatch?    @relation(fields: [batchId], references: [id])
+  batchNo         String?
+  mfgDate         DateTime?     @db.Date
+  expiryDate      DateTime?     @db.Date
+  serialNumbers   String[]      @default([])
+  note            String?
+
+  @@index([stockDocumentId])
+  @@index([itemId])
+  @@map("stock_document_lines")
+}
+
+/**
+ * The units of measure items are kept in (owner, 22 Oct 2026), by GST UQC code where there is one.
+ */
+model UnitOfMeasure {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  /**
+   * How many decimals a quantity in this unit takes — 0 for pieces, 3 for kilograms.
+   */
+  decimals  Int      @default(0)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@map("units_of_measure")
+}
+
+/**
+ * Another unit an item is bought or sold in, and how many of its base unit one of it holds: a box of 12.
+ */
+model ItemUnit {
+  id        String  @id @default(cuid())
+  itemId    String
+  item      Item    @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  unit      String
+  factor    Decimal @db.Decimal(14, 6)
+
+  @@unique([itemId, unit])
+  @@map("item_units")
 }
 
 model Ticket {
@@ -3866,6 +4310,8 @@ model Task {
 enum TaskStatus {
   TODO
   IN_PROGRESS
+  /// Stuck: the person working it has said what they need (owner, 22 Oct 2026) — still open.
+  NEED_HELP
   DONE
   CANCELLED
 }
@@ -4522,6 +4968,8 @@ model LedgerAccount {
   lines JournalLine[]
 
   bankAccount       BankAccount?
+  voucherLines      AccountVoucherLine[]
+  vouchersPaidFrom  AccountVoucher[]     @relation("VoucherMoneyAccount")
   assetsHeld        FixedAsset[] @relation("AssetCostAccount")
   assetsDepreciated FixedAsset[] @relation("AssetDepreciationAccount")
 
@@ -4565,6 +5013,13 @@ enum JournalSource {
    * The gain or loss from settling a foreign-currency document at a different rate.
    */
   FX
+  /**
+   * Finance → Accounts (owner, 22 Oct 2026): a payment, receipt, contra or journal voucher, posted from
+   * its draft (AccountVoucher); and inventory's own entries under perpetual inventory — stock received,
+   * the cost of goods sold, an adjustment (src/lib/inventory/posting.ts).
+   */
+  VOUCHER
+  INVENTORY
   /**
    * Revenue & Close: a month's revenue recognised off its schedules, from Deferred Revenue into Sales —
    * and the entries that move revenue in or out of deferral apart from an invoice's own posting (opening
@@ -4625,6 +5080,18 @@ model JournalEntry {
   createdBy   User     @relation("JournalCreatedBy", fields: [createdById], references: [id])
   createdAt   DateTime @default(now())
 
+  /**
+   * Finance → Accounts (owner, 22 Oct 2026): what this entry is the one posting of — "voucher:<id>",
+   * "stock:<movement source>" — unique, so the same thing can't be posted twice however the request is
+   * retried. Older entries are kept from double-posting by the checks in src/lib/ledger/journal.ts.
+   * Read by name (NOT_YET_EVERYWHERE).
+   */
+  postingKey       String?         @unique
+  accountVoucherId String?
+  accountVoucher   AccountVoucher? @relation("VoucherJournal", fields: [accountVoucherId], references: [id])
+  stockDocumentId  String?
+  stockDocument    StockDocument?  @relation("StockDocumentJournal", fields: [stockDocumentId], references: [id])
+
   lines JournalLine[]
 
   /**
@@ -4648,7 +5115,157 @@ model JournalEntry {
   @@index([payrollRunId])
   @@index([companyId])
   @@index([documentId])
+  @@index([accountVoucherId])
+  @@index([stockDocumentId])
   @@map("journal_entries")
+}
+
+enum VoucherType {
+  PAYMENT
+  RECEIPT
+  CONTRA
+  JOURNAL
+}
+
+enum VoucherStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  POSTED
+  CANCELLED
+  REVERSED
+}
+
+/**
+ * A payment, receipt, contra or journal voucher (owner, 22 Oct 2026) — money out to an expense or a party,
+ * money in, money between the company's own bank and cash accounts, or any balanced entry — written as a
+ * draft, approved where the company asks for it, and posted to the ledger once (`JournalEntry.postingKey`
+ * "voucher:<id>"). A posted voucher is corrected by reversing it, never by editing.
+ *
+ * Settling an invoice or a bill stays with Receivables and Payables, which apply the money to the
+ * document; these are for everything else that moves through the books.
+ */
+model AccountVoucher {
+  id              String        @id @default(cuid())
+  type            VoucherType
+  number          String        @unique
+  date            DateTime      @db.Date
+  status          VoucherStatus @default(DRAFT)
+  narration       String
+  reference       String?
+  /**
+   * The party, where there is one — a vendor paid an advance, a customer refunded.
+   */
+  companyId       String?
+  company         Company?      @relation("VoucherParty", fields: [companyId], references: [id])
+  /**
+   * The bank or cash account a payment or receipt goes through.
+   */
+  moneyAccountId  String?
+  moneyAccount    LedgerAccount? @relation("VoucherMoneyAccount", fields: [moneyAccountId], references: [id])
+  amount          Decimal       @db.Decimal(16, 2)
+  /**
+   * The form's own token, so a double submit makes one voucher rather than two.
+   */
+  idempotencyKey  String?       @unique
+
+  createdById     String
+  createdBy       User          @relation("VoucherCreatedBy", fields: [createdById], references: [id])
+  submittedById   String?
+  submittedAt     DateTime?
+  approvedById    String?
+  approvedAt      DateTime?
+  postedById      String?
+  postedAt        DateTime?
+  cancelledById   String?
+  cancelledAt     DateTime?
+  cancelReason    String?
+  reversedById    String?
+  reversedAt      DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  lines           AccountVoucherLine[]
+  journalEntries  JournalEntry[] @relation("VoucherJournal")
+
+  @@index([type, date])
+  @@index([status])
+  @@map("account_vouchers")
+}
+
+/**
+ * One side of a voucher, as its journal line will be: an account, a debit or a credit, and the party,
+ * cost centre and branch it is booked to.
+ */
+model AccountVoucherLine {
+  id           String         @id @default(cuid())
+  voucherId    String
+  voucher      AccountVoucher @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  accountId    String
+  account      LedgerAccount  @relation(fields: [accountId], references: [id])
+  debit        Decimal        @default(0) @db.Decimal(16, 2)
+  credit       Decimal        @default(0) @db.Decimal(16, 2)
+  companyId    String?
+  departmentId String?
+  branchId     String?
+  narration    String?
+  sortOrder    Int            @default(0)
+
+  @@index([voucherId])
+  @@index([accountId])
+  @@map("account_voucher_lines")
+}
+
+/**
+ * The next number in each of Accounts' own series, per financial year: vouchers by type, and the stock
+ * vouchers. Taken with an increment inside the posting's transaction, whose row lock serialises two
+ * people numbering at once.
+ */
+model AccountsCounter {
+  series        String
+  financialYear String
+  lastNumber    Int    @default(0)
+
+  @@id([series, financialYear])
+  @@map("accounts_counters")
+}
+
+enum InventoryAccounting {
+  PERIODIC
+  PERPETUAL
+}
+
+enum CostingMethod {
+  WEIGHTED_AVERAGE
+  FIFO
+}
+
+/**
+ * Finance → Accounts settings (owner, 22 Oct 2026), one row. No row is the defaults, which are how the books
+ * behaved before: periodic inventory, weighted-average cost, no negative stock, and nothing moving stock
+ * but a hand-recorded movement until the company switches it on.
+ */
+model AccountsSettings {
+  id                         String              @id @default("global")
+  inventoryAccounting        InventoryAccounting @default(PERIODIC)
+  costingMethod              CostingMethod       @default(WEIGHTED_AVERAGE)
+  allowNegativeStock         Boolean             @default(false)
+  invoiceIssuesStock         Boolean             @default(false)
+  billReceivesStock          Boolean             @default(false)
+  creditNoteReturnsStock     Boolean             @default(false)
+  reserveOnOrderApproval     Boolean             @default(false)
+  voucherApprovalRequired    Boolean             @default(false)
+  adjustmentApprovalRequired Boolean             @default(true)
+  quantityDecimals           Int                 @default(2)
+  defaultWarehouseId         String?
+  /**
+   * Each series' prefix, by series key ("PAYMENT", "GRN"…) — the defaults where not set.
+   */
+  seriesPrefixes             Json                @default("{}")
+  updatedById                String?
+  updatedAt                  DateTime            @updatedAt
+
+  @@map("accounts_settings")
 }
 
 /**
@@ -5521,15 +6138,106 @@ model AttendanceLocation {
   date        DateTime               @db.Date
   kind        AttendanceLocationKind
   at          DateTime               @default(now())
-  latitude    Float
-  longitude   Float
+  /// Null only where an approved exception let somebody clock with no location at all (GPS unavailable).
+  latitude    Float?
+  longitude   Float?
   /// How sure the phone was, in metres.
   accuracyM   Int?
   appDeviceId String?
   appDevice   AppDevice?             @relation(fields: [appDeviceId], references: [id], onDelete: SetNull)
 
+  /// What the clocking was checked against and how it came out (owner, 22 Oct 2026) — null on rows from before.
+  check       AttendanceGeoCheck?
+  branchId    String?
+  branch      Branch?                @relation("AttendanceLocationBranch", fields: [branchId], references: [id], onDelete: SetNull)
+  /// From the office's point, in metres, where both were known.
+  distanceM   Int?
+  /// The office's radius at the time, in metres.
+  radiusM     Int?
+  /// The phone said the reading came from a mock-location provider (Android) or was simulated (iOS).
+  mocked      Boolean?
+  exceptionId String?
+  exception   AttendanceException?   @relation(fields: [exceptionId], references: [id], onDelete: SetNull)
+
   @@index([userId, date])
+  @@index([exceptionId])
   @@map("attendance_locations")
+}
+
+/// How a clocking's location was taken (owner, 22 Oct 2026).
+enum AttendanceGeoCheck {
+  /// Inside the office's radius, with a reading sure enough — the ordinary case where the office enforces it.
+  INSIDE
+  /// Accepted under an approved exception, not because the reading was inside — said so, never passed off as INSIDE.
+  EXCEPTION
+  /// The office doesn't enforce its location: kept for the record, wherever it was.
+  NOT_ENFORCED
+}
+
+/**
+ * Leave to clock in or out without being inside the office's radius (owner, 22 Oct 2026): working from an
+ * approved alternate site, GPS that won't settle, a correction. Asked for by the employee (PENDING, decided by
+ * somebody with "Approve attendance exceptions") or granted directly by such a person (APPROVED) — never by the
+ * employee for themselves. Good for the actions in `scope`, each once, between `validFrom` and `validUntil`;
+ * revoked while unused, it authorises nothing. Expired is not a status but a fact: an APPROVED one past
+ * `validUntil`.
+ */
+model AttendanceException {
+  id               String                    @id @default(cuid())
+  userId           String
+  user             User                      @relation("AttendanceExceptions", fields: [userId], references: [id], onDelete: Cascade)
+  scope            AttendanceExceptionScope
+  reasonCode       AttendanceExceptionReason
+  reason           String
+  status           AttendanceExceptionStatus @default(PENDING)
+  validFrom        DateTime
+  validUntil       DateTime
+  requestedById    String
+  requestedBy      User                      @relation("AttendanceExceptionsRequested", fields: [requestedById], references: [id], onDelete: NoAction)
+  requestedAt      DateTime                  @default(now())
+  /// The refused attempt a request came from — its distance and the phone's accuracy, never its coordinates.
+  attemptDistanceM Int?
+  attemptAccuracyM Int?
+  attemptProblem   String?
+  /// Who approved or rejected it, and when.
+  decidedById      String?
+  decidedBy        User?                     @relation("AttendanceExceptionsDecided", fields: [decidedById], references: [id], onDelete: SetNull)
+  decidedAt        DateTime?
+  decisionNote     String?
+  revokedById      String?
+  revokedBy        User?                     @relation("AttendanceExceptionsRevoked", fields: [revokedById], references: [id], onDelete: SetNull)
+  revokedAt        DateTime?
+  revokeReason     String?
+  /// When it was used to clock in and out — each once.
+  usedInAt         DateTime?
+  usedOutAt        DateTime?
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+  locations        AttendanceLocation[]
+
+  @@index([userId, status, validUntil])
+  @@index([status, requestedAt])
+  @@map("attendance_exceptions")
+}
+
+enum AttendanceExceptionScope {
+  IN
+  OUT
+  IN_AND_OUT
+}
+
+enum AttendanceExceptionReason {
+  ALTERNATE_LOCATION
+  GPS_UNAVAILABLE
+  CORRECTION
+  OTHER
+}
+
+enum AttendanceExceptionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  REVOKED
 }
 
 enum AttendanceLocationKind {
