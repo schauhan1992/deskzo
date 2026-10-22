@@ -1,4 +1,5 @@
 import { createSign } from "node:crypto";
+import { db } from "@/lib/db";
 
 /**
  * Pushes to the Deskzo app (owner, 18 Oct 2026), through Firebase Cloud Messaging's HTTP v1 API — plain
@@ -55,12 +56,13 @@ async function googleToken(account: ServiceAccount): Promise<string> {
 }
 
 /**
- * A data message to one phone, delivered at once (high priority, dropped after two minutes): "sent";
+ * A data message to one phone, delivered at once (high priority; dropped after two minutes unless `ttlSeconds` says
+ * otherwise — a ring is no use later, a notice is): "sent";
  * "gone" when the address no longer reaches the app (uninstalled, or another Firebase project's) and should
  * be forgotten; "failed"; or "off" when pushes aren't set up here.
  */
-export async function pushToPhone(pushToken: string, data: Record<string, string>): Promise<"sent" | "gone" | "failed" | "off"> {
-  const message = { message: { token: pushToken, data, android: { priority: "HIGH", ttl: "120s" } } };
+export async function pushToPhone(pushToken: string, data: Record<string, string>, ttlSeconds = 120): Promise<"sent" | "gone" | "failed" | "off"> {
+  const message = { message: { token: pushToken, data, android: { priority: "HIGH", ttl: `${ttlSeconds}s` } } };
   const verdict = (status: number) => (status >= 200 && status < 300 ? "sent" : status === 404 || status === 403 ? "gone" : "failed");
   if (testSend) return verdict(await testSend(message));
   const account = serviceAccount();
@@ -77,4 +79,24 @@ export async function pushToPhone(pushToken: string, data: Record<string, string
     console.error("[app] push failed", err);
     return "failed";
   }
+}
+
+/**
+ * A Deskzo notification on the person's phones too (owner, 22 Oct 2026 — push in the native app's first phase):
+ * a lead given to them, something waiting for their decision, a task, a ticket's reply — whatever their bell
+ * says. Only its title and where it leads go, never what's behind it; the phone opens the record through
+ * /api/app as anywhere else, so the person's access still decides. To each of their approved phones with a push
+ * address; an address Firebase no longer knows is forgotten. Nothing goes while pushes aren't set up here.
+ */
+export async function pushNoticeToPhones(userId: string, notice: { id: string; type: string; title: string; link: string | null }): Promise<number> {
+  if (!testSend && !pushConfigured()) return 0;
+  const phones = await db.appDevice.findMany({ where: { userId, pushToken: { not: null }, device: { status: "APPROVED" } }, select: { id: true, pushToken: true } });
+  let sent = 0;
+  for (const phone of phones) {
+    // Kept for a phone that's off for a while — six hours — not the two minutes a ring is.
+    const verdict = await pushToPhone(phone.pushToken!, { type: "notice", notice: notice.id, kind: notice.type, title: notice.title.slice(0, 160), link: notice.link ?? "" }, 6 * 3600);
+    if (verdict === "sent") sent += 1;
+    if (verdict === "gone") await db.appDevice.update({ where: { id: phone.id }, data: { pushToken: null } }).catch(() => {});
+  }
+  return sent;
 }

@@ -62,13 +62,13 @@ function companyOut(row: Row, address: Awaited<ReturnType<typeof addressesOf>> e
   };
 }
 
-async function companiesOut(userId: string, rows: Row[]) {
+export async function companiesOut(userId: string, rows: Row[]) {
   const ids = rows.map((r) => r.id);
   const [addresses, custom] = await Promise.all([addressesOf(ids), customFieldsOut("COMPANY", userId, ids)]);
   return rows.map((r) => companyOut(r, addresses.get(r.id), custom.get(r.id)));
 }
 
-function contactOut(row: Row, company: Record<string, unknown> | null, custom: Record<string, unknown> | undefined) {
+export function contactOut(row: Row, company: Record<string, unknown> | null, custom: Record<string, unknown> | undefined) {
   return {
     id: row.id,
     ref: contactRef(row.contactSeq as number),
@@ -89,7 +89,7 @@ function contactOut(row: Row, company: Record<string, unknown> | null, custom: R
 }
 
 /** One company through the screens' own read — or not found. */
-async function readCompany(userId: string, id: string) {
+export async function readCompany(userId: string, id: string) {
   const company = (await getCompany(id)) as Row | null;
   if (!company) throw notFound("company");
   const [out] = await companiesOut(userId, [company]);

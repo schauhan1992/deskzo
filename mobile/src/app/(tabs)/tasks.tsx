@@ -8,7 +8,7 @@ import { keyOf } from "@/lib/format";
 
 /**
  * The person's own tasks (owner, 18 Oct 2026): due today, overdue, everything open, done — ticked off with a tap,
- * and a quick one added for themselves. Everything else about a task is on the Deskzo tab.
+ * and a quick one added for themselves. Everything else about a task is on its web page, under More.
  */
 
 const VIEWS = [

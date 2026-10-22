@@ -149,7 +149,7 @@ export default function TodayScreen() {
       )}
 
       {today && !today.attendance && !today.tasks && !today.leave && today.approvals_waiting === 0 && !problem && (
-        <Notice>Nothing here for you yet. Everything else in Deskzo is on the Deskzo tab.</Notice>
+        <Notice>Nothing here for you yet. Everything else in Deskzo is under More.</Notice>
       )}
     </ScrollView>
   );

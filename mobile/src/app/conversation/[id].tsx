@@ -405,7 +405,7 @@ export default function Conversation() {
                   onReply={setReply}
                   onImage={setViewing}
                   onFile={() =>
-                    Alert.alert("Open on the Deskzo tab", "Files open in Deskzo's own chat, where your workspace's rules for them apply.", [
+                    Alert.alert("Open in Deskzo's chat", "Files open in Deskzo's own chat, where your workspace's rules for them apply.", [
                       { text: "Cancel", style: "cancel" },
                       { text: "Open", onPress: () => router.push({ pathname: "/web", params: { path: `/chat?c=${id}` } }) },
                     ])

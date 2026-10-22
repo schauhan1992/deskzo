@@ -4,12 +4,18 @@ The Deskzo app for phones, Android first (owner, 18 Oct 2026). Calling comes fir
 with a person's Deskzo, its calls with customers log themselves on the Calls module, a customer's name shows
 while they ring, and "Ring my phone" in Deskzo's call dialog makes this phone offer to dial. Then the day's
 work: Today (clocking in, with where the phone is if the person allows it; tasks due; what waits for a
-decision; leave), Tasks, Approvals and Leave — and all of Deskzo's own pages on the Deskzo tab, signed in as
-the phone.
+decision; leave), Tasks, Approvals and Leave.
+
+Since 22 Oct 2026 the app is native, module by module, sales first: the **Sales** tab (leads, companies and
+contacts — search, a lead's stage moved and a call or note logged, a customer's people rung, WhatsApped or
+emailed, a new lead, company or contact) and a search over all three. **More** lists everything else the person
+may open, as the web's menu does: what has a screen here opens natively, the rest as its web page, signed in
+as the phone — until it has a screen of its own. Online only: nothing is kept on the phone.
 
 It talks only to Deskzo's `/api/app/*` (`src/lib/app` and `src/app/api/app` in the main project); the
-server's suites `npm run check:phone-app` (pairing, calling, the pages) and `npm run check:app-daily` (the
-everyday screens) cover everything the app relies on.
+server's suites `npm run check:phone-app` (pairing, calling, the pages), `npm run check:app-daily` (the
+everyday screens) and `npm run check:app-sales` (the sales screens, and notifications pushed to the phone)
+cover everything the app relies on.
 
 ## How it is put together
 

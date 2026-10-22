@@ -21,7 +21,7 @@ import { countTasks, listTasks } from "@/actions/task";
  * first, as its pages do; within it, the actions' own rules decide.
  */
 
-const MODULE_NAMES: Record<string, string> = { hr: "Attendance and leave", tasks: "Tasks", expenses: "Expenses", orders: "Orders", notifications: "Approvals" };
+const MODULE_NAMES: Record<string, string> = { hr: "Attendance and leave", tasks: "Tasks", expenses: "Expenses", orders: "Orders", notifications: "Approvals", leads: "Leads", companies: "Companies", contacts_library: "Contacts" };
 
 /** A module the person may open now — or a 403 that says why. */
 export async function needAppModule(key: string, userId: string): Promise<void> {

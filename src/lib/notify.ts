@@ -18,6 +18,7 @@ import type { Clock } from "@/lib/time/zone";
 import { companyPath, personPath, ticketPath } from "@/lib/record-links";
 import { notMigratedYet } from "@/lib/custom-fields/server";
 import { nextReminder } from "@/lib/tasks/rules";
+import { pushNoticeToPhones } from "@/lib/app/push";
 
 const DAY_MS = 86_400_000;
 
@@ -60,6 +61,13 @@ export async function notifyUser(input: { userId: string; type: NotificationType
      * Awaited, so it goes before the request ends; it never throws.
      */
     await sendEmailNotification({ userId: input.userId, type: input.type, subject: input.title, body: input.message ?? "", link: input.link });
+    /**
+     * And on their phones (src/lib/app/push.ts): what the bell shows, as the bell shows it — so only when it rang,
+     * never for a kind they muted. Its title and link, nothing more. Never throws.
+     */
+    if (notification) {
+      await pushNoticeToPhones(input.userId, { id: notification.id, type: input.type, title: input.title, link: input.link ?? null }).catch((err) => console.error("[app] notice push failed", err));
+    }
     return notification;
   } catch (err) {
     // A notification is a side effect of the action that triggered it — it should never fail the action itself.
