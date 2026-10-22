@@ -1,12 +1,13 @@
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
-import { attendanceMonth, myPunches, myToday } from "@/actions/attendance";
+import { attendanceMonth, myDays, myToday } from "@/actions/attendance";
 import { hrCapabilities, listPeople } from "@/actions/hr";
 import { listDepartmentOptions } from "@/actions/department";
 import { SearchParamInput } from "@/components/ui/search-param-input";
 import { SelectParamFilter } from "@/components/ui/select-param-filter";
 import { AttendanceGrid } from "@/components/hr/attendance-grid";
-import { MyPunches } from "@/components/hr/my-punches";
+import { MyInOut } from "@/components/hr/my-in-out";
+import { periodOf } from "@/lib/hr/period";
 import { monthLabel } from "@/lib/hr/calendar";
 import { workspaceClock } from "@/lib/time/workspace";
 
@@ -27,11 +28,15 @@ export default async function AttendancePage({
 
   const params = await searchParams;
   // This month in the workspace's zone — UTC's was last month until 05:30 IST on the 1st.
-  const now = (await workspaceClock()).parts(new Date());
+  const clock = await workspaceClock();
+  const now = clock.parts(new Date());
+  // A person's own card opens on this week.
+  const todayKey = clock.today();
+  const week = periodOf("week", todayKey);
   const month = Math.min(12, Math.max(1, Number(params.month) || now.month + 1));
   const year = Math.min(2100, Math.max(2000, Number(params.year) || now.year));
 
-  const [data, today, caps, departments, people, punches] = await Promise.all([
+  const [data, today, caps, departments, people, myWeek] = await Promise.all([
     attendanceMonth({
       year,
       month,
@@ -44,7 +49,7 @@ export default async function AttendancePage({
     hrCapabilities(),
     listDepartmentOptions(),
     listPeople({ status: "active" }),
-    myPunches({ year, month }),
+    myDays({ from: week.from, to: week.to }),
   ]);
   const filtered = data.rows.length !== data.totalPeople;
   // Somebody who sees only themselves gets their own page: no team or person to pick, their in and out first.
@@ -66,7 +71,7 @@ export default async function AttendancePage({
 
       {own && (
         <div className="mt-5">
-          <MyPunches days={punches} year={year} month={month} />
+          <MyInOut initial={{ period: week, days: myWeek }} today={todayKey} />
         </div>
       )}
 
@@ -104,7 +109,7 @@ export default async function AttendancePage({
       {/* Whoever sees more than themselves still has their own days — below the team's. */}
       {!own && (
         <div className="mt-6">
-          <MyPunches days={punches} year={year} month={month} />
+          <MyInOut initial={{ period: week, days: myWeek }} today={todayKey} />
         </div>
       )}
     </div>

@@ -18,6 +18,7 @@ import { spanWords, timingWithShortLeave } from "@/lib/hr/short-leave-rules";
 import type { ActionResult } from "@/actions/company";
 import { clockPolicyFor, recordClock, type ClockOutcome, type ClockPolicy, type ClockRefusal } from "@/lib/hr/clock";
 import { readReading } from "@/lib/hr/geofence";
+import { dayKey, daysBetween } from "@/lib/hr/period";
 
 /**
  * Daily attendance: clocking in and out, and the month grid HR reads it from.
@@ -382,7 +383,7 @@ export async function attendanceMonth(params: {
   };
 }
 
-export type MyPunchDay = {
+export type MyDay = {
   /** yyyy-mm-dd */
   date: string;
   status: AttendanceStatus | null;
@@ -391,33 +392,55 @@ export type MyPunchDay = {
   workedMinutes: number | null;
   /** Corrected by HR or a manager. */
   regularised: boolean;
+  /** Not a working day — and so not a gap when nothing is recorded. */
+  offDay: "week off" | "holiday" | null;
 };
 
 /**
- * The signed-in person's own days for one month — in, out and the hours between — newest first (owner,
- * 22 Oct 2026: everybody sees their own attendance, when in and when out).
+ * The signed-in person's own days from one date to another — in, out and the hours between — newest first, up
+ * to today (owner, 22 Oct 2026: everybody sees their own attendance, when in and when out, by week or month).
  *
- * Only ever the caller's own: there is no person to pass. A day is listed when it has an attendance record;
- * a terminal's punches become one (src/lib/hr/punch-rollup.ts), In the first of the day and Out the last.
+ * Only ever the caller's own: there is no person to pass. Every day in the range is listed, recorded or not, so
+ * a week shows all seven; a terminal's punches become a record (src/lib/hr/punch-rollup.ts), In the first of the
+ * day and Out the last. At most 62 days.
  */
-export async function myPunches(params: { year: number; month: number }): Promise<MyPunchDay[]> {
+export async function myDays(params: { from: string; to: string }): Promise<MyDay[]> {
   const user = await requireModuleUser("hr");
-  const year = Math.min(2100, Math.max(2000, Math.trunc(params.year) || 2000));
-  const month = Math.min(12, Math.max(1, Math.trunc(params.month) || 1));
-  const { from, to } = monthRange(year, month);
-  const records = await db.attendanceDay.findMany({
-    where: { userId: user.id, date: { gte: from, lte: to } },
-    orderBy: { date: "desc" },
-    select: { date: true, status: true, checkInAt: true, checkOutAt: true, workedMinutes: true, regularisedAt: true },
-  });
-  return records.map((r) => ({
-    date: toKey(r.date),
-    status: r.status,
-    checkInAt: r.checkInAt ? r.checkInAt.toISOString() : null,
-    checkOutAt: r.checkOutAt ? r.checkOutAt.toISOString() : null,
-    workedMinutes: r.workedMinutes,
-    regularised: !!r.regularisedAt,
-  }));
+  const fromKey = dayKey(params.from);
+  const toKeyIn = dayKey(params.to);
+  if (!fromKey || !toKeyIn || fromKey > toKeyIn || daysBetween(fromKey, toKeyIn) > 62) return [];
+
+  const clock = await workspaceClock();
+  const today = clock.calendarDate(new Date());
+  const from = dateOnly(fromKey);
+  const to = dateOnly(toKeyIn) > today ? today : dateOnly(toKeyIn);
+  if (from > to) return [];
+
+  const [records, holidays] = await Promise.all([
+    db.attendanceDay.findMany({
+      where: { userId: user.id, date: { gte: from, lte: to } },
+      select: { date: true, status: true, checkInAt: true, checkOutAt: true, workedMinutes: true, regularisedAt: true },
+    }),
+    db.holiday.findMany({ where: { date: { gte: from, lte: to } }, select: { date: true, optional: true } }),
+  ]);
+  const byDay = new Map(records.map((r) => [toKey(r.date), r]));
+  const closed = closedDates(holidays);
+
+  return eachDay(from, to)
+    .reverse()
+    .map((day) => {
+      const key = toKey(day);
+      const r = byDay.get(key);
+      return {
+        date: key,
+        status: r?.status ?? null,
+        checkInAt: r?.checkInAt ? r.checkInAt.toISOString() : null,
+        checkOutAt: r?.checkOutAt ? r.checkOutAt.toISOString() : null,
+        workedMinutes: r?.workedMinutes ?? null,
+        regularised: !!r?.regularisedAt,
+        offDay: isWeekOff(day) ? "week off" : closed.has(key) ? "holiday" : null,
+      };
+    });
 }
 
 /**
