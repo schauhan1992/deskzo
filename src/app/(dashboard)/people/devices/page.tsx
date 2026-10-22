@@ -12,6 +12,12 @@ import {
 import { Card } from "@/components/ui/card";
 import { BiometricDevices } from "@/components/hr/biometric-devices";
 
+/** This server's public IP number, when the deployment names it (DEVICE_SERVER_IP) — a dotted IPv4 only. */
+function deviceServerIp(): string | null {
+  const ip = process.env.DEVICE_SERVER_IP?.trim() ?? "";
+  return /^(\d{1,3})(\.\d{1,3}){3}$/.test(ip) && ip.split(".").every((n) => Number(n) <= 255) ? ip : null;
+}
+
 export default async function DevicesPage() {
   const enabled = await isModuleEnabled("hr");
   if (!enabled) return <ModuleDisabledNotice moduleKey="hr" />;
@@ -63,6 +69,7 @@ export default async function DevicesPage() {
           punches={punches}
           people={people.map((p) => ({ id: p.id, name: p.name }))}
           serverUrl={`${proto}://${host}`}
+          serverIp={deviceServerIp()}
         />
       </div>
     </div>

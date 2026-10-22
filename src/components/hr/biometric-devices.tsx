@@ -35,6 +35,7 @@ export function BiometricDevices({
   punches,
   people,
   serverUrl,
+  serverIp,
 }: {
   devices: Device[];
   unmapped: Unmapped[];
@@ -42,6 +43,8 @@ export function BiometricDevices({
   punches: Punch[];
   people: { id: string; name: string }[];
   serverUrl: string;
+  /** This server's public IP number, when the deployment names it (DEVICE_SERVER_IP). */
+  serverIp?: string | null;
 }) {
   const router = useRouter();
   const clock = useClock();
@@ -68,7 +71,7 @@ export function BiometricDevices({
 
   return (
     <div className="space-y-5">
-      <SetupCard serverUrl={serverUrl} />
+      <SetupCard serverUrl={serverUrl} serverIp={serverIp ?? null} />
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex gap-2">
@@ -245,17 +248,28 @@ export function BiometricDevices({
   );
 }
 
-/** What to type into the terminal's keypad, and the warning that goes with it. */
-function SetupCard({ serverUrl }: { serverUrl: string }) {
+/**
+ * What to type into the terminal's keypad, and the warning that goes with it.
+ *
+ * Most eSSL / ZKTeco firmware speaks plain HTTP only and cannot follow a redirect, so the terminal is pointed at
+ * port 80 — the server answers /iclock there as it is (deploy/azure/Caddyfile). With the server's IP number,
+ * "Enable domain name" is off; with the workspace's address it must be on, or the terminal reads the name as a
+ * malformed IP and never connects.
+ */
+function SetupCard({ serverUrl, serverIp }: { serverUrl: string; serverIp: string | null }) {
   let host = serverUrl;
-  let port = "80";
   try {
-    const parsed = new URL(serverUrl);
-    host = parsed.hostname;
-    port = parsed.port || (parsed.protocol === "https:" ? "443" : "80");
+    host = new URL(serverUrl).hostname;
   } catch {
     // Leave the raw value — better to show something than nothing.
   }
+  const isIp = /^(\d{1,3}\.){3}\d{1,3}$/.test(host);
+  const rows = [
+    ...(serverIp && !isIp
+      ? [{ label: "With the server's IP", address: serverIp, port: "80", domain: "OFF", recommended: true }]
+      : []),
+    { label: isIp ? "Server" : "With the workspace's address", address: host, port: "80", domain: isIp ? "OFF" : "ON", recommended: !serverIp || isIp },
+  ];
 
   return (
     <Card>
@@ -265,22 +279,35 @@ function SetupCard({ serverUrl }: { serverUrl: string }) {
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         <p className="text-muted">
-          On the terminal: <span className="text-text">Menu → Comm → Cloud Server / ADMS</span>, then set:
+          On the terminal: <span className="text-text">Menu → Comm → Cloud Server / ADMS</span>, then set either of these:
         </p>
-        <div className="grid grid-cols-1 gap-2 rounded-base border border-line bg-surface-sunken px-3 py-2 font-mono text-xs sm:grid-cols-3">
-          <div>
-            <div className="text-subtle">Server address</div>
-            <div className="text-text">{host}</div>
+        {rows.map((r) => (
+          <div key={r.label} className="rounded-base border border-line bg-surface-sunken px-3 py-2">
+            <div className="mb-1.5 text-xs font-medium text-muted">
+              {r.label}
+              {rows.length > 1 && r.recommended && <span className="ml-1.5 text-brand">· recommended</span>}
+            </div>
+            <div className="grid grid-cols-1 gap-2 font-mono text-xs sm:grid-cols-3">
+              <div>
+                <div className="text-subtle">Server address</div>
+                <div className="text-text">{r.address}</div>
+              </div>
+              <div>
+                <div className="text-subtle">Server port</div>
+                <div className="text-text">{r.port}</div>
+              </div>
+              <div>
+                <div className="text-subtle">Enable domain name</div>
+                <div className="text-text">{r.domain}</div>
+              </div>
+            </div>
           </div>
-          <div>
-            <div className="text-subtle">Server port</div>
-            <div className="text-text">{port}</div>
-          </div>
-          <div>
-            <div className="text-subtle">Enable domain name</div>
-            <div className="text-text">OFF (unless using a hostname)</div>
-          </div>
-        </div>
+        ))}
+        <p className="text-xs text-muted">
+          Leave HTTPS off on the terminal — most can&apos;t speak it. If yours has an HTTPS switch and you use the
+          workspace&apos;s address, port 443 with HTTPS on works too. A minute after saving, the terminal&apos;s{" "}
+          <span className="text-text">Last seen</span> below should change from &ldquo;never&rdquo;.
+        </p>
         <p className="text-xs text-muted">
           Register the terminal&apos;s serial below first — until then its uploads are refused. The serial is on the
           sticker underneath, and on the device under <span className="text-text">Menu → System → Device Info</span>.
