@@ -109,7 +109,7 @@ export default async function TasksPage({
             { value: "todo", label: "To do" },
             { value: "in_progress", label: "In progress" },
             { value: "need_help", label: "Need help" },
-            { value: "done", label: "Done" },
+            { value: "done", label: "Complete" },
             { value: "cancelled", label: "Cancelled" },
           ]}
         />
