@@ -1,21 +1,32 @@
 import { useCallback, useState } from "react";
 import { Alert, ScrollView, Text } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
+import { CallerIdCard, NotificationsCard } from "@/components/iphone-calls";
 import { Button, Card, Heading, Notice, styles } from "@/components/ui";
 import { APP_VERSION } from "@/lib/config";
 import { when } from "@/lib/format";
-import { calls } from "@/lib/native";
+import { calls, phone } from "@/lib/native";
+import { notifications } from "@/lib/notifications";
 import { useSession } from "@/lib/session";
 
-/** Who this phone is signed in as, call sync, and signing out. */
+/**
+ * Who this phone is signed in as, call sync, and signing out. On an iPhone, its calls instead of call sync — caller ID
+ * and refreshing it — and its notifications (src/components/iphone-calls.tsx).
+ */
 export default function Settings() {
   const router = useRouter();
   const { me, signOut } = useSession();
   const [sync, setSync] = useState(calls.getCallSync());
+  const [iphoneOn, setIphoneOn] = useState(phone.callsOn());
   const [result, setResult] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  useFocusEffect(useCallback(() => setSync(calls.getCallSync()), []));
+  useFocusEffect(
+    useCallback(() => {
+      setSync(calls.getCallSync());
+      setIphoneOn(phone.callsOn());
+    }, []),
+  );
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
@@ -51,6 +62,27 @@ export default function Settings() {
             {result && <Notice>{result}</Notice>}
             <Button title={sync.on ? "Change call sync" : "Set up call sync"} kind="secondary" onPress={() => router.push("/setup")} />
           </Card>
+        </>
+      )}
+
+      {phone.available && (
+        <>
+          <Heading>Calls on this iPhone</Heading>
+          <Card>
+            <Text style={styles.body}>{iphoneOn ? "On — a customer's name shows when they ring, and a call you start from Deskzo is asked about afterwards." : "Off."}</Text>
+            <Button title={iphoneOn ? "Change calls on this iPhone" : "Set up calls on this iPhone"} kind="secondary" onPress={() => router.push("/setup")} />
+          </Card>
+          {iphoneOn && <CallerIdCard />}
+        </>
+      )}
+
+      {notifications.available && (
+        <>
+          <Heading>Notifications</Heading>
+          <NotificationsCard
+            why={'Get told when Deskzo rings this phone, a colleague messages you, or something waits for your decision — who and where, never what.'}
+            on={'On — for "Ring my phone", chat messages and what waits for your decision.'}
+          />
         </>
       )}
 

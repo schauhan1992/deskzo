@@ -3,25 +3,13 @@ import { ActivityIndicator, ScrollView, Text, TextInput, View } from "react-nati
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Button, Card, Chip, Heading, Notice, colors, styles } from "@/components/ui";
 import { ApiError, OUTCOMES, api, type Outcome, type ReviewCall } from "@/lib/api";
+import { CALLBACKS } from "@/lib/callbacks";
 import { length, when } from "@/lib/format";
 
 /**
  * The after-call card (owner, 18 Oct 2026): how a call from this phone went, what was said, a callback and
  * the lead it was about — PATCH /api/app/calls/:id. Opened from the "How did it go?" notification too.
  */
-
-const at = (hoursFromNow: number, hour?: number) => {
-  const d = new Date(Date.now() + hoursFromNow * 3_600_000);
-  if (hour !== undefined) d.setHours(hour, 0, 0, 0);
-  return d;
-};
-
-const CALLBACKS: { label: string; at: () => Date }[] = [
-  { label: "In an hour", at: () => at(1) },
-  { label: "Tomorrow 10:00", at: () => at(24, 10) },
-  { label: "In 3 days", at: () => at(72, 10) },
-  { label: "Next week", at: () => at(168, 10) },
-];
 
 export default function Review() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -71,7 +59,7 @@ export default function Review() {
   if (call === null) {
     return (
       <View style={[styles.screen, styles.content]}>
-        <Notice>This call has already been noted, or it's more than three days old — change it in Deskzo.</Notice>
+        <Notice>This call has already been noted, or it&apos;s more than three days old — change it in Deskzo.</Notice>
         <Button title="Back" kind="secondary" onPress={() => router.back()} />
       </View>
     );

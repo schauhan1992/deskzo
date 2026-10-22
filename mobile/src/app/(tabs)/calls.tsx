@@ -1,19 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AppState, Linking, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
-import { useFocusEffect, useRouter } from "expo-router";
+import { AppState, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { Button, Card, Heading, Notice, colors, styles } from "@/components/ui";
 import { ApiError, api, type Callback, type ReviewCall, type Ring } from "@/lib/api";
+import { calling, type CallAbout } from "@/lib/calling";
 import { length, overdue, when } from "@/lib/format";
-import { calls } from "@/lib/native";
+import { calls, phone } from "@/lib/native";
 import { useSession } from "@/lib/session";
 
 /**
  * Home: what to do on the phone now — a call Deskzo asked this phone to make ("Ring my phone"), the calls
  * with customers still waiting to be told how they went, and the callbacks owed. Opening it sends any
  * calls not yet sent; while it is open it looks for rings every few seconds.
+ *
+ * On an iPhone (owner, 22 Oct 2026) there is no call log to send: a call dialled from here is asked about when the
+ * person is back from it (src/app/after-call.tsx), and "Log a call" notes one that started anywhere else.
  */
 
-const dial = (number: string) => void Linking.openURL(`tel:${number.replace(/[^\d+]/g, "")}`);
+const dial = (number: string, about: CallAbout) => calling.dial(number, about);
 
 export default function Home() {
   const router = useRouter();
@@ -24,7 +28,16 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [syncOn, setSyncOn] = useState(calls.getCallSync().on);
+  const [iphoneOn, setIphoneOn] = useState(phone.callsOn());
   const focused = useRef(false);
+
+  // Opened from a "Ring my phone" notification: that ring on top, though the app hasn't looked yet.
+  const pushed = useLocalSearchParams<{ ring?: string; number?: string; label?: string }>();
+  useEffect(() => {
+    if (!pushed.ring || !pushed.number) return;
+    const ring: Ring = { id: pushed.ring, number: pushed.number, label: pushed.label ?? pushed.number, asked_at: new Date().toISOString() };
+    setRings((now) => (now.some((n) => n.id === ring.id) ? now : [ring, ...now]));
+  }, [pushed.ring, pushed.number, pushed.label]);
 
   // Rings are handed over once each (src/lib/app/calls.ts takeCallRequests): kept here until dialled or dismissed.
   const takeRings = useCallback(async () => {
@@ -40,6 +53,7 @@ export default function Home() {
     setLoading(true);
     setProblem(null);
     setSyncOn(calls.getCallSync().on);
+    setIphoneOn(phone.callsOn());
     try {
       if (calls.getCallSync().on) await calls.syncNow();
       const [, toReview, owed] = await Promise.all([takeRings(), api<ReviewCall[]>("GET", "/api/app/calls/review"), api<Callback[]>("GET", "/api/app/calls/callbacks")]);
@@ -97,6 +111,15 @@ export default function Home() {
           <Button title="Set up call sync" onPress={() => router.push("/setup")} />
         </Card>
       )}
+      {phone.available && !iphoneOn && !problem && (
+        <Card style={{ borderColor: colors.brand }}>
+          <Text style={styles.body}>Use this iPhone for your calls with customers: their names show when they ring, and a word after each call logs it in Deskzo.</Text>
+          <Button title="Set up calls on this iPhone" onPress={() => router.push("/setup")} />
+        </Card>
+      )}
+      {phone.available && iphoneOn && !problem && (
+        <Button title="Log a call" kind="secondary" onPress={() => router.push({ pathname: "/after-call", params: { manual: "1" } })} />
+      )}
 
       {rings.length > 0 && (
         <>
@@ -112,7 +135,7 @@ export default function Home() {
                   title="Call"
                   style={{ flex: 1 }}
                   onPress={() => {
-                    dial(r.number);
+                    dial(r.number, { label: r.label, via: "ring", request: r.id });
                     setRings((now) => now.filter((n) => n.id !== r.id));
                   }}
                 />
@@ -125,7 +148,7 @@ export default function Home() {
 
       <Heading count={review.length}>How did these go?</Heading>
       {review.length === 0 ? (
-        <Notice>Nothing waiting. After a call with a customer, it shows here for a word on how it went.</Notice>
+        <Notice>{phone.available ? "Nothing waiting. A call you logged without a word on how it went shows here." : "Nothing waiting. After a call with a customer, it shows here for a word on how it went."}</Notice>
       ) : (
         review.map((c) => (
           <Pressable key={c.id} accessibilityRole="button" onPress={() => router.push({ pathname: "/review/[id]", params: { id: c.id } })}>
@@ -157,7 +180,7 @@ export default function Home() {
               {c.notes ? ` · ${c.notes}` : ""}
             </Text>
             <View style={styles.row}>
-              <Button title={`Call ${c.number}`} kind="secondary" style={{ flex: 1 }} onPress={() => dial(c.number)} />
+              <Button title={`Call ${c.number}`} kind="secondary" style={{ flex: 1 }} onPress={() => dial(c.number, { label: c.contact ? `${c.contact}, ${c.company}` : c.company, via: "callback" })} />
               <Button
                 title="Done"
                 kind="secondary"

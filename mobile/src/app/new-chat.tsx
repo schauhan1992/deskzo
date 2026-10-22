@@ -56,7 +56,7 @@ export default function NewChat() {
     return (
       <KeyboardAvoidingView style={[s.screen, { padding: 16, gap: 12 }]} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <Text style={s.label}>Group name</Text>
-        <TextInput style={s.input} value={name} onChangeText={setName} placeholder="e.g. Sales — North" placeholderTextColor={colors.muted} maxLength={60} autoFocus />
+        <TextInput style={s.input} value={name} onChangeText={setName} placeholder="e.g. Sales — North" placeholderTextColor={colors.muted} maxLength={60} autoFocus accessibilityLabel="Group name" />
         <Text style={s.small}>
           {picked.length} {picked.length === 1 ? "person" : "people"} and you. You&apos;ll be the group&apos;s admin.
         </Text>
@@ -71,7 +71,7 @@ export default function NewChat() {
     <View style={s.screen}>
       <View style={s.searchBox}>
         <Ionicons name="search" size={18} color={colors.muted} />
-        <TextInput style={s.search} value={q} onChangeText={setQ} placeholder="Search name or department" placeholderTextColor={colors.muted} autoFocus />
+        <TextInput style={s.search} value={q} onChangeText={setQ} placeholder="Search name or department" placeholderTextColor={colors.muted} autoFocus accessibilityLabel="Search people" />
       </View>
       {!group && (
         <Pressable accessibilityRole="button" style={s.row} onPress={() => setGroup(true)}>
@@ -127,7 +127,7 @@ const s = StyleSheet.create({
   searchBox: { flexDirection: "row", alignItems: "center", gap: 8, margin: 12, paddingHorizontal: 12, borderRadius: 24, backgroundColor: colors.sunken },
   search: { flex: 1, paddingVertical: 9, fontSize: 16, color: colors.text },
   row: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 10 },
-  groupIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.brand, alignItems: "center", justifyContent: "center" },
+  groupIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.brandFill, alignItems: "center", justifyContent: "center" },
   name: { fontSize: 16, fontWeight: "600", color: colors.text },
   small: { fontSize: 13, color: colors.muted },
   label: { fontSize: 14, fontWeight: "600", color: colors.text },

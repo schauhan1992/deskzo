@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { Linking, PermissionsAndroid, Platform, ScrollView, Text } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
+import { IphoneSetup } from "@/components/iphone-calls";
 import { Button, Card, Notice, styles } from "@/components/ui";
 import { ApiError, api } from "@/lib/api";
 import { calls } from "@/lib/native";
@@ -9,12 +10,17 @@ import { useSession } from "@/lib/session";
 /**
  * Call sync, switched on by the person on their own phone — never from anywhere else (owner, 18 Oct 2026).
  * What it reads and what leaves the phone, the permissions Android asks for, and the battery setting that
- * decides whether Android lets it run with the app closed.
+ * decides whether Android lets it run with the app closed. On an iPhone, which lets no app read its calls, the
+ * closest it allows (src/components/iphone-calls.tsx).
  */
 
 const WANTED = [PermissionsAndroid.PERMISSIONS.READ_CALL_LOG, PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE, ...(Number(Platform.Version) >= 33 ? [PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS] : [])];
 
 export default function Setup() {
+  return Platform.OS === "ios" ? <IphoneSetup /> : <CallSync />;
+}
+
+function CallSync() {
   const router = useRouter();
   const { refreshMe } = useSession();
   const [on, setOn] = useState(calls.getCallSync().on);

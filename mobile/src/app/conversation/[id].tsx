@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, AppState, FlatList, Image, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, AppState, FlatList, Image, KeyboardAvoidingView, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -8,7 +8,7 @@ import { Avatar } from "@/components/chat/avatar";
 import { Bubble, CHAT, type Ticks } from "@/components/chat/bubble";
 import { Composer, type Picked } from "@/components/chat/composer";
 import { MessageMenu, type MenuAction } from "@/components/chat/message-menu";
-import { colors } from "@/components/ui";
+import { colors, dynamic } from "@/components/ui";
 import { ApiError, api, signedIn, upload } from "@/lib/api";
 import { useChat } from "@/lib/chat";
 import { dayKey, dayLine, lastSeenLine, ticksFor } from "@/lib/chat-format";
@@ -339,7 +339,7 @@ export default function Conversation() {
             {summary?.title ?? ""}
           </Text>
           {!!subtitle && (
-            <Text style={[s.subtitle, typing && { color: "#16A34A" }]} numberOfLines={1}>
+            <Text style={[s.subtitle, typing && { color: TYPING }]} numberOfLines={1}>
               {subtitle}
             </Text>
           )}
@@ -463,6 +463,9 @@ export default function Conversation() {
   );
 }
 
+/** WhatsApp's "typing…" green — lighter in iOS's dark mode. */
+const TYPING = dynamic("#16A34A", "#4ADE80");
+
 const s = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 6, paddingVertical: 6, backgroundColor: colors.surface, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
   title: { fontSize: 17, fontWeight: "700", color: colors.text },
@@ -472,8 +475,8 @@ const s = StyleSheet.create({
   pinCount: { fontSize: 12, color: colors.muted },
   problem: { margin: 24, textAlign: "center", color: colors.danger },
   dayRow: { alignItems: "center", marginVertical: 8 },
-  day: { fontSize: 12.5, color: "#54656F", backgroundColor: "#fff", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, overflow: "hidden", elevation: 1 },
-  down: { position: "absolute", right: 14, bottom: 80, width: 40, height: 40, borderRadius: 20, backgroundColor: "#fff", alignItems: "center", justifyContent: "center", elevation: 3 },
+  day: { fontSize: 12.5, color: CHAT.note, backgroundColor: colors.surface, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, overflow: "hidden", elevation: 1 },
+  down: { position: "absolute", right: 14, bottom: 80, width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surface, alignItems: "center", justifyContent: "center", elevation: 3 },
   viewer: { flex: 1, backgroundColor: "#000" },
   viewerBar: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 8 },
   viewerName: { flex: 1, color: "#fff", fontSize: 15 },

@@ -1,5 +1,6 @@
 import { Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { BOXED_TEXT_SCALE, colors } from "@/components/ui";
 
 /**
  * A person's or a group's circle: their initials on a colour picked from the name, so the same person is always the
@@ -28,13 +29,15 @@ export function Avatar({ name, group, size = 48, online }: { name: string; group
         {group ? (
           <Ionicons name="people" size={size * 0.5} color="#fff" />
         ) : (
-          <Text style={{ color: "#fff", fontWeight: "700", fontSize: size * 0.36 }}>{initials(name)}</Text>
+          <Text style={{ color: "#fff", fontWeight: "700", fontSize: size * 0.36 }} maxFontSizeMultiplier={BOXED_TEXT_SCALE}>
+            {initials(name)}
+          </Text>
         )}
       </View>
       {online && (
         <View
           accessibilityLabel="online"
-          style={{ position: "absolute", right: 0, bottom: 0, width: size * 0.28, height: size * 0.28, borderRadius: size, backgroundColor: "#22C55E", borderWidth: 2, borderColor: "#fff" }}
+          style={{ position: "absolute", right: 0, bottom: 0, width: size * 0.28, height: size * 0.28, borderRadius: size, backgroundColor: "#22C55E", borderWidth: 2, borderColor: colors.surface }}
         />
       )}
     </View>

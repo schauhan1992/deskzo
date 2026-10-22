@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AppState, StyleSheet, Text, View } from "react-native";
 import { useSegments } from "expo-router";
-import { colors } from "@/components/ui";
+import { colors, dynamic } from "@/components/ui";
 import { api } from "@/lib/api";
 import { screen } from "@/lib/native";
 import { useSession } from "@/lib/session";
@@ -116,6 +116,6 @@ const s = StyleSheet.create({
   markBox: { overflow: "hidden", alignItems: "center", justifyContent: "center" },
   markGrid: { width: "260%", transform: [{ rotate: "-30deg" }], gap: 34 },
   markRow: { fontSize: 13, fontWeight: "600", color: colors.text, letterSpacing: 0.4 },
-  notice: { position: "absolute", left: 16, right: 16, bottom: 96, backgroundColor: colors.text, borderRadius: 10, padding: 12 },
+  notice: { position: "absolute", left: 16, right: 16, bottom: 96, backgroundColor: dynamic("#0F172A", "#334155"), borderRadius: 10, padding: 12 },
   noticeText: { color: "#fff", fontSize: 14, lineHeight: 19 },
 });
