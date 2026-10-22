@@ -1,3 +1,4 @@
+import { db } from "@/lib/db";
 import { controlConfigured, controlDb } from "@/lib/platform/control-db";
 import { tenantById } from "@/lib/tenancy/registry";
 import { currentTenant } from "@/lib/tenancy/resolve";
@@ -56,6 +57,32 @@ export async function claimDeviceSerial(serial: string): Promise<{ ok: true } | 
   const owner = await control.biometricDeviceRoute.findUnique({ where: { serial: wanted }, select: { tenantId: true } });
   if (owner?.tenantId === tenant.id) return { ok: true };
   return { ok: false, error: `Serial ${wanted} is registered to another workspace. If this terminal has moved to you, ask support to release it.` };
+}
+
+/**
+ * Brings this workspace's routes in line with the terminals its database now holds — after a restore or a
+ * reset replaced them wholesale (owner, 22 Oct 2026). A serial no terminal here has any more is let go; one
+ * a terminal here has and no route names is claimed. One another workspace has claimed since is left with
+ * it and reported, as registering it would be refused. Nothing outside the control plane.
+ */
+export async function resyncDeviceRoutes(): Promise<{ claimed: number; released: number; elsewhere: string[] }> {
+  const result = { claimed: 0, released: 0, elsewhere: [] as string[] };
+  const tenant = await routed();
+  if (!tenant) return result;
+  const control = controlDb();
+  const devices = await db.biometricDevice.findMany({ select: { serialNumber: true } });
+  const wanted = new Set(devices.map((d) => normaliseSerial(d.serialNumber)).filter(Boolean));
+  const routes = await control.biometricDeviceRoute.findMany({ where: { tenantId: tenant.id }, select: { serial: true } });
+  const stale = routes.map((r) => r.serial).filter((serial) => !wanted.has(serial));
+  if (stale.length) result.released = (await control.biometricDeviceRoute.deleteMany({ where: { tenantId: tenant.id, serial: { in: stale } } })).count;
+  const have = new Set(routes.map((r) => r.serial));
+  for (const serial of wanted) {
+    if (have.has(serial)) continue;
+    const claim = await claimDeviceSerial(serial);
+    if (claim.ok) result.claimed += 1;
+    else result.elsewhere.push(serial);
+  }
+  return result;
 }
 
 /** Lets go of a serial this workspace no longer uses — after a terminal's serial was corrected. */

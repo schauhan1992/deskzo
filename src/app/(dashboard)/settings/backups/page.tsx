@@ -4,8 +4,8 @@ import { can } from "@/lib/authz/resolve";
 import { backupOverview } from "@/actions/backup";
 import { BackupManager } from "@/components/settings/backup-manager";
 import { RestorePanel } from "@/components/backups/restore-panel";
-import { getDataResetOverview } from "@/actions/data-reset";
-import { DataResetPanel } from "@/components/backups/data-reset-panel";
+import { workspaceResetState } from "@/lib/workspace-reset";
+import { WorkspaceResetPanel } from "@/components/backups/workspace-reset-panel";
 
 /**
  * Never cached. The whole point of the page is whether a backup ran recently, and a cached "last
@@ -18,12 +18,12 @@ export default async function BackupSettingsPage() {
 
   if (!(await can(user.id, "backups.manage"))) notFound();
 
-  const [overview, canDownload, canRestore, resetOverview] = await Promise.all([
+  const [overview, canDownload, canRestore, reset] = await Promise.all([
     backupOverview(),
     can(user.id, "backups.download"),
     can(user.id, "backups.restore"),
-    // TEMPORARY — null unless ENABLE_DATA_RESET=true and this is the super admin. See src/lib/data-reset.ts.
-    getDataResetOverview(),
+    // The super admin's reset, and whoever looks after backups seeing one scheduled (src/lib/workspace-reset.ts).
+    workspaceResetState(user.id),
   ]);
 
   return (
@@ -52,9 +52,9 @@ export default async function BackupSettingsPage() {
         </div>
       )}
 
-      {resetOverview && (
+      {reset && (
         <div className="mt-8">
-          <DataResetPanel overview={resetOverview} />
+          <WorkspaceResetPanel state={reset} canRestore={canRestore} />
         </div>
       )}
     </div>

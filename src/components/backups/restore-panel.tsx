@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ARCHIVE_EXTENSION, CONFIRM_PHRASE } from "@/lib/backup/archive-format";
+import { IdentityFields } from "@/components/security/identity-fields";
 import { formatBytes } from "@/lib/backup/policy";
 import { useClock } from "@/components/time/clock-provider";
 
@@ -45,6 +46,8 @@ type Status = {
     error: string | null;
     finishedAt: string | null;
     secretHandoffPath: string | null;
+    safetyCopy?: string | null;
+    rolledBack?: boolean;
   } | null;
 };
 
@@ -55,6 +58,9 @@ export function RestorePanel() {
   const [preflight, setPreflight] = useState<Preflight | null>(null);
   const [passphrase, setPassphrase] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [askCode, setAskCode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [status, setStatus] = useState<Status | null>(null);
@@ -122,12 +128,15 @@ export function RestorePanel() {
       const res = await fetch("/api/backups/restore", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ id: preflight.id, passphrase, confirm }),
+        body: JSON.stringify({ id: preflight.id, passphrase, confirm, password, code }),
       });
       const data = await res.json();
+      if (data?.needsCode) setAskCode(true);
       if (!res.ok) throw new Error(data?.error ?? "The restore could not be started.");
       setPassphrase("");
       setConfirm("");
+      setPassword("");
+      setCode("");
     } catch (err) {
       setError((err as Error).message);
       setStarting(false);
@@ -173,6 +182,11 @@ export function RestorePanel() {
                 {clock.dateTimeShort(last.finishedAt)}
               </p>
               <p className="mt-0.5 whitespace-pre-line">{last.error ?? last.message}</p>
+              {last.phase === "done" && last.safetyCopy && (
+                <p className="mt-1 text-xs">
+                  The workspace as it was before is kept 30 days as <span className="font-mono">{last.safetyCopy}</span> — restore it to undo this.
+                </p>
+              )}
               {last.secretHandoffPath && (
                 <p className="mt-1 flex items-start gap-1.5">
                   <KeyRound aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -287,12 +301,15 @@ export function RestorePanel() {
                 </div>
               </div>
 
+              <IdentityFields idPrefix="rs" password={password} onPassword={setPassword} code={code} onCode={setCode} showCode={askCode} />
+              <p className="text-xs text-subtle">A copy of the workspace as it is now is taken first and kept 30 days — restore that copy to undo this.</p>
+
               <div className="flex justify-end">
                 <Button
                   size="sm"
                   variant="danger"
                   onClick={start}
-                  disabled={starting || confirm.trim() !== CONFIRM_PHRASE || passphrase.length === 0}
+                  disabled={starting || confirm.trim() !== CONFIRM_PHRASE || passphrase.length === 0 || password.length === 0}
                 >
                   {starting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <AlertTriangle className="h-3.5 w-3.5" />}
                   {starting ? "Starting…" : "Replace the database"}

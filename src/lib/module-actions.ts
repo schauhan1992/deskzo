@@ -105,7 +105,7 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "dashboard.ts": "core",
   "data-export.ts": "core",
   "data-import.ts": "core",
-  "data-reset.ts": "core",
+  "workspace-reset.ts": "core",
   "department.ts": "core",
   // Contact designations: a list the contacts on every company pick from.
   "designation.ts": "core",

@@ -26,6 +26,10 @@ export type Sidecar = {
   sizeBytes: number | null;
   /** So a file found in five years says what wrote it. */
   app: string;
+  /** Why it was taken, when not by the schedule or a person — the safety copy before a restore or a reset. */
+  reason?: string | null;
+  /** ISO time it is kept until, whatever the retention says. */
+  keepUntil?: string | null;
 };
 
 export function sidecarPath(dumpPath: string): string {
@@ -56,6 +60,9 @@ export async function readSidecar(dumpPath: string): Promise<Sidecar | null> {
       via: parsed.via ?? null,
       sizeBytes: parsed.sizeBytes ?? null,
       app: parsed.app ?? "unknown",
+      // Only when written: a sidecar from before them reads back exactly as it was.
+      ...(typeof parsed.reason === "string" ? { reason: parsed.reason } : {}),
+      ...(typeof parsed.keepUntil === "string" ? { keepUntil: parsed.keepUntil } : {}),
     };
   } catch {
     return null;

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { runScheduledBackup } from "@/lib/backup/scheduled";
+import { runDueWorkspaceReset } from "@/lib/workspace-reset";
 import { forEachTenant, tickTargets } from "@/lib/platform/fanout";
 import { fanoutResponse, tickAuthorised } from "@/lib/platform/tick-auth";
 
@@ -47,6 +48,10 @@ async function handle(request: Request) {
     "backup-tick",
     tenants,
     async () => {
+      // A workspace reset that has come due (src/lib/workspace-reset.ts) — its own safety copy first. Its
+      // outcome is on its own record and told to the admins; the backup goes ahead either way.
+      const reset = await runDueWorkspaceReset();
+      if (reset.ran && !reset.ok) console.error(`[backup-tick] the workspace reset failed: ${reset.error}`);
       const run = await runScheduledBackup();
       // A failed dump is a failure of this workspace's run, so the fan-out reports it as one.
       if (run.ran && !run.outcome.ok) throw new Error(run.outcome.error);

@@ -11197,6 +11197,16 @@ model Backup {
    * Which tool actually ran: the host's pg_dump, or the one inside the container.
    */
   via               String?
+  /**
+   * Why it was taken, when neither the schedule nor "Back up now" took it: the safety copy before a
+   * restore or a workspace reset (owner, 22 Oct 2026). Shown in the list.
+   */
+  reason            String?
+  /**
+   * Kept at least until then, whatever the retention says — the copy a restore or a reset can be
+   * undone from. Read by name (src/lib/tenancy/clients.ts NOT_YET_EVERYWHERE).
+   */
+  keepUntil         DateTime?
 
   /**
    * Null when a scheduled run took it, rather than a person.
@@ -11238,6 +11248,40 @@ model BackupSchedule {
   updatedBy   User?    @relation("BackupScheduleUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@map("backup_schedule")
+}
+
+/**
+ * A workspace reset its super admin asked for (owner, 22 Oct 2026 — src/lib/workspace-reset.ts). It runs
+ * a day after it was asked for unless an admin cancels it, after a safety copy is taken; that copy is
+ * kept 30 days, so the reset can be undone by restoring it. Kept through the reset itself — the record
+ * of who asked, when, and what was left — so no foreign keys: everybody but the super admin goes.
+ */
+model WorkspaceReset {
+  id              String               @id @default(cuid())
+  status          WorkspaceResetStatus @default(SCHEDULED)
+  requestedById   String
+  requestedByName String
+  requestedAt     DateTime             @default(now())
+  /** Not before then: a day after it was asked for. */
+  runAfter        DateTime
+  cancelledByName String?
+  cancelledAt     DateTime?
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  /** The safety copy taken just before, kept 30 days — what "Undo" restores. */
+  backupFilename  String?
+  error           String?
+
+  @@index([status, runAfter])
+  @@map("workspace_resets")
+}
+
+enum WorkspaceResetStatus {
+  SCHEDULED
+  CANCELLED
+  RUNNING
+  DONE
+  FAILED
 }
 
 // ---------------------------------------------------------------------------------------------

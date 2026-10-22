@@ -244,6 +244,10 @@ type BatchedRequest = { transaction?: { id?: string | number } };
  * Take an entry out in a later release, once every workspace is past the migration that added it.
  */
 const NOT_YET_EVERYWHERE = {
+  // 20261122110000_restore_safety_and_workspace_reset. Read by name in src/lib/backup (the safety copy
+  // before a restore or a reset, and the retention that keeps it), which tolerates a workspace not
+  // migrated yet.
+  backup: { reason: true, keepUntil: true },
   // 20261112100000_automate_builder. Read by name in src/lib/automate (refs, the builder, converting
   // pipeline automations); Automate tolerates a workspace not migrated yet.
   automationWorkflow: { workflowSeq: true, migratedFrom: true },

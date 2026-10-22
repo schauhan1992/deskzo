@@ -104,6 +104,17 @@ export type Manifest = {
   /** Bytes this run actually added to the store — what "incremental" means in the log. */
   newBytes: number;
   newChunks: number;
+  /**
+   * What the backup row says, so the list can be rebuilt from the folder after a restore puts back an
+   * older log (src/lib/backup/run.ts relistBackups). Absent in manifests written before 22 Oct 2026.
+   */
+  takenAt?: string;
+  filename?: string;
+  schemaVersion?: string | null;
+  secretFingerprint?: string | null;
+  via?: string | null;
+  reason?: string | null;
+  keepUntil?: string | null;
 };
 
 export function chunkDir(root: string): string {
@@ -266,6 +277,13 @@ export async function readManifest(root: string, id: string): Promise<Manifest |
       sha256: parsed.sha256,
       newBytes: parsed.newBytes ?? 0,
       newChunks: parsed.newChunks ?? 0,
+      takenAt: parsed.takenAt,
+      filename: parsed.filename,
+      schemaVersion: parsed.schemaVersion ?? null,
+      secretFingerprint: parsed.secretFingerprint ?? null,
+      via: parsed.via ?? null,
+      reason: parsed.reason ?? null,
+      keepUntil: parsed.keepUntil ?? null,
     };
   } catch {
     return null;

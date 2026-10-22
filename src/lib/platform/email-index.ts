@@ -101,6 +101,25 @@ export async function indexWorkspaceUsers(userIds: string[]): Promise<void> {
   }
 }
 
+/**
+ * The whole index for the workspace in hand, at once — after a restore or a reset has replaced its people
+ * wholesale (owner, 22 Oct 2026), rather than leaving "Find my workspaces" out of step until the nightly
+ * reconcile. Never throws: a failure is logged by its code, and the nightly reconcile puts it right.
+ */
+export async function reindexCurrentWorkspace(): Promise<void> {
+  if (!controlConfigured()) return;
+  try {
+    const tenant = await currentTenant();
+    if (tenant.source !== "control") return;
+    const users = await db.user.findMany({ where: { active: true, ...PEOPLE_ONLY }, select: { id: true, email: true } });
+    const desired = new Map(users.map((user) => [user.id, emailKey(user.email)]));
+    const existing = await controlDb().workspaceEmail.findMany({ where: { tenantId: tenant.id }, select: { userId: true, emailHmac: true } });
+    await apply(tenant.id, desired, existing);
+  } catch (err) {
+    console.warn(`[email-index] could not rebuild the workspace's index: ${codeOf(err)}`);
+  }
+}
+
 export type EmailIndexRun = { workspaces: number; rows: number; failed: string[] };
 
 /**

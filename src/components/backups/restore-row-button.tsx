@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { CONFIRM_PHRASE } from "@/lib/backup/archive-format";
 import { formatBytes } from "@/lib/backup/policy";
 import { useClock } from "@/components/time/clock-provider";
+import { IdentityFields } from "@/components/security/identity-fields";
 
 /**
  * Puts one of this server's own backups back, from the row it is listed on.
@@ -38,6 +39,9 @@ export function RestoreRowButton({
   const [staging, setStaging] = useState(false);
   const [staged, setStaged] = useState<Staged | null>(null);
   const [confirm, setConfirm] = useState("");
+  const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [askCode, setAskCode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
 
@@ -46,6 +50,8 @@ export function RestoreRowButton({
     setError(null);
     setStaged(null);
     setConfirm("");
+    setPassword("");
+    setCode("");
     setStaging(true);
     try {
       const res = await fetch(`/api/backups/${backup.id}/stage`, { method: "POST" });
@@ -68,9 +74,10 @@ export function RestoreRowButton({
         method: "POST",
         headers: { "content-type": "application/json" },
         // No passphrase: the file never left the server, so it was never sealed.
-        body: JSON.stringify({ id: staged.id, confirm }),
+        body: JSON.stringify({ id: staged.id, confirm, password, code }),
       });
       const data = await res.json();
+      if (data?.needsCode) setAskCode(true);
       if (!res.ok) throw new Error(data?.error ?? "The restore could not be started.");
       // From here the proxy holds everything at a maintenance page, which polls its own status and
       // reloads when the database is back. Nothing left for this dialog to do.
@@ -107,7 +114,8 @@ export function RestoreRowButton({
               <p className="font-medium">This replaces the entire database.</p>
               <p className="mt-0.5">
                 Everything recorded since this backup was taken is discarded — orders, invoices, payments, tickets, and
-                the log of who discarded them. The application goes offline while it runs. There is no undo.
+                the log of who discarded them. The application goes offline while it runs. A copy of the workspace as
+                it is now is taken first and kept 30 days: restore that copy to undo this.
               </p>
             </div>
           </div>
@@ -146,6 +154,7 @@ export function RestoreRowButton({
                   autoComplete="off"
                 />
               </div>
+              <IdentityFields idPrefix={`rr-${backup.id}`} password={password} onPassword={setPassword} code={code} onCode={setCode} showCode={askCode} />
             </>
           )}
 
@@ -157,7 +166,7 @@ export function RestoreRowButton({
               variant="danger"
               size="sm"
               onClick={start}
-              disabled={!staged || starting || confirm.trim() !== CONFIRM_PHRASE}
+              disabled={!staged || starting || confirm.trim() !== CONFIRM_PHRASE || password.length === 0}
             >
               {starting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <History className="h-3.5 w-3.5" />}
               {starting ? "Starting…" : "Replace the database"}

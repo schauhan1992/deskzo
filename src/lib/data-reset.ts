@@ -3,12 +3,8 @@ import path from "node:path";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 /**
- * TEMPORARY — resetting the whole database to a fresh install, for the testing phase. Remove this
- * file, `src/actions/data-reset.ts`, `src/components/backups/data-reset-panel.tsx`, the panel on
- * the Backups page and `scripts/check-data-reset.ts` before production; nothing else depends on it.
- *
- * Switched off unless `ENABLE_DATA_RESET=true` is in the environment, and then only for the super
- * admin — so a build that reaches production with this still in it cannot use it by accident.
+ * The engine behind the workspace reset (owner, 22 Oct 2026 — src/lib/workspace-reset.ts, which decides who
+ * may, when, and takes the safety copy first): a workspace's database emptied back to a fresh one.
  *
  * ## What survives
  *
@@ -33,13 +29,6 @@ import { Prisma, type PrismaClient } from "@prisma/client";
  * transaction: a failure part-way leaves the database exactly as it was.
  */
 
-/** Typed to confirm. */
-export const RESET_PHRASE = "RESET ALL DATA";
-
-export function dataResetEnabled(): boolean {
-  return process.env.ENABLE_DATA_RESET === "true";
-}
-
 const tableOf = (model: string) => Prisma.dmmf.datamodel.models.find((m) => m.name === model)?.dbName ?? model;
 
 /** The tables left alone, and why — shown on the reset panel. */
@@ -49,6 +38,7 @@ export function keptTables(): { table: string; what: string }[] {
     { table: tableOf("Role"), what: "the built-in roles — ones added since are removed" },
     { table: tableOf("Backup"), what: "the backup log, so a backup taken before the reset can be restored" },
     { table: tableOf("BackupSchedule"), what: "when backups are taken" },
+    { table: tableOf("WorkspaceReset"), what: "the record of the reset — who asked, when, and the copy taken before" },
   ];
 }
 

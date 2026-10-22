@@ -30,6 +30,7 @@
 import "dotenv/config";
 import { runBackup } from "../src/lib/backup/run";
 import { runScheduledBackup } from "../src/lib/backup/scheduled";
+import { runDueWorkspaceReset } from "../src/lib/workspace-reset";
 import { formatBytes } from "../src/lib/backup/policy";
 import { formatTimeOfDay } from "../src/lib/backup/schedule";
 import { db } from "../src/lib/db";
@@ -96,6 +97,9 @@ async function backupOne(args: string[]) {
   const started = Date.now();
 
   if (ifDue) {
+    // A workspace reset that has come due, as the backup tick runs it (src/lib/workspace-reset.ts).
+    const reset = await runDueWorkspaceReset();
+    if (reset.ran) console.log(reset.ok ? `Workspace reset — done; the copy taken before is ${reset.backup}.` : `Workspace reset — failed, nothing removed: ${reset.error}`);
     const run = await runScheduledBackup();
     if (!run.ran) {
       // One line, on purpose. This runs every few minutes for years; anything more and the log it

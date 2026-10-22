@@ -52,6 +52,10 @@ export type BackupRow = {
   schemaVersion: string | null;
   via: string | null;
   triggeredByName: string | null;
+  /** Why, for a safety copy: "Before restoring …", "Before resetting the workspace". */
+  reason: string | null;
+  /** Kept at least until then, whatever the retention says. */
+  keepUntil: Date | null;
   /**
    * False when the row is there and its data is not — moved, or deleted by hand.
    *
@@ -89,6 +93,22 @@ export type BackupOverview = {
   scheduleVerdict: string;
 };
 
+/**
+ * Why each safety copy was taken and how long it is kept (owner, 22 Oct 2026) — read by name, and nothing
+ * for a workspace whose database hasn't had the migration yet (src/lib/tenancy/clients.ts NOT_YET_EVERYWHERE).
+ */
+async function safetyCopies(ids: string[]): Promise<Map<string, { reason: string | null; keepUntil: Date | null }>> {
+  if (!ids.length) return new Map();
+  try {
+    const rows = await db.backup.findMany({ where: { id: { in: ids }, OR: [{ reason: { not: null } }, { keepUntil: { not: null } }] }, select: { id: true, reason: true, keepUntil: true } });
+    const now = Date.now();
+    // A keep-until already past is no longer anything to show.
+    return new Map(rows.map((r) => [r.id, { reason: r.reason, keepUntil: r.keepUntil && r.keepUntil.getTime() > now ? r.keepUntil : null }]));
+  } catch {
+    return new Map();
+  }
+}
+
 export async function backupOverview(): Promise<ActionResult<BackupOverview>> {
   const user = await requireUser();
   if (!(await can(user.id, "backups.manage"))) {
@@ -112,6 +132,8 @@ export async function backupOverview(): Promise<ActionResult<BackupOverview>> {
     scheduleState(),
     storeSize(directory),
   ]);
+
+  const safety = await safetyCopies(records.map((r) => r.id));
 
   // Needs the rows themselves: a chunked backup's data is found by row id, not by filename.
   const present = await presentBackups(
@@ -149,6 +171,8 @@ export async function backupOverview(): Promise<ActionResult<BackupOverview>> {
         schemaVersion: r.schemaVersion,
         via: r.via,
         triggeredByName: r.triggeredBy?.name ?? null,
+        reason: safety.get(r.id)?.reason ?? null,
+        keepUntil: safety.get(r.id)?.keepUntil ?? null,
         present: present.has(r.id),
       })),
     },

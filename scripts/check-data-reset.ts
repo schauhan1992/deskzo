@@ -1,5 +1,5 @@
 /**
- * TEMPORARY, with the reset it checks — see src/lib/data-reset.ts. Remove both before production.
+ * The reset engine (src/lib/data-reset.ts) and the workspace reset built on it (src/lib/workspace-reset.ts).
  *
  *   · Without a database: the plan — which tables are truncated, which are deleted and in what
  *     order, and what it refuses (a kept row that can't let go, tables that point at each other).
@@ -10,9 +10,9 @@
  *     super admin, the PIN directory, the backup log and the built-in roles emptied; the starter
  *     categories back as the migration wrote them; numbering restarted; a second reset harmless;
  *     anybody but the super admin refused.
- *   · Through the action and the page, on the real database but only the paths that refuse: switched
- *     off without ENABLE_DATA_RESET, refused to anybody but the super admin, refused without the
- *     phrase — and the panel shown only when all three hold.
+ *   · The workspace reset, on the real database but only the paths that refuse: not the super admin,
+ *     not the workspace's address, not their password, not once an e-invoice exists — and the panel on
+ *     the Backups page. The whole reset, scheduled and run, is exercised on a scratch workspace instead.
  *
  *   npm run check:data-reset
  */
@@ -32,7 +32,7 @@ internals._load = function (this: unknown, request: string, parent: unknown, isM
   if (request === "next/cache") return { revalidatePath() {}, revalidateTag() {}, unstable_cache: (fn: unknown) => fn };
   if (request === "@/lib/session" || request.endsWith("lib/session")) {
     const user = () => ({ id: actorId, role: "ADMIN", name: "Zzreset", email: "x@zzprobe-reset.invalid" });
-    return { requireUser: async () => user(), currentUser: async () => user() };
+    return { requireUser: async () => user(), currentUser: async () => user(), viewAsContext: async () => null, refuseWhileViewingAs: async () => null };
   }
   if (request === "next/navigation") {
     return {
@@ -217,52 +217,59 @@ async function main() {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  section("The button, on the real database — only the paths that refuse");
+  section("The workspace reset, on the real database — only the paths that refuse");
 
   const db = directClient();
-  const actions = require("../src/actions/data-reset") as typeof import("../src/actions/data-reset");
+  const lib = require("../src/lib/workspace-reset") as typeof import("../src/lib/workspace-reset");
+  const actions = require("../src/actions/workspace-reset") as typeof import("../src/actions/workspace-reset");
   const BackupsPage = (require("../src/app/(dashboard)/settings/backups/page") as { default: () => Promise<ReactElement> }).default;
   /**
-   * Every call below sends a phrase that is NOT the confirmation, so even a gate that failed to
-   * refuse could not reset this database — the call would stop at the phrase instead, with a
-   * different message, and the check would fail rather than the data go.
+   * Nothing below can reset this database: every request is refused before it is scheduled — a password
+   * nobody has, a confirmation that isn't the address — and a scheduled one would still wait a day.
    */
-  const NOT_THE_PHRASE = "reset all data please";
-  const refusedBecause = async () => {
-    const r = await actions.resetAllDataNow({ confirm: NOT_THE_PHRASE, backupFirst: false });
-    return r.ok ? "IT RAN" : r.error;
-  };
   const realSuperAdmin = await db.user.findFirst({ where: { isSuperAdmin: true }, select: { id: true } });
   const other = await db.user.create({ data: { name: "Zzreset Other", email: `other${MAIL}`, role: "ADMIN", passwordHash: "o".repeat(60) } });
   const companiesBefore = await db.company.count();
-  const wasEnabled = process.env.ENABLE_DATA_RESET;
+  const resetsBefore = await db.workspaceReset.count();
+  let irnDoc: string | null = null;
   try {
     ok("there is a super admin to borrow", !!realSuperAdmin);
-    actorId = realSuperAdmin!.id;
-    // Set, not deleted: a Prisma client imported later loads .env, and would put a deleted value back.
-    process.env.ENABLE_DATA_RESET = "false";
-    const off = await refusedBecause();
-    ok("switched off without ENABLE_DATA_RESET — even for the super admin", (await actions.getDataResetOverview()) === null && off.includes("switched off") && off.includes("ENABLE_DATA_RESET"), off);
-    const offHtml = renderToStaticMarkup(await BackupsPage());
-    const shown = offHtml.indexOf("Reset all data");
-    ok("  and the Backups page doesn't show it", shown < 0, shown < 0 ? "" : offHtml.slice(Math.max(0, shown - 200), shown + 60));
-
-    process.env.ENABLE_DATA_RESET = "true";
     actorId = other.id;
-    const notSuper = await refusedBecause();
-    ok("switched on, it is still only the super admin's", (await actions.getDataResetOverview()) === null && notSuper === "Only the super admin can reset data.", notSuper);
+    const notSuper = await actions.scheduleWorkspaceReset({ confirm: "deskzo", password: "x" });
+    ok("only the super admin can ask for it", !notSuper.ok && notSuper.error === "Only the workspace's super admin can reset it.", notSuper.ok ? "IT RAN" : notSuper.error);
     actorId = realSuperAdmin!.id;
-    const overview = await actions.getDataResetOverview();
-    ok("the super admin sees how much there is before pressing anything", !!overview && overview.counts.companies === companiesBefore && overview.tables > 150 && overview.phrase === "RESET ALL DATA", overview ? JSON.stringify(overview.counts) : "");
-    const wrong = await refusedBecause();
-    ok("the phrase has to be typed", wrong === "Type RESET ALL DATA to confirm.", wrong);
+    const wrongName = await actions.scheduleWorkspaceReset({ confirm: "not-this-workspace", password: "x" });
+    ok("the workspace's address has to be typed", !wrongName.ok && wrongName.error.startsWith("Type the workspace's address"), wrongName.ok ? "IT RAN" : wrongName.error);
+    const state = await lib.workspaceResetState(realSuperAdmin!.id);
+    const wrongPassword = await actions.scheduleWorkspaceReset({ confirm: state?.slug ?? "", password: "not the password, certainly" });
+    // A database with e-invoices or e-way bills (the demo data has them) refuses before the password.
+    const blockedHere = await lib.resetBlockers();
+    if (blockedHere.length) ok("with tax records here, it is refused before the password is asked", !wrongPassword.ok && wrongPassword.error === blockedHere[0]!.message, wrongPassword.ok ? "IT RAN" : wrongPassword.error);
+    else ok("and the super admin's own password", !wrongPassword.ok && wrongPassword.error === "That password isn't right.", wrongPassword.ok ? "IT RAN" : wrongPassword.error);
+    ok("the super admin sees how much there is before asking", !!state?.overview && state.overview.counts.companies === companiesBefore && state.overview.tables > 150 && state.isSuperAdmin, state?.overview ? JSON.stringify(state.overview.counts) : "");
+    ok("somebody else sees the panel only when they look after backups", (await lib.workspaceResetState(other.id))?.isSuperAdmin === false);
+
+    // A tax document filed with the GST system: the reset is refused.
+    const company = await db.company.findFirst({ select: { id: true } });
+    if (company) {
+      const doc = await db.tradeDocument.create({ data: { docType: "INVOICE", direction: "SALES", status: "ISSUED", companyId: company.id, docNumber: `ZZRESET-IRN-${Date.now()}`, taxableValue: 1, total: 1, createdById: realSuperAdmin!.id, issueDate: new Date(), irn: `zzreset-${Date.now()}` } as never, select: { id: true } });
+      irnDoc = doc.id;
+      const blockers = await lib.resetBlockers();
+      ok("once an e-invoice has been generated, it is refused", blockers.some((b) => b.key === "einvoices"), blockers.map((b) => b.message).join(" "));
+    }
+
     const html = renderToStaticMarkup(await BackupsPage());
-    ok("the Backups page shows the panel, with what stays", html.includes("Reset all data — for testing only") && html.includes("the backup log"), html.includes("Reset all data") ? "" : "no panel");
-    ok("  the backup-first box starts ticked and the button waits for the phrase", /type="checkbox"[^>]*checked=""/.test(html) && /<button[^>]*disabled=""[^>]*>Reset all data<\/button>/.test(html));
-    ok("nothing on the real database was reset by any of that", (await db.company.count()) === companiesBefore);
+    const refusedHere = (await lib.resetBlockers()).filter((b) => b.key !== "einvoices" || !irnDoc);
+    ok(
+      "the Backups page shows the reset to the super admin — the form, or why it can't be",
+      html.includes("Reset the workspace") && html.includes("kept 30 days") && (html.includes("Schedule the reset") || html.includes("must be kept")),
+      html.includes("Reset the workspace") ? (refusedHere.length ? "refused here" : "") : "no panel",
+    );
+    ok("  and no trace of the testing button", !html.includes("for testing only") && !html.includes("ENABLE_DATA_RESET"));
+    ok("nothing on the real database was reset or scheduled by any of that", (await db.company.count()) === companiesBefore && (await db.workspaceReset.count()) === resetsBefore);
   } finally {
-    if (wasEnabled === undefined) delete process.env.ENABLE_DATA_RESET;
-    else process.env.ENABLE_DATA_RESET = wasEnabled;
+    if (irnDoc) await db.tradeDocument.delete({ where: { id: irnDoc } });
+    await db.auditLog.deleteMany({ where: { userId: other.id } });
     await db.user.delete({ where: { id: other.id } });
     await db.$disconnect();
   }

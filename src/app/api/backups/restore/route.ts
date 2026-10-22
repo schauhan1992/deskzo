@@ -9,6 +9,7 @@ import { ArchiveFormatError, PassphraseError, extractArchive, verifyArchiveSigna
 import { archiveFingerprints, backupFingerprints, currentKeys, keysFromArchive, sealKeyBundle } from "@/lib/tenancy/keys";
 import { currentTenant } from "@/lib/tenancy/resolve";
 import { CONFIRM_PHRASE } from "@/lib/backup/archive-format";
+import { confirmIdentity } from "@/lib/security/confirm-identity";
 import {
   clearStaged,
   ensureRestoreDir,
@@ -68,7 +69,7 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json().catch(() => null)) as
-    | { id?: string; passphrase?: string; confirm?: string }
+    | { id?: string; passphrase?: string; confirm?: string; password?: string; code?: string }
     | null;
 
   const id = typeof body?.id === "string" ? body.id : "";
@@ -81,6 +82,10 @@ export async function POST(request: Request) {
   if (confirm !== CONFIRM_PHRASE) {
     return NextResponse.json({ error: `Type ${CONFIRM_PHRASE} to confirm.` }, { status: 400 });
   }
+  // Their own password, and their two-factor code when they have it on (owner, 22 Oct 2026): an open
+  // session alone is not enough to put the whole workspace back to another day.
+  const proved = await confirmIdentity(user.id, { password: body?.password, code: body?.code }, "a restore");
+  if (!proved.ok) return NextResponse.json({ error: proved.error, needsCode: proved.needsCode ?? false }, { status: 400 });
 
   const archivePath = await stagingPath(id, ".wbak");
   const dumpPath = await stagingPath(id, ".dump");
@@ -204,6 +209,7 @@ export async function POST(request: Request) {
     takenAt,
     secretHandoffPath,
     keysFromBackup,
+    requestedById: user.id,
     error: null,
   });
 

@@ -117,7 +117,6 @@ Work through the runbook's checklist (§8). On this setup:
 - **Reference data:** load PIN codes and world places in the console → Reference data.
 - **Billing:** enter the gateways' keys in the console → Billing, test mode first, and run one checkout end to end (runbook §2 for the webhooks).
 - **Customers' own domains:** certificates for them are now automatic, so the console's **Offer custom domains** setting can go on.
-- **Remove the temporary "Reset all data" button** from the code. `ENABLE_DATA_RESET` stays unset here.
 
 ## Every release
 

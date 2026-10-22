@@ -56,8 +56,10 @@ export const LOCK_STALE_AFTER_MS = 60 * 60 * 1000;
 export type RestorePhase =
   | "staged"
   | "opening"
+  | "saving"
   | "dropping"
   | "restoring"
+  | "rolling-back"
   | "done"
   | "failed";
 
@@ -78,6 +80,15 @@ export type RestoreStatus = {
   secretHandoffPath: string | null;
   /** Set when the archive's own keys were installed as the workspace's, after the restore. */
   keysFromBackup?: boolean;
+  /** Who started it — the safety copy is theirs. */
+  requestedById?: string | null;
+  /**
+   * The copy of the workspace taken just before the restore cleared it (owner, 22 Oct 2026), kept 30 days:
+   * what a failed restore is put back from, and what undoes a finished one.
+   */
+  safetyCopy?: string | null;
+  /** A failed restore whose data was put back from the safety copy: nothing was lost. */
+  rolledBack?: boolean;
   error: string | null;
 };
 
@@ -182,6 +193,9 @@ export async function readRestoreStatus(): Promise<RestoreStatus | null> {
       takenAt: parsed.takenAt ?? null,
       secretHandoffPath: parsed.secretHandoffPath ?? null,
       keysFromBackup: parsed.keysFromBackup ?? false,
+      requestedById: parsed.requestedById ?? null,
+      safetyCopy: parsed.safetyCopy ?? null,
+      rolledBack: parsed.rolledBack ?? false,
       error: parsed.error ?? null,
     };
   } catch {

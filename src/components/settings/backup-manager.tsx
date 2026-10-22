@@ -328,6 +328,12 @@ export function BackupManager({
                           {row.schemaVersion ? `schema ${row.schemaVersion}` : "schema unknown"}
                           {row.via ? ` · ${row.via}` : ""}
                         </div>
+                        {row.reason && (
+                          <div className="mt-1 text-xs text-text">
+                            <Badge tone="amber">Safety copy</Badge> {row.reason}
+                            {row.keepUntil ? ` · kept until ${clock.date(row.keepUntil)}` : ""}
+                          </div>
+                        )}
                         {row.error && <div className="mt-1 max-w-lg text-xs text-danger">{row.error}</div>}
                       </td>
                       <td className="whitespace-nowrap px-5 py-2.5">

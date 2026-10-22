@@ -53,7 +53,6 @@ Set in the server's environment (pm2 ecosystem file or systemd unit), never in t
 | `BACKUP_DIR` | no (`backups/`) | Where workspace backups are written; each workspace under `workspaces/<id>/` |
 | `SUPPORT_DIR` | no (`storage/support` in the app's folder) | Contact Support's attachments and screen recordings (§11) — **back it up** (§4). Every app process must see the same folder: a file is uploaded to one and claimed when the request is sent, perhaps by another |
 | `PDF_BROWSER_PATH`, `PDF_BROWSER_NO_SANDBOX` | for PDFs | A Chromium for printing documents |
-| `ENABLE_DATA_RESET` | **never in production** | The temporary "reset all data" button — remove the button before launch (§8) |
 
 The gateways' keys (Stripe, Razorpay) are **not** environment settings: an owner enters them in the console, under Billing, where they are sealed and never shown back.
 
@@ -214,7 +213,6 @@ Then set `TENANCY_POOLER_URL=postgresql://127.0.0.1:6432`. Only the app's querie
 ## 8. Before the first paying customer
 
 - [ ] `NODE_ENV=production`, TLS at the proxy, `TRUST_PROXY=1`.
-- [ ] Remove the temporary "reset all data" button (Settings → Backups) and its code; `ENABLE_DATA_RESET` unset.
 - [ ] `PLATFORM_MASTER_KEY` backed up offline, twice (§4). The control plane dumped nightly, off the server.
 - [ ] Staff two-factor **required** (console → Staff); `PLATFORM_CONSOLE_IP_ALLOWLIST` set.
 - [ ] `cms.<domain>` in DNS and the proxy's certificate; the first CMS admin invited; CMS two-factor **required** (CMS → Settings → Security, or `npm run cms:user -- two-factor required`); the placeholders (tagline, display domain, sales email) replaced and published.

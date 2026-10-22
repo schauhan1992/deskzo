@@ -126,6 +126,10 @@ export async function runBackup(options?: {
    * that survives losing this machine.
    */
   kind?: BackupKind;
+  /** Why, when neither the schedule nor "Back up now" took it — "Before restoring …", "Before resetting the workspace". */
+  reason?: string;
+  /** Kept at least until then, whatever the retention says: the copy a restore or a reset can be undone from. */
+  keepUntil?: Date;
 }): Promise<BackupOutcome> {
   const kind: BackupKind = options?.kind ?? "FULL";
   // The workspace's own database, into the workspace's own folder, marked with its own keys.
@@ -168,6 +172,10 @@ export async function runBackup(options?: {
       schemaVersion: await latestMigration(),
       secretFingerprint: keys.fingerprint,
       triggeredById: options?.triggeredById ?? null,
+      // Named only when given: a workspace not migrated yet has no such columns, and its nightly backup
+      // must not start failing over them (src/lib/tenancy/clients.ts NOT_YET_EVERYWHERE).
+      ...(options?.reason ? { reason: options.reason } : {}),
+      ...(options?.keepUntil ? { keepUntil: options.keepUntil } : {}),
     },
     select: { id: true },
   });
@@ -217,10 +225,21 @@ export async function runBackup(options?: {
         via: tool.via,
         sizeBytes: size,
         app: "Deskzo One",
+        reason: options?.reason ?? null,
+        keepUntil: options?.keepUntil?.toISOString() ?? null,
       });
     } else {
       const manifest = await storeDump(directory, workingPath);
-      await writeManifest(directory, record.id, manifest);
+      await writeManifest(directory, record.id, {
+        ...manifest,
+        takenAt: startedAt.toISOString(),
+        filename,
+        schemaVersion: await latestMigration(),
+        secretFingerprint: keys.fingerprint,
+        via: tool.via,
+        reason: options?.reason ?? null,
+        keepUntil: options?.keepUntil?.toISOString() ?? null,
+      });
       storedBytes = manifest.newBytes;
       // The working copy goes as soon as its pieces are safely in the store. Until this line there
       // are two complete copies of the database on disk; after it, one.
@@ -357,24 +376,40 @@ async function latestMigration(): Promise<string | null> {
  * "bytes of chunks" depending on which kind aged out — and both callers, the settings page and
  * `check:backup`, want the count. `storeSize` answers the disk-usage question honestly instead.
  */
+/**
+ * The rows the pruner weighs, with how long each is kept — read by name, and without it for a workspace
+ * whose database hasn't had the migration that added it yet (naming a column that isn't there fails).
+ */
+async function backupRowsForPruning(directory: string) {
+  type Row = { id: string; filename: string; kind: BackupKind; startedAt: Date; status: string; keepUntil: Date | null };
+  try {
+    return (await db.backup.findMany({
+      where: { directory },
+      // `kind` decides what there is to delete: a chunked backup has no file of its own, and deleting
+      // by filename would quietly leave its manifest behind pinning chunks nothing can restore.
+      select: { id: true, filename: true, kind: true, startedAt: true, status: true, keepUntil: true },
+    })) as Row[];
+  } catch {
+    const rows = await db.backup.findMany({ where: { directory }, select: { id: true, filename: true, kind: true, startedAt: true, status: true } });
+    return rows.map((r) => ({ ...r, keepUntil: null })) as Row[];
+  }
+}
+
 export async function pruneOldBackups(
   directory: string,
   retention?: { keepDays?: number; keepMinimum?: number },
 ): Promise<number> {
-  const rows = await db.backup.findMany({
-    where: { directory },
-    // `kind` decides what there is to delete: a chunked backup has no file of its own, and deleting
-    // by filename would quietly leave its manifest behind pinning chunks nothing can restore.
-    select: { id: true, filename: true, kind: true, startedAt: true, status: true },
-  });
+  const rows = await backupRowsForPruning(directory);
+  const now = new Date();
 
   const doomed = prunable(
     rows.map((r) => ({
       filename: r.filename,
       takenAt: r.startedAt,
       // A run in progress is still being written to, and a failed one has no file to delete but its
-      // row is the evidence that it failed. Neither is age-pruned.
-      keep: r.status !== "SUCCEEDED",
+      // row is the evidence that it failed. Neither is age-pruned. Nor is a safety copy still within
+      // the days it is kept for — the one a restore or a reset would be undone from.
+      keep: r.status !== "SUCCEEDED" || (!!r.keepUntil && r.keepUntil.getTime() > now.getTime()),
     })),
     new Date(),
     {

@@ -61,6 +61,14 @@ import {
 import { db } from "../src/lib/db";
 import { REFERENCE_TABLES } from "../src/lib/reference-data";
 import { afterRestore } from "../src/lib/automate/restore";
+import { runBackup } from "../src/lib/backup/run";
+import { backupRoot } from "../src/lib/backup/maintenance";
+import { relistBackups } from "../src/lib/backup/relist";
+import { reindexCurrentWorkspace } from "../src/lib/platform/email-index";
+import { resyncDeviceRoutes } from "../src/lib/platform/device-routes";
+
+/** How long the copy taken before a restore is kept, whatever the retention says. */
+const SAFETY_COPY_DAYS = 30;
 
 async function main(tenant: Tenant, id: string) {
   const existing = await readRestoreStatus();
@@ -78,6 +86,9 @@ async function main(tenant: Tenant, id: string) {
     takenAt: existing?.id === id ? existing.takenAt : null,
     secretHandoffPath: existing?.id === id ? existing.secretHandoffPath : null,
     keysFromBackup: false,
+    requestedById: existing?.id === id ? (existing.requestedById ?? null) : null,
+    safetyCopy: null,
+    rolledBack: false,
     error: null,
   };
 
@@ -152,6 +163,57 @@ async function main(tenant: Tenant, id: string) {
     return;
   }
 
+  /**
+   * The safety copy (owner, 22 Oct 2026): the workspace as it is now, taken before anything is cleared —
+   * the application is already behind the maintenance page, so nothing changes under it. Without it a
+   * restore that failed half way left an empty workspace, and one that finished could not be undone.
+   * Kept 30 days whatever the retention says. No copy, no restore.
+   */
+  await say("saving", "Taking a safety copy of the workspace as it is now…");
+  const safety = await runBackup({
+    kind: "FULL",
+    triggeredById: status.requestedById ?? null,
+    reason: `Before restoring ${status.archiveName ?? "a backup"}`,
+    keepUntil: new Date(Date.now() + SAFETY_COPY_DAYS * 86_400_000),
+  });
+  if (!safety.ok) {
+    await staged.cleanup();
+    await fail(`A safety copy of the workspace couldn't be taken, so nothing was restored and nothing has been changed: ${safety.error}`);
+    return;
+  }
+  status.safetyCopy = safety.filename;
+  const safetyPath = path.join(await backupRoot(), safety.filename);
+
+  /**
+   * After the drop, any failure puts the workspace back from the safety copy rather than leaving it empty
+   * or half restored. Only when that fails too does the workspace stay as the failure left it — and the
+   * message names the copy to restore by hand.
+   */
+  const rollBack = async (why: string) => {
+    await say("rolling-back", "The restore failed — putting the workspace back as it was…");
+    try {
+      try {
+        await db.$executeRawUnsafe("DROP SCHEMA public CASCADE");
+        await db.$executeRawUnsafe("CREATE SCHEMA public");
+      } finally {
+        await db.$disconnect().catch(() => {});
+      }
+      const back = await stageForTool(tool, safetyPath);
+      try {
+        await runRestore(tool, back.pathForTool, connection);
+      } finally {
+        await back.cleanup();
+      }
+      await relistBackups(await backupRoot()).catch(() => null);
+      status.rolledBack = true;
+      await fail(`${why}\nNothing was lost: the workspace was put back as it was just before the restore started, from the safety copy ${safety.filename}.`);
+    } catch (err) {
+      await fail(
+        `${why}\nPutting the workspace back from the safety copy failed too: ${(err as Error).message}. Restore ${safety.filename} from Settings › Backups (or npm run db:restore) before using the workspace.`,
+      );
+    }
+  };
+
   await say("dropping", "Clearing the current database…");
 
   try {
@@ -192,9 +254,7 @@ async function main(tenant: Tenant, id: string) {
     await runRestore(tool, staged.pathForTool, connection);
   } catch (err) {
     await staged.cleanup();
-    await fail(
-      `${(err as Error).message}\nThe database was cleared before this failed, so it is now empty or partial. Restore a known-good backup before using the application.`,
-    );
+    await rollBack((err as Error).message);
     return;
   } finally {
     await staged.cleanup();
@@ -215,7 +275,7 @@ async function main(tenant: Tenant, id: string) {
       `DO $$ DECLARE t text; BEGIN FOREACH t IN ARRAY ARRAY[${REFERENCE_TABLES.map((r) => `'${r.table}'`).join(", ")}] LOOP IF to_regclass(t) IS NOT NULL THEN EXECUTE format('TRUNCATE %I', t); END IF; END LOOP; END $$;`,
     );
   } catch (err) {
-    await fail(`The backup was restored, but its own copy of the reference data could not be cleared: ${(err as Error).message}`);
+    await rollBack(`The backup was restored, but its own copy of the reference data could not be cleared: ${(err as Error).message}`);
     return;
   }
 
@@ -223,9 +283,7 @@ async function main(tenant: Tenant, id: string) {
   try {
     await migrateDeploy(tenant.dbUrl);
   } catch (err) {
-    await fail(
-      `The backup was restored, but its schema could not be brought up to this version: ${(err as Error).message.split("\n").slice(-3).join(" ")} Run the migrations for this workspace before using it.`,
-    );
+    await rollBack(`The backup was restored, but its schema could not be brought up to this version: ${(err as Error).message.split("\n").slice(-3).join(" ")}`);
     return;
   }
 
@@ -243,6 +301,26 @@ async function main(tenant: Tenant, id: string) {
     });
     forgetRegistry();
     status.keysFromBackup = true;
+  }
+
+  /**
+   * What lives beside the database, brought in line with what came back (owner, 22 Oct 2026): the backup
+   * list — the restored log is the old one, missing every backup taken since, the safety copy too — the
+   * "Find my workspaces" index, and the biometric terminals' routes. None is worth failing a finished
+   * restore over: the nightly reconcile and the next registration put them right anyway.
+   */
+  await say("restoring", "Bringing the backup list and sign-in records in line…");
+  try {
+    await relistBackups(await backupRoot());
+  } catch (err) {
+    console.error("[restore] the backup list could not be rebuilt", err instanceof Error ? err.message : err);
+  }
+  await reindexCurrentWorkspace();
+  try {
+    const routes = await resyncDeviceRoutes();
+    if (routes.elsewhere.length) console.warn(`[restore] terminals now registered to another workspace: ${routes.elsewhere.join(", ")}`);
+  } catch (err) {
+    console.error("[restore] the device routes could not be brought in line", err instanceof Error ? err.message : err);
   }
 
   // Reference data is not in a workspace's database or its backups any more (prisma/reference), so a
