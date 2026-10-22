@@ -379,7 +379,22 @@ async function main() {
     browserUser = { id: rep.id, name: rep.name, email: rep.email, role: "SALES" };
     ok("the call dialog finds the rep's phone", (await phoneCalls.myCallingPhone())?.id === phoneId);
     const ring = await phoneCalls.ringMyPhone({ companyId: company.id, contactId: ravi.id, phoneNumber: ravi.phone!, leadId: lead.id });
-    ok("rung: a push to the phone with the number and who — nothing more", ring.ok && ring.data.pushed && JSON.stringify(pushed[0]) === JSON.stringify({ message: { token: "fcm-token-zzphone-0001", data: { type: "call", request: ring.ok ? ring.data.id : "", number: ravi.phone, label: `${TAG} Ravi, ${TAG} Acme` }, android: { priority: "HIGH", ttl: "120s" } } }));
+    const label = `${TAG} Ravi, ${TAG} Acme`;
+    ok(
+      "rung: a push to the phone with the number and who — nothing more — shown by the phone even with the app closed, replacing an earlier ring",
+      ring.ok &&
+        ring.data.pushed &&
+        JSON.stringify(pushed[0]) ===
+          JSON.stringify({
+            message: {
+              token: "fcm-token-zzphone-0001",
+              data: { type: "call", request: ring.ok ? ring.data.id : "", number: ravi.phone, label },
+              notification: { title: `Call ${label}`, body: ravi.phone },
+              android: { priority: "HIGH", ttl: "120s", notification: { channel_id: "deskzo", tag: "deskzo-ring" } },
+            },
+          }),
+      JSON.stringify(pushed[0]),
+    );
     const handed = (await call("GET", "/calls/requests", { token })).body.data as { id: string; number: string }[];
     ok("  handed to the phone once", handed.length === 1 && handed[0]!.number === ravi.phone && ((await call("GET", "/calls/requests", { token })).body.data as unknown[]).length === 0);
     ok("  the dialog sees the phone has it", ring.ok && (await phoneCalls.ringState(ring.data.id)) === "TAKEN");

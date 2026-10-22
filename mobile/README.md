@@ -45,4 +45,20 @@ shows a pairing code. A release build only ever talks HTTPS to a real workspace.
 - An upload key, kept out of the repository.
 - Google Play's declaration for reading the call log (CRM is an allowed use).
 - A privacy policy page that says what is read and what leaves the phone.
-- Firebase, for "Ring my phone" with the app closed (`DESKZO_APP_FCM_SERVICE_ACCOUNT` on the server).
+- Firebase, for notifications with the app closed (below).
+
+## Notifications (Firebase)
+
+Deskzo's notifications — what the bell says, chat (who, never what) and "Ring my phone" — reach a closed app
+through Firebase Cloud Messaging, sent by each workspace's Deskzo itself (`src/lib/app/push.ts`), received by
+`expo-notifications` (`src/lib/push.ts`). One Firebase project is Deskzo's, for every workspace:
+
+1. In the Firebase console, make a project and add an **Android app** with package `com.deskzo.app`.
+2. Download its `google-services.json` and put it in this folder (`mobile/google-services.json`). It holds only
+   public identifiers and may be committed. `app.config.ts` picks it up; without it the app builds and simply
+   gets no notifications while closed.
+3. In Project settings › Service accounts, generate a private key, and set the JSON it gives (as it is, or
+   base64) as `DESKZO_APP_FCM_SERVICE_ACCOUNT` on the server — in Coolify, never in the repository or a chat.
+4. Build the app again (`node scripts/android.js release`) and install it; it asks once whether it may notify.
+
+`npm run check:app-sales` and `check:app-chat` (in the main project) check what is sent, with Firebase stood in for.

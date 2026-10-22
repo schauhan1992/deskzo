@@ -1,5 +1,9 @@
 import type { ExpoConfig } from "expo/config";
 
+// Read by Node when Expo loads this file; the app's own types don't include Node's.
+declare const require: (id: "node:fs") => { existsSync: (file: string) => boolean };
+declare const __dirname: string;
+
 /**
  * The Deskzo app (owner, 18 Oct 2026) — Android first, calling first.
  *
@@ -8,6 +12,13 @@ import type { ExpoConfig } from "expo/config";
  * talks HTTPS to a real workspace.
  */
 const dev = process.env.DESKZO_APP_DEV === "1";
+
+/**
+ * Notifications with the app closed (owner, 22 Oct 2026) come through Firebase Cloud Messaging: Deskzo's own Firebase
+ * project's google-services.json, kept beside this file (it holds only public identifiers). Without it the app still
+ * builds and works — it just asks nothing of Firebase, and gets no notifications while closed.
+ */
+const firebase = require("node:fs").existsSync(`${__dirname}/google-services.json`);
 
 const config: ExpoConfig = {
   name: "Deskzo",
@@ -48,6 +59,7 @@ const config: ExpoConfig = {
     ],
     allowBackup: false,
     predictiveBackGestureEnabled: false,
+    ...(firebase ? { googleServicesFile: "./google-services.json" } : {}),
   },
   plugins: [
     "expo-router",
@@ -87,11 +99,13 @@ const config: ExpoConfig = {
         },
       },
     ],
+    // Deskzo's notifications — a lead given to you, something to approve, a task, a ticket's reply (src/lib/push.ts).
+    ["expo-notifications", { icon: "./assets/android-icon-monochrome.png", color: "#4F46E5", defaultChannel: "deskzo" }],
     "./plugins/with-short-native-paths",
     "./plugins/with-release-signing",
   ],
   experiments: { typedRoutes: false },
-  extra: { dev },
+  extra: { dev, firebase },
 };
 
 export default config;

@@ -927,11 +927,12 @@ const APP_PRIVACY: SitePage = {
               [{ text: "Chat: ", strong: true }, { text: "the messages, photos and files you send, to the people in that chat in your company's {siteName}, kept as your company's chat settings say. An alert in the app says who wrote, never what." }],
               [{ text: "What you do in the app: ", strong: true }, { text: "clocking in and out, tasks you add or tick off, leave you ask for, your decisions on what waits for your approval, and the pages of {siteName} you open in it — as when you use {siteName} on the web." }],
               [{ text: "About the phone: ", strong: true }, { text: "its model and the app's version when it is paired, and its network address when it connects — kept with the device, so your company's administrators can see your paired phones and sign one out." }],
+              [{ text: "Its notification address, ", strong: true }, { text: "if you let the app notify you: the address Google's Firebase Cloud Messaging gives the phone, to your company's {siteName}, so it can send you what your bell says — a lead given to you, something waiting for your approval, a task, a ticket's reply, a chat message. A notification carries its title and where it leads, nothing behind it; for chat, who wrote, never what." }],
             ],
           },
           {
             type: "paragraph",
-            text: "Everything travels encrypted (HTTPS), only to your company's {siteName}. The app has no advertising and no analytics, and passes nothing to anyone else.",
+            text: "Everything travels encrypted (HTTPS), only to your company's {siteName}. The app has no advertising and no analytics, and passes nothing to anyone else — except that notifications reach the phone through Google's Firebase Cloud Messaging, which carries each one's title to it.",
           },
           { type: "heading", level: 2, text: "What stays on your phone" },
           {
@@ -955,6 +956,7 @@ const APP_PRIVACY: SitePage = {
             type: "list",
             items: [
               [{ text: "Turn call sync off ", strong: true }, { text: "in the app at any time. Nothing more is read or sent." }],
+              [{ text: "Turn notifications off ", strong: true }, { text: "for {siteName} in the phone's settings, or say no when the app asks. Everything is still in your bell on the web, and in the app when you open it." }],
               [{ text: "Keep your location to yourself: ", strong: true }, { text: "say no when the phone asks, or turn location off for {siteName} in the phone's settings. You can still clock in. (If your company asks for it at sign-in, the app can't sign in without it — as its website can't.)" }],
               [{ text: "Sign out ", strong: true }, { text: "in the app's Settings. The phone's sign-in stops working at once and the app clears what it kept on the phone. Your company's administrators can sign a phone out too." }],
               [{ text: "Uninstall the app ", strong: true }, { text: "to remove everything it kept on the phone." }],

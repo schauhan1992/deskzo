@@ -261,6 +261,12 @@ async function main() {
       sent.length === 1 && got?.token === token && got.data.type === "notice" && got.data.title === `${TAG} A lead for you: 30 laptops` && got.data.link === `/leads/${lead.data.ref}` && !JSON.stringify(got).includes("private notes"),
       json(got),
     );
+    const shown = got as unknown as { notification?: { title?: string; body?: string }; android?: { notification?: { channel_id?: string }; ttl?: string } };
+    ok(
+      "  shown by the phone itself on the app's channel, the title only, kept six hours",
+      shown.notification?.title === `${TAG} A lead for you: 30 laptops` && shown.notification.body === undefined && shown.android?.notification?.channel_id === "deskzo" && shown.android.ttl === "21600s",
+      json(shown),
+    );
     await notify.notifyUser({ userId: other.id, type: "LEAD_ASSIGNED", title: `${TAG} for the other one` });
     ok("  another person's goes to nobody's phone here (theirs has no push address)", sent.length === 1);
     await db.notificationPreference.create({ data: { userId: seller.id, type: "LEAD_STATUS_CHANGED", inApp: false, email: false } });
