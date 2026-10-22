@@ -11,12 +11,13 @@ import { PROBLEM_WORDS, checkGeofence, type GeofenceOutcome, type GeofenceProble
  * (src/lib/app/daily.ts), so neither can get round the other's rules (owner, 22 Oct 2026).
  *
  * In one transaction, holding the person's day:
- *   1. the day's own rules, as they always were — not twice in, not on approved leave, not out before in, and now
- *      not out twice;
+ *   1. the day's own rules, as they always were — not twice in, not on approved leave, not out before in; out
+ *      again moves the clock-out on;
  *   2. where the person's office enforces its location (src/lib/hr/geofence.ts): a reading inside its radius,
  *      sure enough — or, failing that, an approved exception for this action, valid now and unused, which is
  *      spent in the same statement that checks it;
- *   3. the day written, and where it happened, with how it was checked — INSIDE, EXCEPTION or NOT_ENFORCED.
+ *   3. the day written, and the clocking kept — where it happened, if the phone said, and how it was checked:
+ *      INSIDE, EXCEPTION or NOT_ENFORCED. A terminal's punches later the same day are merged with it.
  * A refusal writes nothing at all: no day, no location, no exception spent.
  *
  * The office is the person's own branch, or the head office when they have none; its point, radius and switches
@@ -27,7 +28,7 @@ type Tx = Prisma.TransactionClient;
 
 export type ClockAction = "in" | "out";
 
-export type ClockRefusal = GeofenceProblem | "office_not_configured" | "exception_needed" | "already_clocked_in" | "already_clocked_out" | "not_clocked_in" | "on_leave";
+export type ClockRefusal = GeofenceProblem | "office_not_configured" | "exception_needed" | "already_clocked_in" | "not_clocked_in" | "on_leave";
 
 export type ClockOutcome =
   | { ok: true; at: Date; minutes: number | null; check: AttendanceGeoCheck | null; distanceM: number | null; exceptionId: string | null }
@@ -157,7 +158,8 @@ export async function recordClock(params: { userId: string; action: ClockAction;
         }
       } else {
         if (!day?.checkInAt) throw new Refused(refuse("not_clocked_in", "You haven't clocked in today."));
-        if (day.checkOutAt) throw new Refused(refuse("already_clocked_out", "You've already clocked out today."));
+        // Out again is allowed, and moves the clock-out on (owner, 22 Oct 2026): a terminal's punch during the
+        // day may already have filled it (src/lib/hr/punch-rollup.ts), and the person still clocks out at the end.
       }
 
       // 2. Where the office enforces its location: inside it, or an approved exception.
@@ -201,10 +203,14 @@ export async function recordClock(params: { userId: string; action: ClockAction;
           update: { status: "PRESENT", checkInAt: now },
         });
       } else {
-        minutes = minutesBetween(day!.checkInAt!, now);
-        await tx.attendanceDay.update({ where: { id: day!.id }, data: { checkOutAt: now, workedMinutes: minutes } });
+        // Never earlier than a clock-out already there — a terminal whose clock runs a minute ahead included.
+        const outAt = day!.checkOutAt && day!.checkOutAt > now ? day!.checkOutAt : now;
+        minutes = minutesBetween(day!.checkInAt!, outAt);
+        await tx.attendanceDay.update({ where: { id: day!.id }, data: { checkOutAt: outAt, workedMinutes: minutes } });
       }
-      if (reading || exceptionId) {
+      // Every clocking is kept where the workspace can hold one without a location: a terminal's punches for the
+      // same day are merged with it later (src/lib/hr/punch-rollup.ts) rather than written over it.
+      if (reading || exceptionId || policy.migrated) {
         await tx.attendanceLocation.create({
           data: {
             userId,

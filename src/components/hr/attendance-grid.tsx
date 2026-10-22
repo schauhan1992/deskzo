@@ -509,6 +509,7 @@ function ClockedFrom({ userId, date }: { userId: string; date: string }) {
           <li key={`${p.kind}-${p.at}`}>
             Clocked {p.kind === "IN" ? "in" : "out"} at {clock.time(p.at)}
             {p.accuracyM !== null ? ` (within ${p.accuracyM} m)` : ""}
+            {p.latitude === null && p.check !== "EXCEPTION" ? " — no location shared" : ""}
             {p.latitude !== null && p.longitude !== null && (
               <>
                 {" "}—{" "}

@@ -188,7 +188,9 @@ async function main() {
     const twice = await call(workerPhone, "POST", "/attendance", { action: "in", latitude: 28.6, longitude: 77.2 });
     ok("clocking in twice: the web's own refusal, and no second place", twice.status === 422 && twice.error?.message === "You're already clocked in today." && (await db.attendanceLocation.count({ where: { userId: worker.id } })) === 1, twice.error?.message);
     const out = await call<Today["attendance"]>(workerPhone, "POST", "/attendance", { action: "out", latitude: 123, longitude: 77.2 });
-    ok("clocked out, sending a latitude that can't be: out, and no place kept", out.status === 200 && !!out.data?.check_out_at && (await db.attendanceLocation.count({ where: { userId: worker.id, kind: "OUT" } })) === 0, out.status);
+    // Every clocking is kept now (owner, 22 Oct 2026), so a terminal's punches merge with it — with no place when none came.
+    const outRows = await db.attendanceLocation.findMany({ where: { userId: worker.id, kind: "OUT" }, select: { latitude: true, longitude: true } });
+    ok("clocked out, sending a latitude that can't be: out, the clocking kept with no place", out.status === 200 && !!out.data?.check_out_at && outRows.length === 1 && outRows[0]!.latitude === null && outRows[0]!.longitude === null, out.status);
     ok("an action that isn't one: refused", (await call(workerPhone, "POST", "/attendance", { action: "lunch" })).status === 400);
     browserUser = { id: worker.id, name: worker.name, email: worker.email, role: worker.role };
     const own = await attendanceLocations(worker.id, today);
@@ -197,7 +199,7 @@ async function main() {
     browserUser = { id: stranger.id, name: stranger.name, email: stranger.email, role: stranger.role };
     const strangers = await attendanceLocations(worker.id, today);
     browserUser = null;
-    ok("HR's day dialog: the person and their manager see where; somebody else sees nothing", own.length === 1 && managers.length === 1 && managers[0]!.latitude === 28.6139 && strangers.length === 0, `${own.length}/${managers.length}/${strangers.length}`);
+    ok("HR's day dialog: the person and their manager see where; somebody else sees nothing", own.length === 2 && managers.length === 2 && managers[0]!.latitude === 28.6139 && managers[1]!.latitude === null && strangers.length === 0, `${own.length}/${managers.length}/${strangers.length}`);
 
     section("Tasks");
     const added = await call<{ id: string }>(workerPhone, "POST", "/tasks", { title: `${TAG} call the bank`, due: today });
