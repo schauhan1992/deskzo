@@ -25,6 +25,25 @@ export const calls = {
   openBatterySettings: () => native?.openBatterySettings(),
 };
 
+/**
+ * An iPhone's calling (src/lib/native.ios.ts): caller ID loaded ahead of time, calls logged from the after-call sheet.
+ * Nothing on Android, where `calls` above reads the call log instead.
+ */
+export const phone = {
+  available: false,
+  /** The person said this iPhone is the phone they call customers on (Settings › Calls on this iPhone). */
+  callsOn: () => false,
+  setCallsOn: (_on: boolean) => {},
+  setCallerIds: async (_entries: { number: string; label: string }[]) => 0,
+  reloadCallerIds: async (): Promise<string | null> => null,
+  callerIdStatus: async (): Promise<"enabled" | "disabled" | "unknown"> => "unknown",
+  openCallerIdSettings: async () => false,
+  /** A file a Deskzo page offers for download — Android's WebView hands those to its own download manager. */
+  saveDownload: async (_url: string) => false,
+  /** A file a Deskzo page made itself — an export — to the share sheet (src/lib/web-downloads.ts). */
+  shareFile: async (_name: string, _base64: string) => false,
+};
+
 /** The workspace's screen rules on this phone (src/lib/screen-rules.tsx): told of screenshots, and blocking them. */
 export const screen = {
   /** Android 14 and later tell the app when a screenshot is taken; elsewhere nothing can. */
