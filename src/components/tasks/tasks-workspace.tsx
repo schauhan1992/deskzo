@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowUpDown, CalendarDays, CheckSquare, LayoutGrid, List, Lock, MessageSquare, Paperclip, Pencil, Plus, Star, Trash2, Trophy } from "lucide-react";
 import { deleteTask, setTaskStatus, toggleTaskStar } from "@/actions/task";
+import { useStatusMove } from "@/components/tasks/status-note";
 import { Badge, Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
@@ -50,6 +51,7 @@ export type WorkspaceTask = TaskFormTask & {
 const BOARD: { status: TaskStatusKey; label: string; panel: string; title: string }[] = [
   { status: "TODO", label: "To do", panel: "bg-surface-sunken", title: "text-muted" },
   { status: "IN_PROGRESS", label: "In progress", panel: "bg-warning-bg", title: "text-warning" },
+  { status: "NEED_HELP", label: "Need help", panel: "bg-danger-bg", title: "text-danger" },
   { status: "DONE", label: "Done", panel: "bg-success-bg", title: "text-success" },
   { status: "CANCELLED", label: "Cancelled", panel: "bg-danger-bg", title: "text-danger" },
 ];
@@ -104,6 +106,8 @@ export function TasksWorkspace({
       if (!result.ok) setError(result.error);
       router.refresh();
     });
+  // Dragged to Need help or Cancelled, a task asks for its note first (src/components/tasks/status-note.tsx).
+  const { move, dialog: noteDialog } = useStatusMove((id, status, note) => run(() => setTaskStatus(id, status, note)));
 
   return (
     <div className="space-y-4">
@@ -138,9 +142,10 @@ export function TasksWorkspace({
         </div>
       </div>
       {error && <p className="text-sm text-danger">{error}</p>}
+      {noteDialog}
 
       {view === "board" ? (
-        <TaskBoard tasks={tasks} today={today} onOpen={setOpenId} onMove={(id, status) => run(() => setTaskStatus(id, status))} />
+        <TaskBoard tasks={tasks} today={today} onOpen={setOpenId} onMove={(id, status) => move(id, status, tasks.find((t) => t.id === id)?.title ?? "")} />
       ) : (
         <Card className="overflow-x-auto p-0">
           <table className="w-full text-sm">

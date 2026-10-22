@@ -5,6 +5,7 @@ import { workspaceClock } from "@/lib/time/workspace";
 import { closes, dayKeyOf, earnsXp, nextOccurrence, onlyWorks, type TaskStatusKey } from "@/lib/tasks/rules";
 import { getDownlineUserIds } from "@/lib/org-chart";
 import { taskAccess } from "@/lib/authz/access";
+import { notifyUser } from "@/lib/notify";
 
 /**
  * The task, when this person may work it — move it through its stages, tick its steps, attach files and
@@ -164,4 +165,20 @@ export async function moveTask(taskId: string, status: TaskStatusKey): Promise<{
     });
     return { nextTaskId: next.id };
   });
+}
+
+/**
+ * A comment on a task, by `userId` — its maker and its assignee told, whoever of them didn't write it. The comment
+ * box's (src/actions/task-extras.ts) and the note a move to Cancelled or Need help leaves. Asks nothing about who
+ * may: the caller has.
+ */
+export async function postTaskComment(task: { id: string; title: string; assignedToUserId: string | null; createdByUserId: string }, userId: string, text: string) {
+  const comment = await db.taskComment.create({ data: { taskId: task.id, userId, body: text }, select: { id: true } });
+  const name = (await db.user.findUnique({ where: { id: userId }, select: { name: true } }))?.name ?? "Somebody";
+  for (const to of new Set([task.assignedToUserId, task.createdByUserId].filter((v): v is string => !!v && v !== userId))) {
+    // Whoever set it finds it under "Set by me"; whoever it's for, on their own list.
+    const link = to === task.assignedToUserId ? "/tasks" : "/tasks?assignedTo=byme";
+    await notifyUser({ userId: to, type: "TASK_COMMENT", title: `${name} commented on "${task.title}"`, message: text.slice(0, 200), link });
+  }
+  return comment;
 }

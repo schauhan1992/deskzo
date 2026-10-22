@@ -4310,6 +4310,8 @@ model Task {
 enum TaskStatus {
   TODO
   IN_PROGRESS
+  /// Stuck: the person working it has said what they need (owner, 22 Oct 2026) — still open.
+  NEED_HELP
   DONE
   CANCELLED
 }

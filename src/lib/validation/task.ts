@@ -47,6 +47,8 @@ export const updateTaskSchema = z.object({
    * link stays as it was; sent empty, it's taken off.
    */
   about: z.object({ companyId: z.string().optional().or(z.literal("")), leadId: z.string().optional().or(z.literal("")), ticketId: z.string().optional().or(z.literal("")) }).optional(),
+  /** Why, when the status is moved to Cancelled or Need help (src/lib/tasks/rules.ts, NOTE_FOR). */
+  statusNote: z.string().optional(),
   ...advancedFields,
 });
 
