@@ -186,13 +186,25 @@ async function main() {
 
   const settingsLib = require("../src/lib/copilot/settings") as typeof import("../src/lib/copilot/settings");
   const original = await db.copilotSettings.findUnique({ where: { id: "global" } });
+  /**
+   * The platform's AI pause (console › Deskzo AI) is one switch for every workspace, so one left on stopped every chat
+   * below with "paused". Off for this run only, and put back exactly as it was found — who set it and when included.
+   */
+  const { controlDb, controlConfigured } = require("../src/lib/platform/control-db") as typeof import("../src/lib/platform/control-db");
+  const pause = controlConfigured() ? await controlDb().platformSetting.findUnique({ where: { key: "ai.paused" } }) : null;
   /** The real settings row exactly as it was, timestamp and all — or none, if there was none. */
   const restore = async () => {
     if (original) await db.copilotSettings.upsert({ where: { id: original.id }, create: original, update: original });
     else await db.copilotSettings.deleteMany({ where: { id: "global" } });
   };
+  /** The pause as it was found — at the very end, after the chat endpoint's checks too. */
+  const restorePause = async () => {
+    if (pause?.value) await controlDb().platformSetting.update({ where: { key: "ai.paused" }, data: { value: pause.value, updatedBy: pause.updatedBy, updatedAt: pause.updatedAt } });
+  };
   await cleanup();
   try {
+    // Inside the try, so the finally below always puts it back.
+    if (pause?.value) await controlDb().platformSetting.update({ where: { key: "ai.paused" }, data: { value: null } });
     const make = async (name: string, grants: Record<string, boolean>) => {
       const u = await db.user.create({
         data: {
@@ -434,12 +446,13 @@ async function main() {
     script = () => ({ text: "Streaming works." });
     const res = await post({ origin: "http://localhost:3000", host: "localhost:3000" }, { message: "hi" });
     const lines = (await res.text()).trim().split("\n").map((l) => JSON.parse(l) as ChatEvent);
-    ok("from the app, it streams one event per line", res.headers.get("content-type")?.includes("ndjson") === true && lines[0]?.type === "conversation" && lines.at(-1)?.type === "done" && lines.some((l) => l.type === "text"));
+    ok("from the app, it streams one event per line", res.headers.get("content-type")?.includes("ndjson") === true && lines[0]?.type === "conversation" && lines.at(-1)?.type === "done" && lines.some((l) => l.type === "text"), JSON.stringify(lines));
   } finally {
     providers.setTestProvider(null);
     accounts.setTestRoute(null);
     settingsLib.setTestSettings(null);
     await restore();
+    await restorePause();
     await cleanup();
   }
 
