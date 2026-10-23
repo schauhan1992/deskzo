@@ -644,6 +644,9 @@ async function run(db: PrismaClient) {
   ok("with no server set up, the reply still goes — through Deskzo's mail, saying why", noServer.ok && sent.length === 1 && /isn't set up in Settings › Messaging/.test(noServerRow.note ?? ""), noServerRow);
 
   const server = await fakeSmtp();
+  // The fake mail server is on this machine, which the providers refuse unless a check says so.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  (require("../src/lib/marketing/providers/email") as typeof import("../src/lib/marketing/providers/email")).allowTestSmtpServers(true);
   try {
     await db.messagingProvider.create({
       data: {

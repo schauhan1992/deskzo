@@ -340,6 +340,9 @@ async function main() {
     section("With the defaults, the account is all there");
 
     actorId = rep.id;
+    // The lead export also needs "Export CRM data", which no preset holds (security review, 23 Oct 2026) — given here,
+    // so this is about what the views show.
+    await db.userPermission.create({ data: { userId: rep.id, permission: "data.exportCrm", allowed: true, reason: TAG } });
     const seen = await readAll();
     const hidden = Object.entries(seen).filter(([k, v]) => (k === "modules" ? Object.values(v as object).some((x) => !x) : v === false || v === 0 || v === -1));
     ok("every module, record, list and figure comes back", hidden.length === 0, hidden.map(([k]) => k).join(", "));
