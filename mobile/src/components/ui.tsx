@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
 
-/** Deskzo's colours, as the web app's (src/app/globals.css). */
+/** Deskzo's colours: Deskzo blue, the official logo's (owner, 23 Oct 2026; --deskzo-blue in src/app/globals.css). */
 export const colors = {
-  brand: "#4F46E5",
-  brandSoft: "#EEF2FF",
+  brand: "#0249FE",
+  brandSoft: "#E8EFFF",
   text: "#0F172A",
   muted: "#64748B",
   line: "#E2E8F0",

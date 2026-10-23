@@ -1,0 +1,6 @@
+# Rendered from source/template.html (live/index.html with ?static=1 or ?frame=1..8) — large, kept out of git.
+*.png
+*.zip
+slideshow/
+!live/*.jpg
+!source/*.png

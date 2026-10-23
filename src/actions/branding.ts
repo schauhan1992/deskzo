@@ -4,16 +4,21 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { hasEffectivePermission } from "@/actions/permission";
-import { DEFAULT_BRANDING, type Branding } from "@/lib/branding";
+import { DEFAULT_BRANDING, PLATFORM_BRANDING, type Branding } from "@/lib/branding";
+import { currentTenantOrNull } from "@/lib/tenancy/resolve";
 import { brandingSettingsSchema } from "@/lib/validation/branding";
 import type { ActionResult } from "@/actions/company";
 
 /**
  * Read by the root layout on every request, so it must never throw — an unseeded database or a
  * missing row falls back to the defaults rather than taking the whole app down.
+ *
+ * Deskzo's own hosts — the public site, the console, the CMS, the partner portal — have no workspace, and
+ * wear Deskzo's own branding (owner, 23 Oct 2026). They used to reach the defaults by the query failing.
  */
 export async function getBranding(): Promise<Branding> {
   try {
+    if (!(await currentTenantOrNull())) return PLATFORM_BRANDING;
     const row = await db.brandingSettings.findUnique({ where: { id: "global" } });
     if (!row) return DEFAULT_BRANDING;
     return {

@@ -64,7 +64,7 @@ export function SignupLoader({ brandName, status, large = false, children }: { b
     <div className={large ? "flex flex-col items-center py-6 text-center" : "flex items-center gap-3"}>
       <span className={`flex shrink-0 flex-col items-center ${large ? "gap-3" : "gap-1.5"}`} aria-hidden="true">
         <span className="animate-float">
-          <SiteLogoMark name={brandName} className={large ? "h-16 w-16 rounded-2xl text-2xl shadow-md" : "h-8 w-8"} />
+          <SiteLogoMark name={brandName} className={large ? "h-16 w-16 shadow-md" : "h-8 w-8"} />
         </span>
         <span className={`animate-float-shadow block rounded-full bg-text/25 blur-[2px] ${large ? "h-2 w-12" : "h-1 w-6"}`} />
       </span>

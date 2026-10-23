@@ -398,7 +398,7 @@ async function main() {
   explain(homeScore);
   const org = home.jsonLd.find((o) => o["@type"] === "Organization")!;
   ok("the home page is its own kind, with Organization and WebSite JSON-LD", home.kind === "home" && isDeepStrictEqual(types(home.jsonLd), ["Organization", "WebSite"]), types(home.jsonLd));
-  ok("  Organization: name, address and social profiles — no logo (the site's is a letter mark)", org.name === "Deskzo One" && org.url === "https://deskzo.test/" && isDeepStrictEqual(org.sameAs, ["https://www.linkedin.com/company/deskzo"]) && !("logo" in org), org);
+  ok("  Organization: name, address, social profiles and the official logo (23 Oct 2026)", org.name === "Deskzo One" && org.url === "https://deskzo.test/" && isDeepStrictEqual(org.sameAs, ["https://www.linkedin.com/company/deskzo"]) && org.logo === "https://deskzo.test/brand/deskzo-icon-512.png", org);
   ok("  entity identification is checked on it", ["PASS", "WARNING"].includes(statusOf(homeScore, "geo.entity")));
   ok("  its default status is INFO", statusOf(homeScore, "seo.status") === "INFO");
   ok("  the placeholder tagline counts as unset", site.tagline === null);

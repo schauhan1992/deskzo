@@ -18,9 +18,20 @@ export const DEFAULT_BRANDING: Branding = {
   defaultTheme: "system",
 };
 
+/** Deskzo blue, as the official logo has it (owner, 23 Oct 2026; src/lib/brand/deskzo-logo.ts). */
+export const DESKZO_BLUE = "#0249FE";
+
+/**
+ * Deskzo's own surfaces — deskzo.com, signup and sign-in, the console, the CMS, the partner portal — wear
+ * Deskzo blue (owner, 23 Oct 2026). A workspace keeps its own colour, or the default above: Deskzo blue is
+ * Deskzo's own pages only, and one of the presets a workspace may choose.
+ */
+export const PLATFORM_BRANDING: Branding = { ...DEFAULT_BRANDING, primaryColor: DESKZO_BLUE };
+
 /** Suggested brand colours — a starting point, any hex is allowed. */
 export const BRAND_PRESETS = [
   { name: "Indigo", value: "#4f46e5" },
+  { name: "Deskzo blue", value: DESKZO_BLUE },
   { name: "Blue", value: "#2563eb" },
   { name: "Teal", value: "#0d9488" },
   { name: "Emerald", value: "#059669" },

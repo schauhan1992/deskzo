@@ -54,8 +54,9 @@ const config: ExpoConfig = {
   android: {
     package: "com.deskzo.app",
     versionCode: 6,
+    // The official icon (owner, 23 Oct 2026): the blue D on white — scripts/brand-assets.js draws the images.
     adaptiveIcon: {
-      backgroundColor: "#4F46E5",
+      backgroundColor: "#FFFFFF",
       foregroundImage: "./assets/android-icon-foreground.png",
       backgroundImage: "./assets/android-icon-background.png",
       monochromeImage: "./assets/android-icon-monochrome.png",
@@ -146,7 +147,7 @@ const config: ExpoConfig = {
       },
     ],
     // Deskzo's notifications — a lead given to you, something to approve, a task, a ticket's reply (src/lib/push.ts).
-    ["expo-notifications", { icon: "./assets/android-icon-monochrome.png", color: "#4F46E5", defaultChannel: "deskzo" }],
+    ["expo-notifications", { icon: "./assets/android-icon-monochrome.png", color: "#0249FE", defaultChannel: "deskzo" }],
     "./plugins/with-short-native-paths",
     "./plugins/with-release-signing",
   ],
