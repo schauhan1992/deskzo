@@ -10,6 +10,7 @@ import { formatOrderId } from "@/lib/order-id";
 import { STALE_DAYS, dayKey, inWeek, promiseState, type PromiseState } from "@/lib/collections/rules";
 import { workspaceClock } from "@/lib/time/workspace";
 import type { Clock } from "@/lib/time/zone";
+import { RECEIVABLE_DOC_TYPE } from "@/lib/trade-documents";
 
 /**
  * What a person may chase, and what has been said about it — the database side of Collections.
@@ -254,7 +255,8 @@ export async function loadDues(userId: string, opts: { search?: string; now?: Da
       where: {
         // The scope and the search both reach the company, so they are separate AND terms — two spreads
         // into one object keep only the last `company` key, and the one lost would be the scope.
-        AND: [{ docType: "INVOICE", status: OPEN_INVOICE }, invoiceScope(ids), ...(byName ? [{ company: byName }] : [])],
+        // A debit note is chased as its invoice is (src/lib/trade-documents.ts `RECEIVABLE_TYPES`).
+        AND: [{ docType: RECEIVABLE_DOC_TYPE, status: OPEN_INVOICE }, invoiceScope(ids), ...(byName ? [{ company: byName }] : [])],
       },
       select: {
         id: true,

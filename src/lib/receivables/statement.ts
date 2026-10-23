@@ -9,6 +9,7 @@ import { calendarDayRange } from "@/lib/time/zone";
 import { calendarDateOf } from "@/lib/india-time";
 import { agingBucket, daysOverdue, emptyAging, withRunningBalance, type AgingBucket, type LedgerEntry } from "@/lib/receivables";
 import { summariseBalances, type JournalAmount } from "@/lib/receivables/balance-summary";
+import { docTypeIn } from "@/lib/trade-documents";
 
 /**
  * A party's statement of account (owner, 21 Oct 2026): every invoice (or bill), payment, credit note,
@@ -82,7 +83,7 @@ export async function partyStatement(side: StatementSide, companyId: string, opt
 
   const [docs, paymentRows, vendorCredits, journalLines] = await Promise.all([
     db.tradeDocument.findMany({
-      where: { companyId, docType: { in: ar ? ["INVOICE", "CREDIT_NOTE"] : ["BILL"] }, status: { notIn: ["DRAFT", "CANCELLED"] } },
+      where: { companyId, docType: ar ? docTypeIn(["INVOICE", "CREDIT_NOTE", "DEBIT_NOTE"]) : { in: ["BILL"] }, status: { notIn: ["DRAFT", "CANCELLED"] } },
       orderBy: { issueDate: "asc" },
       select: {
         id: true, docNumber: true, docType: true, issueDate: true, dueDate: true, currency: true, exchangeRate: true, total: true, paidBefore: true,
@@ -184,7 +185,7 @@ export async function partyStatement(side: StatementSide, companyId: string, opt
       date: d.issueDate,
       kind: isCreditNote(d) ? "CREDIT_NOTE" : "INVOICE",
       reference: d.docNumber,
-      description: (isCreditNote(d) ? "Credit note" : ar ? "Tax invoice" : d.reference ? `Bill · ref ${d.reference}` : "Bill") + before,
+      description: (isCreditNote(d) ? "Credit note" : d.docType === "DEBIT_NOTE" ? "Debit note" : ar ? "Tax invoice" : d.reference ? `Bill · ref ${d.reference}` : "Bill") + before,
       up: isCreditNote(d) ? 0 : r2(amount, rate),
       down: isCreditNote(d) ? r2(amount, rate) : 0,
       href: `/documents/${d.id}`,

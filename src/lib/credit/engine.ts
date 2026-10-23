@@ -323,7 +323,7 @@ export function assessCredit(bills: Bill[], opts: { asOf: Date; manualLimit?: nu
  * paid in advance — a balance that would go over the limit. An advance order is not credit, so it
  * cannot take anybody over a credit limit.
  */
-export type CreditConcern = { kind: "TERMS" | "LIMIT"; text: string };
+export type CreditConcern = { kind: "TERMS" | "LIMIT" | "OVERDUE"; text: string };
 
 export function creditConcerns(
   assessment: Pick<CreditAssessment, "rating" | "recommendedTerms" | "limit" | "outstanding">,

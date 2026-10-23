@@ -242,6 +242,38 @@ export const guide: SeedGuide = {
         ),
         note("Every time somebody gives more credit than suggested, it is listed under Credit decisions on the customer's Credit tab, with the reason."),
       ),
+      task(
+        "Get paid online",
+        ol(
+          runs("An admin connects your Razorpay or Cashfree account under ", { b: "Settings › Payment collection" }, ", with test keys first — no real money moves on test keys."),
+          runs("Open an issued invoice. Its ", { b: "Pay online" }, " card makes a pay-now link for what's left to pay; select ", { b: "Copy" }, " to send it yourself."),
+          "Reminders carry the same link, and customers find a Pay now button beside each invoice in their portal.",
+        ),
+        p("When the customer pays, the money goes straight to your account and the payment is recorded against the invoice by itself — the invoice's salesperson and account manager are told. If part of the invoice is paid some other way first, the old link is closed and a new one made for the rest."),
+      ),
+      task(
+        "Switch on payment reminders",
+        ol(
+          runs("Open ", { b: "Settings › Payment collection" }, " and tick ", { b: "Send payment reminders" }, "."),
+          runs("Choose who they're ", { b: "Sent as" }, " — someone who can open every invoice."),
+          runs("Keep the standard schedule — 3 days before the due date, on the day, then 7, 15 and 30 days late and a final notice at 45 — or select ", { b: "Edit" }, " on a step to change its day, tone and words."),
+          runs("Select ", { b: "Save" }, "."),
+        ),
+        p("Each reminder goes once per invoice, from 9 in the morning, with the invoice attached and the pay-now link in it. Switching on sends nothing for days already past. On the 1st of each month every customer who owes something gets their statement of account."),
+      ),
+      task(
+        "Pause a customer's reminders",
+        ol(
+          runs("Open the customer and their ", { b: "Statement" }, " tab."),
+          runs("Select ", { b: "Pause reminders" }, ", say why — a dispute, an arrangement to pay — and select ", { b: "Pause" }, ". ", { b: "Resume reminders" }, " starts them again."),
+        ),
+        p("A promise to pay logged on an invoice holds its reminders by itself until the promised day passes."),
+      ),
+      task(
+        "See how fast customers pay",
+        ol(runs("Open ", { b: "Receivables" }, " and select ", { b: "DSO & forecast" }, ".")),
+        p("Days sales outstanding — what's owed over what was invoiced in the last three months, in days — today and at each month's end for a year, and what promises and due dates say should come in over the next eight weeks."),
+      ),
     ],
     settings: [
       setting(
@@ -258,6 +290,16 @@ export const guide: SeedGuide = {
         "Follow up payments on their accounts",
         "Settings › Roles & Permissions",
         p("Off for every role until an admin ticks it — per role here, or for one person in Settings › Users. It shows a salesperson money on orders they punched on somebody else's account, which viewing payments alone does not."),
+      ),
+      setting(
+        "Credit hold",
+        "Settings › Payment collection",
+        p("On from the start at 60 days: a customer with an invoice that many days overdue has their new orders wait for someone who can override credit, with a reason. Orders paid in advance, and quotes, aren't held. Change the days or switch it off there."),
+      ),
+      setting(
+        "MSME late-payment interest",
+        "Settings › Payment collection",
+        p("For a micro or small enterprise: your Udyam number, its category and the RBI bank rate. With them, each late invoice shows the interest the MSMED Act allows — compound, monthly, at three times the bank rate — on the customer's Statement tab, in the final notice, and in a summary for an MSME Samadhaan complaint. It's never billed on its own: Charge, beside a late invoice, drafts a debit note for the interest so far, with GST at the invoice's rate, for you to check and issue — and never charges the same interest twice."),
       ),
     ],
     faq: [

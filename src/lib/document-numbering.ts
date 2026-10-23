@@ -49,10 +49,10 @@ export function derivedSeriesPrefix(template: string, scope: "REGISTRATION" | "B
 }
 
 /**
- * The types whose number is a GST document number: a tax invoice, a credit note (Rule 46(b), 53) and a
- * delivery challan (Rule 55). The IRP's `DocDtls.No` takes the same rules for the first two.
+ * The types whose number is a GST document number: a tax invoice, a credit or debit note (Rule 46(b), 53)
+ * and a delivery challan (Rule 55). The IRP's `DocDtls.No` takes the same rules for the first three.
  */
-export const GST_NUMBERED_TYPES: readonly TradeDocumentType[] = ["INVOICE", "CREDIT_NOTE", "DELIVERY_CHALLAN"];
+export const GST_NUMBERED_TYPES: readonly TradeDocumentType[] = ["INVOICE", "CREDIT_NOTE", "DEBIT_NOTE", "DELIVERY_CHALLAN"];
 
 const GST_NUMBER_MAX = 16;
 const GST_NUMBER_SHAPE = /^[A-Za-z1-9][A-Za-z0-9/-]*$/;

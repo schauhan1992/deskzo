@@ -252,6 +252,8 @@ export function DocumentForm({
 
   const isSales = documentDirection[docType] === "SALES";
   const isCreditNote = docType === "CREDIT_NOTE";
+  // A credit or debit note is raised against an issued invoice (owner, 23 Oct 2026 for the debit note).
+  const isNote = isCreditNote || docType === "DEBIT_NOTE";
   const gstinRequired = registeredTreatments.includes(gstTreatment as (typeof registeredTreatments)[number]);
 
   // Locations decide the default addresses and the place of supply, so they're fetched as soon as a
@@ -274,7 +276,7 @@ export function DocumentForm({
   }, [companyId]);
 
   useEffect(() => {
-    if (!isCreditNote || !companyId) return;
+    if (!isNote || !companyId) return;
     let cancelled = false;
     listCreditableInvoices(companyId).then((rows) => {
       if (!cancelled) setFetchedCreditable({ companyId, rows });
@@ -282,7 +284,7 @@ export function DocumentForm({
     return () => {
       cancelled = true;
     };
-  }, [companyId, isCreditNote]);
+  }, [companyId, isNote]);
 
   // The customer's orders, for each line's "Bills order" picker. Sales only: a purchase is the
   // vendor's bill, not a charge against our customer's order.
@@ -333,9 +335,9 @@ export function DocumentForm({
   const placeOfSupplyCode = placeTouched ? placeOverride : ((isSales ? partyStateCode : sellerStateCode) ?? "");
   const supplyType = resolveSupplyType(isSales ? sellerStateCode : partyStateCode, placeOfSupplyCode || null);
 
-  // A credit note is raised by the branch that issued its invoice; once one is chosen, the picker
+  // A credit or debit note is raised by the branch that issued its invoice; once one is chosen, the picker
   // shows that branch and can't be changed (the server refuses any other).
-  const followsInvoice = isCreditNote && Boolean(againstDocumentId);
+  const followsInvoice = isNote && Boolean(againstDocumentId);
 
   /**
    * Editing a draft: moving it to a branch that numbers in another series renumbers it when saved,
@@ -991,7 +993,7 @@ export function DocumentForm({
             </div>
           )}
 
-          {isCreditNote && (
+          {isNote && (
             <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="againstDocumentId">
                 Against invoice <span className="text-danger">*</span>
@@ -1001,13 +1003,13 @@ export function DocumentForm({
                 value={againstDocumentId}
                 onChange={(e) => {
                   setAgainstDocumentId(e.target.value);
-                  // The credit note moves to the invoice's branch — its GSTIN, its series, its address.
+                  // The note moves to the invoice's branch — its GSTIN, its series, its address.
                   const invoice = creditable.find((inv) => inv.id === e.target.value);
                   if (invoice) chooseBranch(invoice.branchId ?? headOfficeId);
                 }}
                 required
               >
-                <option value="">Select the invoice this reduces…</option>
+                <option value="">{isCreditNote ? "Select the invoice this reduces…" : "Select the invoice this adds to…"}</option>
                 {creditable.map((inv) => (
                   <option key={inv.id} value={inv.id}>
                     {inv.docNumber} — {money(inv.total)}

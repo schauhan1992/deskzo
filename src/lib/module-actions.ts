@@ -206,6 +206,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "vendor-codes.ts": ["vendors"],
   "vendor-credit.ts": ["payables"],
   "payment.ts": ["payments"],
+  // Payment recovery (src/lib/collect): pay-now links, reminders, credit hold, MSME interest.
+  "payment-collection.ts": ["receivables"],
   "payroll.ts": ["payroll"],
   // Bringing pay across from another HRMS, for payroll only (src/lib/portability/importers/payroll.ts).
   "payroll-import.ts": ["payroll"],

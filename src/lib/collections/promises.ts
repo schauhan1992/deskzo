@@ -4,6 +4,7 @@ import { computeOrderFinancials } from "@/lib/orders/financials";
 import { promiseOutcome, type SettlementEvent } from "@/lib/collections/rules";
 import { workspaceClock } from "@/lib/time/workspace";
 import type { Clock } from "@/lib/time/zone";
+import { isReceivable } from "@/lib/trade-documents";
 
 /**
  * Whether the promises to pay were kept — the server half of Collections' promise rules (the pure
@@ -59,7 +60,7 @@ async function loadTarget(kind: "doc" | "order", id: string, cache: Map<string, 
   if (kind === "doc") {
     const invoice = await db.tradeDocument.findUnique({ where: { id }, select: invoiceSelect });
     target =
-      !invoice || invoice.docType !== "INVOICE" || invoice.status === "CANCELLED" || invoice.status === "DRAFT"
+      !invoice || !isReceivable(invoice.docType) || invoice.status === "CANCELLED" || invoice.status === "DRAFT"
         ? { gone: true }
         // What was left on it when it came across from the old system, if it did (src/lib/documents/imported.ts).
         : { gone: false, total: Number(invoice.total) - Number(invoice.paidBefore), events: invoiceEvents(invoice) };

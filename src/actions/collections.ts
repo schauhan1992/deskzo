@@ -30,6 +30,7 @@ import {
 } from "@/lib/collections/load";
 import { workspaceClock } from "@/lib/time/workspace";
 import type { ActionResult } from "@/actions/company";
+import { isReceivable } from "@/lib/trade-documents";
 
 /**
  * Collections: what a salesperson's clients owe, and what they said about paying it.
@@ -166,7 +167,7 @@ export async function logFollowUp(input: unknown): Promise<ActionResult<{ id: st
         creditsReceived: { select: { amount: true } },
       },
     });
-    if (!invoice || invoice.docType !== "INVOICE") return { ok: false, error: "Follow-ups are logged against a tax invoice." };
+    if (!invoice || !isReceivable(invoice.docType)) return { ok: false, error: "Follow-ups are logged against a tax invoice or a debit note." };
     if (invoice.status === "DRAFT") return { ok: false, error: "This invoice hasn't been issued yet — there is nothing to chase." };
     if (invoice.status === "CANCELLED") return { ok: false, error: "This invoice has been cancelled — there is nothing to chase." };
     const settlement = settleInvoice(
@@ -319,7 +320,7 @@ export async function followUpPanel(
         lines: { where: { companyProductId: { not: null } }, select: { companyProductId: true } },
       },
     });
-    if (!invoice || invoice.docType !== "INVOICE" || !(await canSeeCompany(user.id, invoice.company))) return null;
+    if (!invoice || !isReceivable(invoice.docType) || !(await canSeeCompany(user.id, invoice.company))) return null;
     const orderIds = invoice.lines.map((l) => l.companyProductId!);
     const history = await loadFollowUps({ OR: [{ documentId: invoice.id }, ...(orderIds.length ? [{ companyProductId: { in: orderIds } }] : [])] }, now);
     const balance = settleInvoice(

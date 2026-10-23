@@ -4,6 +4,8 @@ import { db } from "@/lib/db";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
 import { getOrganisation } from "@/lib/organisation";
 import { notifyUser } from "@/lib/notify";
+import { settleInvoice } from "@/lib/receivables";
+import { activeGateways } from "@/lib/collect/gateways";
 import {
   REFUSAL_MESSAGE,
   allowedActions,
@@ -14,6 +16,7 @@ import {
   type Section,
 } from "@/lib/portal/access";
 import type { ActionResult } from "@/actions/company";
+import { docTypeIn, RECEIVABLE_DOC_TYPE } from "@/lib/trade-documents";
 
 /**
  * The customer's own view of their account, served to somebody with no login here.
@@ -217,6 +220,10 @@ export type PortalInvoice = {
   dueDate: Date | null;
   total: number;
   status: string;
+  /** What's still to pay on a tax invoice; null on anything else. */
+  balance: number | null;
+  /** Whether it can be paid online from here: a balance, in rupees, and a gateway connected (src/lib/collect). */
+  payable: boolean;
 };
 
 export async function portalInvoices(token: string): Promise<PortalInvoice[]> {
@@ -227,23 +234,63 @@ export async function portalInvoices(token: string): Promise<PortalInvoice[]> {
     where: {
       companyId: resolved.companyId,
       direction: "SALES",
-      docType: { in: ["INVOICE", "PROFORMA", "CREDIT_NOTE"] },
+      docType: docTypeIn(["INVOICE", "DEBIT_NOTE", "PROFORMA", "CREDIT_NOTE"]),
       // A draft is our workings. Issuing one is the act that makes it theirs to see.
       status: { not: "DRAFT" },
     },
-    select: { id: true, docNumber: true, docType: true, issueDate: true, dueDate: true, total: true, status: true },
+    select: {
+      id: true,
+      docNumber: true,
+      docType: true,
+      issueDate: true,
+      dueDate: true,
+      total: true,
+      status: true,
+      currency: true,
+      paidBefore: true,
+      payments: { select: { amount: true } },
+      creditsReceived: { select: { amount: true } },
+    },
     orderBy: { issueDate: "desc" },
     take: 100,
   });
+  // Paying online (owner, 23 Oct 2026): where the business has connected its gateway.
+  const online = (await activeGateways()).length > 0;
+  const sum = (rows: { amount: unknown }[]) => rows.reduce((t, r) => t + Number(r.amount), 0);
 
-  return documents.map((d) => ({
-    id: d.id,
-    number: d.docNumber,
-    date: d.issueDate,
-    dueDate: d.dueDate,
-    total: Number(d.total),
-    status: d.docType === "CREDIT_NOTE" ? "CREDIT_NOTE" : d.status,
-  }));
+  return documents.map((d) => {
+    const balance =
+      (d.docType === "INVOICE" || d.docType === "DEBIT_NOTE") && d.status !== "CANCELLED" ? settleInvoice(Number(d.total), sum(d.payments), sum(d.creditsReceived), Number(d.paidBefore)).balance : null;
+    return {
+      id: d.id,
+      number: d.docNumber,
+      date: d.issueDate,
+      dueDate: d.dueDate,
+      total: Number(d.total),
+      status: d.docType === "CREDIT_NOTE" ? "CREDIT_NOTE" : d.status,
+      balance,
+      payable: online && balance !== null && balance >= 1 && d.currency === "INR",
+    };
+  });
+}
+
+/**
+ * The pay-now link for one of their invoices (owner, 23 Oct 2026 — src/lib/collect/links.ts): the open one for
+ * its balance, or a new one. Only their own company's issued invoices, and only where the invoices section is
+ * theirs to see.
+ */
+export async function portalPayLink(token: string, invoiceId: string): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  const resolved = await resolve(token);
+  if (!resolved || !resolved.sections.has("invoices")) return { ok: false, error: "This link has stopped working. Ask us for a new one." };
+  const invoice = await db.tradeDocument.findFirst({
+    where: { id: String(invoiceId ?? ""), companyId: resolved.companyId, direction: "SALES", docType: RECEIVABLE_DOC_TYPE, status: { notIn: ["DRAFT", "CANCELLED"] } },
+    select: { id: true },
+  });
+  if (!invoice) return { ok: false, error: "We couldn't find that invoice." };
+  // Loaded only when somebody presses Pay: the public page doesn't carry the ledger and gateways with it.
+  const { payLinkFor } = await import("@/lib/collect/links");
+  const link = await payLinkFor(invoice.id, null);
+  return link.ok ? { ok: true, url: link.link.url } : { ok: false, error: "Paying online isn't available for this invoice just now. Please pay by bank transfer, or ask us." };
 }
 
 export type PortalTicket = {

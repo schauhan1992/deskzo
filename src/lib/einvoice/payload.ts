@@ -44,7 +44,7 @@ export type EInvoiceLine = {
 };
 
 export type EInvoiceDocument = {
-  docType: "INVOICE" | "CREDIT_NOTE";
+  docType: "INVOICE" | "CREDIT_NOTE" | "DEBIT_NOTE";
   docNumber: string;
   issueDate: Date;
   reverseCharge: boolean;
@@ -73,7 +73,7 @@ function irpDate(date: Date) {
   return `${String(day).padStart(2, "0")}/${String(month + 1).padStart(2, "0")}/${year}`;
 }
 
-const DOC_TYPE: Record<EInvoiceDocument["docType"], string> = { INVOICE: "INV", CREDIT_NOTE: "CRN" };
+const DOC_TYPE: Record<EInvoiceDocument["docType"], string> = { INVOICE: "INV", CREDIT_NOTE: "CRN", DEBIT_NOTE: "DBN" };
 
 /** A GSTIN-less buyer can't be reported as B2B; the portal treats those as B2C. */
 function supplyCategory(doc: EInvoiceDocument) {

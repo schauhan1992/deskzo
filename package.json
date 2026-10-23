@@ -91,6 +91,8 @@
     "check:customer-emails": "tsx scripts/check-customer-emails.ts",
     "check:company-sides": "tsx scripts/check-company-sides.ts",
     "check:activity": "tsx scripts/check-activity.ts",
+    "check:collect": "tsx scripts/check-collect.ts",
+    "check:debit-notes": "tsx scripts/check-debit-notes.ts",
     "check:expense-approvals": "tsx scripts/check-expense-approvals.ts",
     "check:analytics": "tsx scripts/check-analytics.ts",
     "check:finance": "tsx scripts/check-finance-cards.ts",

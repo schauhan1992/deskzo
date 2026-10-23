@@ -3,6 +3,8 @@ import { calculateOrderAmount } from "@/lib/gst";
 import { isCustomerSide } from "@/lib/companies/roles";
 import { creditConcerns, type CreditAssessment, type CreditConcern, type TermsKey } from "@/lib/credit/engine";
 import { assessCompany } from "@/lib/credit/load";
+import { creditHoldFor } from "@/lib/collect/hold";
+import { formatMoney } from "@/lib/currency";
 
 export type OrderCreditPosition = {
   assessment: CreditAssessment;
@@ -50,5 +52,16 @@ export async function orderCreditPosition(orderId: string): Promise<OrderCreditP
   const terms = order.paymentTerms ?? order.company.paymentTerms;
   const termsDecided = (await db.creditDecision.count({ where: { orderId } })) > 0;
   const concerns = creditConcerns(assessment, { terms, amount: total }).filter((c) => !(termsDecided && c.kind === "TERMS"));
+  // Credit hold (src/lib/collect/hold.ts): a customer this late paying needs an override for more credit. An
+  // order paid in advance isn't credit, so isn't held.
+  if (terms !== "ADVANCE") {
+    const hold = await creditHoldFor(order.companyId).catch(() => null);
+    if (hold) {
+      concerns.push({
+        kind: "OVERDUE",
+        text: `they're on credit hold — ${formatMoney(hold.overdue, "INR")} on ${hold.invoices} invoice${hold.invoices === 1 ? "" : "s"} more than ${hold.holdDays} days overdue, the oldest ${hold.oldestDays} days`,
+      });
+    }
+  }
   return { assessment, amount: total, terms, concerns, termsDecided };
 }

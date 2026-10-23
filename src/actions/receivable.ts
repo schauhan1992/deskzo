@@ -9,18 +9,19 @@ import { documentAccess, mayAccess, mayAddTo, throughAccount } from "@/lib/authz
 import { toPlain } from "@/lib/serialize";
 import { hasEffectivePermission, viewerHas } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
-import { postExchangeDifferenceToLedger, postPaymentToLedger } from "@/lib/ledger/journal";
+import { postExchangeDifferenceToLedger } from "@/lib/ledger/journal";
 import { bookingRate, crossCurrencyPaymentAmount, settlementRateError, takenFromPayment } from "@/lib/ledger/posting";
 import { formatMoney, formatRate, isBaseCurrency } from "@/lib/currency";
 import { firstOpenDate } from "@/lib/ledger/period";
 import { ensureHeadOffice } from "@/lib/branches/identity";
 import { syncInvoiceStatus } from "@/lib/receivables/sync";
+import { recordPaymentOnInvoice } from "@/lib/receivables/record";
+import { isReceivable, RECEIVABLE_DOC_TYPE } from "@/lib/trade-documents";
 import { balanceSummaryFor } from "@/lib/receivables/balance-summary";
 import { partyStatement } from "@/lib/receivables/statement";
 import { agingReportFor, type AgingParams } from "@/lib/receivables/aging";
 import { exportAging } from "@/lib/receivables/aging-export";
 import type { ExportPayload } from "@/actions/data-export";
-import { emitPaymentReceived } from "@/lib/automate/emit-records";
 import { bookOnFirstPayment } from "@/lib/orders/handoff";
 import { settlePromisesFor } from "@/lib/collections/promises";
 import { loadFollowUps, mayLogFollowUps, receivableFollowUps } from "@/lib/collections/load";
@@ -87,7 +88,8 @@ export async function recordInvoicePayment(input: unknown): Promise<ActionResult
   if (!invoice || !(await mayAccess(user.id, "documents", "view", invoice.id)) || !(await mayAddTo(user.id, "payments", invoice.company))) {
     return { ok: false, error: "That invoice no longer exists." };
   }
-  if (invoice.docType !== "INVOICE") return { ok: false, error: "Payments are recorded against a tax invoice." };
+  // A debit note is owed like the invoice it adds to (src/lib/trade-documents.ts `RECEIVABLE_TYPES`).
+  if (!isReceivable(invoice.docType)) return { ok: false, error: "Payments are recorded against a tax invoice or a debit note." };
   if (invoice.status === "DRAFT") return { ok: false, error: "Issue the invoice before recording a payment." };
   if (invoice.status === "CANCELLED") return { ok: false, error: "This invoice has been cancelled." };
 
@@ -110,47 +112,25 @@ export async function recordInvoicePayment(input: unknown): Promise<ActionResult
   const branchId = invoice.branchId ?? (await ensureHeadOffice()).id;
 
   // One payment, one application — written together so a payment can never exist without the
-  // allocation that explains it.
-  const payment = await db.$transaction(async (tx) => {
-    const created = await tx.payment.create({
-      data: {
-        companyId: invoice.companyId,
-        branchId,
-        amount: new Prisma.Decimal(amount),
-        // The amount is in the invoice's currency — it was checked against the invoice's balance — so
-        // the payment is too, at the rate it came in at. Its posting is Dr Bank amount × that rate /
-        // Cr AR the same; the exchange difference below adds back what the invoice booked at its own
-        // rate, so AR clears by exactly amount × the invoice's rate and the rest is a realised gain or
-        // loss. $1,000 of an invoice booked at ₹83, received at ₹84.10: Bank 84,100, AR 83,000, gain 1,100.
-        currency: invoice.currency,
-        exchangeRate: new Prisma.Decimal(rate),
-        paidOn: new Date(paidOn),
-        method,
-        reference: reference || null,
-        notes: notes || null,
-        recordedByUserId: user.id,
-      },
-      select: { id: true },
-    });
-    await tx.paymentAllocation.create({
-      data: { paymentId: created.id, documentId: invoiceId, amount: new Prisma.Decimal(amount), allocatedByUserId: user.id },
-    });
-    // Money against an invoice raised for an in-hand order is money against that order: it counts as
-    // booked from this first payment (O-D2).
-    await bookOnFirstPayment(tx, { documentLines: { some: { documentId: invoiceId } } }, new Date());
-    // Posted in the same transaction, so cash in the ledger can't disagree with the payment record.
-    await postPaymentToLedger(tx, created.id, user.id);
-    // And the exchange difference, if the invoice was raised at a different rate to the one the
-    // money came in at. Domestic settlements pass straight through — both rates are 1.
-    await postExchangeDifferenceToLedger(tx, {
-      paymentId: created.id,
-      documentId: invoiceId,
-      allocatedAmount: amount,
+  // allocation that explains it (src/lib/receivables/record.ts, which a paid pay-now link shares).
+  const payment = await db.$transaction((tx) =>
+    recordPaymentOnInvoice(tx, {
+      invoiceId,
+      companyId: invoice.companyId,
+      branchId,
+      // The amount is in the invoice's currency — it was checked against the invoice's balance — so the
+      // payment is too, at the rate it came in at.
+      amount,
+      applied: amount,
+      currency: invoice.currency,
+      rate,
+      paidOn: new Date(paidOn),
+      method,
+      reference: reference || null,
+      notes: notes || null,
       userId: user.id,
-    });
-    await emitPaymentReceived(tx, created.id, user.id, invoiceId);
-    return created;
-  });
+    }),
+  );
 
   await syncInvoiceStatus(invoiceId);
   // A promise to pay this invoice, kept by this money (src/lib/collections/promises.ts). Never fails the payment.
@@ -235,7 +215,7 @@ export async function applyPaymentToInvoice(
   if (invoice.companyId !== payment.companyId) {
     return { ok: false, error: "That invoice belongs to a different customer." };
   }
-  if (invoice.docType !== "INVOICE" || invoice.status === "DRAFT" || invoice.status === "CANCELLED") {
+  if (!isReceivable(invoice.docType) || invoice.status === "DRAFT" || invoice.status === "CANCELLED") {
     return { ok: false, error: "That isn't an open invoice." };
   }
 
@@ -349,7 +329,7 @@ export async function applyCreditNote(input: unknown): Promise<ActionResult<{ id
   if (creditNote && !(await mayAccess(user.id, "documents", "edit", creditNote.id))) return { ok: false, error: "That isn't a credit note." };
   if (invoice && !(await mayAccess(user.id, "documents", "edit", invoice.id))) return { ok: false, error: "That isn't a tax invoice." };
   if (!creditNote || creditNote.docType !== "CREDIT_NOTE") return { ok: false, error: "That isn't a credit note." };
-  if (!invoice || invoice.docType !== "INVOICE") return { ok: false, error: "That isn't a tax invoice." };
+  if (!invoice || !isReceivable(invoice.docType)) return { ok: false, error: "That isn't a tax invoice." };
   if (creditNote.status === "DRAFT") return { ok: false, error: "Issue the credit note before applying it." };
   if (invoice.status === "DRAFT" || invoice.status === "CANCELLED") {
     return { ok: false, error: "That invoice isn't open." };
@@ -526,7 +506,7 @@ export async function listOpenInvoices(companyId: string) {
   // from a credit note the viewer is already on, so this only refuses an id passed in by hand.
   if (!(await maySeeCustomer(user.id, companyId))) return [];
   const invoices = await db.tradeDocument.findMany({
-    where: { AND: [{ companyId, docType: "INVOICE", status: { notIn: ["DRAFT", "CANCELLED"] } }, await documentAccess(user.id, "view")] },
+    where: { AND: [{ companyId, docType: RECEIVABLE_DOC_TYPE, status: { notIn: ["DRAFT", "CANCELLED"] } }, await documentAccess(user.id, "view")] },
     orderBy: { issueDate: "asc" },
     select: { id: true, docNumber: true, issueDate: true, dueDate: true, total: true, currency: true, ...invoiceSettlementInclude },
   });
@@ -601,7 +581,7 @@ export async function agingReport(params?: { search?: string; promise?: string }
 
   const invoices = await db.tradeDocument.findMany({
     where: {
-      docType: "INVOICE",
+      docType: RECEIVABLE_DOC_TYPE,
       status: { notIn: ["DRAFT", "CANCELLED", "PAID"] },
       /**
        * Both conditions can reach the company, so they go in an `AND` rather than side by side.
