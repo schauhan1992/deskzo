@@ -23,6 +23,8 @@
 # misc
 .DS_Store
 *.pem
+# The phone app's update certificate is public, and an EAS build reads it (mobile/app.config.ts `updates`).
+!mobile/certs/certificate.pem
 
 # debug
 npm-debug.log*
