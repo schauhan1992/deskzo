@@ -93,11 +93,11 @@ const MAX_DEFINITION = 200_000;
 // ─── The catalogue and templates ─────────────────────────────────────────────
 
 /** Every source, open ones with their fields and the rest locked with the reason; and the templates. */
-export async function reportingSetup(): Promise<ActionResult<{ sources: CatalogSource[]; templates: TemplateCard[]; groups: string[]; categories: string[] }>> {
+export async function reportingSetup(): Promise<ActionResult<{ sources: CatalogSource[]; templates: TemplateCard[]; groups: string[]; categories: string[]; hasDepartment: boolean }>> {
   const user = await reportingUser();
   if (!user) return { ok: false, error: OFF };
   const sources = await reportingCatalog(user.id, isModuleEnabled);
-  return { ok: true, data: { sources, templates: templateCards(sources), groups: SOURCE_GROUPS, categories: TEMPLATE_CATEGORIES } };
+  return { ok: true, data: { sources, templates: templateCards(sources), groups: SOURCE_GROUPS, categories: TEMPLATE_CATEGORIES, hasDepartment: !!user.departmentId } };
 }
 
 export type TemplateCard = {
@@ -173,11 +173,13 @@ export type ReportRow = {
   owner: { id: string; name: string; initials: string };
   updatedAt: string;
   createdAt: string;
+  /** Whether this person can open what it reads — a report shared with them may read a source their role can't. */
+  sourceOpen: boolean;
 };
 
 type ListedReport = Prisma.SavedReportGetPayload<{ include: typeof reportInclude & { favourites: { select: { userId: true } } } }>;
 
-function rowOf(report: ListedReport, user: User): ReportRow {
+function rowOf(report: ListedReport, user: User, open: ReadonlySet<string>): ReportRow {
   const def = storedDefinition(report);
   const access = accessTo(report, viewerOf(user)) ?? "view";
   return {
@@ -196,7 +198,13 @@ function rowOf(report: ListedReport, user: User): ReportRow {
     owner: { id: report.owner.id, name: report.owner.name, initials: initials(report.owner.name) },
     updatedAt: report.updatedAt.toISOString(),
     createdAt: report.createdAt.toISOString(),
+    sourceOpen: open.has(report.sourceKey),
   };
+}
+
+/** The sources this person can open, by key. */
+async function openKeys(user: User): Promise<Set<string>> {
+  return new Set((await reportingCatalog(user.id, isModuleEnabled)).filter((s) => s.available).map((s) => s.key));
 }
 
 const listSchema = z.object({
@@ -228,14 +236,15 @@ export async function listReports(input: unknown): Promise<ActionResult<{ rows: 
   };
   const orderBy: Prisma.SavedReportOrderByWithRelationInput = q.sort === "name" ? { name: "asc" } : q.sort === "created" ? { createdAt: "desc" } : { updatedAt: "desc" };
   try {
-    const [rows, total, mine, shared, favourites] = await Promise.all([
+    const [rows, total, mine, shared, favourites, open] = await Promise.all([
       db.savedReport.findMany({ where, orderBy, skip: (q.page - 1) * q.pageSize, take: q.pageSize, include: { ...reportInclude, favourites: { where: { userId: user.id }, select: { userId: true } } } }),
       db.savedReport.count({ where }),
       db.savedReport.count({ where: { ownerId: user.id } }),
       db.savedReport.count({ where: sharedWithWhere(viewer) }),
       db.savedReport.count({ where: { AND: [visibleWhere(viewer), { favourites: { some: { userId: user.id } } }] } }),
+      openKeys(user),
     ]);
-    return { ok: true, data: { rows: rows.map((r) => rowOf(r, user)), total, counts: { mine, shared, favourites } } };
+    return { ok: true, data: { rows: rows.map((r) => rowOf(r, user, open)), total, counts: { mine, shared, favourites } } };
   } catch (err) {
     if (notMigratedYet(err)) return { ok: false, error: MIGRATE };
     throw err;
@@ -256,7 +265,8 @@ export type ReportingHome = {
   range: DateRange;
   windowLabel: string;
   kpis: HomeKpi[];
-  favourites: (ReportRow & { previewChartId: string | null })[];
+  /** With the chart its card draws small — the first one on its first page that isn't a number or a table. */
+  favourites: (ReportRow & { previewChart: ReportChart | null })[];
   recentlyViewed: { id: string; name: string; sourceLabel: string; viewedAt: string }[];
   recent: ReportRow[];
   total: number;
@@ -311,6 +321,7 @@ export async function reportingHome(input?: { range?: unknown }): Promise<Action
       db.savedReport.count({ where: visibleWhere(viewer) }),
       db.savedReportView.findMany({ where: { userId: user.id, report: visibleWhere(viewer) }, orderBy: { viewedAt: "desc" }, take: 5, include: { report: { select: { id: true, name: true, sourceKey: true } } } }),
     ]);
+    const open = new Set(sources.filter((s) => s.available).map((s) => s.key));
     const visibleIds = (await db.savedReport.findMany({ where: visibleWhere(viewer), select: { id: true }, orderBy: { updatedAt: "desc" }, take: 300 })).map((r) => r.id);
     const audit = visibleIds.length
       ? await db.auditLog.findMany({ where: { entityType: "SavedReport", entityId: { in: visibleIds } }, orderBy: { createdAt: "desc" }, take: 6, select: { id: true, entityLabel: true, createdAt: true, userId: true, user: { select: { name: true } } } })
@@ -324,10 +335,10 @@ export async function reportingHome(input?: { range?: unknown }): Promise<Action
         favourites: favs.map((r) => {
           const def = storedDefinition(r);
           const first = def.pages[0]?.charts.find((c) => c.type !== "score" && c.type !== "table" && c.type !== "pivot");
-          return { ...rowOf(r, user), previewChartId: first?.id ?? null };
+          return { ...rowOf(r, user, open), previewChart: first ?? null };
         }),
         recentlyViewed: views.map((v) => ({ id: v.report.id, name: v.report.name, sourceLabel: sourceEntry(v.report.sourceKey)?.label ?? v.report.sourceKey, viewedAt: v.viewedAt.toISOString() })),
-        recent: recent.map((r) => rowOf(r, user)),
+        recent: recent.map((r) => rowOf(r, user, open)),
         total,
         activity: audit.map((a) => ({ id: a.id, who: a.userId === user.id ? "You" : a.user.name, initials: initials(a.user.name), what: a.entityLabel, at: a.createdAt.toISOString() })),
         templates,

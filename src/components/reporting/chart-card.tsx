@@ -57,7 +57,7 @@ export function ChartCard({
       {score ? (
         <>
           {(menu || badge) && (
-            <div className="absolute right-2 top-2 z-10 flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+            <div className="absolute right-2 top-2 z-10 flex items-center gap-1 rounded-md bg-surface opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
               {menu}
             </div>
           )}

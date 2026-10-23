@@ -383,7 +383,8 @@ function Donut({ result, height, hole, onPick, picked, compact }: { result: Buck
       </div>
       {!compact && (
         <div className="grid min-w-[180px] max-w-[360px] flex-1 items-center gap-x-2.5 gap-y-2" style={{ gridTemplateColumns: "8px minmax(64px,1fr) auto" }}>
-          {items.map((it, i) => (
+          {items.map((it, i) =>
+            it.value <= 0 ? null : (
             <button key={it.label} type="button" disabled={!onPick} onClick={() => onPick?.(it.label)} className="contents text-left disabled:cursor-default">
               <span className="h-2 w-2 rounded-full" style={{ background: PALETTE[i % PALETTE.length] }} />
               <span title={it.label} className={cn("truncate text-[13px]", picked && picked !== it.label ? "text-subtle" : "text-text")}>{it.label}</span>
@@ -392,7 +393,8 @@ function Donut({ result, height, hole, onPick, picked, compact }: { result: Buck
                 <span className="font-normal text-subtle"> ({total ? Math.round((it.value / total) * 100) : 0}%)</span>
               </span>
             </button>
-          ))}
+            ),
+          )}
         </div>
       )}
     </div>

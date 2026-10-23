@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { CalendarDays, Check, ChevronDown, X } from "lucide-react";
 import { AnchoredPopover, insideAnchoredPopover } from "@/components/ui/anchored-popover";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { DATE_PRESET_LABELS, DATE_PRESETS, type DateRange } from "@/lib/reporting/definition";
 import { rangeDays } from "@/lib/reporting/window";
 import type { FieldType } from "@/lib/reporting/sources";
+import { whenText } from "./format";
 
 /** The little type mark before a field: Date, Aa, ₹, #, fx — as the builder's data panel shows them. */
 export function FieldMark({ type, calc }: { type: FieldType | "calc"; calc?: boolean }) {
@@ -193,4 +194,20 @@ export function downloadCsv(filename: string, csv: string) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+const subscribeNothing = () => () => {};
+/** Whether the browser is drawing — times are shown in its zone, so not in the server's first render. */
+export function useIsClient() {
+  return useSyncExternalStore(subscribeNothing, () => true, () => false);
+}
+
+/** "Today, 10:42", "Yesterday", "18 Oct 2026" — drawn once the browser can say what today is. */
+export function When({ iso, className }: { iso: string; className?: string }) {
+  const client = useIsClient();
+  return (
+    <time dateTime={iso} className={className} suppressHydrationWarning>
+      {client ? whenText(iso) : ""}
+    </time>
+  );
 }
