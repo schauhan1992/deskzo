@@ -3,6 +3,8 @@ import { db } from "@/lib/db";
 import { SYSTEM_ACCOUNTS } from "@/lib/ledger/chart";
 import { bookingRate, takenFromPayment } from "@/lib/ledger/posting";
 import { DOCUMENT_SOURCES } from "@/lib/ledger/journal";
+import { sourceIn } from "@/lib/ledger/posting";
+import { docTypeIn } from "@/lib/trade-documents";
 import { indiaClock } from "@/lib/time/zone";
 import { dayKey, monthEnd, monthLabel, monthWindow } from "@/lib/close/months";
 import { detailOf, inr, round2, type CheckDetail, type CheckOutcome, type DetailItem } from "@/lib/close/checks";
@@ -39,7 +41,7 @@ export type TieOutDocument = {
   id: string;
   docNumber: string;
   /** VENDOR_CREDIT: a distributor's or an OEM's credit note (src/actions/vendor-credit.ts), on the payables side — it reads as a credit note does. */
-  docType: "INVOICE" | "CREDIT_NOTE" | "BILL" | "VENDOR_CREDIT";
+  docType: "INVOICE" | "CREDIT_NOTE" | "DEBIT_NOTE" | "BILL" | "VENDOR_CREDIT";
   companyId: string;
   companySeq: number;
   companyName: string;
@@ -285,7 +287,8 @@ export async function subledgerAt(
     where: {
       AND: [
         {
-          docType: { in: side === "AR" ? ["INVOICE", "CREDIT_NOTE"] : ["BILL"] },
+          // A debit note is owed as an invoice is, and posted to receivables the same way.
+          docType: side === "AR" ? docTypeIn(["INVOICE", "CREDIT_NOTE", "DEBIT_NOTE"]) : { in: ["BILL"] },
           status: { not: "DRAFT" },
           issueDate: { lt: to },
         },
@@ -310,7 +313,7 @@ export async function subledgerAt(
     const lines = await db.journalLine.findMany({
       where: {
         accountId: account.id,
-        entry: { source: { in: [...DOCUMENT_SOURCES] }, documentId: { not: null }, reversesId: null, date: { lt: to } },
+        entry: { source: sourceIn(DOCUMENT_SOURCES), documentId: { not: null }, reversesId: null, date: { lt: to } },
       },
       select: {
         debit: true, credit: true,

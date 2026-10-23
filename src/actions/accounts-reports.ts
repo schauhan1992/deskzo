@@ -18,6 +18,7 @@ import { fromPaise, round2, toPaise } from "@/lib/accounts/money";
 import { resolvePage, resolvePageSize } from "@/lib/pagination";
 import { dateParam, tableToCsv, type Cell, type ReportColumn, type ReportResult, type ReportRow, type ReportTable } from "@/components/reports/accounts/table";
 import type { ActionResult } from "@/actions/company";
+import { docTypeIn } from "@/lib/trade-documents";
 
 /**
  * Accounting reports, under Finance → Accounts (owner, 22 Oct 2026): the day book, the cash and bank books,
@@ -62,6 +63,7 @@ const TITLES: Record<AccountsReportKey, string> = {
 const SOURCE_LABEL: Record<JournalSource, string> = {
   INVOICE: "Invoice",
   CREDIT_NOTE: "Credit note",
+  DEBIT_NOTE: "Debit note",
   BILL: "Bill",
   PAYMENT: "Payment",
   EXPENSE: "Expense",
@@ -661,7 +663,7 @@ async function gstSummary(p: AccountsReportParams, pg: Paging): Promise<ReportTa
     where: {
       AND: [
         RAISED_IN_DESKZO,
-        { docType: { in: ["INVOICE", "CREDIT_NOTE", "BILL"] }, status: { notIn: [...NOT_RETURNED] }, ...(w.filter ? { issueDate: w.filter } : {}) },
+        { docType: docTypeIn(["INVOICE", "CREDIT_NOTE", "DEBIT_NOTE", "BILL"]), status: { notIn: [...NOT_RETURNED] }, ...(w.filter ? { issueDate: w.filter } : {}) },
       ],
     },
     select: {

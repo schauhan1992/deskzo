@@ -309,6 +309,11 @@ export default async function GstPage({
                         CN
                       </Badge>
                     )}
+                    {inv.isDebitNote && (
+                      <Badge tone="blue" className="ml-1.5">
+                        DN
+                      </Badge>
+                    )}
                   </td>
                   {/* The day the return reports it on: India's, in every workspace. */}
                   <td className="px-4 py-2 text-muted">{indiaClock.date(inv.issueDate)}</td>

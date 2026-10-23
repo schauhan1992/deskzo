@@ -30,6 +30,7 @@ import {
   documentDirection,
   documentListPath,
   isEInvoiceEligible,
+  isNoteAgainstInvoice,
   isEditable,
   conversionTargets,
   manualStatuses,
@@ -402,10 +403,10 @@ export async function issueTradeDocument(input: unknown): Promise<ActionResult<{
    * the head office's.
    */
   const branch = (existing.branchId ? await branchWithRegistration(existing.branchId) : null) ?? (await ensureHeadOffice());
-  // A credit note goes out from its invoice's branch even after that branch closed — it is the only
-  // branch whose GSTIN can reduce that invoice.
+  // A credit or debit note goes out from its invoice's branch even after that branch closed — it is the
+  // only branch whose GSTIN can correct that invoice.
   const followsInvoice =
-    existing.docType === "CREDIT_NOTE" &&
+    isNoteAgainstInvoice(existing.docType) &&
     (existing.againstDocument?.branchId ? existing.againstDocument.branchId === branch.id : branch.isHeadOffice);
   if (!branch.active && !followsInvoice) {
     return { ok: false, error: `Branch ${branch.name} is inactive. Move this draft to an active branch, then issue it.` };
@@ -545,7 +546,7 @@ async function loadEInvoiceDocument(
   });
   if (!document) return { error: "That document no longer exists." };
   if (!isEInvoiceEligible(document.docType)) {
-    return { error: "Only a tax invoice or a credit note is reported to the portal." };
+    return { error: "Only a tax invoice, a credit note or a debit note is reported to the portal." };
   }
 
   // The branch the document was raised from, not the live organisation: an invoice reported (or
@@ -557,7 +558,7 @@ async function loadEInvoiceDocument(
   return {
     gstRegistrationId: document.gstRegistrationId,
     doc: {
-      docType: document.docType as "INVOICE" | "CREDIT_NOTE",
+      docType: document.docType as "INVOICE" | "CREDIT_NOTE" | "DEBIT_NOTE",
       docNumber: document.docNumber,
       issueDate: document.issueDate,
       reverseCharge: document.reverseCharge,
@@ -787,9 +788,9 @@ export async function convertTradeDocument(input: unknown): Promise<ActionResult
   if (source.status === "CANCELLED" || source.status === "REJECTED") {
     return { ok: false, error: "A cancelled or rejected document can't be converted." };
   }
-  // A credit note is a correction, not a conversion — it carries `againstDocumentId`, and the
+  // A credit or debit note is a correction, not a conversion — it carries `againstDocumentId`, and the
   // amounts are usually different, so it's raised through the normal create path.
-  const isCreditNote = target === "CREDIT_NOTE";
+  const isNote = isNoteAgainstInvoice(target);
 
   /**
    * The branch travels with the deal: a proposal from Pune becomes Pune's invoice, a Bengaluru PO
@@ -871,8 +872,8 @@ export async function convertTradeDocument(input: unknown): Promise<ActionResult
       roundOff: source.roundOff,
       total: source.total,
       einvoiceStatus: isEInvoiceEligible(target) ? "PENDING" : "NOT_APPLICABLE",
-      sourceDocumentId: isCreditNote ? null : source.id,
-      againstDocumentId: isCreditNote ? source.id : null,
+      sourceDocumentId: isNote ? null : source.id,
+      againstDocumentId: isNote ? source.id : null,
       // The deal follows the conversion. A proposal that becomes an invoice is still that deal
       // closing, and the lead's own page should show the whole chain rather than losing sight of
       // it the moment the quotation turns into something billable.

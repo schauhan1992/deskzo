@@ -121,13 +121,14 @@ export async function resolveDocumentBranch(input: {
 }): Promise<{ branch: BranchWithRegistration } | { error: string }> {
   const requested = input.requestedBranchId?.trim() || null;
 
-  if (input.docType === "CREDIT_NOTE" && input.againstDocumentId) {
+  if ((input.docType === "CREDIT_NOTE" || input.docType === "DEBIT_NOTE") && input.againstDocumentId) {
     const invoice = await db.tradeDocument.findUnique({ where: { id: input.againstDocumentId }, select: { branchId: true } });
     const branch = (invoice?.branchId ? await branchWithRegistration(invoice.branchId) : null) ?? (await ensureHeadOffice());
-    if (requested && requested !== branch.id) return { error: "A credit note is raised by the branch that issued the invoice." };
+    const noteName = input.docType === "CREDIT_NOTE" ? "credit note" : "debit note";
+    if (requested && requested !== branch.id) return { error: `A ${noteName} is raised by the branch that issued the invoice.` };
     if (!branch.active && branch.gstRegistration && !branch.gstRegistration.active) {
       return {
-        error: `Branch ${branch.name} is inactive, and so is its GSTIN ${branch.gstRegistration.gstin}. Reactivate the GSTIN under Settings → Branches & GST registrations to raise a credit note against this invoice.`,
+        error: `Branch ${branch.name} is inactive, and so is its GSTIN ${branch.gstRegistration.gstin}. Reactivate the GSTIN under Settings → Branches & GST registrations to raise a ${noteName} against this invoice.`,
       };
     }
     return { branch };
@@ -417,12 +418,15 @@ export async function createDraftDocument(
     }
   }
   if (data.againstDocumentId) {
-    if (data.docType !== "CREDIT_NOTE") return { ok: false, error: "Only a credit note is raised against an invoice." };
+    if (data.docType !== "CREDIT_NOTE" && data.docType !== "DEBIT_NOTE") return { ok: false, error: "Only a credit or debit note is raised against an invoice." };
     const error = await validateLinkedDocument(data.againstDocumentId, data.companyId, ["INVOICE"]);
     if (error) return { ok: false, error };
   }
   if (data.docType === "CREDIT_NOTE" && !data.againstDocumentId) {
     return { ok: false, error: "A credit note must name the invoice it reduces." };
+  }
+  if (data.docType === "DEBIT_NOTE" && !data.againstDocumentId) {
+    return { ok: false, error: "A debit note must name the invoice it adds to." };
   }
   if (data.sourceDocumentId) {
     const error = await validateLinkedDocument(data.sourceDocumentId, data.companyId, [

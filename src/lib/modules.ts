@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { ClipboardPen, Trophy, DoorOpen, CalendarClock as CalendarClockIcon, MessagesSquare, ClipboardCheck, KeyRound, FolderKanban, BarChart4, StickyNote, MessageCircle, Building2, CalendarDays, Fingerprint, LocateFixed, IdCard, Plane, Target, UserRound, Package, PackageCheck, CalendarClock, Banknote, Users, Ticket, Truck, CheckSquare, Handshake, ShoppingCart, HandCoins, Store, FileText, FileCheck2, Receipt, ReceiptText, FileMinus2, ClipboardList, MapPin, Wallet, Scale, BookOpen, NotebookPen, ListTree, TrendingUp, Landmark, PhoneCall, Globe, LayoutList, BadgeCheck, UserPlus, PartyPopper, Waves, Boxes, FileSpreadsheet, Percent, Lock, Laptop, Gauge, MessageSquareQuote, Star, Megaphone, Route, ShieldBan, MailCheck, ScanSearch, Inbox, BellRing, Tags, ShieldCheck, Mail, Send, ListPlus, Combine, CalendarRange, Layers, Hourglass, ListChecks, PiggyBank, Coins, WalletCards, PenLine, MailPlus, CalendarCheck, Workflow, History as RunHistory, LayoutTemplate, Cable, FolderOpen, Warehouse, Ruler, PackagePlus, ArrowLeftRight, ChartColumn, SlidersHorizontal, BookText, Library, TableProperties, NotebookTabs } from "lucide-react";
+import { ClipboardPen, Trophy, DoorOpen, CalendarClock as CalendarClockIcon, MessagesSquare, ClipboardCheck, KeyRound, FolderKanban, BarChart4, StickyNote, MessageCircle, Building2, CalendarDays, Fingerprint, LocateFixed, IdCard, Plane, Target, UserRound, Package, PackageCheck, CalendarClock, Banknote, Users, Ticket, Truck, CheckSquare, Handshake, ShoppingCart, HandCoins, Store, FileText, FileCheck2, Receipt, ReceiptText, FileMinus2, FilePlus2, ClipboardList, MapPin, Wallet, Scale, BookOpen, NotebookPen, ListTree, TrendingUp, Landmark, PhoneCall, Globe, LayoutList, BadgeCheck, UserPlus, PartyPopper, Waves, Boxes, FileSpreadsheet, Percent, Lock, Laptop, Gauge, MessageSquareQuote, Star, Megaphone, Route, ShieldBan, MailCheck, ScanSearch, Inbox, BellRing, Tags, ShieldCheck, Mail, Send, ListPlus, Combine, CalendarRange, Layers, Hourglass, ListChecks, PiggyBank, Coins, WalletCards, PenLine, MailPlus, CalendarCheck, Workflow, History as RunHistory, LayoutTemplate, Cable, FolderOpen, Warehouse, Ruler, PackagePlus, ArrowLeftRight, ChartColumn, SlidersHorizontal, BookText, Library, TableProperties, NotebookTabs } from "lucide-react";
 import type { PermissionKey } from "@/lib/permissions";
 import type { TermKey } from "@/lib/terms/dictionary";
 
@@ -197,13 +197,15 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     viewPermission: "documents.view",
     label: "Sales Documents",
     description:
-      "Proposals, proforma invoices, GST tax invoices and credit notes — with place-of-supply tax handling, and e-invoice (IRN) and e-way bill generation through the government portal.",
+      "Proposals, proforma invoices, GST tax invoices, credit and debit notes — with place-of-supply tax handling, and e-invoice (IRN) and e-way bill generation through the government portal.",
     navGroup: "Accounts",
     navItems: [
       { href: "/sales/proposals", label: "Proposals", icon: FileText, section: "Sales" },
       { href: "/sales/proformas", label: "Proforma Invoices", icon: FileCheck2, section: "Sales" },
       { href: "/sales/invoices", label: "Tax Invoices", icon: Receipt, section: "Sales" },
       { href: "/sales/credit-notes", label: "Credit Notes", icon: FileMinus2, section: "Sales" },
+      // Owner, 23 Oct 2026: adds to an issued invoice — MSME interest, a price revised up, short billing.
+      { href: "/sales/debit-notes", label: "Debit Notes", icon: FilePlus2, section: "Sales" },
       // With the other trade documents, because it is one.
       { href: "/sales/challans", label: "Delivery Challans", icon: PackageCheck, section: "Sales" },
       // Every e-way action asks "Process orders (purchasing)" (src/actions/eway.ts gate), so the link does too.

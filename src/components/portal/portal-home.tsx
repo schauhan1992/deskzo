@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { CalendarClock, CheckCircle2, FileText, LifeBuoy, MessageSquare, Package, RefreshCw, UserPlus } from "lucide-react";
 import {
+  portalPayLink,
   raisePortalRequest,
   type PortalInvoice,
   type PortalSubscription,
@@ -53,6 +54,28 @@ export function PortalHome({
   const [seats, setSeats] = useState("1");
   const [question, setQuestion] = useState("");
   const [notice, setNotice] = useState<{ text: string; bad?: boolean } | null>(null);
+
+  const [paying, setPaying] = useState<string | null>(null);
+  // What they owe in all, and how much of it is late — their statement, at a glance.
+  const today = new Date().toISOString().slice(0, 10);
+  const owed = invoices.filter((i) => (i.balance ?? 0) >= 1);
+  const owedTotal = owed.reduce((t, i) => t + (i.balance ?? 0), 0);
+  const lateTotal = owed.filter((i) => (i.dueDate ? new Date(i.dueDate).toISOString().slice(0, 10) : today) < today).reduce((t, i) => t + (i.balance ?? 0), 0);
+
+  // Paying online: the gateway's own page, in this tab. They come back by this same link.
+  const pay = (invoiceId: string) => {
+    setPaying(invoiceId);
+    setNotice(null);
+    startTransition(async () => {
+      const result = await portalPayLink(token, invoiceId);
+      if (!result.ok) {
+        setPaying(null);
+        setNotice({ text: result.error, bad: true });
+        return;
+      }
+      window.location.assign(result.url);
+    });
+  };
 
   const can = (a: string) => view.actions.includes(a as "renewal");
   const shows = (s: string) => view.sections.includes(s as "subscriptions");
@@ -216,6 +239,17 @@ export function PortalHome({
             Your invoices
           </CardHeader>
           <CardContent className="p-0">
+            {owed.length > 0 && (
+              <p className="border-b border-line px-5 py-3 text-sm text-text">
+                You owe <span className="font-semibold">{formatCurrency(owedTotal)}</span> on {owed.length} invoice{owed.length === 1 ? "" : "s"}
+                {lateTotal >= 1 ? (
+                  <>
+                    , of which <span className="font-semibold text-danger">{formatCurrency(lateTotal)}</span> is past due
+                  </>
+                ) : null}
+                .
+              </p>
+            )}
             {invoices.length === 0 ? (
               <p className="px-5 py-8 text-center text-sm text-muted">Nothing here yet.</p>
             ) : (
@@ -227,18 +261,39 @@ export function PortalHome({
                       <th className="px-5 py-2 font-medium">Date</th>
                       <th className="px-5 py-2 font-medium">Due</th>
                       <th className="px-5 py-2 font-medium">Amount</th>
+                      <th className="px-5 py-2 font-medium">Still to pay</th>
                       <th className="px-5 py-2 font-medium">Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {invoices.map((i) => (
                       <tr key={i.id} className="border-b border-line last:border-0">
-                        <td className="whitespace-nowrap px-5 py-2.5 font-medium text-text">{i.number}</td>
+                        <td className="whitespace-nowrap px-5 py-2.5 font-medium text-text">
+                          {i.number}
+                          {/* On a phone the table scrolls sideways: Pay is kept where the eye starts. */}
+                          {i.payable && (
+                            <div className="mt-1.5 sm:hidden">
+                              <Button type="button" size="sm" disabled={paying !== null} onClick={() => pay(i.id)}>
+                                {paying === i.id ? "Opening…" : `Pay ${formatCurrency(i.balance ?? 0)}`}
+                              </Button>
+                            </div>
+                          )}
+                        </td>
                         <td className="whitespace-nowrap px-5 py-2.5 text-muted">{formatCalendarDay(i.date)}</td>
                         <td className="whitespace-nowrap px-5 py-2.5 text-muted">
                           {i.dueDate ? formatCalendarDay(i.dueDate) : "—"}
                         </td>
                         <td className="whitespace-nowrap px-5 py-2.5 text-text">{formatCurrency(i.total)}</td>
+                        <td className="whitespace-nowrap px-5 py-2.5 text-text">
+                          {i.balance === null ? "—" : formatCurrency(i.balance)}
+                          {i.payable && (
+                            <div className="mt-1.5 hidden sm:block">
+                              <Button type="button" size="sm" disabled={paying !== null} onClick={() => pay(i.id)}>
+                                {paying === i.id ? "Opening…" : "Pay now"}
+                              </Button>
+                            </div>
+                          )}
+                        </td>
                         <td className="px-5 py-2.5">
                           <Badge tone={i.status === "PAID" ? "green" : i.status === "CREDIT_NOTE" ? "blue" : "amber"}>
                             {/* Their word for it, not ours. "ISSUED" means nothing to a customer. */}

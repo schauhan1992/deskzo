@@ -20,7 +20,7 @@ import { uqcForLine, type LineUqc } from "@/lib/uqc";
 
 export type ReturnDocument = {
   docNumber: string;
-  docType: "INVOICE" | "CREDIT_NOTE" | "BILL";
+  docType: "INVOICE" | "CREDIT_NOTE" | "DEBIT_NOTE" | "BILL";
   issueDate: Date;
   status: string;
   partyName: string;
@@ -64,6 +64,8 @@ export type B2BInvoice = {
   total: number;
   /** A credit note reduces what was supplied, so it is carried separately rather than negated in. */
   isCreditNote: boolean;
+  /** A debit note adds to an invoice already reported: listed with the notes (CDNR, note type D), not as an invoice. */
+  isDebitNote: boolean;
 };
 
 export type B2CSummary = {
@@ -136,7 +138,7 @@ export type Gstr1 = {
  * from the portal's own list. Without it, rows are named after their first line and nothing is flagged.
  */
 export function buildGstr1(docs: ReturnDocument[], options: { directory?: ReadonlyMap<string, { description: string }> } = {}): Gstr1 {
-  const sales = docs.filter((d) => (d.docType === "INVOICE" || d.docType === "CREDIT_NOTE") && countsForReturn(d));
+  const sales = docs.filter((d) => (d.docType === "INVOICE" || d.docType === "CREDIT_NOTE" || d.docType === "DEBIT_NOTE") && countsForReturn(d));
 
   const b2b: B2BInvoice[] = [];
   const b2cMap = new Map<string, B2CSummary>();
@@ -175,6 +177,7 @@ export function buildGstr1(docs: ReturnDocument[], options: { directory?: Readon
         igstAmount: round2(doc.igstAmount),
         total: round2(doc.total),
         isCreditNote,
+        isDebitNote: doc.docType === "DEBIT_NOTE",
       });
     } else {
       // B2C is reported by place of supply and rate, not invoice by invoice — so the lines are what

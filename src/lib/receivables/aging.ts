@@ -113,7 +113,7 @@ const isRupees = (currency: string) => currency.toUpperCase() === "INR";
 export function ageDocuments(input: { documents: TieOutDocument[]; asOf: string; basis: AgingBasis; columns: AgingColumn[] }): AgedDocument[] {
   const out: AgedDocument[] = [];
   for (const doc of input.documents) {
-    if (doc.docType !== "INVOICE" && doc.docType !== "BILL") continue;
+    if (doc.docType !== "INVOICE" && doc.docType !== "DEBIT_NOTE" && doc.docType !== "BILL") continue;
     const left = round2(doc.total - doc.allocated - doc.credited);
     const balance = round2(round2(doc.total * doc.rate) - round2(doc.allocated * doc.rate) - round2(doc.credited * doc.rate));
     if (balance < 0.01) continue;

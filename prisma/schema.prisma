@@ -470,6 +470,11 @@ enum NotificationType {
    */
   PAYMENT_FOLLOW_UP_DUE
   /**
+   * A customer paid an invoice online through a pay-now link (src/lib/collect/links.ts) — its salesperson and
+   * account manager are told.
+   */
+  PAYMENT_RECEIVED_ONLINE
+  /**
    * The day's draft invoices raised by recurring billing, in one notice, for everybody who issues them.
    */
   RECURRING_DRAFTS_RAISED
@@ -2070,6 +2075,11 @@ enum TradeDocumentType {
    */
   CREDIT_NOTE
   /**
+   * Adds to a previously issued invoice (GST s.34(3)): interest on late payment, a price revised upward,
+   * short billing (owner, 23 Oct 2026). Owed like an invoice, and raised against one.
+   */
+  DEBIT_NOTE
+  /**
    * Our PO to a vendor.
    */
   PURCHASE_ORDER
@@ -2411,6 +2421,8 @@ model TradeDocument {
    * Payments settling this invoice.
    */
   payments        PaymentAllocation[]     @relation("InvoicePayment")
+  /** Pay-now links made for it (src/lib/collect). */
+  paymentLinks    PaymentLink[]           @relation("InvoicePaymentLinks")
   /**
    * Credit notes reducing this invoice.
    */
@@ -3497,6 +3509,169 @@ model PaymentFollowUp {
 }
 
 /**
+ * Payment recovery (owner, 23 Oct 2026 — src/lib/collect): the business's own Razorpay or Cashfree account,
+ * which pay-now links are made in. The money goes straight to it, never through Deskzo; a paid link is
+ * recorded against its invoice on its own.
+ */
+enum PaymentGatewayProvider {
+  RAZORPAY
+  CASHFREE
+}
+
+enum PaymentGatewayMode {
+  /** The gateway's test keys: links that take no real money. */
+  TEST
+  LIVE
+}
+
+model PaymentGateway {
+  id       String                 @id @default(cuid())
+  provider PaymentGatewayProvider @unique
+  mode     PaymentGatewayMode     @default(TEST)
+  /** Razorpay's key id or Cashfree's client id — not a secret; shown so the keys can be told apart. */
+  keyId     String
+  /** The key secret or client secret, encrypted with the workspace's own key (src/lib/crypto.ts). */
+  secretEnc String
+  /** Razorpay's webhook secret, encrypted. Cashfree signs its notices with the client secret. */
+  webhookSecretEnc String?
+  /** The account a payment through it is recorded in — often one named for the gateway, settled out of. */
+  bankAccountId String?
+  bankAccount   BankAccount? @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+  /** Which one new links are made in, where both are connected. */
+  isDefault Boolean @default(false)
+  active    Boolean @default(true)
+  connectedByUserId String?
+  connectedAt       DateTime  @default(now())
+  /** When the keys were last tried against the gateway, and what it said if they failed. */
+  checkedAt DateTime?
+  lastError String?
+
+  links PaymentLink[]
+
+  @@map("payment_gateways")
+}
+
+enum PaymentLinkStatus {
+  ACTIVE
+  PAID
+  EXPIRED
+  CANCELLED
+}
+
+/**
+ * A pay-now link for one invoice's balance, made in the business's gateway. One active link an invoice:
+ * when the balance changes (a payment recorded by hand), the old one is cancelled and a new one made.
+ */
+model PaymentLink {
+  id        String         @id @default(cuid())
+  gatewayId String
+  gateway   PaymentGateway @relation(fields: [gatewayId], references: [id], onDelete: Restrict)
+  documentId String
+  document   TradeDocument @relation("InvoicePaymentLinks", fields: [documentId], references: [id], onDelete: Cascade)
+  companyId  String
+  /** The gateway's id for it: Razorpay's plink_…, or the link_id we give Cashfree. */
+  providerLinkId String
+  url            String
+  amount         Decimal           @db.Decimal(12, 2)
+  currency       String            @default("INR")
+  status         PaymentLinkStatus @default(ACTIVE)
+  expiresAt      DateTime?
+  paidAt         DateTime?
+  /** The gateway's payment id, and ours once it's recorded — one payment a link, however often it's told. */
+  providerPaymentId String?
+  paymentId         String?  @unique
+  payment           Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  createdByUserId   String?
+  createdAt         DateTime  @default(now())
+  /** When its status was last asked of the gateway — the sweep that catches a notice that never came. */
+  checkedAt DateTime?
+
+  @@unique([gatewayId, providerLinkId])
+  @@index([documentId, status])
+  @@index([status, checkedAt])
+  @@index([companyId])
+  @@map("payment_links")
+}
+
+enum MsmeCategory {
+  MICRO
+  SMALL
+  MEDIUM
+}
+
+/**
+ * How a workspace collects (owner, 23 Oct 2026): the reminder schedule, credit hold, and the MSME details its
+ * late-payment interest is worked out from. One row; missing means every default.
+ */
+model CollectionSettings {
+  id String @id @default("default")
+  /** Off until an admin switches them on. */
+  remindersOn Boolean @default(false)
+  /** When they were switched on: a step whose day came before it is never sent, so switching on sends no backlog. */
+  remindersFrom DateTime?
+  /** Who they go as — whose mailbox, or the company's, as Settings › Document emails says, and whose signature. */
+  senderUserId String?
+  /** The steps, as edited; null is the standard schedule (src/lib/collect/reminders.ts). */
+  steps Json?
+  /** A statement of account on the 1st of the month to each customer who owes something. */
+  statementOn Boolean @default(true)
+  /** An approved WhatsApp template sent with each reminder, once the workspace has WhatsApp. */
+  whatsappTemplate String?
+  /** New orders for a customer this many days overdue need a credit override. */
+  creditHoldOn   Boolean @default(true)
+  creditHoldDays Int     @default(60)
+  /** The business's Udyam registration: MSMED Act interest is a micro or small supplier's to claim. */
+  udyamNumber  String?
+  msmeCategory MsmeCategory?
+  /** The RBI's bank rate, %, which the Act's interest is three times. */
+  bankRate        Decimal?  @db.Decimal(5, 2)
+  updatedByUserId String?
+  updatedAt       DateTime  @updatedAt
+
+  @@map("collection_settings")
+}
+
+/** A customer no reminders or statements go to, until it's lifted — a dispute, an arrangement. */
+model PaymentReminderPause {
+  companyId      String   @id
+  pausedByUserId String?
+  reason         String?
+  createdAt      DateTime @default(now())
+
+  @@map("payment_reminder_pauses")
+}
+
+enum PaymentReminderStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+/**
+ * One reminder step for one invoice, or one month's statement for one customer — claimed before it's sent,
+ * so each goes once however often the day's run is knocked.
+ */
+model PaymentReminder {
+  id String @id @default(cuid())
+  /** "<invoice id>:<step>", or "statement:<company id>:<yyyy-mm>". */
+  key        String                @unique
+  companyId  String
+  documentId String?
+  step       String
+  status     PaymentReminderStatus @default(PENDING)
+  attempts   Int                   @default(0)
+  error      String?
+  sentTo     String?
+  createdAt  DateTime              @default(now())
+  sentAt     DateTime?
+
+  @@index([companyId, createdAt])
+  @@index([documentId])
+  @@map("payment_reminders")
+}
+
+/**
  * A cost line item against an order (commission, freight, installation, etc.) — subtracted from gross margin.
  */
 model OrderExpense {
@@ -3589,6 +3764,9 @@ model Payment {
   allocations PaymentAllocation[]
 
   journalEntries JournalEntry[] @relation("PaymentJournal")
+
+  /** The pay-now link it came through, when it did. */
+  paymentLink PaymentLink?
 
   @@index([companyId])
   @@index([bankAccountId])
@@ -5023,6 +5201,7 @@ enum JournalSource {
    */
   INVOICE
   CREDIT_NOTE
+  DEBIT_NOTE
   BILL
   PAYMENT
   EXPENSE
@@ -7504,6 +7683,7 @@ model BankAccount {
   vendorCredits   VendorCredit[]
   statementLines  BankStatementLine[]
   reconciliations BankReconciliation[]
+  paymentGateways PaymentGateway[]
 
   @@map("bank_accounts")
 }

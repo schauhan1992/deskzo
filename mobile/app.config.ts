@@ -20,17 +20,40 @@ const dev = process.env.DESKZO_APP_DEV === "1";
  */
 const firebase = require("node:fs").existsSync(`${__dirname}/google-services.json`);
 
+/**
+ * Over-the-air updates (owner, 23 Oct 2026): the app's own screens — its JavaScript — come from deskzo.com when a newer
+ * one is published (`npm run app:update`, src/lib/app-updates), signed with Deskzo's key and checked against
+ * certs/certificate.pem before they run. A phone takes only an update made for its own native build (the fingerprint
+ * of its native parts), so anything native — a library, a permission — still goes out as a release to the store.
+ *
+ * DESKZO_APP_UPDATES_URL points a test build at a Deskzo on this computer (http://localhost:3000/api/app-updates/manifest,
+ * through `adb reverse tcp:3000 tcp:3000`); scripts/android.js refuses a release made with it.
+ */
+const updatesUrl = process.env.DESKZO_APP_UPDATES_URL || "https://deskzo.com/api/app-updates/manifest";
+const updatesOverHttp = updatesUrl.startsWith("http://");
+
 const config: ExpoConfig = {
   name: "Deskzo",
   slug: "deskzo",
-  version: "0.3.1",
+  version: "0.4.0",
   orientation: "portrait",
   icon: "./assets/icon.png",
   scheme: "deskzo",
+  runtimeVersion: { policy: "fingerprint" },
+  updates: {
+    enabled: !dev,
+    url: updatesUrl,
+    // Looked for at every launch, in the background: the app opens at once on what it has, and a newer version runs
+    // from the next launch (or at once, from Settings).
+    checkAutomatically: "ON_LOAD",
+    fallbackToCacheTimeout: 0,
+    codeSigningCertificate: "./certs/certificate.pem",
+    codeSigningMetadata: { keyid: "main", alg: "rsa-v1_5-sha256" },
+  },
   userInterfaceStyle: "light",
   android: {
     package: "com.deskzo.app",
-    versionCode: 5,
+    versionCode: 6,
     adaptiveIcon: {
       backgroundColor: "#4F46E5",
       foregroundImage: "./assets/android-icon-foreground.png",
@@ -113,7 +136,7 @@ const config: ExpoConfig = {
       "expo-build-properties",
       {
         android: {
-          usesCleartextTraffic: dev,
+          usesCleartextTraffic: dev || updatesOverHttp,
           // A release is shrunk (R8). Android's background jobs (WorkManager) open their database by a constructor
           // nothing calls directly — kept, or the app crashes on launch; the calling module, kept whole; and the
           // pairing scanner's parts (ML Kit), which Google's component discovery makes by their constructors.

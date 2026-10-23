@@ -11,7 +11,7 @@ import { isDraftNumber } from "@/lib/document-numbering";
 type Document = Awaited<ReturnType<typeof listCompanyDocuments>>[number];
 
 /** The order documents are raised in, so the list reads as the deal progressed rather than alphabetically. */
-const SALES_ORDER: TradeDocumentType[] = ["PROPOSAL", "PROFORMA", "INVOICE", "CREDIT_NOTE"];
+const SALES_ORDER: TradeDocumentType[] = ["PROPOSAL", "PROFORMA", "INVOICE", "CREDIT_NOTE", "DEBIT_NOTE"];
 const PURCHASE_ORDER: TradeDocumentType[] = ["PURCHASE_ORDER", "BILL"];
 
 export function CompanyDocuments({

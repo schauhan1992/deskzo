@@ -22,6 +22,8 @@ import {
   postAssetDisposal,
   postChequeClearing,
   postCreditNote,
+  postDebitNote,
+  sourceIn,
   postDepreciation,
   postExchangeDifference,
   postExpenseClaim,
@@ -431,7 +433,7 @@ export { DOCUMENT_SOURCES, PAYMENT_SOURCES } from "@/lib/ledger/posting";
 function currentDocumentEntryWhere(documentId: string) {
   return {
     documentId,
-    source: { in: [...DOCUMENT_SOURCES] },
+    source: sourceIn(DOCUMENT_SOURCES),
     reversesId: null,
     reversedBy: { is: null },
   } satisfies Prisma.JournalEntryWhereInput;
@@ -465,7 +467,7 @@ export async function writeDocumentEntry(
     deferredReduction?: number;
   },
 ): Promise<{ id: string; entryNumber: string }> {
-  if (doc.docType !== "INVOICE" && doc.docType !== "CREDIT_NOTE" && doc.docType !== "BILL") {
+  if (doc.docType !== "INVOICE" && doc.docType !== "CREDIT_NOTE" && doc.docType !== "DEBIT_NOTE" && doc.docType !== "BILL") {
     throw new Error(`A ${doc.docType} does not post to the ledger.`);
   }
   const financials: DocumentFinancials = {
@@ -478,7 +480,9 @@ export async function writeDocumentEntry(
       ? postSalesInvoice(financials)
       : doc.docType === "CREDIT_NOTE"
         ? postCreditNote(financials)
-        : postVendorBill(financials);
+        : doc.docType === "DEBIT_NOTE"
+          ? postDebitNote(financials)
+          : postVendorBill(financials);
 
   // Every line, receivable and revenue included, carries the document's branch and GSTIN: the tax
   // lines are what a return per registration sums, the rest are what a P&L per branch sums. A document
@@ -529,14 +533,14 @@ export async function postDocumentToLedger(
   const doc = await tx.tradeDocument.findUnique({ where: { id: documentId }, select: documentPostingSelect });
   if (!doc) return null;
   // Quotes, proformas and purchase orders are commitments, not transactions — nothing has happened
-  // in accounting terms until an invoice or a bill exists.
-  if (doc.docType !== "INVOICE" && doc.docType !== "CREDIT_NOTE" && doc.docType !== "BILL") return null;
+  // in accounting terms until an invoice, a note against one, or a bill exists.
+  if (doc.docType !== "INVOICE" && doc.docType !== "CREDIT_NOTE" && doc.docType !== "DEBIT_NOTE" && doc.docType !== "BILL") return null;
 
   // Posted already if it has any posting of its own, reversed or not: the live one is returned when
   // there is one (a repaired document's re-post), and a cancelled document's reversed original
   // otherwise — cancelling is final, and posting again would put its revenue back.
   const posted = await tx.journalEntry.findMany({
-    where: { documentId, source: { in: [...DOCUMENT_SOURCES] }, reversesId: null },
+    where: { documentId, source: sourceIn(DOCUMENT_SOURCES), reversesId: null },
     orderBy: { createdAt: "desc" },
     select: { id: true, entryNumber: true, reversedBy: { select: { id: true } } },
   });

@@ -574,6 +574,17 @@ export const SETTINGS: SettingsSection[] = [
         label: "Accounting",
         items: [
           {
+            // Owner, 23 Oct 2026: pay-now links through the business's Razorpay or Cashfree, payment reminders,
+            // credit hold and MSME late-payment interest (src/lib/collect).
+            key: "payment-collection",
+            label: "Payment collection",
+            description: "Pay-now links through your Razorpay or Cashfree, the reminders customers get before and after an invoice is due, credit hold, and MSME interest.",
+            href: "/settings/payment-collection",
+            icon: Banknote,
+            permission: "settings.manage",
+            module: "receivables",
+          },
+          {
             key: "accounts",
             label: "Chart of accounts",
             description: "The ledger accounts every posting lands in.",

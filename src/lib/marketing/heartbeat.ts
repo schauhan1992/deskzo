@@ -7,6 +7,8 @@ import { announcePrizes } from "@/lib/wins/prize-announce";
 import { runRevenueAndClose } from "@/lib/close/nightly";
 import { runOrderReleases } from "@/lib/orders/handoff";
 import { runCollectionsDaily } from "@/lib/collections/daily";
+import { sweepPayLinks } from "@/lib/collect/links";
+import { runPaymentReminders } from "@/lib/collect/reminders";
 import { runRecurringBilling } from "@/lib/recurring-billing/run";
 import { calendarChores } from "@/lib/calendar/chores";
 import { workTenant } from "@/lib/automate/engine";
@@ -99,6 +101,24 @@ export async function runHeartbeat() {
     return { ran: false, broken: 0 };
   });
   /**
+   * Payment recovery (src/lib/collect): pay-now links asked about again — a payment whose notice never came
+   * is recorded, a link whose invoice was settled some other way is closed — and, from 9 in the morning, the
+   * day's payment reminders and, on the 1st, statements. Only where Receivables is on; each asks for itself.
+   */
+  const receivablesOn = await moduleAvailableForTenant("receivables");
+  const payLinks = !receivablesOn
+    ? null
+    : await sweepPayLinks().catch((err) => {
+        console.error("pay link sweep failed", err);
+        return null;
+      });
+  const paymentReminders = !receivablesOn
+    ? null
+    : await runPaymentReminders(new Date(), { budgetMs: 60_000 }).catch((err) => {
+        console.error("payment reminders failed", err);
+        return null;
+      });
+  /**
    * Recurring billing, once a day: subscriptions switched on to renew themselves are renewed on the
    * first day of their next term, and instalments that have begun are raised — all as drafts, with one
    * notice to whoever issues documents. Its own claim row decides who runs it; it asks after its modules.
@@ -164,6 +184,8 @@ export async function runHeartbeat() {
     revenueAndCloseRan: revenueAndClose.ran,
     ordersReleased: orderReleases.released,
     promisesBroken: collections.broken,
+    paidOnline: payLinks?.paid ?? 0,
+    paymentRemindersSent: (paymentReminders?.sent ?? 0) + (paymentReminders?.statements ?? 0),
     recurringDrafts: recurringBilling.drafts,
     calendarsSynced: calendars?.synced ?? 0,
     meetingsHeld: calendars?.held ?? 0,

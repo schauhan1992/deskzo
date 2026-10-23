@@ -4,7 +4,39 @@ import { isBaseCurrency } from "@/lib/currency";
 import { entryTotalsPaise } from "@/lib/accounts/money";
 
 /** The sources a document's own posting is written under — not a reversal's, not an exchange difference's. */
-export const DOCUMENT_SOURCES = ["INVOICE", "CREDIT_NOTE", "BILL"] as const satisfies readonly JournalSource[];
+export const DOCUMENT_SOURCES = ["INVOICE", "CREDIT_NOTE", "DEBIT_NOTE", "BILL"] as const satisfies readonly JournalSource[];
+
+/** Every posting source — typed, so a new one can't be left off. */
+const EVERY_SOURCE: Record<JournalSource, true> = {
+  INVOICE: true,
+  CREDIT_NOTE: true,
+  DEBIT_NOTE: true,
+  BILL: true,
+  PAYMENT: true,
+  EXPENSE: true,
+  MANUAL: true,
+  OPENING: true,
+  PAYROLL: true,
+  DEPRECIATION: true,
+  CLOSING: true,
+  FX: true,
+  VOUCHER: true,
+  INVENTORY: true,
+  REVENUE: true,
+  SCHEDULE: true,
+  VENDOR_CREDIT: true,
+};
+const ALL_SOURCES = Object.keys(EVERY_SOURCE) as JournalSource[];
+/** Sources newer than some workspaces' databases: named to one only once its migration has run. */
+const NEWER_SOURCES: readonly JournalSource[] = ["DEBIT_NOTE"];
+
+/**
+ * A where on a journal entry's `source` for just these, safe on a database not migrated yet: a list holding a
+ * source it may not have is written as "none of the others" (src/lib/trade-documents.ts `docTypeIn`, the same).
+ */
+export function sourceIn(sources: readonly JournalSource[]): { in: JournalSource[] } | { notIn: JournalSource[] } {
+  return sources.some((s) => NEWER_SOURCES.includes(s)) ? { notIn: ALL_SOURCES.filter((s) => !sources.includes(s)) } : { in: [...sources] };
+}
 
 /**
  * The sources a payment's own entries are written under: the payment itself and its cheque clearing
@@ -229,6 +261,16 @@ export function postSalesInvoice(doc: DocumentFinancials): DraftEntry {
   pushSigned(lines, SYSTEM_ACCOUNTS.ROUND_OFF, doc.roundOff, "credit", "Round off");
 
   return { narration: `Sales invoice ${doc.docNumber}`, lines: clean(lines) };
+}
+
+/**
+ * A debit note (owner, 23 Oct 2026) — what it adds to an invoice, posted as the invoice was: Dr Receivables,
+ * Cr Sales and the output tax. Interest on late payment is part of the supply's value (GST s.15(2)(d)), so
+ * it is revenue like the rest. Never deferred: nothing on it is earned over time.
+ */
+export function postDebitNote(doc: DocumentFinancials): DraftEntry {
+  const entry = postSalesInvoice({ ...doc, deferred: 0 });
+  return { ...entry, narration: `Debit note ${doc.docNumber}` };
 }
 
 /**

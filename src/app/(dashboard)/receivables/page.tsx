@@ -15,6 +15,8 @@ import { AGING_BUCKETS } from "@/lib/receivables";
 import { followUpChannelLabels } from "@/lib/collections/rules";
 import { workspaceClock } from "@/lib/time/workspace";
 import { companyPath } from "@/lib/record-links";
+import { receivablesInsights } from "@/actions/payment-collection";
+import { CollectionInsightsView } from "@/components/collect/collection-insights";
 
 /** Collections' views of the list: customers with a promise to pay broken, or due in the next week. */
 const PROMISE_FILTERS = [
@@ -48,6 +50,20 @@ export default async function ReceivablesPage({ searchParams }: { searchParams: 
         </div>
         <BalanceViews base="/receivables" current="aging" q={params.q} />
         {params.docs ? <AgingDocumentsView report={report} base="/receivables" /> : <AgingReportView report={report} base="/receivables" statementTab="statement" />}
+      </div>
+    );
+  }
+  // How fast customers pay, and what should come in (owner, 23 Oct 2026 — src/lib/collect/insights.ts).
+  if (params.view === "insights") {
+    const insights = await receivablesInsights();
+    return (
+      <div className="animate-fade-rise">
+        <div>
+          <h1 className="text-xl font-semibold text-text">Receivables</h1>
+          <p className="mt-1 text-sm text-muted">How many days&apos; sales are waiting to be paid at each month&apos;s end, and what promises and due dates say should come in over the next eight weeks.</p>
+        </div>
+        <BalanceViews base="/receivables" current="insights" q={params.q} />
+        <CollectionInsightsView insights={insights} />
       </div>
     );
   }

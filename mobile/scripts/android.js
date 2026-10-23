@@ -6,6 +6,8 @@
  *   npm run android:dev                 a development build on the emulator, talking to http://*.localhost
  *   node scripts/android.js prebuild    regenerate android/ from app.config.ts
  *   node scripts/android.js gradle assembleRelease
+ *   node scripts/android.js release        the release: the bundle for Google Play and an APK, checked
+ *   node scripts/android.js updates-test   a release-like APK that takes its updates from the Deskzo on this computer
  */
 const { spawnSync } = require("node:child_process");
 const path = require("node:path");
@@ -54,6 +56,10 @@ const ALLOWED_PERMISSIONS = [
 function release() {
   const fs = require("node:fs");
   delete env.DESKZO_APP_DEV;
+  if (env.DESKZO_APP_UPDATES_URL) {
+    console.error("DESKZO_APP_UPDATES_URL is set — a release takes its updates from deskzo.com. Unset it and build again.");
+    process.exit(1);
+  }
   run("npx", ["expo", "prebuild", "--platform", "android", "--no-install", "--clean"]);
   const dir = path.join(__dirname, "..", "android");
   run('"' + path.join(dir, process.platform === "win32" ? "gradlew.bat" : "gradlew") + '"', ["bundleRelease", "assembleRelease", "--console=plain"], { cwd: dir });
@@ -77,7 +83,32 @@ function release() {
   console.log(`\nSigned with ${hasKey ? "Deskzo's upload key — ready for Google Play" : "the debug key — fine to install for a test; Google Play will refuse it (see plugins/with-release-signing.js)"}.`);
   console.log(`Bundle for Google Play: ${path.join(dir, "app", "build", "outputs", "bundle", "release", "app-release.aab")}`);
   console.log(`APK to install:         ${path.join(dir, "app", "build", "outputs", "apk", "release", "app-release.apk")}`);
+  console.log(`Native build:           ${runtimeVersion()} — over-the-air updates published for it reach it (npm run app:update).`);
 }
+
+/** The runtime version a build of the app as it is now carries — the fingerprint of its native parts (app.config.ts). */
+function runtimeVersion() {
+  const r = spawnSync("npx", ["expo-updates", "runtimeversion:resolve", "--platform", "android"], { env, shell: true, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const line = (r.stdout || "").split(/\r?\n/).find((l) => l.startsWith("{"));
+  return line ? JSON.parse(line).runtimeVersion : "(unknown)";
+}
+
+/**
+ * A release-like build for trying over-the-air updates on the emulator: it asks the Deskzo on this computer
+ * (http://localhost:3000, through `adb reverse tcp:3000 tcp:3000`) instead of deskzo.com, so it may talk plain HTTP
+ * — never one to hand out. Publish to it with `npm run app:update -- publish --server http://localhost:3000` run with
+ * the same DESKZO_APP_UPDATES_URL, so the update is for this build.
+ */
+function updatesTest() {
+  delete env.DESKZO_APP_DEV;
+  env.DESKZO_APP_UPDATES_URL = env.DESKZO_APP_UPDATES_URL || "http://localhost:3000/api/app-updates/manifest";
+  run("npx", ["expo", "prebuild", "--platform", "android", "--no-install", "--clean"]);
+  const dir = path.join(__dirname, "..", "android");
+  run('"' + path.join(dir, process.platform === "win32" ? "gradlew.bat" : "gradlew") + '"', ["assembleRelease", "--console=plain"], { cwd: dir });
+  console.log(`\nA test build asking ${env.DESKZO_APP_UPDATES_URL} — native build ${runtimeVersion()}:`);
+  console.log(`  ${path.join(dir, "app", "build", "outputs", "apk", "release", "app-release.apk")}`);
+}
+
 const run = (cmd, args, opts = {}) => {
   const r = spawnSync(cmd, args, { stdio: "inherit", env, shell: true, ...opts });
   if (r.status !== 0) process.exit(r.status ?? 1);
@@ -90,6 +121,8 @@ if (what === "dev") {
   run("npx", ["expo", "prebuild", "--platform", "android", "--no-install", ...rest]);
 } else if (what === "release") {
   release();
+} else if (what === "updates-test") {
+  updatesTest();
 } else if (what === "gradle") {
   // A debug build is a development build: it embeds app.config.ts as evaluated now, so say so here.
   if (rest.some((task) => /debug/i.test(task))) env.DESKZO_APP_DEV = "1";

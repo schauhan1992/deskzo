@@ -13,7 +13,7 @@ import type { TradeDocumentType } from "@prisma/client";
  */
 
 /** The four that can be emailed to a customer — the ones with a customer on the other end. */
-export const EMAILABLE_TYPES = ["INVOICE", "PROPOSAL", "PROFORMA", "CREDIT_NOTE"] as const satisfies readonly TradeDocumentType[];
+export const EMAILABLE_TYPES = ["INVOICE", "PROPOSAL", "PROFORMA", "CREDIT_NOTE", "DEBIT_NOTE"] as const satisfies readonly TradeDocumentType[];
 export type EmailableType = (typeof EMAILABLE_TYPES)[number];
 
 export function isEmailable(docType: TradeDocumentType): docType is EmailableType {
@@ -79,6 +79,14 @@ ${SIGNATURE}`,
     body: `Dear {{recipient.names|Sir/Madam}},
 
 Please find attached credit note {{document.number}} dated {{document.date}} for {{document.total}}.
+
+${SIGNATURE}`,
+  },
+  DEBIT_NOTE: {
+    subject: "Debit note {{document.number}} from {{company.name}}",
+    body: `Dear {{recipient.names|Sir/Madam}},
+
+Please find attached debit note {{document.number}} dated {{document.date}} for {{document.total}}, payable by {{document.dueDate|the date on it}}.
 
 ${SIGNATURE}`,
   },

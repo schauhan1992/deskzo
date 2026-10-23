@@ -23,7 +23,7 @@ export const guide: SeedGuide = {
     module: "sales_documents",
     heading: "Sales Documents",
     summary:
-      "Proposals, proforma invoices, tax invoices, credit notes and delivery challans — drafted, issued, printed and emailed, with GST worked out on every line, and India's e-invoice (IRN) and e-way bill filed with the government portal.",
+      "Proposals, proforma invoices, tax invoices, credit and debit notes and delivery challans — drafted, issued, printed and emailed, with GST worked out on every line, and India's e-invoice (IRN) and e-way bill filed with the government portal.",
     purpose: [
       p(
         runs(
@@ -240,6 +240,27 @@ export const guide: SeedGuide = {
             ["Receivables", "/help/receivables"],
             ".",
           ),
+        ),
+      ),
+      task(
+        "Add to an issued invoice with a debit note",
+        ol(
+          runs(
+            "Open the tax invoice and select ",
+            { b: "Convert to debit note" },
+            " — or select ",
+            { b: "New debit note" },
+            " on ",
+            { b: "Accounts › Debit Notes" },
+            " and choose the invoice under ",
+            { b: "Against invoice" },
+            ".",
+          ),
+          "Change the lines to what is being added — a price revised upward, something billed short, interest on late payment.",
+          runs("Save it and select ", { b: "Issue" }, "."),
+        ),
+        p(
+          "A debit note has its own series (DN), goes out from the invoice's branch, names the invoice on the printed copy, and is reported to the IRP as a debit note. The customer owes it like an invoice: it is aged, reminded, paid online and settled the same way.",
         ),
       ),
       task(
