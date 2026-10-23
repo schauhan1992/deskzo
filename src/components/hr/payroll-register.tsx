@@ -206,6 +206,7 @@ export function PayrollRegister({
                       formatCurrency(num(s.incomeTax))
                     )}
                     {s.incomeTaxBasis === "TYPED" && <div className="text-[10px] text-subtle">typed</div>}
+                    {s.incomeTaxBasis === "FIXED" && <div className="text-[10px] text-subtle" title="The monthly TDS fixed on their salary structure">fixed</div>}
                   </td>
                   <td className="px-3 py-2.5 text-right font-medium tabular-nums text-text">{formatCurrency(num(s.netPay))}</td>
                   <td className="px-3 py-2.5">
@@ -277,12 +278,23 @@ function AdjustDialog({ slip, onClose }: { slip: Slip; onClose: () => void }) {
     <Dialog open onClose={onClose} title={`${slip.user.name} — adjustments`}>
       <div className="space-y-4">
         <p className="rounded-base border border-line bg-surface-sunken px-3 py-2 text-xs text-muted">
-          PF, ESI and professional tax are computed from the rules and can&apos;t be edited here — change the salary
-          structure instead. Income tax is worked out from the tax year so far and their declaration on their record;
-          type a different figure and it&apos;s kept when the month is recalculated.
+          PF, ESI and professional tax come from the rules, or from PF and ESI amounts fixed on the salary structure —
+          change them there. Income tax is worked out from the tax year so far and their declaration on their record,
+          or is the monthly TDS fixed on their salary structure; type a different figure and it&apos;s kept when the
+          month is recalculated.
         </p>
         <p className="text-xs text-muted">
-          TDS on this payslip: {slip.incomeTaxBasis === "TYPED" ? "typed" : slip.incomeTaxBasis === "WORKED_OUT" ? "worked out by Deskzo" : num(slip.incomeTax) > 0 ? "typed" : "none"}.
+          TDS on this payslip:{" "}
+          {slip.incomeTaxBasis === "TYPED"
+            ? "typed"
+            : slip.incomeTaxBasis === "WORKED_OUT"
+              ? "worked out by Deskzo"
+              : slip.incomeTaxBasis === "FIXED"
+                ? "fixed on their salary structure"
+                : num(slip.incomeTax) > 0
+                  ? "typed"
+                  : "none"}
+          .
           {slip.incomeTaxBasis !== "WORKED_OUT" && (
             <button type="button" className="ml-2 font-medium text-brand hover:underline" disabled={pending} onClick={() => submit(true)}>
               Let Deskzo work it out

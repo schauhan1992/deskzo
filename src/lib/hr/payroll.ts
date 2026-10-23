@@ -36,6 +36,15 @@ export type StatutoryFlags = {
   ptApplicable: boolean;
 };
 
+/**
+ * PF, ESI and TDS typed at the CTC split over Deskzo's own figures (owner, 23 Oct 2026: HR can edit the PF, ESI
+ * and TDS amounts) — whole rupees for a full month. A share left out is worked out as it always was. PF and ESI
+ * count only while the scheme is on for the person; a payslip pro-rates them by the days it pays, as it does
+ * every earning. TDS is the payroll run's (src/actions/payroll.ts): taken whole in a month that pays salary.
+ */
+export type StatutoryFixed = { pfEmployee?: number; pfEmployer?: number; esiEmployee?: number; esiEmployer?: number; tds?: number };
+export const STATUTORY_FIXED_KEYS = ["pfEmployee", "pfEmployer", "esiEmployee", "esiEmployer", "tds"] as const;
+
 export function round2(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
@@ -299,7 +308,9 @@ export type PayslipInput = {
   /** The wage month (1–12) and its year: professional tax's slab and the PF wage ceiling in force. */
   month: number;
   year: number;
-  /** TDS: worked out by src/lib/hr/tds.ts, or typed by whoever runs payroll. */
+  /** PF and ESI fixed on the salary structure in force at the month's end, for a full month. */
+  fixed?: StatutoryFixed;
+  /** TDS: worked out by src/lib/hr/tds.ts, typed by whoever runs payroll, or fixed on the salary structure. */
   incomeTax?: number;
   /** Worked out, a nil TDS is the answer, not a gap — the payslip says nothing about it. */
   incomeTaxWorkedOut?: boolean;
@@ -401,6 +412,17 @@ export function computePayslip(input: PayslipInput): PayslipResult {
   // contribution period, and a raise inside one doesn't end it.
   const wageRate = round2(monthlyGross(parts[0]!.components) + incentive);
   const esi = computeEsi(grossEarnings, { applicable: input.flags.esiApplicable, wageRate });
+  // Fixed on the structure (StatutoryFixed): HR's full-month figure stands in for the worked-out share, pro-rated
+  // by the days paid — loss of pay, joining or leaving, a payslip of no days. ESI fixed is taken above the wage
+  // limit too: a contribution period that began below it still owes it, which is what fixing it is for.
+  const fixed = input.fixed ?? {};
+  const share = (amount: number) => roundRupee((amount * paidDays) / monthDays);
+  const pfFixed = input.flags.pfApplicable ? fixed : {};
+  const esiFixed = input.flags.esiApplicable ? fixed : {};
+  const pfEmployee = pfFixed.pfEmployee !== undefined ? share(pfFixed.pfEmployee) : pf.employee;
+  const pfEmployer = pfFixed.pfEmployer !== undefined ? share(pfFixed.pfEmployer) : pf.employer;
+  const esiEmployee = esiFixed.esiEmployee !== undefined ? share(esiFixed.esiEmployee) : esi.employee;
+  const esiEmployer = esiFixed.esiEmployer !== undefined ? share(esiFixed.esiEmployer) : esi.employer;
   const pt = computeProfessionalTax({
     monthGross: grossEarnings,
     monthRate: wageRate,
@@ -442,7 +464,7 @@ export function computePayslip(input: PayslipInput): PayslipResult {
         : "No work state on this employee, so professional tax was not deducted.",
     );
   }
-  if (input.flags.esiApplicable && !esi.applied && wageRate > ESI_WAGE_LIMIT) {
+  if (input.flags.esiApplicable && !esi.applied && wageRate > ESI_WAGE_LIMIT && esiFixed.esiEmployee === undefined && esiFixed.esiEmployer === undefined) {
     warnings.push(
       `Gross is above the ₹${ESI_WAGE_LIMIT.toLocaleString("en-IN")} ESI limit, so no ESI was deducted. If they were covered earlier in this contribution period, it may still be due.`,
     );
@@ -478,9 +500,9 @@ export function computePayslip(input: PayslipInput): PayslipResult {
 
   const incomeTax = round2(input.incomeTax ?? 0);
   const otherDeduction = round2(input.otherDeduction ?? 0);
-  const totalDeductions = round2(pf.employee + esi.employee + pt.amount + incomeTax + otherDeduction);
+  const totalDeductions = round2(pfEmployee + esiEmployee + pt.amount + incomeTax + otherDeduction);
   const netPay = round2(grossEarnings - totalDeductions);
-  const employerCost = round2(grossEarnings + pf.employer + esi.employer);
+  const employerCost = round2(grossEarnings + pfEmployer + esiEmployer);
 
   return {
     monthDays,
@@ -489,10 +511,10 @@ export function computePayslip(input: PayslipInput): PayslipResult {
     components,
     incentive,
     grossEarnings,
-    pfEmployee: pf.employee,
-    pfEmployer: pf.employer,
-    esiEmployee: esi.employee,
-    esiEmployer: esi.employer,
+    pfEmployee,
+    pfEmployer,
+    esiEmployee,
+    esiEmployer,
     professionalTax: pt.amount,
     incomeTax,
     otherDeduction,
@@ -505,10 +527,22 @@ export function computePayslip(input: PayslipInput): PayslipResult {
 
 // A CTC split into a structure, and revisions by a percentage or an amount: src/lib/hr/salary-split.ts.
 
-/** Annual cost to company implied by a monthly structure. */
-export function annualCtcOf(c: SalaryComponents, flags: Pick<StatutoryFlags, "pfApplicable" | "esiApplicable">) {
-  const gross = monthlyGross(c);
+/** A full month's PF and ESI on a structure, both shares: Deskzo's figures, or those fixed on it (StatutoryFixed). */
+export function monthlyStatutory(c: SalaryComponents, flags: Pick<StatutoryFlags, "pfApplicable" | "esiApplicable">, fixed: StatutoryFixed = {}) {
   const pf = computePf(c.basic, { applicable: flags.pfApplicable });
-  const esi = computeEsi(gross, { applicable: flags.esiApplicable });
-  return round2((gross + pf.employer + esi.employer) * 12);
+  const esi = computeEsi(monthlyGross(c), { applicable: flags.esiApplicable });
+  const pfFixed = flags.pfApplicable ? fixed : {};
+  const esiFixed = flags.esiApplicable ? fixed : {};
+  return {
+    pfEmployee: pfFixed.pfEmployee ?? pf.employee,
+    pfEmployer: pfFixed.pfEmployer ?? pf.employer,
+    esiEmployee: esiFixed.esiEmployee ?? esi.employee,
+    esiEmployer: esiFixed.esiEmployer ?? esi.employer,
+  };
+}
+
+/** Annual cost to company implied by a monthly structure: gross and the employer's PF and ESI, fixed or worked out. */
+export function annualCtcOf(c: SalaryComponents, flags: Pick<StatutoryFlags, "pfApplicable" | "esiApplicable">, fixed: StatutoryFixed = {}) {
+  const employer = monthlyStatutory(c, flags, fixed);
+  return round2((monthlyGross(c) + employer.pfEmployer + employer.esiEmployer) * 12);
 }

@@ -22,7 +22,7 @@ export const guide: SeedGuide = {
     summary: "Salary structures, the monthly payroll run and payslips, with PF, ESI, professional tax and TDS on salary worked out for you, loss of pay taken from attendance and leave, and a leaver's full & final settlement. For workspaces in India.",
     purpose: [
       p("Payroll turns each person's salary structure and their month's attendance into payslips. You calculate a month, check it, adjust what needs adjusting, lock it and mark it paid. Everyone sees their own payslips once the month is locked."),
-      p("PF, ESI and professional tax are worked out from each salary structure and the rules built into the app. Income tax (TDS) is worked out from the tax year so far and the person's declaration — or you type the figure yourself. Loss of pay is the days recorded as Absent, plus days of unpaid leave; a day nobody recorded is never counted against anyone."),
+      p("PF, ESI and professional tax are worked out from each salary structure and the rules built into the app — or, for PF and ESI, fixed at amounts you type on the structure. Income tax (TDS) is worked out from the tax year so far and the person's declaration — or you fix a monthly figure on the structure, or type it on the payslip. Loss of pay is the days recorded as Absent, plus days of unpaid leave; a day nobody recorded is never counted against anyone."),
       p("When somebody leaves, Payroll also prepares their full & final settlement: the last salary, leave encashment and gratuity, less notice shortfall and any recoveries."),
       note(runs("Payroll is for workspaces in India only. It needs People (HR), which holds the employee records, attendance and leave it works from — see ", ["People (HR)", "/help/people-hr"], ".")),
     ],
@@ -55,9 +55,11 @@ export const guide: SeedGuide = {
           runs("Open the person in ", { b: "People › People" }, " and, on the ", { b: "Salary" }, " card, select ", { b: "Set salary" }, " (or ", { b: "Revise" }, ")."),
           runs("Type the ", { b: "Annual CTC" }, ". It's split as you type, by the rules in ", { b: "Settings › Salary structure" }, ", with your own components in and the special allowance taking up the rest, so the structure costs exactly the CTC."),
           runs("To revise, choose ", { b: "Revise by" }, " — ", { b: "A percentage" }, ", ", { b: "An amount a year (₹)" }, " or ", { b: "A new CTC (₹)" }, " — and type it. ", { b: "The breakup" }, " keeps theirs, scaled up, or splits it again by the company's rules."),
-          runs("Change any part. With ", { b: "Keep to the CTC" }, " ticked, the special allowance takes up the difference. Add one of the company's own components, or another typed there, from ", { b: "+ Add a component…" }, "."),
-          runs("Set ", { b: "Effective from" }, ", tick whether ", { b: "Provident fund" }, ", ", { b: "ESI" }, " and ", { b: "Professional tax" }, " apply, check the monthly gross and annual cost to company, and select ", { b: "Save structure" }, "."),
+          runs("Change any part. With ", { b: "Keep to the CTC" }, " ticked, the special allowance takes up the difference. Under ", { b: "Custom fields" }, ", select ", { b: "Add custom field" }, " and type its name and amount a month, or pick one of the company's own from ", { b: "+ Company component…" }, "."),
+          runs("Tick whether ", { b: "Provident fund" }, ", ", { b: "ESI" }, " and ", { b: "Professional tax" }, " apply. Under ", { b: "PF, ESI and TDS a month" }, ", each box shows the app's own figure; leave it empty to keep that, or type an amount in whole rupees to fix it — ", { b: "PF — employee" }, ", ", { b: "PF — employer" }, ", ", { b: "ESI — employee" }, ", ", { b: "ESI — employer" }, " or ", { b: "TDS (income tax)" }, ". The arrow beside a typed amount puts the app's figure back."),
+          runs("Set ", { b: "Effective from" }, ", check the monthly gross, what's taken from their pay, what's in hand and the annual cost to company, and select ", { b: "Save structure" }, "."),
         ),
+        p("An employer's PF or ESI you fix is what the CTC counts, so with Keep to the CTC ticked the special allowance moves with it. Fixed amounts are for a full month: a month with unpaid days, or the month someone joins or leaves, takes its share of PF and ESI. A fixed TDS is taken whole in every month that pays salary. PF or ESI typed while the scheme is unticked isn't kept, and amounts that would take more than the monthly gross are refused."),
         p(runs("A revision keeps the earlier structures as history, and the card shows how it was given (+10%, +₹60,000 a year). A structure can't start on or before a month that is already locked. To correct the structure someone is on, select ", { b: "Edit" }, " — offered until a locked month has paid from it.")),
       ),
       task(
@@ -131,12 +133,12 @@ export const guide: SeedGuide = {
       setting(
         "Provident fund, ESI and Professional tax",
         "Salary card › Set salary or Revise",
-        p("Ticked or unticked per structure. Their amounts are worked out from the rules and can't be edited on a payslip — change the structure and calculate again instead. Professional tax follows the state of the branch the person works at, or the state on their record; with no state, nothing is deducted and the payslip says so."),
+        p("Ticked or unticked per structure. PF and ESI are worked out from the rules unless you fix their amounts on the structure, under PF, ESI and TDS a month; they can't be edited on a payslip — change the structure and calculate again instead. Professional tax follows the state of the branch the person works at, or the state on their record; with no state, nothing is deducted and the payslip says so."),
       ),
       setting(
         "Income tax",
         "On each person's record in People › People",
-        p(runs("The person's regime and declaration for this tax year and last year. ", { b: "Declaration" }, " changes it. If the app doesn't work out TDS for a tax year, type the figure on each payslip with ", { b: "Adjust" }, ".")),
+        p(runs("The person's regime and declaration for this tax year and last year. ", { b: "Declaration" }, " changes it. If the app doesn't work out TDS for a tax year, type the figure on each payslip with ", { b: "Adjust" }, ", or fix a monthly figure on their salary structure under ", { b: "TDS (income tax)" }, ".")),
       ),
       setting(
         "Works at",
@@ -163,11 +165,11 @@ export const guide: SeedGuide = {
       ),
       qa(
         "Can I change PF, ESI or professional tax on a payslip?",
-        p("No. They come from the salary structure. Change the structure, then calculate the month again while it is still a draft."),
+        p("Not on the payslip. They come from the salary structure, where you can fix PF and ESI at amounts of your own. Change the structure, then calculate the month again while it is still a draft."),
       ),
       qa(
         "I typed an income tax figure. Will calculating again overwrite it?",
-        p("No. Typed income tax and other deductions are carried across when the month is recalculated. Worked-out TDS is worked out again."),
+        p("No. Typed income tax and other deductions are carried across when the month is recalculated. Worked-out TDS is worked out again, and a TDS fixed on the salary structure is taken from the structure again — the register marks it fixed."),
       ),
       qa(
         "Why can't I calculate or adjust a month?",
