@@ -18,6 +18,8 @@ import { companyPath, leadPath } from "@/lib/record-links";
 import { LeadStatusBadge } from "@/components/leads/lead-status-badge";
 import { useColumns } from "@/components/ui/table-columns";
 import { LeadScoreBadge } from "@/components/leads/lead-score";
+import { LeadQuoteCell } from "@/components/leads/lead-quote-badge";
+import type { LeadQuote } from "@/lib/leads/quotes";
 import { leadSourceLabel } from "@/lib/leads/source";
 import { CustomFieldBodyCells, CustomFieldHeaderCells, type CustomColumn } from "@/components/custom-fields/custom-field-cells";
 import { useWording } from "@/components/terms/wording-provider";
@@ -53,6 +55,7 @@ export function LeadsListTable({
   reassign,
   customColumns = { columns: [], texts: {} },
   contactDetails = false,
+  quotes = null,
 }: {
   leads: LeadRow[];
   /** The workspace's stages still in use (Settings → Pipeline) — what the bulk bar can move leads to. */
@@ -70,6 +73,11 @@ export function LeadsListTable({
    * page. Their values come masked from the server where the list masks them for this person.
    */
   contactDetails?: boolean;
+  /**
+   * Each lead's quotation (src/lib/leads/quote-status.ts), or null where the Quotation column doesn't
+   * exist for this person — no sales documents to see, or a pipeline that isn't sales.
+   */
+  quotes?: Record<string, LeadQuote | null> | null;
 }) {
   const cols = useColumns("leads");
   // The fields this person shows, worked out once: the header and every row draw this one list.
@@ -171,6 +179,7 @@ export function LeadsListTable({
                 {cols.show("source") && <th className="px-4 py-2.5">Source</th>}
                 {cols.show("owner") && <th className="px-4 py-2.5">Owner</th>}
                 {cols.show("value") && <th className="px-4 py-2.5">Value</th>}
+                {cols.show("quote") && quotes && <th className="px-4 py-2.5">Quotation</th>}
                 {cols.show("expectedClose") && <th className="px-4 py-2.5">Expected close</th>}
                 {cols.show("updated") && <th className="px-4 py-2.5">Updated</th>}
                 <CustomFieldHeaderCells columns={fieldColumns} className="px-4 py-2.5" />
@@ -238,6 +247,11 @@ export function LeadsListTable({
                   )}
                   {cols.show("value") && (
                     <td className="px-4 py-2.5 text-muted">{formatCurrency(lead.estimatedValue?.toString())}</td>
+                  )}
+                  {cols.show("quote") && quotes && (
+                    <td className="whitespace-nowrap px-4 py-2.5">
+                      <LeadQuoteCell quote={quotes[lead.id] ?? null} status={lead.status} />
+                    </td>
                   )}
                   {cols.show("expectedClose") && (
                     <td className="px-4 py-2.5 text-muted">{formatCalendarDay(lead.expectedCloseDate)}</td>

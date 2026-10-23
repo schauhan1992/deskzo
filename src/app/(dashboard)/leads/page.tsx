@@ -31,6 +31,8 @@ import { CustomFieldFilters } from "@/components/custom-fields/custom-field-filt
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
 import { leadBoardExtras } from "@/lib/leads/board-extras";
+import { isQuoteFilter, QUOTE_FILTERS } from "@/lib/leads/quotes";
+import { leadQuotes, seesLeadQuotes } from "@/lib/leads/quote-status";
 
 export default async function LeadsPage({
   searchParams,
@@ -48,6 +50,8 @@ export default async function LeadsPage({
     closeTo?: string;
     source?: string;
     grade?: string;
+    /** Has had a quotation sent, hasn't, or is missing one (src/lib/leads/quotes.ts). */
+    quote?: string;
     sort?: string;
     page?: string;
     pageSize?: string;
@@ -67,6 +71,9 @@ export default async function LeadsPage({
   const pipelineData = await leadStages();
   const inUse = pipelineData.pipelines.filter((p) => !p.archived);
   const shown = inUse.find((p) => p.key === params.pipeline) ?? inUse[0] ?? pipelineData.pipelines[0]!;
+  // Each lead's quotation (owner, 19 Oct 2026): a column, a filter and a card's badge — in a sales
+  // pipeline, for somebody who may see sales documents.
+  const quotesShown = shown.sales && (await seesLeadQuotes(user.id));
   const filters = {
     status: params.status as LeadStatus | undefined,
     stage: params.stage || undefined,
@@ -77,6 +84,7 @@ export default async function LeadsPage({
     closeTo: params.closeTo,
     source: (LEAD_SOURCE_VALUES as readonly string[]).includes(params.source ?? "") ? (params.source as LeadSource) : undefined,
     grade: (["HOT", "WARM", "COLD"] as const).find((g) => g === params.grade),
+    quote: quotesShown && isQuoteFilter(params.quote) ? params.quote : undefined,
     sort: params.sort === "score" ? ("score" as const) : undefined,
     customFilters: parseCustomFilters(params),
   };
@@ -104,6 +112,8 @@ export default async function LeadsPage({
   const selected = view === "list" && viewMode === "split" ? resolveSelected(leads, params.sel) : null;
   // The board's cards: tasks, products, calls and notes, and the people on each (src/lib/leads/board-extras.ts).
   const boardExtras = view === "board" ? await leadBoardExtras(result.rows.map((l) => ({ id: l.id, ownerUserId: l.ownerUserId }))) : {};
+  // The split list has no column for it.
+  const quotes = quotesShown && !(view === "list" && viewMode === "split") ? await leadQuotes(user.id, result.rows.map((l) => l.id)) : null;
 
   // The workspace's own fields (src/lib/custom-fields): the columns the table can show — only the table
   // shows them, so neither the board nor the split list asks for values, though the picker still offers
@@ -137,6 +147,7 @@ export default async function LeadsPage({
               closeTo: params.closeTo,
               source: params.source,
               grade: params.grade,
+              quote: params.quote,
               sort: params.sort,
             }}
           />
@@ -186,6 +197,9 @@ export default async function LeadsPage({
             { value: "COLD", label: "Cold (under 40)" },
           ]}
         />
+        {quotesShown && (
+          <SelectParamFilter paramName="quote" label="Quotation" allLabel="Any" options={QUOTE_FILTERS.map((f) => ({ value: f.value, label: f.label }))} />
+        )}
         <SelectParamFilter
           paramName="sort"
           label="Sort"
@@ -215,6 +229,7 @@ export default async function LeadsPage({
                 reassign={await viewerReassignControls()}
                 customColumns={customColumns}
                 contactDetails={result.contactDetails}
+                quotes={quotes}
               />
               <Pagination
                 page={page}
@@ -225,7 +240,7 @@ export default async function LeadsPage({
               />
             </>
           ) : (
-            <LeadsBoard leads={leads} stages={activeStages} extras={boardExtras} />
+            <LeadsBoard leads={leads} stages={activeStages} extras={boardExtras} quotes={quotes} />
           )}
         </div>
       )}

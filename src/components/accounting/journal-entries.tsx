@@ -16,6 +16,7 @@ import { Amount } from "@/components/accounting/report-chrome";
 const SOURCE_LABEL: Record<JournalSource, string> = {
   INVOICE: "Invoice",
   CREDIT_NOTE: "Credit note",
+  DEBIT_NOTE: "Debit note",
   BILL: "Bill",
   PAYMENT: "Payment",
   EXPENSE: "Expense",
@@ -35,6 +36,7 @@ const SOURCE_LABEL: Record<JournalSource, string> = {
 const SOURCE_TONE: Record<JournalSource, "default" | "green" | "blue" | "red" | "amber"> = {
   INVOICE: "green",
   CREDIT_NOTE: "amber",
+  DEBIT_NOTE: "green",
   BILL: "blue",
   PAYMENT: "blue",
   EXPENSE: "default",

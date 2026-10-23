@@ -94,7 +94,9 @@ export function nextStepFor({
         tone: "info",
       };
 
-    case "INVOICE": {
+    // A debit note is collected as its invoice is.
+    case "INVOICE":
+    case "DEBIT_NOTE": {
       if (balance !== null && balance <= 0) {
         return { headline: "Settled in full.", detail: "Nothing left to collect on this one.", tone: "success" };
       }

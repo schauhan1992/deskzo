@@ -14,6 +14,9 @@ import {
   listPartyOrders,
 } from "@/actions/trade-document";
 import { getNumberSetting, previewNextNumber } from "@/actions/document-number";
+import { listPartyLeads, type PartyLead } from "@/actions/document-lead";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, Badge } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -252,6 +255,12 @@ export function DocumentForm({
 
   const isSales = documentDirection[docType] === "SALES";
   const isCreditNote = docType === "CREDIT_NOTE";
+  // A credit or debit note is raised against an issued invoice (owner, 23 Oct 2026 for the debit note).
+  const isNote = isCreditNote || docType === "DEBIT_NOTE";
+  const isProposal = docType === "PROPOSAL";
+  const [leadId, setLeadId] = useState(defaults.leadId);
+  const [fetchedLeads, setFetchedLeads] = useState<{ companyId: string; rows: PartyLead[] }>({ companyId: "", rows: [] });
+  const w = useWording();
   const gstinRequired = registeredTreatments.includes(gstTreatment as (typeof registeredTreatments)[number]);
 
   // Locations decide the default addresses and the place of supply, so they're fetched as soon as a
@@ -274,7 +283,7 @@ export function DocumentForm({
   }, [companyId]);
 
   useEffect(() => {
-    if (!isCreditNote || !companyId) return;
+    if (!isNote || !companyId) return;
     let cancelled = false;
     listCreditableInvoices(companyId).then((rows) => {
       if (!cancelled) setFetchedCreditable({ companyId, rows });
@@ -282,7 +291,7 @@ export function DocumentForm({
     return () => {
       cancelled = true;
     };
-  }, [companyId, isCreditNote]);
+  }, [companyId, isNote]);
 
   // The customer's orders, for each line's "Bills order" picker. Sales only: a purchase is the
   // vendor's bill, not a charge against our customer's order.
@@ -297,11 +306,35 @@ export function DocumentForm({
     };
   }, [companyId, isSales, defaults.id]);
 
+  // Which deal a proposal is for (owner, 19 Oct 2026; src/actions/document-lead.ts): the customer's leads,
+  // asked for once one is chosen. A new proposal for a customer with one open lead is that lead's; one
+  // opened from a lead keeps it; a draft keeps what it has. Invoices never ask — they take the lead of what
+  // they were made from.
+  useEffect(() => {
+    if (!isProposal || !companyId) return;
+    let cancelled = false;
+    listPartyLeads(companyId).then((rows) => {
+      if (cancelled) return;
+      setFetchedLeads({ companyId, rows });
+      setLeadId((current) => {
+        if (current && rows.some((r) => r.id === current)) return current;
+        if (defaults.id || (current && current === defaults.leadId && companyId === defaults.companyId)) return current;
+        const open = rows.filter((r) => r.open);
+        return open.length === 1 ? open[0]!.id : "";
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId, isProposal, defaults.id, defaults.leadId, defaults.companyId]);
+
   locationIdRef.current = locationId;
 
   const locations = fetchedLocations.companyId === companyId ? fetchedLocations.rows : EMPTY_LOCATIONS;
   const creditable = fetchedCreditable.companyId === companyId ? fetchedCreditable.rows : [];
   const orders = fetchedOrders.companyId === companyId ? fetchedOrders.rows : EMPTY_ORDERS;
+  // The open leads, and the one linked even if it has closed since.
+  const leadChoices = (fetchedLeads.companyId === companyId ? fetchedLeads.rows : []).filter((l) => l.open || l.id === leadId);
 
   /**
    * On a tax invoice, each order its lines bill against what it has already been invoiced (owner, 15 Oct
@@ -333,9 +366,9 @@ export function DocumentForm({
   const placeOfSupplyCode = placeTouched ? placeOverride : ((isSales ? partyStateCode : sellerStateCode) ?? "");
   const supplyType = resolveSupplyType(isSales ? sellerStateCode : partyStateCode, placeOfSupplyCode || null);
 
-  // A credit note is raised by the branch that issued its invoice; once one is chosen, the picker
+  // A credit or debit note is raised by the branch that issued its invoice; once one is chosen, the picker
   // shows that branch and can't be changed (the server refuses any other).
-  const followsInvoice = isCreditNote && Boolean(againstDocumentId);
+  const followsInvoice = isNote && Boolean(againstDocumentId);
 
   /**
    * Editing a draft: moving it to a branch that numbers in another series renumbers it when saved,
@@ -569,9 +602,10 @@ export function DocumentForm({
       adjustmentLabel,
       adjustment,
       sourceDocumentId: defaults.sourceDocumentId,
-      // No control for this one: the deal is decided by where the form was opened from, and a
-      // picker would only invite someone to attribute an invoice to the wrong lead.
-      leadId: defaults.leadId,
+      // A proposal's is chosen on the form ("For lead"). Anything else has no control for it: its deal is
+      // where it was opened or made from, and a picker would only invite someone to attribute an invoice
+      // to the wrong lead.
+      leadId: isProposal ? leadId : defaults.leadId,
       againstDocumentId,
       lines: lines.map((l) => ({
         itemId: l.itemId,
@@ -967,6 +1001,22 @@ export function DocumentForm({
             <Input id="reference" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="PO-2026-118" />
           </div>
 
+          {isProposal && leadChoices.length > 0 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="leadId">{slot(w, "For lead", "lead", "For {one:lower}")}</Label>
+              <Select id="leadId" value={leadId} onChange={(e) => setLeadId(e.target.value)}>
+                <option value="">{slot(w, "No lead", "lead", "No {one:lower}")}</option>
+                {leadChoices.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.ref} · {l.title}
+                    {l.stage ? ` — ${l.stage}` : ""}
+                  </option>
+                ))}
+              </Select>
+              <p className="text-xs text-subtle">{slot(w, "Once issued, the lead shows it as its quotation.", "lead", "Once issued, the {one:lower} shows it as its quotation.")}</p>
+            </div>
+          )}
+
           {isSales && (
             <div className="space-y-1.5">
               <Label htmlFor="salespersonId">Salesperson</Label>
@@ -991,7 +1041,7 @@ export function DocumentForm({
             </div>
           )}
 
-          {isCreditNote && (
+          {isNote && (
             <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="againstDocumentId">
                 Against invoice <span className="text-danger">*</span>
@@ -1001,13 +1051,13 @@ export function DocumentForm({
                 value={againstDocumentId}
                 onChange={(e) => {
                   setAgainstDocumentId(e.target.value);
-                  // The credit note moves to the invoice's branch — its GSTIN, its series, its address.
+                  // The note moves to the invoice's branch — its GSTIN, its series, its address.
                   const invoice = creditable.find((inv) => inv.id === e.target.value);
                   if (invoice) chooseBranch(invoice.branchId ?? headOfficeId);
                 }}
                 required
               >
-                <option value="">Select the invoice this reduces…</option>
+                <option value="">{isCreditNote ? "Select the invoice this reduces…" : "Select the invoice this adds to…"}</option>
                 {creditable.map((inv) => (
                   <option key={inv.id} value={inv.id}>
                     {inv.docNumber} — {money(inv.total)}

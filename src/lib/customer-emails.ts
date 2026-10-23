@@ -8,6 +8,7 @@ import { supportReplySettings } from "@/lib/support-mail/send";
 import { eachStep, type Definition, type Step } from "@/lib/automate/definition";
 import { triggerByType } from "@/lib/automate/triggers";
 import { workflowRef } from "@/lib/automate/refs";
+import { collectionConfig } from "@/lib/collect/settings";
 
 /**
  * Settings › Customer emails (owner, 18 Oct 2026): every email Deskzo sends a workspace's customers, in
@@ -108,7 +109,7 @@ const CALENDAR_ROUTE = "The person's connected calendar; otherwise their own mai
 /** Every email this workspace's modules send its customers, as the page lists them. */
 export async function customerEmailOverview(): Promise<CustomerEmailOverview> {
   const has = async (...keys: string[]) => (await Promise.all(keys.map((k) => moduleAvailableForTenant(k)))).some(Boolean);
-  const [helpdesk, booking, automate, marketing, documents, notices, calendar, forms] = await Promise.all([
+  const [helpdesk, booking, automate, marketing, documents, notices, calendar, forms, receivables] = await Promise.all([
     has("helpdesk"),
     has("booking"),
     has("automate"),
@@ -117,6 +118,7 @@ export async function customerEmailOverview(): Promise<CustomerEmailOverview> {
     has("renewals", "orders"),
     has("calendar"),
     has("forms"),
+    has("receivables"),
   ]);
   const [transactional, marketingRoute, support, sendMode, settings, acknowledge, workflows, journeys] = await Promise.all([
     emailRouteFor("TRANSACTIONAL"),
@@ -201,6 +203,23 @@ export async function customerEmailOverview(): Promise<CustomerEmailOverview> {
       stops: "hard",
       note: "The renewal reminder also stops for a customer who unticked renewal reminders or unsubscribed from everything. The confirmations always go.",
       manage: { label: "Renewals", href: "/renewals" },
+      toggle: null,
+    });
+  }
+  if (receivables) {
+    // Payment reminders and statements (owner, 23 Oct 2026 — src/lib/collect/reminders.ts): business mail, like the invoice.
+    const collect = await collectionConfig();
+    rows.push({
+      key: "payment-reminders",
+      label: "Payment reminders and monthly statements",
+      to: "The contacts who receive invoices — else the primary contact",
+      automatic: true,
+      from: "Whoever Settings › Payment collection names, the way their Mail button sends documents",
+      stops: "hard",
+      note: collect.remindersOn
+        ? "On. They stop once an invoice is paid, while a promise to pay it is open, and for a customer whose reminders are paused."
+        : "Off until an admin switches them on.",
+      manage: { label: "Payment collection", href: "/settings/payment-collection" },
       toggle: null,
     });
   }

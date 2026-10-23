@@ -34,6 +34,8 @@ import {
   writeEntry,
 } from "@/lib/ledger/journal";
 import { firstOpenDate } from "@/lib/ledger/period";
+import { docTypeIn } from "@/lib/trade-documents";
+import { sourceIn } from "@/lib/ledger/posting";
 
 type Tx = Prisma.TransactionClient;
 
@@ -90,7 +92,7 @@ export type RatelessPayment = {
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /** The live-entry filter, as journal.ts `currentDocumentEntry` asks it. */
-const LIVE = { source: { in: [...DOCUMENT_SOURCES] }, reversesId: null, reversedBy: { is: null } } satisfies Prisma.JournalEntryWhereInput;
+const LIVE = { source: sourceIn(DOCUMENT_SOURCES), reversesId: null, reversedBy: { is: null } } satisfies Prisma.JournalEntryWhereInput;
 
 /** The party account a document's own posting runs through: the receivable, or for a bill the payable. */
 function partyKey(docType: string) {
@@ -101,7 +103,7 @@ function partyKey(docType: string) {
 export async function findFxMisposts(client: Tx | PrismaClient): Promise<FxMispost[]> {
   const docs = await client.tradeDocument.findMany({
     where: {
-      docType: { in: [...DOCUMENT_SOURCES] },
+      docType: docTypeIn(DOCUMENT_SOURCES),
       status: { notIn: ["DRAFT", "CANCELLED"] },
       // A rupee document is booked as written, whatever rate it carries (posting.ts `bookingRate`).
       currency: { not: BASE_CURRENCY },

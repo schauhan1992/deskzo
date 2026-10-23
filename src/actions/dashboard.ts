@@ -39,7 +39,7 @@ import {
   DEFAULT_CHARTS,
   DEFAULT_RANGE,
   LAYOUT_MARKER,
-  SUPERSEDED_CARDS,
+  asWidgets,
   decodeChart,
   encodeChart,
   isChartEntry,
@@ -645,7 +645,12 @@ export async function setDashboardPreferences(widgetKeys: string[]): Promise<Act
 
 export type DashboardPresetOption = { id: string; label: string; widgets: string[] };
 
-/** Admin-configured per-department "predefined layouts" (Settings → Users & Access → Departments), each already narrowed to widgets this user currently has module access to — a department preset that has nothing left after that narrowing is dropped rather than offered as an empty no-op. */
+/**
+ * Admin-configured per-department "predefined layouts" (Settings → Users & Access → Departments), each already
+ * narrowed to widgets this user currently has module access to — a department preset that has nothing left after
+ * that narrowing is dropped rather than offered as an empty no-op. The cards a department names are handed over as
+ * the widgets that stand in for them (src/lib/dashboard/charts.ts CARD_WIDGETS).
+ */
 export async function getDashboardPresetOptions(): Promise<DashboardPresetOption[]> {
   await requireUser();
   const [available, departments] = await Promise.all([
@@ -654,7 +659,7 @@ export async function getDashboardPresetOptions(): Promise<DashboardPresetOption
   ]);
   const availableKeys = new Set(available.map((w) => w.key));
   return departments
-    .map((d) => ({ id: d.id, label: d.name, widgets: d.defaultDashboardWidgets.filter((k) => availableKeys.has(k)) }))
+    .map((d) => ({ id: d.id, label: d.name, widgets: asWidgets(d.defaultDashboardWidgets.filter((k) => availableKeys.has(k))) }))
     .filter((p) => p.widgets.length > 0);
 }
 
@@ -671,45 +676,39 @@ export async function resetDashboardPreferences(): Promise<ActionResult<null>> {
 // ─── Charts (src/lib/dashboard/charts.ts) ────────────────────────────────────
 
 /**
- * The dashboard as this person has it: charts and older cards in one array, in their order.
+ * The dashboard as this person has it: widgets only, in their order (owner, 23 Oct 2026 — the older cards are
+ * gone, each read as the widget that stands in for it, src/lib/dashboard/charts.ts asWidgets).
  *
- * Never customised, it is the default charts and then their role's cards (less the ones a chart now
- * stands in for). Customised before charts existed, the default charts go in front of what they chose —
- * the array has no `layout:2` until this dashboard saves it — so the upgrade happens once and is theirs
- * to change after.
+ * Never customised, it is the design's charts and then their role's cards as widgets. Customised before
+ * charts existed, the design's charts go in front of what they chose — the array has no `layout:2` until this
+ * dashboard saves it — so the upgrade happens once and is theirs to change after.
  */
 export async function getDashboardLayout(): Promise<{ entries: string[]; customized: boolean; defaults: string[] }> {
   const prefs = await getDashboardPreferences();
   const charts = DEFAULT_CHARTS.map(encodeChart);
-  const defaults = [LAYOUT_MARKER, ...charts, ...prefs.defaults.filter((k) => !SUPERSEDED_CARDS.has(k))];
+  const defaults = asWidgets([LAYOUT_MARKER, ...charts, ...prefs.defaults]);
   if (!prefs.customized) return { entries: defaults, customized: false, defaults };
-  if (prefs.widgets.includes(LAYOUT_MARKER)) return { entries: prefs.widgets, customized: true, defaults };
-  return { entries: [LAYOUT_MARKER, ...charts, ...prefs.widgets], customized: true, defaults };
+  if (prefs.widgets.includes(LAYOUT_MARKER)) return { entries: asWidgets(prefs.widgets), customized: true, defaults };
+  return { entries: asWidgets([LAYOUT_MARKER, ...charts, ...prefs.widgets]), customized: true, defaults };
 }
 
 /**
- * Saves the arrangement — charts and cards, in order. Each chart is checked field by field and kept only
- * while its source is open to this person; each card only while it is offered to them. What a browser
- * sends is a suggestion.
+ * Saves the arrangement — widgets, in order. Each is checked field by field and kept only while its source is
+ * open to this person; anything else (an older card's key among them) is dropped. What a browser sends is a
+ * suggestion.
  */
 export async function saveDashboardLayout(entries: unknown): Promise<ActionResult<null>> {
   const user = await requireUser();
   if (!Array.isArray(entries) || entries.length > 60) return { ok: false, error: "That layout couldn't be saved." };
   const ctx = await dashboardContext(user.id);
-  const cards = new Set((await getDashboardWidgetOptions()).map((w) => w.key));
   const kept: string[] = [LAYOUT_MARKER];
   const seen = new Set<string>();
   for (const entry of entries) {
-    if (typeof entry !== "string" || entry === LAYOUT_MARKER) continue;
-    if (isChartEntry(entry)) {
-      const spec = decodeChart(entry);
-      if (!spec || seen.has(spec.id) || !(await sourceOpen(ctx, spec.source))) continue;
-      seen.add(spec.id);
-      kept.push(encodeChart(spec));
-    } else if (cards.has(entry) && !seen.has(entry)) {
-      seen.add(entry);
-      kept.push(entry);
-    }
+    if (typeof entry !== "string" || !isChartEntry(entry)) continue;
+    const spec = decodeChart(entry);
+    if (!spec || seen.has(spec.id) || !(await sourceOpen(ctx, spec.source))) continue;
+    seen.add(spec.id);
+    kept.push(encodeChart(spec));
   }
   await db.user.update({ where: { id: user.id }, data: { dashboardWidgets: kept, dashboardCustomized: true } });
   revalidatePath("/dashboard");

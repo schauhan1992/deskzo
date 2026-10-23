@@ -1,12 +1,12 @@
 import type { ReactNode } from "react";
 import { ActivityIndicator, DynamicColorIOS, Platform, Pressable, StyleSheet, Text, View, type NativeColorValue, type StyleProp, type ViewStyle } from "react-native";
 
-/** Deskzo's colours, as the web app's (src/app/globals.css). */
+/** Deskzo's colours: Deskzo blue, the official logo's (owner, 23 Oct 2026; --deskzo-blue in src/app/globals.css). */
 const LIGHT = {
-  brand: "#4F46E5",
-  /** The brand under white text — a button, a badge. The same indigo as `brand`; only dark mode tells them apart. */
-  brandFill: "#4F46E5",
-  brandSoft: "#EEF2FF",
+  brand: "#0249FE",
+  /** The brand under white text — a button, a badge. The same blue as `brand`; only dark mode tells them apart. */
+  brandFill: "#0249FE",
+  brandSoft: "#E8EFFF",
   text: "#0F172A",
   muted: "#64748B",
   line: "#E2E8F0",
@@ -22,13 +22,13 @@ const LIGHT = {
 type Name = keyof typeof LIGHT;
 
 /**
- * Dark mode, on iOS only (app.config.ts): the web's slate and indigo turned round, each pair at least 4.5:1 — text on
- * a fill keeps the light value, and text on the dark surfaces gets a lighter one. Android stays light, as it was.
+ * Dark mode, on iOS only (app.config.ts): the web's slate and Deskzo blue turned round, each pair at least 4.5:1 — text
+ * on a fill keeps the light value, and text on the dark surfaces gets a lighter one. Android stays light, as it was.
  */
 const DARK: Record<Name, string> = {
-  brand: "#A5B4FC",
-  brandFill: "#4F46E5",
-  brandSoft: "#312E81",
+  brand: "#6E95FF",
+  brandFill: "#0249FE",
+  brandSoft: "#14286B",
   text: "#F1F5F9",
   muted: "#94A3B8",
   line: "#334155",

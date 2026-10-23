@@ -13,7 +13,7 @@ site or the demo workspace, with a second phone to call from. Note the iPhone mo
 
 ## 1. Installing and signing in
 
-- [ ] Installed, the icon is the indigo D, square-cornered by iOS; in Settings › Home Screen › Dark, the dark icon; Tinted, the tinted one.
+- [ ] Installed, the icon is the official blue D on white, square-cornered by iOS; in Settings › Home Screen › Dark, the lighter blue D on black; Tinted, the tinted one.
 - [ ] The launch screen is white with the D (dark phone: dark with the light D), then the sign-in screen.
 - [ ] **Browser sign-in**: type the workspace, Sign in — a Safari sheet asks "Deskzo wants to use … to sign in"; sign in, Allow — the app opens on Today.
 - [ ] **QR pairing**: Pair with a code › Scan the code — the camera permission asks with the camera words; scan Settings › Deskzo app on a computer — signed in.
@@ -22,7 +22,7 @@ site or the demo workspace, with a second phone to call from. Note the iPhone mo
 - [ ] Restart the iPhone, open the app before and after unlocking — signed in once unlocked.
 - [ ] Delete the app and install it again — it starts on the sign-in screen (the token isn't left in the Keychain).
 - [ ] An administrator revokes the phone in Security › Devices — the next screen says this iPhone was signed out.
-- [ ] **Settings › This app**: "Deskzo app 0.3.1", "Screens as installed"; Check for a newer version says it's the newest. After `npm run app:update -- publish --platform ios`, the app takes it at the next launch (or Restart with the new version) and says when the screens were updated.
+- [ ] **Settings › This app**: "Deskzo app 0.4.0", "Screens as installed"; Check for a newer version says it's the newest. After `npm run app:update -- publish --platform ios`, the app takes it at the next launch (or Restart with the new version) and says when the screens were updated.
 
 ## 2. Today, Tasks, Approvals, Leave
 

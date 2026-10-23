@@ -11,7 +11,12 @@ import { getDownlineUserIds } from "@/lib/org-chart";
 import { salesLeads } from "@/lib/pipeline/server";
 import { listLeadMasker, maskLeads } from "@/lib/leads/masking";
 import { LEAD_SOURCE_LABELS } from "@/lib/leads/source";
-import { leadPath } from "@/lib/record-links";
+import { companyPath, leadPath } from "@/lib/record-links";
+import { formatOrderId } from "@/lib/order-id";
+import { formatCurrency } from "@/lib/utils";
+import { formatCalendarDay } from "@/lib/time/zone";
+import { projectHealthLabels, projectStatusLabels } from "@/lib/projects/status";
+import type { ProjectHealth, ProjectStatus } from "@prisma/client";
 import { PRIORITY_LABELS, type TaskPriorityKey } from "@/lib/tasks/rules";
 import { officeHours } from "@/lib/hr/office-hours";
 import { dayTiming } from "@/lib/hr/office-hours-rules";
@@ -25,6 +30,7 @@ import {
   rangeLabel,
   rangeStart,
   shiftDay,
+  shortRupees,
   type ActivityIcon,
   type ChartCatalog,
   type ChartData,
@@ -66,7 +72,41 @@ function once<T>(ctx: DashboardContext, key: string, read: () => Promise<T>): Pr
 
 const moduleOn = (ctx: DashboardContext, key: string) => once(ctx, `module:${key}`, () => isModuleEnabled(key));
 
+/**
+ * The older card each of the newer sources stands in for (src/lib/dashboard/charts.ts CARD_WIDGETS): the
+ * source is open exactly where that card was offered — its module open to this person, its permission held
+ * (src/actions/dashboard.ts getDashboardWidgetOptions) — and counts what it counted (getDashboardSummary).
+ */
+const SOURCE_CARD = {
+  customers: "companies",
+  quotations: "quotations",
+  orders: "orders",
+  targets: "salesTarget",
+  payments: "payments",
+  finance: "incomeExpense",
+  renewals: "renewals",
+  support: "tickets",
+  projects: "projectsAtRisk",
+  expenses: "expenses",
+  vendors: "vendors",
+} as const satisfies Partial<Record<SourceKey, string>>;
+
+// Read through the dashboard's actions, which import this module: loaded when asked for, not at start.
+const dashboardActions = () => import("@/actions/dashboard");
+const offeredCards = (ctx: DashboardContext) =>
+  once(ctx, "cards", async () => new Set((await (await dashboardActions()).getDashboardWidgetOptions()).map((w) => w.key)));
+/** The older cards' figures, read once a request whatever how many widgets show them. */
+const summaryOf = (ctx: DashboardContext) => once(ctx, "summary", async () => (await dashboardActions()).getDashboardSummary());
+
+/** A figure the summary withheld: this person may not see it after all. */
+class NotOffered extends Error {}
+function offered<T>(value: T | null | undefined): T {
+  if (value === null || value === undefined) throw new NotOffered();
+  return value;
+}
+
 export async function sourceOpen(ctx: DashboardContext, source: SourceKey): Promise<boolean> {
+  if (source in SOURCE_CARD) return (await offeredCards(ctx)).has(SOURCE_CARD[source as keyof typeof SOURCE_CARD]);
   switch (source) {
     case "tasks":
     case "team":
@@ -81,6 +121,7 @@ export async function sourceOpen(ctx: DashboardContext, source: SourceKey): Prom
     case "activity":
       return true;
   }
+  return false;
 }
 
 export async function chartCatalog(ctx: DashboardContext): Promise<ChartCatalog> {
@@ -223,12 +264,31 @@ export async function widgetData(ctx: DashboardContext, spec: ChartSpec, dashboa
     const data = await read(ctx, spec, w);
     return { ok: true, data, subtitle: await subtitleOf(ctx, spec) };
   } catch (err) {
+    if (err instanceof NotOffered) return { ok: false, error: "You don't have access to this data any more." };
     if (notMigratedYet(err)) return { ok: false, error: "This chart will work once your workspace has the latest update." };
     throw err;
   }
 }
 
+/** The period a figure the range doesn't move is over, where it has one of its own. */
+async function periodOf(ctx: DashboardContext, spec: ChartSpec): Promise<string | null> {
+  switch (`${spec.source}.${spec.metric}`) {
+    case "finance.incomeExpense":
+    case "finance.topExpenses":
+      return (await summaryOf(ctx)).finance?.fiscalLabel ?? null;
+    case "finance.cashFlow":
+      return "Last 12 months";
+    case "renewals.due":
+    case "renewals.upcoming":
+      return "Next 30 days";
+    case "targets.monthly":
+      return "This month";
+  }
+  return null;
+}
+
 async function subtitleOf(ctx: DashboardContext, spec: ChartSpec): Promise<string> {
+  if (SOURCES[spec.source].metrics[spec.metric]?.fixed) return (await periodOf(ctx, spec)) ?? "";
   const parts: string[] = [];
   if (spec.range !== "inherit") parts.push(rangeLabel(spec.range));
   for (const f of SOURCES[spec.source].filters) {
@@ -394,6 +454,182 @@ async function read(ctx: DashboardContext, spec: ChartSpec, w: Window): Promise<
       const weekAgo = Date.now() - 7 * DAY;
       const fresh = kinds.reduce((a, k) => a + k.asked.filter((at) => at.getTime() >= weekAgo).length, 0);
       return { kind: "number", value: String(total), delta: fresh ? `${fresh} new this week` : "None new this week", tone: fresh ? "warn" : "flat" };
+    }
+
+    // ─── What the older cards showed (getDashboardSummary), as widgets ───
+    case "customers.funnel": {
+      const s = await summaryOf(ctx);
+      const c = offered(s.companies);
+      return {
+        kind: "category",
+        items: [
+          { label: "Prospects", value: c.prospects },
+          { label: "Leads", value: c.leads },
+          { label: "Awaiting order", value: c.awaitingOrder },
+          ...(s.customers ? [{ label: "Customers", value: s.customers.total }] : []),
+        ],
+      };
+    }
+    case "customers.companies": {
+      const c = offered((await summaryOf(ctx)).companies);
+      return { kind: "number", value: c.total.toLocaleString("en-IN"), delta: `${c.prospects} prospects · ${c.leads} leads · ${c.awaitingOrder} awaiting order`, tone: "flat" };
+    }
+    case "customers.customers": {
+      const c = offered((await summaryOf(ctx)).customers);
+      return { kind: "number", value: c.total.toLocaleString("en-IN"), delta: "Have bought at least once", tone: "flat" };
+    }
+    case "quotations.pending": {
+      const q = offered((await summaryOf(ctx)).quotations);
+      return {
+        kind: "number",
+        value: q.pending.toLocaleString("en-IN"),
+        delta: q.pending === 0 ? "Nothing awaiting an answer" : `${shortRupees(q.value)} quoted${q.lapsed > 0 ? ` · ${q.lapsed} past validity` : ""}`,
+        tone: q.lapsed > 0 ? "warn" : "flat",
+      };
+    }
+    case "orders.action": {
+      const o = offered((await summaryOf(ctx)).orders);
+      return { kind: "number", value: o.awaitingApproval.toLocaleString("en-IN"), delta: `${o.awaitingSourcing} approved, awaiting sourcing`, tone: o.awaitingApproval > 0 ? "warn" : "flat" };
+    }
+    case "orders.stages": {
+      const o = offered((await summaryOf(ctx)).orders);
+      return { kind: "category", items: [{ label: "Awaiting approval", value: o.awaitingApproval }, { label: "Awaiting sourcing", value: o.awaitingSourcing }] };
+    }
+    case "targets.monthly": {
+      const t = (await summaryOf(ctx)).salesTarget;
+      // No target this month is said, not left blank: a widget that shows nothing reads as broken.
+      if (!t) return { kind: "number", value: "—", delta: "No target set for this month", tone: "flat" };
+      const tone: Tone = t.tone === "green" ? "up" : t.tone === "amber" ? "warn" : t.tone === "red" ? "down" : "flat";
+      return { kind: "number", value: shortRupees(t.achieved), exact: formatCurrency(t.achieved), delta: `${t.percent}% of ${shortRupees(t.target)} · ${t.status}`, tone };
+    }
+    case "payments.outstanding": {
+      const p = offered((await summaryOf(ctx)).payments);
+      return { kind: "number", value: shortRupees(p.outstandingBalance), exact: formatCurrency(p.outstandingBalance), delta: `${p.unpaidCount} unpaid · ${p.partialCount} partially paid`, tone: "flat" };
+    }
+    case "payments.status": {
+      const p = offered((await summaryOf(ctx)).payments);
+      return { kind: "category", items: [{ label: "Unpaid", value: p.unpaidCount }, { label: "Partially paid", value: p.partialCount }] };
+    }
+    case "finance.incomeExpense": {
+      const months = offered((await summaryOf(ctx)).finance).incomeExpense.months;
+      return {
+        kind: "series",
+        grain: "month",
+        keys: months.map((m) => m.key),
+        combine: "sum",
+        stacked: false,
+        money: true,
+        series: [
+          { name: "Income", values: months.map((m) => m.income) },
+          { name: "Expenses", values: months.map((m) => m.expense) },
+        ],
+      };
+    }
+    case "finance.cashFlow": {
+      const points = offered((await summaryOf(ctx)).finance).cashFlow.points;
+      return { kind: "series", grain: "month", keys: points.map((p) => p.key), combine: "avg", stacked: false, money: true, series: [{ name: "Cash and bank", values: points.map((p) => p.balance) }] };
+    }
+    case "finance.topExpenses": {
+      const top = offered((await summaryOf(ctx)).finance).topExpenses;
+      return { kind: "category", money: true, items: top.map((e) => ({ label: e.name, value: e.amount })) };
+    }
+    case "finance.receivables":
+    case "finance.payables": {
+      const f = offered((await summaryOf(ctx)).finance);
+      const o = spec.metric === "receivables" ? f.receivables : f.payables;
+      return {
+        kind: "category",
+        money: true,
+        headline: {
+          value: shortRupees(o.total),
+          exact: formatCurrency(o.total),
+          delta: o.overdue > 0 ? `${shortRupees(o.overdue)} overdue · ${o.count} unpaid` : `${o.count} unpaid, none overdue`,
+          tone: o.overdue > 0 ? "warn" : "flat",
+        },
+        items: [
+          { label: "Current", value: o.current },
+          { label: "Overdue", value: o.overdue },
+        ],
+      };
+    }
+    case "renewals.due": {
+      const r = offered((await summaryOf(ctx)).renewals);
+      return {
+        kind: "category",
+        headline: { value: r.next30.toLocaleString("en-IN"), delta: r.expired > 0 ? `${r.expired} already expired` : "None expired", tone: r.expired > 0 ? "warn" : "flat" },
+        items: [
+          { label: "Next 30 days", value: r.next30 },
+          { label: "Expired", value: r.expired },
+        ],
+      };
+    }
+    case "renewals.upcoming": {
+      const r = offered((await summaryOf(ctx)).renewals);
+      return {
+        kind: "rows",
+        columns: [{ label: "Company" }, { label: "Item" }, { label: "Order" }, { label: "Ends", align: "right" }],
+        // A typed day, held at UTC midnight: the day itself.
+        rows: r.upcoming.map((u) => ({ id: u.id, href: `${companyPath(u.companySeq)}?tab=renewals`, cells: [u.companyName, u.itemName, formatOrderId(u.orderSeq), formatCalendarDay(u.endDate)] })),
+        empty: "Nothing expiring in the next 30 days.",
+      };
+    }
+    case "support.open": {
+      const t = offered((await summaryOf(ctx)).tickets);
+      return {
+        kind: "category",
+        headline: { value: t.open.toLocaleString("en-IN"), delta: t.overdue > 0 ? `${t.overdue} overdue` : "None overdue", tone: t.overdue > 0 ? "down" : "flat" },
+        items: [
+          { label: "On time", value: Math.max(0, t.open - t.overdue) },
+          { label: "Overdue", value: t.overdue },
+        ],
+      };
+    }
+    case "projects.attention": {
+      const p = offered((await summaryOf(ctx)).projects);
+      return {
+        kind: "category",
+        headline: { value: p.needingAttention.toLocaleString("en-IN"), delta: `of ${p.active} live · yours`, tone: p.needingAttention > 0 ? "warn" : "flat" },
+        items: [
+          { label: "On track", value: Math.max(0, p.active - p.needingAttention) },
+          { label: "Needing attention", value: p.needingAttention },
+        ],
+      };
+    }
+    case "projects.mine": {
+      const p = offered((await summaryOf(ctx)).projects);
+      return {
+        kind: "rows",
+        columns: [{ label: "Project" }, { label: "Stage" }, { label: "Health" }, { label: "Tasks", align: "right" }],
+        pill: 2,
+        rows: p.items.map((x) => ({
+          id: x.id,
+          href: `/projects/${x.id}`,
+          cells: [
+            x.name,
+            `${projectStatusLabels[x.status as ProjectStatus]}${x.lateDays !== null ? ` · ${x.lateDays}d late` : ""}`,
+            projectHealthLabels[x.health as ProjectHealth],
+            x.total > 0 ? `${x.done}/${x.total}` : "—",
+          ],
+        })),
+        empty: "You're not on any live projects.",
+      };
+    }
+    case "expenses.awaiting": {
+      const e = offered((await summaryOf(ctx)).expenses);
+      return {
+        kind: "number",
+        value: e.awaitingMe.toLocaleString("en-IN"),
+        delta: e.myUnreimbursed > 0 ? `${e.myUnreimbursed} of yours approved, not yet paid` : "Nothing of yours outstanding",
+        tone: e.awaitingMe > 0 ? "warn" : "flat",
+      };
+    }
+    case "vendors.status": {
+      const v = offered((await summaryOf(ctx)).vendors);
+      return { kind: "category", items: [{ label: "Onboarding", value: v.onboarding }, { label: "Active", value: v.active }, { label: "Inactive", value: v.inactive }] };
+    }
+    case "vendors.onboarding": {
+      const v = offered((await summaryOf(ctx)).vendors);
+      return { kind: "number", value: v.onboarding.toLocaleString("en-IN"), delta: `${v.active} active · ${v.inactive} inactive`, tone: "flat" };
     }
 
     case "activity.recent": {

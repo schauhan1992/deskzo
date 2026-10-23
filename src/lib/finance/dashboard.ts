@@ -5,6 +5,7 @@ import { bookingRate } from "@/lib/ledger/posting";
 import { bucketOf } from "@/lib/analytics/types";
 import { financialYearStartOf, financialYearWindow } from "@/lib/india-time";
 import { indiaClock } from "@/lib/time/zone";
+import { docTypeIn } from "@/lib/trade-documents";
 
 /**
  * The finance headline figures, read off the ledger rather than recomputed.
@@ -277,10 +278,10 @@ export type Outstanding = { total: number; current: number; overdue: number; cou
  * in `settleInvoice`. Reimplementing it here is how two screens come to disagree about a debt.
  * In rupees, each document's balance at the rate it was raised at, as the ledger holds it.
  */
-async function outstandingOf(docType: "INVOICE" | "BILL", direction: "SALES" | "PURCHASE"): Promise<Outstanding> {
+async function outstandingOf(docTypes: ("INVOICE" | "DEBIT_NOTE" | "BILL")[], direction: "SALES" | "PURCHASE"): Promise<Outstanding> {
   const asOf = new Date();
   const rows = await db.tradeDocument.findMany({
-    where: { docType, direction, status: { notIn: ["DRAFT", "CANCELLED", "PAID"] } },
+    where: { docType: docTypeIn(docTypes), direction, status: { notIn: ["DRAFT", "CANCELLED", "PAID"] } },
     select: {
       total: true,
       paidBefore: true,
@@ -317,7 +318,8 @@ async function outstandingOf(docType: "INVOICE" | "BILL", direction: "SALES" | "
   return { total: round(current + overdue), current: round(current), overdue: round(overdue), count };
 }
 
-export const receivablesOutstanding = () => outstandingOf("INVOICE", "SALES");
-export const payablesOutstanding = () => outstandingOf("BILL", "PURCHASE");
+// What customers owe: invoices, and the debit notes that add to them.
+export const receivablesOutstanding = () => outstandingOf(["INVOICE", "DEBIT_NOTE"], "SALES");
+export const payablesOutstanding = () => outstandingOf(["BILL"], "PURCHASE");
 
 const round = (n: number) => Math.round(n * 100) / 100;

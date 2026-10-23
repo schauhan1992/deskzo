@@ -6,6 +6,9 @@
  *   · A revision is given as a percentage, an amount a year, or a new CTC; "keep their breakup" scales it.
  *   · The company's own components count towards gross, are pro-rated by name for loss of pay and a
  *     mid-month revision, and print on the payslip.
+ *   · PF, ESI and TDS typed over Deskzo's figures at the split (owner, 23 Oct 2026): the employer's shares are
+ *     what the CTC counts, a split still costs exactly the CTC, a payslip takes them pro-rated by the days it
+ *     pays, a scheme switched off takes none; the dialog offers them, and a custom field, plainly.
  *   · An IFSC pasted with spaces, dashes, a letter O for the zero or an invisible character is cleaned
  *     before it is checked — everywhere one is typed, Accounting › Banking too.
  *   · HR's own letter templates fill {{fields}} from the person's record; a field that isn't one is refused
@@ -18,7 +21,7 @@
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { annualCtcOf, computePayslip, monthlyGross, type SalaryComponents } from "../src/lib/hr/payroll";
+import { annualCtcOf, computePayslip, monthlyGross, monthlyStatutory, type SalaryComponents } from "../src/lib/hr/payroll";
 import {
   DEFAULT_SPLIT_RULES,
   balanceToCtc,
@@ -29,8 +32,10 @@ import {
   revisionWords,
   scaleToCtc,
   splitCtc,
+  statutoryFixedOf,
 } from "../src/lib/hr/salary-split";
 import { isIfsc, normaliseIfsc, ifscSchema } from "../src/lib/ifsc";
+import { salaryStructureSchema } from "../src/lib/validation/hr";
 import { LETTER_FIELDS, mergeLetterTemplate, unknownLetterFields } from "../src/lib/hr/letter-templates";
 import { BUILT_IN_LETTER_CODES, letterNumberFor, type LetterPayload } from "../src/lib/hr/letters";
 
@@ -142,6 +147,45 @@ section("The company's own components on a payslip");
   ok("a structure without any has no custom lines on its payslip", !plain.components.custom);
 }
 
+section("PF, ESI and TDS fixed at the split");
+{
+  const read = statutoryFixedOf({ pfEmployee: "1800", pfEmployer: 1800.4, esiEmployee: -5, esiEmployer: "", tds: null, junk: 9 });
+  ok("read from a structure: whole rupees, a negative or empty one left out", JSON.stringify(read) === JSON.stringify({ pfEmployee: 1800, pfEmployer: 1800 }), read);
+  ok("nothing stored is nothing fixed", JSON.stringify(statutoryFixedOf(null)) === "{}" && JSON.stringify(statutoryFixedOf([1, 2])) === "{}");
+
+  const c: SalaryComponents = { basic: 30000, hra: 15000, conveyance: 0, medical: 0, specialAllowance: 5000, otherAllowance: 0 };
+  const worked = monthlyStatutory(c, both);
+  ok("Deskzo's own: PF 12% of the ₹25,000 ceiling, no ESI above its limit", worked.pfEmployee === 3000 && worked.pfEmployer === 3000 && worked.esiEmployee === 0, worked);
+  const pf1800 = { pfEmployee: 1800, pfEmployer: 1800 };
+  ok("fixed, PF is ₹1,800 a side", JSON.stringify(monthlyStatutory(c, both, pf1800)) === JSON.stringify({ pfEmployee: 1800, pfEmployer: 1800, esiEmployee: 0, esiEmployer: 0 }));
+  ok("…and the CTC counts the employer's ₹1,800, not ₹3,000", annualCtcOf(c, both, pf1800) === (50000 + 1800) * 12, annualCtcOf(c, both, pf1800));
+  ok("PF switched off: a fixed PF counts for nothing", annualCtcOf(c, { pfApplicable: false, esiApplicable: true }, pf1800) === 50000 * 12);
+  ok("a stored structure's CTC has its fixed PF in", ctcOfStructure({ ...c, statutoryFixed: pf1800, pfApplicable: true, esiApplicable: true }) === (50000 + 1800) * 12);
+
+  for (const ctc of [240000, 300000, 600000, 960000]) {
+    for (const fixed of [pf1800, { esiEmployer: 650 }, { pfEmployer: 2000, esiEmployer: 0 }]) {
+      const { components, short } = splitCtc(ctc, DEFAULT_SPLIT_RULES, [], both, fixed);
+      const cost = annualCtcOf(components, both, fixed);
+      ok(`₹${ctc} split with ${JSON.stringify(fixed)} costs ₹${Math.round(cost)}`, short === 0 && Math.abs(cost - ctc) < 1, { cost, short });
+    }
+  }
+  const revised = scaleToCtc(c, annualCtcOf(c, both, pf1800), 720000, both, pf1800);
+  ok("a revision keeps to the new CTC with PF still ₹1,800", revised.short === 0 && Math.abs(annualCtcOf(revised.components, both, pf1800) - 720000) < 1);
+
+  const slipOf = (fixed: object, more: object = {}) => computePayslip({ components: c, flags: { ...both, ptApplicable: false }, fixed, monthDays: 30, lopDays: 0, month: 10, year: 2026, incomeTax: 1, ...more });
+  const full = slipOf({ ...pf1800, esiEmployee: 375, esiEmployer: 1625 });
+  ok("a full month takes them as fixed", full.pfEmployee === 1800 && full.pfEmployer === 1800 && full.esiEmployee === 375 && full.esiEmployer === 1625, full);
+  ok("…in deductions, net and cost", full.totalDeductions === 1800 + 375 + 1 && full.netPay === 50000 - 2176 && full.employerCost === 50000 + 1800 + 1625);
+  ok("…and ESI fixed above its limit says nothing about the limit", !full.warnings.some((w) => w.includes("ESI limit")), full.warnings);
+  const lop = slipOf(pf1800, { lopDays: 3 });
+  ok("three days' loss of pay: 27/30 of it, ₹1,620", lop.pfEmployee === 1620 && lop.pfEmployer === 1620, lop.pfEmployee);
+  const joiner = slipOf(pf1800, { employment: { firstDay: 21, lastDay: 30 } });
+  ok("joining on the 21st: 10/30 of it, ₹600", joiner.pfEmployee === 600, joiner.pfEmployee);
+  const off = computePayslip({ components: c, flags: { pfApplicable: false, esiApplicable: false, ptApplicable: false }, fixed: { ...pf1800, esiEmployee: 375 }, monthDays: 30, lopDays: 0, month: 10, year: 2026, incomeTax: 1 });
+  ok("PF and ESI off: nothing taken, fixed or not", off.pfEmployee === 0 && off.esiEmployee === 0);
+  ok("nothing fixed: Deskzo's own figures, as before", slipOf({}).pfEmployee === 3000);
+}
+
 section("An IFSC, cleaned of what a paste carries");
 const ifscCases: [string, string, boolean][] = [
   ["HDFC0001234", "HDFC0001234", true],
@@ -229,20 +273,30 @@ section("The signature on a letter");
 section("Wiring");
 {
   const card = read("src/components/hr/salary-card.tsx");
-  ok("the salary dialog splits as a CTC is typed", card.includes("splitCtc(amount, rules, defaults, flags)"));
+  ok("the salary dialog splits as a CTC is typed", card.includes("splitCtc(amount, rules, defaults, flags, fixed)"));
   ok("…revises by %, ₹ a year or a new CTC", card.includes('value="PERCENT"') && card.includes('value="AMOUNT"') && card.includes('value="CTC"'));
-  ok("…keeps the CTC as a part changes", card.includes("balanceToCtc(rest, target, f)"));
+  ok("…keeps the CTC as a part changes", card.includes("balanceToCtc(rest, target, f, fx)"));
+  ok("…offers PF, ESI and TDS to be typed over, and back to Deskzo's figure", card.includes("STATUTORY_ROWS.map") && card.includes("statutoryFixed: fixed") && card.includes("back to Deskzo's figure"));
+  ok("…an employer's share typed keeps to the CTC", card.includes('if (key === "pfEmployer" || key === "esiEmployer") rebalance('));
+  ok("…and a custom field is one button away", card.includes("Add custom field") && card.includes('addCustom("other")'));
+  ok("…a correction keeps its own day, not String() of the date", card.includes("toKey(current.effectiveFrom)") && !card.includes("String(current.effectiveFrom)"));
+  const structure = { userId: "u", basic: 1 };
+  ok("a structure's day is a calendar day: “Fri Oct 23” is refused, not read as 2001", !salaryStructureSchema.safeParse({ ...structure, effectiveFrom: "Fri Oct 23" }).success && salaryStructureSchema.safeParse({ ...structure, effectiveFrom: "2026-10-23" }).success);
   ok("…saves the components, the CTC and how it was revised", ["customComponents:", "annualCtc:", "revisionBasis:", "revisionValue:"].every((k) => card.includes(k)));
   ok("…corrects the current structure in place while it may", card.includes("updateSalaryStructure(") && card.includes("current?.editable"));
   const payroll = read("src/actions/payroll.ts");
   ok("a correction is refused once a locked month paid from it", /export async function updateSalaryStructure[\s\S]*?lockedRunFrom/.test(payroll));
   ok("the run stores the components it paid", payroll.includes("customEarnings"));
+  ok("the run pays PF and ESI fixed on the structure, and its TDS as FIXED", payroll.includes("statutoryFixedOf(structure.statutoryFixed)") && payroll.includes('fixedTds ? ("FIXED" as const)'));
+  ok("PF and ESI fixed are kept only for a scheme that's on", /function statutoryFixedOrRefusal[\s\S]*?if \(data\.pfApplicable\)[\s\S]*?if \(data\.esiApplicable\)/.test(payroll));
+  ok("the register says a TDS was fixed", read("src/components/hr/payroll-register.tsx").includes('s.incomeTaxBasis === "FIXED"'));
   ok("the payslip prints them", read("src/app/(print)/payslips/[id]/print/page.tsx").includes("customLinesOf(slip.customEarnings)"));
   ok("Settings › Salary structure is in the catalogue, payroll's", /key: "salary-structure"[\s\S]*?permission: "payroll\.manage"[\s\S]*?module: "payroll"/.test(read("src/lib/settings/catalogue.ts")));
   ok("People › Letters is in the menu, HR's", read("src/lib/modules.ts").includes('{ href: "/people/letters", label: "Letters", icon: FileText, permission: "hr.manage" }'));
   ok("the letter-templates actions are the HR module's", read("src/lib/module-actions.ts").includes('"letter-templates.ts": ["hr"]'));
   const clients = read("src/lib/tenancy/clients.ts");
-  ok("the new columns are read by name until every workspace has them", ["customEarnings", "revisionBasis", "signatureDataUrl", "letterSignByDefault"].every((c) => clients.includes(c)));
+  ok("the new columns are read by name until every workspace has them", ["customEarnings", "revisionBasis", "signatureDataUrl", "letterSignByDefault", "statutoryFixed"].every((c) => clients.includes(c)));
+  ok("the migration adds the column and FIXED", /ADD COLUMN "statutoryFixed" JSONB[\s\S]*ADD VALUE 'FIXED'/.test(read("prisma/migrations/20261123100000_salary_statutory_fixed/migration.sql")));
 }
 
 console.log(`\n${passes} passed, ${failures} failed`);

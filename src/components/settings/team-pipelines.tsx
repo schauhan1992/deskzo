@@ -32,6 +32,7 @@ export function TeamPipelines({
   people,
   automationsReady,
   canAutomate = false,
+  quotes = false,
 }: {
   pipelines: ManagedPipeline[];
   stages: ManagedStage[];
@@ -43,6 +44,8 @@ export function TeamPipelines({
   automationsReady: boolean;
   /** May open Automate, where the pipeline's automations are made and changed now. */
   canAutomate?: boolean;
+  /** Whether the workspace raises quotations, so a sales stage's rule may ask for one. */
+  quotes?: boolean;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -182,7 +185,7 @@ export function TeamPipelines({
         <h3 id="pipeline-stages" className="text-sm font-semibold text-text">
           Stages
         </h3>
-        <PipelineManager stages={stages} stored={stored} pipelineId={chosen.id} sales={chosen.sales} fields={fields} rules />
+        <PipelineManager stages={stages} stored={stored} pipelineId={chosen.id} sales={chosen.sales} fields={fields} rules quotes={quotes} />
       </section>
 
       <section className="space-y-3" aria-labelledby="pipeline-automations">

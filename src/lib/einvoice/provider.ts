@@ -51,7 +51,7 @@ class MockProvider implements EInvoiceProvider {
         SellerGstin: doc.seller.gstin,
         BuyerGstin: doc.buyer.gstin ?? "URP",
         DocNo: doc.docNumber,
-        DocTyp: doc.docType === "CREDIT_NOTE" ? "CRN" : "INV",
+        DocTyp: doc.docType === "CREDIT_NOTE" ? "CRN" : doc.docType === "DEBIT_NOTE" ? "DBN" : "INV",
         // India's day, as the IRP dates a document — not the UTC one.
         DocDt: indiaClock.dateKey(doc.issueDate),
         TotInvVal: doc.total,

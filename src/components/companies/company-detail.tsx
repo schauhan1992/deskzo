@@ -80,6 +80,8 @@ import { CompanyLinks } from "@/components/companies/company-links";
 import { CompanyStageBadge } from "@/components/companies/company-stage-badge";
 import { CompanyRolesControl } from "@/components/companies/company-roles-control";
 import { ActivityPanelButton } from "@/components/activity/activity-panel-button";
+import { StatementCollectPanel } from "@/components/collect/statement-collect-panel";
+import { formatCompanyId } from "@/lib/order-id";
 import { activityGroupsFor } from "@/lib/activity/timeline";
 import { rolesAddable, rolesOf } from "@/lib/companies/roles";
 import { vendorStatement } from "@/actions/payable";
@@ -1118,6 +1120,8 @@ export async function CompanyDetail({
             <RecordMeetings record={{ kind: "company", id: company.id }} viewerId={userId} emptyText="No meetings scheduled with this customer yet — from here, a lead, a contact or a ticket." />
           )}
 
+          {/* Payment reminders for this customer, and MSME interest on its late payments (src/lib/collect). */}
+          {activeTab === "statement" && statement && <StatementCollectPanel companyId={company.id} companyRef={formatCompanyId(company.companySeq)} />}
           {activeTab === "statement" && statement && <CompanyStatement statement={statement} />}
           {activeTab === "statement" && statement && asVendor && (
             <Card>

@@ -5,6 +5,7 @@ import { calculateOrderAmount } from "@/lib/gst";
 import { formatOrderId } from "@/lib/order-id";
 import { assessCredit, TERMS_DAYS, type Bill, type CreditAssessment } from "@/lib/credit/engine";
 import { workspaceClock } from "@/lib/time/workspace";
+import { RECEIVABLE_DOC_TYPE } from "@/lib/trade-documents";
 
 /**
  * The database side of the credit engine: a customer's history as `Bill`s, then assessed.
@@ -39,7 +40,8 @@ export async function loadCreditSubjects(companyIds: string[]): Promise<Map<stri
       select: { id: true, paymentTerms: true, creditLimit: true, relationshipType: true, resellerProfile: { select: { creditLimit: true } } },
     }),
     db.tradeDocument.findMany({
-      where: { companyId: { in: ids }, docType: "INVOICE", direction: "SALES", status: { in: [...BILLED_INVOICE] } },
+      // How they pay what's owed: invoices, and the debit notes that add to them.
+      where: { companyId: { in: ids }, docType: RECEIVABLE_DOC_TYPE, direction: "SALES", status: { in: [...BILLED_INVOICE] } },
       select: {
         id: true,
         companyId: true,

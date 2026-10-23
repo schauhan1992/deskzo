@@ -22,7 +22,8 @@
  * Read-only.
  */
 import type { PrismaClient, Prisma } from "@prisma/client";
-import { DOCUMENT_SOURCES, PAYMENT_SOURCES } from "@/lib/ledger/posting";
+import { DOCUMENT_SOURCES, PAYMENT_SOURCES, sourceIn } from "@/lib/ledger/posting";
+import { docTypeIn } from "@/lib/trade-documents";
 
 type Client = PrismaClient | Prisma.TransactionClient;
 
@@ -39,9 +40,9 @@ export async function findLedgerDrift(db: Client): Promise<{ problems: DriftProb
   // Issued, and nothing of its own was ever posted. An exchange difference naming it is not its posting.
   const unposted = await db.tradeDocument.findMany({
     where: {
-      docType: { in: [...DOCUMENT_SOURCES] },
+      docType: docTypeIn(DOCUMENT_SOURCES),
       status: { notIn: ["DRAFT", "CANCELLED"] },
-      journalEntries: { none: { source: { in: [...DOCUMENT_SOURCES] } } },
+      journalEntries: { none: { source: sourceIn(DOCUMENT_SOURCES) } },
     },
     select: { docNumber: true, docType: true },
   });
@@ -52,10 +53,10 @@ export async function findLedgerDrift(db: Client): Promise<{ problems: DriftProb
   // Cancelled, and something that names it still stands: its own posting, or an exchange difference a
   // payment booked against it.
   const cancelled = await db.tradeDocument.findMany({
-    where: { status: "CANCELLED", journalEntries: { some: { source: { in: [...DOCUMENT_SOURCES, "FX"] }, ...LIVE } } },
+    where: { status: "CANCELLED", journalEntries: { some: { source: sourceIn([...DOCUMENT_SOURCES, "FX"]), ...LIVE } } },
     select: {
       docNumber: true,
-      journalEntries: { where: { source: { in: [...DOCUMENT_SOURCES, "FX"] }, ...LIVE }, select: { entryNumber: true, source: true } },
+      journalEntries: { where: { source: sourceIn([...DOCUMENT_SOURCES, "FX"]), ...LIVE }, select: { entryNumber: true, source: true } },
     },
   });
   for (const d of cancelled) {

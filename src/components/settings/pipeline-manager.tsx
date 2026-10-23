@@ -12,6 +12,7 @@ import { Dialog } from "@/components/ui/dialog";
 import {
   MAIN_PIPELINE_ID,
   PIPELINE_LIMITS,
+  QUOTE_RULE,
   RULE_FIELDS,
   RULE_LIMIT,
   STAGE_COLORS,
@@ -48,6 +49,7 @@ export function PipelineManager({
   sales = true,
   fields = [],
   rules = false,
+  quotes = false,
 }: {
   stages: Stage[];
   stored: boolean;
@@ -57,11 +59,17 @@ export function PipelineManager({
   fields?: { key: string; label: string }[];
   /** Whether stages can have rules yet (the workspace has the team pipelines). */
   rules?: boolean;
+  /** Whether the workspace raises quotations (Sales Documents), so a sales stage may ask for one. */
+  quotes?: boolean;
 }) {
   const stages = all.filter((s) => s.pipelineId === pipelineId);
   const kinds = sales ? KIND_LABELS : PROCESS_KIND_LABELS;
   const customLabels = new Map(fields.map((f) => [f.key, f.label]));
-  const ruleOptions = [...RULE_FIELDS.map((f) => ({ key: f.key as string, label: f.label as string })), ...fields.map((f) => ({ key: `cf:${f.key}`, label: f.label }))];
+  // An issued quotation is a sales stage's to ask for, and only where quotations are raised at all.
+  const ruleOptions = [
+    ...RULE_FIELDS.filter((f) => f.key !== QUOTE_RULE || (sales && quotes)).map((f) => ({ key: f.key as string, label: f.label as string })),
+    ...fields.map((f) => ({ key: `cf:${f.key}`, label: f.label })),
+  ];
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);

@@ -16,7 +16,7 @@ export type Ticks = "sending" | "failed" | "sent" | "delivered" | "read";
 /** WhatsApp's colours, light — and on iOS dark too, from WhatsApp's own dark theme. */
 export const CHAT = {
   wallpaper: dynamic("#EFEAE2", "#0B141A"),
-  mine: dynamic("#E3E6FF", "#3730A3"),
+  mine: dynamic("#E3E6FF", "#1E40AF"),
   theirs: dynamic("#FFFFFF", "#1F2C34"),
   read: "#53BDEB",
   system: dynamic("#FFF5C4", "#3A3520"),
@@ -24,7 +24,7 @@ export const CHAT = {
   note: dynamic("#54656F", "#CBD5E1"),
   /** A quote or a file inside a bubble: a little darker than the bubble, or lighter in the dark. */
   inset: dynamic("rgba(0,0,0,0.05)", "rgba(255,255,255,0.08)"),
-  /** The time in a bubble — the muted grey, lighter in the dark where it sits on my indigo. */
+  /** The time in a bubble — the muted grey, lighter in the dark where it sits on my blue. */
   meta: dynamic("#64748B", "#CBD5E1"),
 };
 

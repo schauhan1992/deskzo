@@ -70,7 +70,8 @@ export type DocumentMail = {
   subject: string;
   html: string;
   text: string;
-  attachment: { filename: string; contentType: string; content: Buffer };
+  /** The document's PDF. None for a mail that is itself the document — a monthly statement (src/lib/collect/reminders.ts). */
+  attachment?: { filename: string; contentType: string; content: Buffer };
 };
 
 export type DocumentMailOutcome = { ok: true; from: string; via: SenderChoice; label: string } | { ok: false; error: string };
@@ -83,7 +84,7 @@ export async function sendDocumentMail(choice: Exclude<SenderChoice, "CONNECT">,
       subject: mail.subject,
       html: mail.html,
       to: mail.to,
-      attachments: [{ name: mail.attachment.filename, contentType: mail.attachment.contentType, bytes: mail.attachment.content }],
+      attachments: mail.attachment ? [{ name: mail.attachment.filename, contentType: mail.attachment.contentType, bytes: mail.attachment.content }] : [],
     });
     return sent.ok ? { ok: true, from: sent.mailbox, via: "OWN", label: `your ${MAIL_NAMES[sent.provider]}` } : { ok: false, error: sent.error };
   }
@@ -102,7 +103,7 @@ export async function sendDocumentMail(choice: Exclude<SenderChoice, "CONNECT">,
         subject: mail.subject,
         html: mail.html,
         text: mail.text,
-        attachments: [mail.attachment],
+        attachments: mail.attachment ? [mail.attachment] : [],
       },
       "TRANSACTIONAL",
       { delivering: true },
@@ -123,7 +124,7 @@ export async function sendDocumentMail(choice: Exclude<SenderChoice, "CONNECT">,
       subject: mail.subject,
       text: mail.text,
       html: mail.html,
-      attachments: [mail.attachment],
+      attachments: mail.attachment ? [mail.attachment] : [],
       // The log keeps the recipients; the subject (a customer's document number) stays the workspace's.
       logSubject: "A workspace's document",
     });

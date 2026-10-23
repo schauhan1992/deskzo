@@ -16,6 +16,7 @@ import { knownHsnCodes } from "@/lib/platform/hsn-directory";
 import { normaliseHsn } from "@/lib/items/catalogue-import";
 import { RAISED_IN_DESKZO } from "@/lib/documents/imported";
 import type { RegistrationChoice } from "@/lib/branches/format";
+import { docTypeIn } from "@/lib/trade-documents";
 
 /**
  * The statutory returns and the cash flow statement.
@@ -184,7 +185,7 @@ export async function gstr1(params: { month: number; year: number; gstRegistrati
   const registration = await returnRegistration(params.gstRegistrationId);
   const docs = await db.tradeDocument.findMany({
     where: {
-      docType: { in: ["INVOICE", "CREDIT_NOTE"] },
+      docType: docTypeIn(["INVOICE", "CREDIT_NOTE", "DEBIT_NOTE"]),
       issueDate: { gte: from, lt: before },
       // A document brought from the old system was reported from there (src/lib/documents/imported.ts).
       ...RAISED_IN_DESKZO,
@@ -230,7 +231,7 @@ export async function gstr3b(params: { month: number; year: number; gstRegistrat
   const ofRegistration = registration ? { gstRegistrationId: registration.id } : {};
   const [outward, inward, ledger] = await Promise.all([
     db.tradeDocument.findMany({
-      where: { docType: { in: ["INVOICE", "CREDIT_NOTE"] }, issueDate: { gte: from, lt: before }, ...RAISED_IN_DESKZO, ...ofRegistration },
+      where: { docType: docTypeIn(["INVOICE", "CREDIT_NOTE", "DEBIT_NOTE"]), issueDate: { gte: from, lt: before }, ...RAISED_IN_DESKZO, ...ofRegistration },
       select: documentSelect,
     }),
     db.tradeDocument.findMany({
@@ -362,7 +363,7 @@ export async function tdsSummary(params: { month: number; year: number }) {
   const { from, before, to } = monthBounds(params.month, params.year);
   const docs = await db.tradeDocument.findMany({
     where: {
-      docType: { in: ["INVOICE", "BILL"] },
+      docType: docTypeIn(["INVOICE", "DEBIT_NOTE", "BILL"]),
       issueDate: { gte: from, lt: before },
       ...RAISED_IN_DESKZO,
       withholdingAmount: { not: 0 },

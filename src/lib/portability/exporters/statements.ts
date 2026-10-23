@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { companyAccess, documentAccess, paymentAccess } from "@/lib/authz/access";
 import type { Exporter } from "./types";
+import { docTypeIn } from "@/lib/trade-documents";
 
 /**
  * What each account was invoiced, what they have paid, and what is still outstanding.
@@ -46,7 +47,7 @@ export const statementsExporter: Exporter = async (scope) => {
 
   const documents = await db.tradeDocument.groupBy({
     by: ["companyId", "docType"],
-    where: { AND: [{ companyId: { in: ids }, direction: "SALES", status: { in: [...COUNTED] }, docType: { in: ["INVOICE", "CREDIT_NOTE"] } }, documentScope] },
+    where: { AND: [{ companyId: { in: ids }, direction: "SALES", status: { in: [...COUNTED] }, docType: docTypeIn(["INVOICE", "CREDIT_NOTE", "DEBIT_NOTE"]) }, documentScope] },
     // What a document brought from the old system had settled there is taken off what it adds: it came
     // across with what was left (src/lib/documents/imported.ts). Zero for everything raised here.
     _sum: { total: true, paidBefore: true },

@@ -187,12 +187,14 @@ export function BalanceSummaryReport({ summary, statementTab }: { summary: Balan
 }
 
 /** Receivables' and Payables' views: aged, as of today; the aging report and the balance summary, as of a day. */
-export function BalanceViews({ base, current, q }: { base: "/receivables" | "/payables"; current: "aged" | "aging" | "balances"; q?: string }) {
+export function BalanceViews({ base, current, q }: { base: "/receivables" | "/payables"; current: "aged" | "aging" | "balances" | "insights"; q?: string }) {
   const views = [
     { key: "aged", label: "Aged", query: {} },
     // As of any day, aged by due date or document date, in chosen intervals (src/components/receivables/aging-report.tsx).
     { key: "aging", label: "Aging report", query: { view: "aging" } },
     { key: "balances", label: "Balance summary", query: { view: "balances" } },
+    // Receivables only: DSO by month and the next eight weeks' collections (src/lib/collect/insights.ts).
+    ...(base === "/receivables" ? ([{ key: "insights", label: "DSO & forecast", query: { view: "insights" } }] as const) : []),
   ] as const;
   return (
     <nav aria-label="Views" className="mt-4 flex flex-wrap items-center gap-2">

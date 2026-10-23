@@ -4,7 +4,8 @@ import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
 import { definitionsFor, notMigratedYet } from "@/lib/custom-fields/server";
 import { leadStages, stageWrite, stagesOfLeads, type Pipeline } from "@/lib/pipeline/server";
-import { missingForStage, pipelineById, ruleFieldLabel, ruleRefusal, stageChangeNote, stageForStatus, type LeadStageDef } from "@/lib/pipeline/rules";
+import { missingForStage, pipelineById, QUOTE_RULE, ruleFieldLabel, ruleRefusal, stageChangeNote, stageForStatus, type LeadStageDef } from "@/lib/pipeline/rules";
+import { hasQuoteSent, quoteRuleApplies } from "@/lib/leads/quote-status";
 import { carryOnWonLead } from "@/lib/pipeline/carry-on";
 import { emitLeadMoved } from "@/lib/automate/emit-leads";
 import type { EventCause } from "@/lib/automate/action-types";
@@ -53,17 +54,22 @@ async function leadCustomFields(leadId: string): Promise<unknown> {
 
 /**
  * Why a lead can't move into this stage under its rule (Settings → Pipeline), in words — or null. The
- * rule asks for fields before the lead moves there: a value and a close date before "Proposal sent".
+ * rule asks for fields before the lead moves there: a value and a close date before "Proposal sent" —
+ * and may ask for an issued quotation (`QUOTE_RULE`), which only counts where the workspace can raise
+ * one (`quoteRuleApplies`).
  */
 export async function ruleStops(
   target: { label: string; requiredFields: string[] },
   lead: { id: string; estimatedValue: unknown; expectedCloseDate: unknown; contactId: string | null; ownerUserId: string | null; description: string | null },
 ): Promise<string | null> {
-  if (target.requiredFields.length === 0) return null;
-  const missing = missingForStage(target, { ...lead, customFields: await leadCustomFields(lead.id) });
+  const asks = target.requiredFields.includes(QUOTE_RULE) && !(await quoteRuleApplies()) ? target.requiredFields.filter((k) => k !== QUOTE_RULE) : target.requiredFields;
+  if (asks.length === 0) return null;
+  const quoted = asks.includes(QUOTE_RULE) ? await hasQuoteSent(lead.id) : undefined;
+  const missing = missingForStage({ requiredFields: asks }, { ...lead, customFields: await leadCustomFields(lead.id), quoted });
   if (missing.length === 0) return null;
   const labels = new Map((await definitionsFor("LEAD")).map((d) => [d.key, d.label]));
-  return ruleRefusal(target.label, missing.map((k) => ruleFieldLabel(k, labels)));
+  const fields = missing.filter((k) => k !== QUOTE_RULE);
+  return ruleRefusal(target.label, fields.map((k) => ruleFieldLabel(k, labels)), missing.includes(QUOTE_RULE));
 }
 
 /**
