@@ -929,17 +929,18 @@ const APP_PRIVACY: SitePage = {
               [{ text: "Chat: ", strong: true }, { text: "the messages, photos and files you send, to the people in that chat in your company's {siteName}, kept as your company's chat settings say. An alert in the app says who wrote, never what." }],
               [{ text: "What you do in the app: ", strong: true }, { text: "clocking in and out, visits you plan and write up, meetings you schedule, tasks you add or tick off, leave you ask for, your decisions on what waits for your approval, and the pages of {siteName} you open in it — as when you use {siteName} on the web." }],
               [{ text: "About the phone: ", strong: true }, { text: "its model and the app's version when it is paired, and its network address when it connects — kept with the device, so your company's administrators can see your paired phones and sign one out." }],
+              [{ text: "Which version of the app it runs, ", strong: true }, { text: "to {siteName} itself at deskzo.com, each time the app opens — to fetch a newer version of the app's own screens when there is one. Only the version and which kind of phone; nothing about you or your company." }],
               [{ text: "Its notification address, ", strong: true }, { text: "if you let the app notify you: the address Google's Firebase Cloud Messaging gives the phone, to your company's {siteName}, so it can send you what your bell says — a lead given to you, something waiting for your approval, a task, a ticket's reply, a chat message. A notification carries its title and where it leads, nothing behind it; for chat, who wrote, never what." }],
             ],
           },
           {
             type: "paragraph",
-            text: "Everything travels encrypted (HTTPS), only to your company's {siteName}. The app has no advertising and no analytics, and passes nothing to anyone else — except that notifications reach the phone through Google's Firebase Cloud Messaging, which carries each one's title to it.",
+            text: "Everything travels encrypted (HTTPS), only to your company's {siteName} — and the version check to {siteName} itself. The app has no advertising and no analytics, and passes nothing to anyone else — except that notifications reach the phone through Google's Firebase Cloud Messaging, which carries each one's title to it.",
           },
           { type: "heading", level: 2, text: "What stays on your phone" },
           {
             type: "paragraph",
-            text: "Your workspace's address and the phone's own sign-in key, whether call sync is on and how far it has got — in the app's private storage, which other apps cannot read and which is not backed up.",
+            text: "Your workspace's address and the phone's own sign-in key, whether call sync is on and how far it has got, and the newest version of the app's screens it has fetched — in the app's private storage, which other apps cannot read and which is not backed up.",
           },
           { type: "heading", level: 2, text: "How long it is kept" },
           {

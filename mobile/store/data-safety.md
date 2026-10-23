@@ -90,6 +90,7 @@ when the app sends it off the phone, and **shared** when it is passed to a third
 - **Personal info** — the user's name and email are shown from their Deskzo account; the app sends none.
 - **Location, at any other time** — read only when the user clocks in or out, checks in or out of a visit, or signs in where the company requires it (above). (The network address a phone connects from is kept with the device for the company's security log; it is not turned into a location.)
 - **Audio** — calls are not recorded.
+- **Update checks** (23 Oct 2026) — at each launch the app asks deskzo.com whether a newer version of its own screens is published, saying which version and native build it runs (`expo-updates`). No user, account or device identifier goes with it.
 - **Messages, Calendar, Files and docs, Web browsing, App info and performance, Health** — none. (The app's calendar is the user's Deskzo calendar; the phone's own calendar is never read. Financial info: only the expense claims above — no payment details.)
 
 ## Security practices

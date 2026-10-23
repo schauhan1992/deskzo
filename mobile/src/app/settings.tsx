@@ -2,14 +2,14 @@ import { useCallback, useState } from "react";
 import { Alert, Linking, ScrollView, Text } from "react-native";
 import * as Notifications from "expo-notifications";
 import { useFocusEffect, useRouter } from "expo-router";
+import { AppVersion } from "@/components/app-version";
 import { Button, Card, Heading, Notice, styles } from "@/components/ui";
-import { APP_VERSION } from "@/lib/config";
 import { when } from "@/lib/format";
 import { calls } from "@/lib/native";
 import { useSession } from "@/lib/session";
 import { PUSH_BUILT_IN, registerForPush } from "@/lib/push";
 
-/** Who this phone is signed in as, notifications, call sync, and signing out. */
+/** Who this phone is signed in as, notifications, call sync, which version of the app it runs, and signing out. */
 export default function Settings() {
   const router = useRouter();
   const { me, signOut } = useSession();
@@ -91,6 +91,8 @@ export default function Settings() {
         </>
       )}
 
+      <AppVersion />
+
       <Heading>This phone</Heading>
       <Button
         title="Sign out of Deskzo"
@@ -102,7 +104,6 @@ export default function Settings() {
           ])
         }
       />
-      <Notice>Deskzo app {APP_VERSION}</Notice>
     </ScrollView>
   );
 }

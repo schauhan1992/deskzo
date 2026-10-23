@@ -2731,3 +2731,47 @@ model AiUsage {
   @@index([tenantId, userId, at])
   @@map("ai_usage")
 }
+
+enum AppUpdateKind {
+  /// New screens for the phone: a manifest naming the JavaScript and the files it needs.
+  UPDATE
+  /// Back to what came inside the installed app — for an update that turned out wrong.
+  ROLL_BACK_TO_EMBEDDED
+}
+
+/// A version of the Deskzo phone app's own screens, sent over the air (owner, 23 Oct 2026) — published by
+/// `npm run app:update` (scripts/app-update.ts) and served from deskzo.com/api/app-updates (src/lib/app-updates).
+/// Each is signed on the computer that published it with Deskzo's update key; the server holds only the certificate,
+/// takes nothing it doesn't verify, and serves the body byte for byte as it was signed. A phone takes an update only
+/// for its own native build (`runtimeVersion`, a fingerprint of the app's native parts).
+model AppUpdate {
+  /// The update's own id, from inside its signed body (a UUID).
+  id             String        @id
+  platform       String
+  runtimeVersion String
+  kind           AppUpdateKind
+  /// The manifest (or the rollback directive) exactly as it was signed.
+  body           String
+  /// Its expo-signature header: `sig="…", keyid="main", alg="rsa-v1_5-sha256"`.
+  signature      String
+  /// When it was made — from the signed body. Phones run the newest they have.
+  createdAt      DateTime
+  publishedAt    DateTime      @default(now())
+  /// The files it needs, by hash (app_update_assets).
+  assetHashes    String[]
+
+  @@index([platform, runtimeVersion, createdAt])
+  @@map("app_updates")
+}
+
+/// A file an app update needs — its JavaScript bundle, a font, an image — once, by its hash, however many updates use it.
+model AppUpdateAsset {
+  /// base64url SHA-256 of the bytes, as the manifest names it; the phone checks it before using the file.
+  hash        String   @id
+  contentType String
+  size        Int
+  bytes       Bytes
+  createdAt   DateTime @default(now())
+
+  @@map("app_update_assets")
+}

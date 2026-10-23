@@ -90,9 +90,10 @@ const MAINTENANCE_PAGE = `<!doctype html>
  */
 /**
  * API paths answered on the platform's own address — the scheduled ticks, which fan out over every
- * workspace, and the billing gateways' webhooks.
+ * workspace, the billing gateways' webhooks, and the phone app's over-the-air updates (src/app/api/app-updates:
+ * one app for every workspace, so asked of deskzo.com; signed updates only, src/lib/app-updates/protocol.ts).
  */
-const PLATFORM_API = /^\/api\/(marketing\/tick|backup\/tick|platform\/tick|platform\/billing\/(stripe|razorpay)|platform\/inbound-email)\/?$/;
+const PLATFORM_API = /^\/api\/(marketing\/tick|backup\/tick|platform\/tick|platform\/billing\/(stripe|razorpay)|platform\/inbound-email|app-updates\/(manifest|publish|history|assets\/[A-Za-z0-9_-]{43}))\/?$/;
 
 /** Where Office looks for the add-in scripts a workspace allows — see the rewrite in the proxy. */
 const OFFICE_ADDINS_ALLOWED = "/.well-known/microsoft-officeaddins-allowed.json";
