@@ -19,6 +19,7 @@ import { NONE, ROW_CAP, type FactSource, type SourceContext } from "./types";
 import { listLeadMasker } from "@/lib/leads/masking";
 import { maskCustomValues } from "@/lib/authz/fields";
 import { RAISED_IN_DESKZO } from "@/lib/documents/imported";
+import { AGING_BUCKETS, agingBucket, daysOverdue, settleInvoice } from "@/lib/receivables";
 
 /**
  * The fact tables, and everything each one can be sliced by.
@@ -454,7 +455,10 @@ type InvoiceRow = Awaited<ReturnType<typeof loadInvoices>>[number];
 
 async function loadInvoices(ctx: SourceContext) {
   const where = await scoped(ctx, await documentAccess(ctx.userId, "view"));
-  return withOwnFields(ctx, (want) =>
+  // What each invoice has had paid and credited against it — and, on one brought from the old system, settled
+  // there (`paidBefore`, read by name: NOT_YET_EVERYWHERE) — so its balance is the receivables module's own
+  // (settleInvoice). A workspace without the column yet reads it as nothing settled before Deskzo.
+  const read = (want: Wanted, settledBefore: boolean) =>
     db.tradeDocument.findMany({
       where: {
         direction: "SALES",
@@ -476,12 +480,45 @@ async function loadInvoices(ctx: SourceContext) {
             customFields: want.has("COMPANY"),
           },
         },
+        branch: { select: { name: true } },
+        payments: { select: { amount: true } },
+        creditsReceived: { select: { amount: true } },
       },
+      omit: { paidBefore: !settledBefore },
       take: ROW_CAP,
       orderBy: { issueDate: "asc" },
-    }),
-  );
+    });
+  return withOwnFields(ctx, async (want) => {
+    try {
+      return await read(want, true);
+    } catch (err) {
+      if (!notMigratedYet(err)) throw err;
+      return read(want, false);
+    }
+  });
 }
+
+/**
+ * An invoice's settlement, as the receivables module works it out: paid, credited and still due. A credit note
+ * is the credit, not something owed, so it has nothing received and nothing outstanding of its own.
+ */
+const settlementOf = (r: InvoiceRow) => {
+  if (r.docType === "CREDIT_NOTE") return { paid: 0, balance: 0 };
+  const sum = (rows: { amount: unknown }[]) => rows.reduce((t, x) => t + money(x.amount), 0);
+  const before = "paidBefore" in r ? money((r as { paidBefore?: unknown }).paidBefore) : 0;
+  return settleInvoice(money(r.total), sum(r.payments), sum(r.creditsReceived), before);
+};
+
+/** Where an invoice stands today: paid, part-paid, unpaid and not yet due, or overdue. */
+function paymentStatusOf(r: InvoiceRow): string {
+  if (r.docType === "CREDIT_NOTE") return "Credit note";
+  const s = settlementOf(r);
+  if (s.balance < 0.01) return "Paid";
+  if (daysOverdue(r.dueDate, r.issueDate, new Date()) > 0) return "Overdue";
+  return s.paid > 0 ? "Partially paid" : "Unpaid";
+}
+
+const AGING_LABEL = new Map<string, string>(AGING_BUCKETS.map((b) => [b.key, b.label]));
 
 const invoicesSource: FactSource<InvoiceRow> = {
   key: "invoices",
@@ -505,6 +542,20 @@ const invoicesSource: FactSource<InvoiceRow> = {
       value: (r) => (r.docType === "CREDIT_NOTE" ? -money(r.total) : money(r.total)),
     },
     { key: "tax", label: "Tax", unit: "currency", value: (r) => money(r.cgstAmount) + money(r.sgstAmount) + money(r.igstAmount) },
+    {
+      key: "received",
+      label: "Amount received",
+      unit: "currency",
+      description: "Paid against each invoice so far, as the receivables module settles it.",
+      value: (r) => settlementOf(r).paid,
+    },
+    {
+      key: "outstanding",
+      label: "Outstanding",
+      unit: "currency",
+      description: "What is still due on each invoice today, after payments and credit notes.",
+      value: (r) => settlementOf(r).balance,
+    },
     { key: "count", label: "Number of documents", unit: "number", value: () => 1 },
   ],
   dimensions: [
@@ -516,6 +567,13 @@ const invoicesSource: FactSource<InvoiceRow> = {
     { key: "docType", label: "Document type", of: (r) => r.docType.replaceAll("_", " ") },
     { key: "status", label: "Status", of: (r) => r.status.replaceAll("_", " ") },
     { key: "placeOfSupply", label: "Place of supply", of: (r) => r.placeOfSupplyCode || NONE },
+    { key: "branch", label: "Branch", of: (r) => r.branch?.name ?? NONE },
+    { key: "paymentStatus", label: "Payment status", of: paymentStatusOf },
+    {
+      key: "ageing",
+      label: "Age past due",
+      of: (r) => (r.docType === "CREDIT_NOTE" || settlementOf(r).balance < 0.01 ? NONE : (AGING_LABEL.get(agingBucket(r.dueDate, r.issueDate, new Date())) ?? NONE)),
+    },
   ],
   customFields: [{ entity: "COMPANY", noun: "Customer", values: (r) => r.company.customFields }],
 };
