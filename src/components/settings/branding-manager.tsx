@@ -9,6 +9,7 @@ import { BRAND_PRESETS, HEX_PATTERN, brandInitials, contrastColor, type Branding
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/card";
+import { DeskzoIcon } from "@/components/brand/deskzo-logo";
 import { cn } from "@/lib/utils";
 
 export function BrandingManager({ branding }: { branding: Branding }) {
@@ -22,7 +23,6 @@ export function BrandingManager({ branding }: { branding: Branding }) {
   const [saved, setSaved] = useState(false);
   const [isPending, startTransition] = useTransition();
   const logoInput = useRef<HTMLInputElement>(null);
-  const faviconInput = useRef<HTMLInputElement>(null);
 
   const validColor = HEX_PATTERN.test(primaryColor);
   const preview: Branding = { ...branding, appName, shortName: shortName || null, primaryColor };
@@ -191,38 +191,14 @@ export function BrandingManager({ branding }: { branding: Branding }) {
           <p className="text-xs text-subtle">PNG, JPEG, SVG or WebP up to 256KB. A wide logo works best.</p>
         </div>
 
+        {/* Deskzo's icon on the browser tab and the installed app, on every workspace; the logo above shows inside (owner, 23 Oct 2026). */}
         <div className="space-y-2">
-          <Label>Favicon</Label>
+          <Label>Browser tab and app icon</Label>
           <div className="flex items-center gap-3 rounded-base border border-line bg-surface-sunken p-3">
-            {branding.faviconDataUrl ? (
-              <Image src={branding.faviconDataUrl} alt="Favicon" width={24} height={24} unoptimized className="h-6 w-6 object-contain" />
-            ) : (
-              <span className="text-xs text-subtle">Using the default icon.</span>
-            )}
-            <div className="ml-auto flex gap-1">
-              <Button type="button" variant="secondary" size="sm" disabled={isPending} onClick={() => faviconInput.current?.click()}>
-                <Upload className="h-3.5 w-3.5" />
-                Upload
-              </Button>
-              {branding.faviconDataUrl && (
-                <Button type="button" variant="ghost" size="sm" disabled={isPending} onClick={() => remove("favicon")}>
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              )}
-            </div>
+            <DeskzoIcon className="h-6 w-6 shrink-0" />
+            <span className="text-xs text-subtle">Deskzo&apos;s icon, on the browser tab and the installed app (Windows, Mac and phone).</span>
           </div>
-          <input
-            ref={faviconInput}
-            type="file"
-            accept="image/png,image/x-icon,image/svg+xml"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) upload("favicon", file);
-              e.target.value = "";
-            }}
-          />
-          <p className="text-xs text-subtle">A square PNG or ICO, 32×32 or larger.</p>
+          <p className="text-xs text-subtle">Your logo shows inside the app — the sidebar and the sign-in page.</p>
         </div>
       </div>
 

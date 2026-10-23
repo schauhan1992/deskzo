@@ -1,6 +1,7 @@
 import type { Metadata, MetadataRoute } from "next";
 import { getBranding } from "@/actions/branding";
 import { DEFAULT_BRANDING, HEX_PATTERN, type Branding } from "@/lib/branding";
+import { deskzoIconDataUrl } from "@/lib/brand/deskzo-logo";
 
 /**
  * The workspace as an app on a phone's home screen (owner, 21 Oct 2026) — an iPhone's above all, which has
@@ -8,10 +9,24 @@ import { DEFAULT_BRANDING, HEX_PATTERN, type Branding } from "@/lib/branding";
  * signed in like the browser. It is the web itself, so it is never out of date; what only the Android app can
  * do (reading the call log, blocking screenshots) no iPhone app may do at all.
  *
- * Each workspace's address installs as its own app — the manifest, the icons and the name are the
- * workspace's branding (Settings › Branding). Served under /api/pwa, which needs no session: the same name,
- * colour and logo its sign-in page shows anybody. The service worker is public/sw.js.
+ * Each workspace's address installs as its own app — on a phone, and on a Windows or Mac computer from Chrome or
+ * Edge — under the workspace's name and colour (Settings › Branding), with Deskzo's icon (owner, 23 Oct 2026:
+ * Deskzo's icon on the apps and the browser tab, the company's own logo inside them). Served under /api/pwa,
+ * which needs no session. The service worker is public/sw.js.
  */
+
+/**
+ * The browser tab's icon, on every workspace and on Deskzo's own pages: Deskzo's, sharp at any size, with the
+ * .ico for browsers that don't take an SVG. A company's own logo shows inside the app, not here.
+ */
+export function deskzoFavicons(): { icon: { url: string; sizes?: string; type?: string }[] } {
+  return {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: deskzoIconDataUrl(), type: "image/svg+xml" },
+    ],
+  };
+}
 
 export const PWA_MANIFEST_PATH = "/api/pwa/manifest";
 
@@ -66,38 +81,10 @@ export function pngSize(bytes: Uint8Array): { width: number; height: number } | 
   return { width: view.getUint32(16), height: view.getUint32(20) };
 }
 
-/** Below this a picture blurs on a home screen; the workspace's initials are drawn instead. */
-const MIN_ICON_PIXELS = 96;
-
-/**
- * The picture on the icon: the favicon, else the logo — only one that stays sharp and square on a home
- * screen. An SVG favicon always does; a PNG must be 96 pixels or more, and a logo nearly square (most logos
- * are a wide wordmark, unreadable shrunk into a square). Anything else — a JPEG, WebP or .ico, whose size
- * isn't read here — leaves the initials on the brand colour, which always read.
- */
-export function iconPicture(branding: Branding): string | null {
-  const candidates: { dataUrl: string | null; svg: boolean }[] = [
-    { dataUrl: branding.faviconDataUrl, svg: true },
-    { dataUrl: branding.logoDataUrl, svg: false },
-  ];
-  for (const { dataUrl, svg } of candidates) {
-    const match = dataUrl ? /^data:(image\/png|image\/svg\+xml);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl) : null;
-    if (!match) continue;
-    if (match[1] === "image/svg+xml") {
-      if (svg) return dataUrl;
-      continue;
-    }
-    const size = pngSize(Buffer.from(match[2], "base64"));
-    if (!size || Math.min(size.width, size.height) < MIN_ICON_PIXELS) continue;
-    const ratio = size.width / size.height;
-    if (ratio >= 0.8 && ratio <= 1.25) return dataUrl;
-  }
-  return null;
-}
 
 /**
  * What a workspace page adds to its head so it installs as the workspace's app — on the signed-in pages
- * and the sign-in page, never the public ones (a customer's form or portal is not this app). The favicon
+ * and the sign-in page, never the public ones (a customer's form or portal is not this app). Deskzo's favicon
  * is repeated because a layout's `icons` replaces the root layout's.
  */
 export async function appMetadata(): Promise<Metadata> {
@@ -106,7 +93,7 @@ export async function appMetadata(): Promise<Metadata> {
     manifest: PWA_MANIFEST_PATH,
     appleWebApp: { capable: true, title: homeScreenName(branding), statusBarStyle: "default" },
     icons: {
-      ...(branding.faviconDataUrl ? { icon: branding.faviconDataUrl } : {}),
+      ...deskzoFavicons(),
       apple: [{ url: iconPath("180"), sizes: "180x180", type: "image/png" }],
     },
     // The name older iPhones read before they honoured the manifest's "standalone".

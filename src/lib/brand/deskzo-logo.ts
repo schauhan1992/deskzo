@@ -47,6 +47,17 @@ export function deskzoIconSvg(options: { background?: string; color?: string; ro
   );
 }
 
+/**
+ * The icon as an SVG data URL — the favicon and the installed app's icon on every workspace (owner, 23 Oct 2026:
+ * Deskzo's icon on the apps, the company's own logo inside them). Base64, so it reads the same in a browser's
+ * head and in an image route.
+ */
+export function deskzoIconDataUrl(options: { rounded?: boolean } = {}): string {
+  const svg = deskzoIconSvg({ rounded: options.rounded });
+  const base64 = typeof Buffer !== "undefined" ? Buffer.from(svg).toString("base64") : btoa(svg);
+  return `data:image/svg+xml;base64,${base64}`;
+}
+
 /** The wordmark as an SVG document, in one colour. */
 export function deskzoWordmarkSvg(color: string = DESKZO_BLUE): string {
   return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="' + DESKZO_WORDMARK.viewBox + '"><path fill="' + color + '" fill-rule="evenodd" d="' + DESKZO_WORDMARK.path + '"/></svg>';

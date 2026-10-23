@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { getBranding } from "@/actions/branding";
 import { brandingCss } from "@/lib/branding";
+import { deskzoFavicons } from "@/lib/pwa";
 import { ClockProvider } from "@/components/time/clock-provider";
 import { workspaceZone } from "@/lib/time/workspace";
 
@@ -14,7 +15,8 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: branding.appName,
     description: branding.tagline ?? "Internal ERP — CRM, inventory, and the modules that follow.",
-    icons: branding.faviconDataUrl ? { icon: branding.faviconDataUrl } : undefined,
+    // Deskzo's icon in the tab on every address; a company's own logo shows inside the app (owner, 23 Oct 2026).
+    icons: deskzoFavicons(),
   };
 }
 

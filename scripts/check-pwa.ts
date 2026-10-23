@@ -108,34 +108,14 @@ async function main() {
     const unknown = await icon("1024");
     ok("an icon it doesn't draw is not found", unknown.response.status === 404);
 
-    const initials = (await icon("192")).bytes;
-    ok("no favicon or logo: the initials, no picture", pwa.iconPicture(BASE) === null);
-
-    branding = { ...BASE, faviconDataUrl: SQUARE_SVG };
-    ok("an SVG favicon is the picture", pwa.iconPicture(branding) === SQUARE_SVG);
-    const withSvg = await icon("192");
-    ok("…and is drawn on the icon", withSvg.size?.width === 192 && !withSvg.bytes.equals(initials));
-
-    const tiny = await pngOf(16, 16);
-    branding = { ...BASE, faviconDataUrl: tiny };
-    ok("a 16-pixel favicon would blur: the initials instead", pwa.iconPicture(branding) === null);
-
-    const squareLogo = await pngOf(200, 200);
-    branding = { ...BASE, faviconDataUrl: tiny, logoDataUrl: squareLogo };
-    ok("a square logo of 200 pixels is the picture when the favicon is too small", pwa.iconPicture(branding) === squareLogo);
-    const withLogo = await icon("180");
-    ok("…and is drawn on the iPhone icon", withLogo.size?.width === 180);
-
-    branding = { ...BASE, logoDataUrl: await pngOf(400, 100) };
-    ok("a wide wordmark logo is not squeezed into a square", pwa.iconPicture(branding) === null);
-    branding = { ...BASE, logoDataUrl: SQUARE_SVG };
-    ok("an SVG logo isn't used (its shape is unknown)", pwa.iconPicture(branding) === null);
-    branding = { ...BASE, faviconDataUrl: "data:image/webp;base64,UklGRg==" };
-    ok("a WebP favicon isn't read: the initials", pwa.iconPicture(branding) === null);
-
-    branding = { ...BASE, faviconDataUrl: svgOf("<svg nonsense") };
-    const broken = await icon("192");
-    ok("a picture the renderer can't read still gives an icon — the initials", broken.response.status === 200 && broken.bytes.equals(initials));
+    // Deskzo's icon on every workspace's app (owner, 23 Oct 2026): the company's favicon and logo don't change it.
+    const deskzo192 = (await icon("192")).bytes;
+    branding = { ...BASE, primaryColor: "#e11d48", faviconDataUrl: SQUARE_SVG, logoDataUrl: await pngOf(200, 200) };
+    ok("a company's own favicon, logo and colour leave Deskzo's icon as it is", (await icon("192")).bytes.equals(deskzo192));
+    ok("…on the iPhone's and the maskable one too", (await icon("180")).size?.width === 180 && (await icon("maskable")).size?.width === 512);
+    const route = readFileSync(path.join(__dirname, "../src/app/api/pwa/icon/[name]/route.tsx"), "utf8");
+    ok("drawn from Deskzo's icon, never the branding", /deskzoIconDataUrl/.test(route) && !/getBranding/.test(route));
+    branding = BASE;
 
     ok("a PNG's size is read from its header", JSON.stringify(pwa.pngSize(Buffer.from((await pngOf(120, 64)).split(",")[1], "base64"))) === JSON.stringify({ width: 120, height: 64 }));
     ok("…and anything else has none", pwa.pngSize(Buffer.from("GIF89a-not-a-png-at-all")) === null);
@@ -146,13 +126,20 @@ async function main() {
     branding = { ...BASE, shortName: "Acme", faviconDataUrl: SQUARE_SVG };
     const meta = await pwa.appMetadata();
     const apple = (meta.icons as { apple: { url: string; sizes: string }[] }).apple;
+    const tab = (meta.icons as { icon: { url: string; type?: string }[] }).icon;
     ok("links the manifest", meta.manifest === "/api/pwa/manifest");
     ok("an iPhone opens it full screen, named as on the home screen", (meta.appleWebApp as { capable: boolean; title: string }).capable === true && (meta.appleWebApp as { title: string }).title === "Acme");
     ok("the iPhone's own icon at 180", apple.length === 1 && apple[0].url === "/api/pwa/icon/180" && apple[0].sizes === "180x180");
-    ok("the favicon kept (a layout's icons replace the root's)", (meta.icons as { icon?: string }).icon === SQUARE_SVG);
+    ok(
+      "Deskzo's icon in the tab, as an .ico and an SVG (a layout's icons replace the root's)",
+      tab.length === 2 && tab[0].url === "/favicon.ico" && tab[1].type === "image/svg+xml" && tab[1].url.startsWith("data:image/svg+xml;base64,"),
+    );
+    ok("…not the company's favicon", tab.every((i) => i.url !== SQUARE_SVG));
     ok("the tag older iPhones read", (meta.other as Record<string, string>)["apple-mobile-web-app-capable"] === "yes");
     branding = BASE;
-    ok("no favicon: none named", !("icon" in ((await pwa.appMetadata()).icons as object)));
+    ok("the same icons with no favicon", JSON.stringify((await pwa.appMetadata()).icons) === JSON.stringify(meta.icons));
+    const root = readFileSync(path.join(__dirname, "../src/app/layout.tsx"), "utf8");
+    ok("every other page's tab shows Deskzo's icon too", /icons: deskzoFavicons\(\)/.test(root) && !/faviconDataUrl/.test(root));
 
     const layout = readFileSync(path.join(__dirname, "../src/app/(dashboard)/layout.tsx"), "utf8");
     const login = readFileSync(path.join(__dirname, "../src/app/(auth)/login/page.tsx"), "utf8");
