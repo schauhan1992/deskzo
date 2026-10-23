@@ -1,6 +1,7 @@
 import { UNRESTRICTED, parseEntitlements } from "@/lib/entitlements";
 import { controlConfigured, controlDb } from "@/lib/platform/control-db";
 import { openForTenant } from "@/lib/platform/kek";
+import { browseHostOf } from "@/lib/tenancy/browse-host";
 import { PLATFORM_DOMAIN, classifyHost, legacyHosts, normaliseHost, type HostKind } from "@/lib/tenancy/host";
 import { tenancyState, type Tenant } from "@/lib/tenancy/state";
 
@@ -90,7 +91,7 @@ type ControlRow = {
   timezone: string;
   entitlements: unknown;
   suspendedFor: "STAFF" | "BILLING" | null;
-  domains: { host: string; isPrimary: boolean }[];
+  domains: { host: string; isPrimary: boolean; failingSince: Date | null }[];
 };
 
 const SELECT = {
@@ -106,7 +107,7 @@ const SELECT = {
   entitlements: true,
   suspendedFor: true,
   // Only addresses that are served: a PENDING one has not been proved, a BROKEN one stopped checking out.
-  domains: { where: { status: "ACTIVE" as const }, select: { host: true, isPrimary: true }, orderBy: { createdAt: "asc" as const } },
+  domains: { where: { status: "ACTIVE" as const }, select: { host: true, isPrimary: true, failingSince: true }, orderBy: { createdAt: "asc" as const } },
 };
 
 function fromControl(row: ControlRow): Tenant {
@@ -120,6 +121,7 @@ function fromControl(row: ControlRow): Tenant {
     // None while it is being set up or after it is closed; the proxy serves only an active one.
     dbUrl: row.dbUrlCipher ? openForTenant(row.id, "db-url", row.dbUrlCipher) : "",
     primaryHost: primary,
+    browseHost: browseHostOf(row.domains),
     hosts: [own, ...row.domains.map((d) => d.host)],
     source: "control",
     isDefault: row.isDefault,

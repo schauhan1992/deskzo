@@ -3,6 +3,7 @@ import { Resolver } from "node:dns/promises";
 import { Prisma } from "@deskzo/control-client";
 import { parseEntitlements } from "@/lib/entitlements";
 import { platformBrandName } from "@/lib/platform/brand";
+import { CloudflareError, cloudflareConfig, deleteHostname, edgeFailed, edgeOf, edgeProblems, edgeReady, ensureHostname, type EdgeState } from "@/lib/platform/cloudflare-hostnames";
 import { controlDb } from "@/lib/platform/control-db";
 import {
   CHECK_EVERY_MS,
@@ -27,7 +28,9 @@ import {
   problemsText,
   routingTarget,
   stopsAt,
+  withCertificate,
   type CheckOutcome,
+  type DomainCertificate,
   type DomainRecord,
   type DomainStatusKey,
   type DomainTone,
@@ -59,6 +62,12 @@ import type { Clock } from "@/lib/time/zone";
  *   sweep    once a day (the platform tick): every live or stopped address is checked again, PENDING
  *            ones older than 14 days are removed, and the owner is mailed once when an address starts
  *            failing and once when it stops.
+ *
+ * With Cloudflare connected (src/lib/platform/cloudflare-hostnames.ts), an address whose records check
+ * out is added to Cloudflare as a custom hostname, and a waiting one goes live only once Cloudflare has
+ * confirmed it and issued its HTTPS certificate; a live one fails a check when Cloudflare has given up
+ * on it (moved away, blocked, the certificate timed out), never because Cloudflare couldn't be asked.
+ * Removing an address, its expiry and closing its workspace remove it from Cloudflare too.
  *
  * Serving reads only ACTIVE addresses (src/lib/tenancy/registry.ts), so every change that affects
  * serving forgets the registry's remembered lookups. Whether workspaces may add addresses at all is
@@ -171,6 +180,7 @@ const DOMAIN_SELECT = {
   lastCheckError: true,
   failingSince: true,
   addedBy: true,
+  edge: true,
   createdAt: true,
 } as const satisfies Prisma.TenantDomainSelect;
 export type DomainRow = Prisma.TenantDomainGetPayload<{ select: typeof DOMAIN_SELECT }>;
@@ -287,10 +297,19 @@ export async function checkDomain(
   }
 
   const records = await checkRecords(row.host, row.verifyToken, routingTarget(row.tenant.slug), opts.resolver ?? activeResolver());
-  const passed = records.txtOk && records.routeOk;
+  const recordsPassed = records.txtOk && records.routeOk;
+  // Only an address whose records check out is taken to Cloudflare — never one nobody has proved.
+  const edge = recordsPassed && !records.skipped ? await edgeStep(row) : null;
+  const passed = recordsPassed && (!edge || edgePasses(edge, row.status));
+  const problems = [...records.problems, ...(edge?.problems ?? [])];
   const next = nextDomainState({ status: row.status, failingSince: row.failingSince }, passed, now);
-  const checked = { lastCheckedAt: now, lastCheckError: passed ? null : problemsText(records.problems) };
-  const result = (domain: DomainRow | null, outcome: DomainCheck["outcome"]): DomainCheck => ({ domain, outcome, passed, problems: records.problems, skipped: records.skipped });
+  const checked = {
+    lastCheckedAt: now,
+    // A live address whose certificate is still being issued passes, and keeps that note for its page.
+    lastCheckError: !passed || problems.length ? problemsText(problems) : null,
+    ...(edge?.state ? { edge: edge.state as Prisma.InputJsonValue } : {}),
+  };
+  const result = (domain: DomainRow | null, outcome: DomainCheck["outcome"]): DomainCheck => ({ domain, outcome, passed, problems, skipped: records.skipped });
   const fresh = () => control.tenantDomain.findUnique({ where: { id: row.id }, select: DOMAIN_SELECT });
   /** Where a row changed meanwhile by somebody else stands now, without this check's verdict. */
   const standing = (d: DomainRow | null): DomainCheck => result(d, !d ? "taken" : d.status === "PENDING" ? "waiting" : d.status === "BROKEN" ? "still-stopped" : d.failingSince ? "failing" : "live");
@@ -325,6 +344,54 @@ export async function checkDomain(
     forgetRegistry();
   }
   return result(await fresh(), next.outcome);
+}
+
+/** What Cloudflare said about the address, in the owner's words; `state` null when it couldn't be asked. */
+type EdgeStep = { state: EdgeState | null; problems: string[] };
+
+/** The address on Cloudflare — added there the first time — while Cloudflare is connected; null when it isn't. */
+async function edgeStep(row: DomainRow): Promise<EdgeStep | null> {
+  const cfg = await cloudflareConfig();
+  if (!cfg) return null;
+  const host = hostnameOf(row.host);
+  try {
+    const state = await ensureHostname(cfg, host, edgeOf(row.edge)?.id ?? null);
+    return { state, problems: edgeProblems(state, host) };
+  } catch (err) {
+    if (!(err instanceof CloudflareError)) throw err;
+    console.error(`[domains] ${host}: ${err.message}`);
+    return { state: null, problems: ["How far its HTTPS certificate has got couldn't be read just now — check again in a few minutes"] };
+  }
+}
+
+/**
+ * A waiting address goes live only once Cloudflare serves it over HTTPS. A live one fails only once Cloudflare
+ * has given up on it — not while a certificate is being issued, and not when Cloudflare couldn't be asked.
+ */
+function edgePasses(edge: EdgeStep, status: DomainStatusKey): boolean {
+  if (!edge.state) return status !== "PENDING";
+  return status === "PENDING" ? edgeReady(edge.state) : !edgeFailed(edge.state);
+}
+
+/**
+ * Off Cloudflare, for addresses no workspace has any more — one another workspace is still waiting on stays.
+ * Never throws: what couldn't be removed is left in the audit log for staff (`tenant.domain.edge-left`).
+ */
+export async function releaseDomainEdges(hosts: string[], tenantId: string, actor: string): Promise<void> {
+  const names = [...new Set(hosts.map(hostnameOf))].filter((host) => !dnsSkipped(host, hostRules().production));
+  if (!names.length) return;
+  const cfg = await cloudflareConfig();
+  if (!cfg) return;
+  for (const host of names) {
+    try {
+      if (await controlDb().tenantDomain.count({ where: { host } })) continue;
+      await deleteHostname(cfg, host);
+    } catch (err) {
+      const error = (err instanceof Error ? err.message : String(err)).split("\n")[0].slice(0, 300);
+      console.error(`[domains] ${host} was left on Cloudflare: ${error}`);
+      await audit(actor, "tenant.domain.edge-left", { host, error }, tenantId).catch(() => {});
+    }
+  }
 }
 
 // ─── Primary, removing ───────────────────────────────────────────────────────────────────────────
@@ -369,13 +436,14 @@ export async function removeDomain(
   const removed = await controlDb().tenantDomain.deleteMany({ where: { id: row.id } });
   if (removed.count === 0) throw new DomainRefused(GONE);
   forgetRegistry();
+  if (row.kind === "CUSTOM") await releaseDomainEdges([row.host], row.tenantId, "domain-remove");
   return { id: row.id, tenantId: row.tenantId, host: row.host, kind: row.kind, status: row.status, isPrimary: row.isPrimary };
 }
 
 // ─── The daily sweep ─────────────────────────────────────────────────────────────────────────────
 
 export type DomainSweep = {
-  /** Live or stopped addresses checked again. */
+  /** Addresses checked again: live, stopped, and waiting ones already on Cloudflare. */
   checked: number;
   /** Of those: now failing (within the grace), newly stopped, working again. */
   failing: number;
@@ -392,8 +460,9 @@ export type DomainSweep = {
 const SWEEP_ACTOR = "domain-sweep";
 
 /**
- * Once a day: every live or stopped address of an open workspace checked again; waiting ones older
- * than 14 days removed; and each owner told once when an address starts failing and once when it
+ * Once a day: every live or stopped address of an open workspace checked again, and every waiting one
+ * already on Cloudflare; waiting ones older than 14 days removed (from Cloudflare too); and each owner
+ * told once when an address starts failing and once when it
  * stops (`tenant.domain.mail` entries say who was told about which episode, so a second run mails
  * nobody). `only` limits it to some workspaces — for a check suite running beside real ones.
  */
@@ -411,10 +480,17 @@ export async function domainSweep(now = new Date(), opts: { only?: string[]; res
     if (gone.count === 0) continue;
     summary.expired += 1;
     await audit(SWEEP_ACTOR, "tenant.domain.expired", { host: d.host, addedAt: d.createdAt.toISOString() }, d.tenantId);
+    await releaseDomainEdges([d.host], d.tenantId, SWEEP_ACTOR);
   }
 
+  // Waiting ones too once they are on Cloudflare: their records checked out, and the certificate may be out now.
   const rows = await control.tenantDomain.findMany({
-    where: { ...scope, kind: "CUSTOM", status: { in: ["ACTIVE", "BROKEN"] }, tenant: { status: "ACTIVE" } },
+    where: {
+      ...scope,
+      kind: "CUSTOM",
+      OR: [{ status: { in: ["ACTIVE", "BROKEN"] } }, { status: "PENDING", edge: { not: Prisma.DbNull } }],
+      tenant: { status: "ACTIVE" },
+    },
     orderBy: { createdAt: "asc" },
     select: { id: true, host: true },
   });
@@ -479,7 +555,9 @@ export type DomainView = {
   /** "Live — records failing since 3 Oct, stops on 6 Oct". */
   statusText: string;
   tone: DomainTone;
-  /** The records to create (none for a LEGACY address). */
+  /** Its HTTPS certificate from Cloudflare — null until it is on Cloudflare, and while Cloudflare isn't connected. */
+  certificate: DomainCertificate;
+  /** The records to create (none for a LEGACY address), and any extra TXT record Cloudflare asks for. */
   records: DomainRecord[];
   apex: boolean;
   url: string;
@@ -511,15 +589,19 @@ export type WorkspaceDomains = {
 export function domainView(row: DomainRow, slug: string, clock: Clock): DomainView {
   const state = { status: row.status, failingSince: row.failingSince };
   const words = domainStatusText(state, clock);
+  // On Cloudflare: where its certificate is, and any TXT record Cloudflare asks for under the others.
+  const edge = row.kind === "CUSTOM" ? edgeOf(row.edge) : null;
+  const certificate: DomainCertificate = !edge ? null : edgeReady(edge) ? "issued" : edgeFailed(edge) ? "failed" : "issuing";
   return {
     id: row.id,
     host: row.host,
     kind: row.kind,
     status: row.status,
     isPrimary: row.isPrimary,
-    statusText: row.kind === "LEGACY" ? "Live — kept from before workspaces" : words.label,
+    statusText: row.kind === "LEGACY" ? "Live — kept from before workspaces" : withCertificate(words.label, row.status, certificate),
+    certificate,
     tone: row.kind === "LEGACY" ? "live" : words.tone,
-    records: row.kind === "CUSTOM" ? domainRecords(row.host, row.verifyToken, routingTarget(slug)) : [],
+    records: row.kind === "CUSTOM" ? [...domainRecords(row.host, row.verifyToken, routingTarget(slug)), ...(edge && !edgeReady(edge) ? edge.records : [])] : [],
     apex: row.kind === "CUSTOM" && isApex(row.host),
     url: `${protocolFor(row.host)}://${row.host}`,
     verifiedAt: row.verifiedAt,

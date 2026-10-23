@@ -19,6 +19,11 @@ export type Tenant = {
   dbUrl: string;
   /** The address links in emails and documents are built on, e.g. "acme.example.com". */
   primaryHost: string;
+  /**
+   * Where a person's browser opening a page on the subdomain is sent (src/lib/tenancy/browse-host.ts): the primary
+   * custom domain while its checks pass. Null or absent: browsers stay on the address they used.
+   */
+  browseHost?: string | null;
   /** Every host that reaches it: its subdomain, custom domains, an old address kept alive. */
   hosts: string[];
   /** Where it was found: the control plane, or the environment (src/lib/tenancy/registry.ts). */

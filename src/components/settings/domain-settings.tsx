@@ -129,7 +129,9 @@ export function OwnAddress({ host, url, primary }: { host: string; url: string; 
           </Button>
         )}
       </div>
-      <p className="text-xs text-muted">The workspace&apos;s own address. It always works, whatever happens to the others.</p>
+      <p className="text-xs text-muted">
+        The workspace&apos;s own address. It always works, whatever happens to the others{primary ? "" : " — while another is primary, browsers opening it are sent there; the app and integrations stay here"}.
+      </p>
       {error && <p className="text-sm text-danger">{error}</p>}
     </li>
   );
@@ -235,8 +237,14 @@ export function DomainRow({ domain, ownHost }: { domain: DomainItem; ownHost: st
             Links in emails and documents — invoices, proposals, password resets — will use <span className="font-mono">{domain.host}</span> instead of{" "}
             <span className="font-mono">{ownHost}</span>.
           </p>
+          <p>
+            And anybody opening Deskzo at <span className="font-mono">{ownHost}</span> in a browser is sent to <span className="font-mono">{domain.host}</span> — one
+            address to bookmark and sign in at. They sign in there once: a sign-in belongs to the address it was made at.
+          </p>
           <p className="text-muted">
-            People sign in separately at each address: signing in at one doesn&apos;t sign them in at another. Both addresses keep working.
+            The Deskzo app, devices, the API and integrations keep using <span className="font-mono">{ownHost}</span>. If {domain.host} stops checking out, browsers
+            stay on <span className="font-mono">{ownHost}</span> until it does again. If people sign in with Microsoft, add {domain.host}&apos;s redirect address
+            (Settings › Security) first.
           </p>
           {error && <p className="text-danger">{error}</p>}
           <div className="flex justify-end gap-2 pt-1">

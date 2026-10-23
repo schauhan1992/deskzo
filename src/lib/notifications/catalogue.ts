@@ -62,6 +62,8 @@ export const NOTIFICATION_CATALOGUE: NotificationDefinition[] = [
   { type: "WORKFLOW_PAUSED", label: "My workflow paused itself", when: "A workflow you own stops on its own: it failed twenty times in a row, or its owner left.", group: "work" },
   { type: "AUTOMATE_STEPS", label: "Automate steps run low", when: "Four fifths of this month's workflow steps are used, or all of them — for whoever manages the workspace's settings.", group: "work" },
   { type: "VISITOR_EXPECTED", label: "A visitor is expected", when: "A visitor you invited is due shortly, or somebody adds one in your name.", group: "work" },
+  { type: "REPORT_SHARED", label: "A report is shared with me", when: "Somebody shares a report from Reporting & Analytics with you or your department, or lets you edit it.", group: "work" },
+  { type: "REPORT_ACCESS_REQUESTED", label: "Somebody asks to open my report", when: "Somebody a report of yours was shared with can't open what it reads, and asks you for access.", group: "work" },
 
   // ─── Sales ──────────────────────────────────────────────────────────────────────────────────
   { type: "LEAD_ASSIGNED", label: "A lead is assigned to me", when: "A lead is put in your name.", group: "sales" },

@@ -10,6 +10,7 @@ import { currentMaintenance, maintenanceAppName, maintenancePage, maintenanceVer
 import { evaluateAccess } from "@/lib/access/gate";
 import { clientIpFrom } from "@/lib/client-ip";
 import { DEVICE_COOKIE, DEVICE_COOKIE_MAX_AGE, newDeviceToken, validDeviceToken } from "@/lib/access/device-token";
+import { browseRedirect } from "@/lib/tenancy/browse-host";
 import { HOST_MISMATCH, classifyHost, protocolFor, requestHost } from "@/lib/tenancy/host";
 import { referralCookieDays } from "@/lib/partners/settings";
 import { redirectablePath } from "@/lib/cms/redirect-rules";
@@ -337,6 +338,22 @@ const withSession = edgeAuth(async (req: NextRequest & { auth: unknown }) => {
    * maintenance status endpoint authenticate themselves and must keep answering while pages are held.
    */
   if (api) return NextResponse.next();
+  /**
+   * One address to use (src/lib/tenancy/browse-host.ts — owner, 23 Oct 2026): a person's browser opening a page on
+   * the workspace's own subdomain is sent to its primary custom domain while that one checks out — before the
+   * session, so somebody not signed in there signs in there. Never the app's page view, a form's POST, the PDF
+   * printer or anything that isn't a page being opened; /api has gone through above.
+   */
+  const browseTo = browseRedirect({
+    host: kind?.host ?? "",
+    onSubdomain: kind?.kind === "tenant",
+    browseHost: tenant.browseHost,
+    method: req.method,
+    pathname,
+    search: req.nextUrl.search,
+    headers: req.headers,
+  });
+  if (browseTo) return harden(NextResponse.redirect(browseTo, { status: 307, headers: { "cache-control": "no-store" } }) as NextResponse, pathname);
   /**
    * The Outlook add-in's well-known file (src/lib/signatures/outlook.ts): classic Outlook for Windows
    * reads it, with no session, before it lets the add-in's script reach this workspace. Answered by an
