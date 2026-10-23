@@ -12,15 +12,39 @@ import { useSession } from "@/lib/session";
  *   · Screenshots count against the person's daily allowance and the administrators are told of each. The phone says
  *     when one is taken (Android 14 and later); once the day's are used, the app blocks them — which, unlike the
  *     website, a phone can. An older Android can't say, so there the app blocks them while the allowance applies.
- *   · The watermark — the person's name and address — across the app's own screens. The Deskzo tab's pages draw
+ *   · The watermark — the person's name and address — across the app's own screens. The web pages (src/app/web.tsx) draw
  *     their own.
  */
 
 type Answer = { allowed: boolean; remaining: number | null; enforced: boolean; message: string };
 
 /** The screens with customers' details on them, for a watermark kept to those (as src/lib/security/watermark-pages.ts). */
-const CUSTOMER_SCREENS = new Set(["today", "chat", "conversation", "calls", "review", "tasks", "approvals"]);
-/** Never watermarked: signing in, and the Deskzo tab, whose pages draw the website's own. */
+const CUSTOMER_SCREENS = new Set([
+  "today",
+  "chat",
+  "conversation",
+  "calls",
+  "review",
+  "tasks",
+  "approvals",
+  // The sales screens (22 Oct 2026): leads, companies and their people, and what's typed to find them.
+  "sales",
+  "lead",
+  "company",
+  "search",
+  "new-lead",
+  "new-company",
+  "new-contact",
+  // Field work (22 Oct 2026): the customer it was with, what it cost, and the calendar.
+  "visits",
+  "visit",
+  "new-visit",
+  "expenses",
+  "new-expense",
+  "meetings",
+  "new-meeting",
+]);
+/** Never watermarked: signing in, and the web pages, which draw the website's own. */
 const NEVER = new Set(["pair", "signed-in", "web"]);
 
 export function ScreenRules() {

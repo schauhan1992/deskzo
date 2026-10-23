@@ -265,6 +265,9 @@ const NOT_YET_EVERYWHERE = {
   callLog: { source: true, appDeviceId: true, phoneCallKey: true, reviewedAt: true },
   // 20261118140000_app_web_pages. Read by name in src/lib/app.
   appDevice: { secretDigest: true },
+  // 20261122160000_field_work. Read by name in src/lib/expenses/receipts.ts, which treats a workspace without it as
+  // never requiring a receipt.
+  expenseSettings: { receiptRequiredAbove: true },
   // 20261118170000_app_browser_sign_in. Read by name in src/lib/app/pairing.ts.
   appPairing: { codeChallenge: true },
   // 20261013100000_deskzo_updates_seen. Read by name in src/actions/help.ts only.

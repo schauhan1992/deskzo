@@ -4,7 +4,7 @@
  *
  *   · `call`        "Ring my phone": the number to dial. Its Call button dials; a tap opens Calls with the ring on top.
  *   · `chat`        A message in a chat: that conversation.
- *   · `approval`    Something waits for the person's decision: Approvals.
+ *   · `notice`      What the person's bell says on the web: where its link leads, as on Android (`linkRoute`).
  *   · `after-call`  The app's reminder to say how a call went: the after-call sheet for it.
  *
  * Kept free of Expo so it can be tested on its own (src/lib/__tests__/push-routing.test.ts).
@@ -34,6 +34,24 @@ const phone = (value: unknown): string | null => {
   return v && /^\+?[\d\s().-]{3,40}$/.test(v) && /\d{3}/.test(v.replace(/\D/g, "")) ? v : null;
 };
 
+/** Where a link of this workspace leads in the app — a route, or a route with its params. */
+export type LinkRoute = string | { pathname: string; params: Record<string, string> };
+
+/**
+ * A notice's link in the app (owner, 22 Oct 2026; src/lib/push.ts on Android too): a lead or company to its own screen,
+ * tasks and chat to theirs, anything else to its web page in the app — only ever a page of this workspace.
+ */
+export function linkRoute(link: string): LinkRoute {
+  if (!link.startsWith("/") || link.startsWith("//")) return "/";
+  const lead = /^\/leads\/(LEAD-\d+)/.exec(link);
+  if (lead) return { pathname: "/lead/[ref]", params: { ref: lead[1]! } };
+  const company = /^\/companies\/(COM-\d+)(?:$|[/?#])/.exec(link);
+  if (company) return { pathname: "/company/[ref]", params: { ref: company[1]! } };
+  if (/^\/tasks(?:$|[/?#])/.test(link)) return "/tasks";
+  if (/^\/chat(?:$|[/?#])/.test(link)) return "/chat";
+  return { pathname: "/web", params: { path: link } };
+}
+
 export function routeFor(data: Record<string, unknown> | null | undefined, action: string = TAP): PushRoute {
   if (!data) return null;
   switch (data.type) {
@@ -49,8 +67,10 @@ export function routeFor(data: Record<string, unknown> | null | undefined, actio
       const chat = id(data.chat);
       return chat ? { kind: "open", pathname: "/conversation/[id]", params: { id: chat } } : { kind: "open", pathname: "/chat" };
     }
-    case "approval":
-      return { kind: "open", pathname: "/approvals" };
+    case "notice": {
+      const to = linkRoute(text(data.link) ?? "");
+      return typeof to === "string" ? { kind: "open", pathname: to } : { kind: "open", ...to };
+    }
     case "after-call": {
       const number = phone(data.number);
       const at = Number(data.at);

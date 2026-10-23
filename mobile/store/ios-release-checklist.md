@@ -87,8 +87,8 @@ From the iOS Simulator (Xcode 26.4+, or a development build), with the demo work
 | 6.5" iPhone | iPhone 11 Pro Max / XS Max | 1242 × 2688 (or 1284 × 2778) | Yes, unless 6.9" is given (Apple scales) — give both to be safe |
 | 13" iPad | iPad Pro 13-inch (M4) | 2064 × 2752 | Yes — the app supports iPad (`supportsTablet`) |
 
-Three to ten each: Today, Calls with the after-call sheet, a chat conversation, Approvals, the Deskzo tab, Settings ›
-Calls on this iPhone. Keep them in `store/graphics/ios/` (6.9, 6.5, ipad-13), as Google Play's are in `store/graphics/`.
+Three to ten each: Today, Sales with a lead, a visit checked in, Calls with the after-call sheet, a chat conversation,
+Approvals, Settings › Calls on this iPhone. Keep them in `store/graphics/ios/` (6.9, 6.5, ipad-13), as Google Play's are in `store/graphics/`.
 
 Apple's review of a business app that needs an account usually takes a day or two; most rejections are the review
 notes not getting them in, so keep the demo account working.

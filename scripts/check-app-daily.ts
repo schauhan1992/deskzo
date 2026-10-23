@@ -13,9 +13,9 @@
  *   · Leave: the days a span takes, asking, cancelling before it starts.
  *   · Approvals: the manager sees the report's leave and never their own; decided from the phone, by the leave
  *     action's own rule; a kind there isn't, a 404.
- *   · On an iPhone (owner, 22 Oct 2026): leave asked for pushes the approver's iPhone that a decision waits —
- *     the title, never the request; not their Android phone, not news that isn't a decision, and nothing for a
- *     kind they muted.
+ *   · On an iPhone (owner, 22 Oct 2026): what the bell says goes to the person's iPhone too, as on Android — leave
+ *     asked for to the approver, the decision to the one who asked; the title and where it leads, never the
+ *     request; and nothing for a kind they muted.
  *   · Screen rules: the app is told the screenshot allowance and the watermark; a screenshot taken in it counts
  *     where the website's do, and past the allowance is logged as blocked. The workspace's own rules are put back.
  *
@@ -195,7 +195,9 @@ async function main() {
     const twice = await call(workerPhone, "POST", "/attendance", { action: "in", latitude: 28.6, longitude: 77.2 });
     ok("clocking in twice: the web's own refusal, and no second place", twice.status === 422 && twice.error?.message === "You're already clocked in today." && (await db.attendanceLocation.count({ where: { userId: worker.id } })) === 1, twice.error?.message);
     const out = await call<Today["attendance"]>(workerPhone, "POST", "/attendance", { action: "out", latitude: 123, longitude: 77.2 });
-    ok("clocked out, sending a latitude that can't be: out, and no place kept", out.status === 200 && !!out.data?.check_out_at && (await db.attendanceLocation.count({ where: { userId: worker.id, kind: "OUT" } })) === 0, out.status);
+    // Every clocking is kept now (owner, 22 Oct 2026), so a terminal's punches merge with it — with no place when none came.
+    const outRows = await db.attendanceLocation.findMany({ where: { userId: worker.id, kind: "OUT" }, select: { latitude: true, longitude: true } });
+    ok("clocked out, sending a latitude that can't be: out, the clocking kept with no place", out.status === 200 && !!out.data?.check_out_at && outRows.length === 1 && outRows[0]!.latitude === null && outRows[0]!.longitude === null, out.status);
     ok("an action that isn't one: refused", (await call(workerPhone, "POST", "/attendance", { action: "lunch" })).status === 400);
     browserUser = { id: worker.id, name: worker.name, email: worker.email, role: worker.role };
     const own = await attendanceLocations(worker.id, today);
@@ -204,7 +206,7 @@ async function main() {
     browserUser = { id: stranger.id, name: stranger.name, email: stranger.email, role: stranger.role };
     const strangers = await attendanceLocations(worker.id, today);
     browserUser = null;
-    ok("HR's day dialog: the person and their manager see where; somebody else sees nothing", own.length === 1 && managers.length === 1 && managers[0]!.latitude === 28.6139 && strangers.length === 0, `${own.length}/${managers.length}/${strangers.length}`);
+    ok("HR's day dialog: the person and their manager see where; somebody else sees nothing", own.length === 2 && managers.length === 2 && managers[0]!.latitude === 28.6139 && managers[1]!.latitude === null && strangers.length === 0, `${own.length}/${managers.length}/${strangers.length}`);
 
     section("Tasks");
     const added = await call<{ id: string }>(workerPhone, "POST", "/tasks", { title: `${TAG} call the bank`, due: today });
@@ -251,7 +253,7 @@ async function main() {
     const workerIphone = await pair(worker.id, `${TAG} worker iPhone`, "ios");
     await call(managerIphone, "PATCH", "/device", { push_token: "apns-zzappday-manager" });
     await call(workerIphone, "PATCH", "/device", { push_token: "apns-zzappday-worker" });
-    type Pushed = { apns?: { token: string; payload: unknown }; message?: unknown };
+    type Pushed = { apns?: { token: string; payload: { aps: { alert: { title: string; body?: string } }; body: Record<string, string> } }; message?: unknown };
     const pushed: Pushed[] = [];
     push.setTestPush(async (message) => {
       pushed.push(message as Pushed);
@@ -259,11 +261,15 @@ async function main() {
     });
     const asked = await call<{ id: string; days: number }>(workerPhone, "POST", "/leave", { type_id: type.id, from, to, reason: `${TAG} family wedding` });
     ok("asked for from the phone: the web's own applyForLeave", asked.status === 201 && asked.data.days === 2 && (await db.leaveRequest.findUnique({ where: { id: asked.data.id } }))?.status === "PENDING", asked.error?.message ?? asked.status);
+    const toManager = pushed.filter((p) => p.apns?.token === "apns-zzappday-manager");
     ok(
-      "  the manager's iPhone told a decision waits — the title, never the request — and nothing to an Android phone",
-      pushed.length === 1 &&
-        pushed[0]!.apns?.token === "apns-zzappday-manager" &&
-        JSON.stringify(pushed[0]!.apns?.payload) === JSON.stringify({ aps: { alert: { title: "Leave request", body: "Waiting for your decision." }, sound: "default", category: "deskzo-approval" }, body: { type: "approval" } }) &&
+      "  the manager's iPhone told, as their bell is — the title and where it leads, never the request — and nothing to the worker",
+      toManager.length === 1 &&
+        toManager[0]!.apns!.payload.aps.alert.title === "Leave request" &&
+        toManager[0]!.apns!.payload.body.type === "notice" &&
+        toManager[0]!.apns!.payload.body.kind === "LEAVE_REQUESTED" &&
+        toManager[0]!.apns!.payload.body.link.startsWith("/") &&
+        !pushed.some((p) => p.apns?.token === "apns-zzappday-worker") &&
         !JSON.stringify(pushed).includes("wedding"),
       JSON.stringify(pushed),
     );
@@ -286,7 +292,15 @@ async function main() {
     const approved = await call(managerPhone, "POST", `/approvals/leave/${asked.data.id}`, { approve: true, note: "Enjoy" });
     const decided = await db.leaveRequest.findUnique({ where: { id: asked.data.id } });
     ok("approved from the manager's phone, with the note, as the manager", approved.status === 200 && decided?.status === "APPROVED" && decided.decisionNote === "Enjoy" && decided.approverId === manager.id, approved.error?.message ?? approved.status);
-    ok("  the worker told in Deskzo, but not pushed — it isn't a decision waiting for them", (await db.notification.count({ where: { userId: worker.id, type: "LEAVE_DECIDED" } })) >= 1 && pushed.length === 0, JSON.stringify(pushed));
+    ok(
+      "  the worker told in Deskzo, and on their iPhone — the title, never the note — and nothing to the manager",
+      (await db.notification.count({ where: { userId: worker.id, type: "LEAVE_DECIDED" } })) >= 1 &&
+        pushed.length === 1 &&
+        pushed[0]!.apns?.token === "apns-zzappday-worker" &&
+        pushed[0]!.apns.payload.body.kind === "LEAVE_DECIDED" &&
+        !JSON.stringify(pushed).includes("Enjoy"),
+      JSON.stringify(pushed),
+    );
     ok("  gone from the queue", !(await call<Approval[]>(managerPhone, "GET", "/approvals")).data.some((a) => a.id === asked.data.id));
     ok("  and approved on the worker's Today", !!(await call<Today>(workerPhone, "GET", "/today")).data.leave?.upcoming.some((l) => l.id === asked.data.id && l.status === "APPROVED"));
     const again = await call(managerPhone, "POST", `/approvals/leave/${asked.data.id}`, { approve: false });

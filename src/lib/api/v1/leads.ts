@@ -58,14 +58,14 @@ function leadOut(row: Row, extra: Awaited<ReturnType<typeof extrasFor>> extends 
   };
 }
 
-async function leadsOut(userId: string, rows: Row[]) {
+export async function leadsOut(userId: string, rows: Row[]) {
   const ids = rows.map((r) => r.id);
   const [extras, custom] = await Promise.all([extrasFor(ids), customFieldsOut("LEAD", userId, ids)]);
   return rows.map((r) => leadOut(r, extras.get(r.id), custom.get(r.id)));
 }
 
 /** One lead, read again through the screens' own read — or not found. */
-async function readLead(userId: string, id: string) {
+export async function readLead(userId: string, id: string) {
   const lead = (await getLead(id)) as Row | null;
   if (!lead) throw notFound("lead");
   return (await leadsOut(userId, [lead]))[0]!;

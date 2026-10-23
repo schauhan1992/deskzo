@@ -47,7 +47,10 @@ export function ClockButtons({ today }: { today: Day }) {
     };
   }, [today?.checkInAt, today?.checkOutAt]);
 
-  const action: "in" | "out" | null = !today?.checkInAt ? "in" : !today.checkOutAt ? "out" : null;
+  // Clocked out already, they can clock out again (owner, 22 Oct 2026): a terminal's punch during the day may have
+  // filled the clock-out, and the end of their day moves it on.
+  const action: "in" | "out" = !today?.checkInAt ? "in" : "out";
+  const again = !!today?.checkInAt && !!today.checkOutAt;
 
   // Reached by a link inside the app, this page may still carry the first page's "no location" policy; the tap
   // reloads it as itself (src/lib/browser-location.ts) and the reloaded page carries on with that tap here.
@@ -114,13 +117,14 @@ export function ClockButtons({ today }: { today: Day }) {
             <LogIn className="mr-1.5 h-3.5 w-3.5" />
             {step === "locating" ? "Getting your location…" : step === "sending" ? "Clocking in…" : "Clock in"}
           </Button>
-        ) : action === "out" ? (
-          <Button size="sm" variant="secondary" disabled={busy} onClick={() => clock("out")}>
-            <LogOut className="mr-1.5 h-3.5 w-3.5" />
-            {step === "locating" ? "Getting your location…" : step === "sending" ? "Clocking out…" : "Clock out"}
-          </Button>
         ) : (
-          <Badge tone="green">Done for the day</Badge>
+          <>
+            {again && <Badge tone="green">Done for the day</Badge>}
+            <Button size="sm" variant={again ? "ghost" : "secondary"} disabled={busy} onClick={() => clock("out")} title={again ? "Moves your clock-out to now" : undefined}>
+              <LogOut className="mr-1.5 h-3.5 w-3.5" />
+              {step === "locating" ? "Getting your location…" : step === "sending" ? "Clocking out…" : again ? "Clock out again" : "Clock out"}
+            </Button>
+          </>
         )}
         {canAsk && action && !busy && (
           <Button size="sm" variant="ghost" onClick={() => setAsking(true)}>

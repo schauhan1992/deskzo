@@ -4745,6 +4745,8 @@ model Visit {
   assetMovements   AssetMovement[]
   feedbackRequests FeedbackRequest[] @relation("FeedbackVisit")
   calendarEvent      CalendarEvent?
+  /// Where the phone was at check-in and check-out, from the Deskzo app (owner, 22 Oct 2026).
+  locations        VisitLocation[]
 
   @@index([companyId])
   @@index([userId, scheduledFor])
@@ -4753,6 +4755,36 @@ model Visit {
   @@index([scheduledFor])
   @@index([checkInAt])
   @@map("visits")
+}
+
+enum VisitLocationKind {
+  IN
+  OUT
+}
+
+/**
+ * Where the phone was when its person checked in to, or out of, a visit from the Deskzo app (owner, 22 Oct 2026):
+ * proof the visit happened. Read only at those two moments, never in the background, and only when the phone
+ * shares it. Seen by whoever may open the visit (src/lib/authz/access.ts, "visits") — the person, their managers,
+ * and whoever sees every visit — as a clock-in's place is (AttendanceLocation).
+ */
+model VisitLocation {
+  id          String            @id @default(cuid())
+  visitId     String
+  visit       Visit             @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  kind        VisitLocationKind
+  at          DateTime          @default(now())
+  latitude    Float
+  longitude   Float
+  /// How sure the phone was, in metres.
+  accuracyM   Int?
+  /// The phone said the reading came from a mock-location provider (Android) or was simulated.
+  mocked      Boolean?
+  appDeviceId String?
+  appDevice   AppDevice?        @relation(fields: [appDeviceId], references: [id], onDelete: SetNull)
+
+  @@index([visitId])
+  @@map("visit_locations")
 }
 
 enum ExpenseCategory {
@@ -4828,6 +4860,9 @@ enum ExpenseApprovalStep {
 model ExpenseSettings {
   id           String              @id @default("global")
   approvalFlow ExpenseApprovalFlow @default(HR)
+  /// A claim over this many rupees needs a photo of its receipt before it is submitted — on the web and the app
+  /// alike (owner, 22 Oct 2026). Null: a receipt is never required.
+  receiptRequiredAbove Decimal?  @db.Decimal(12, 2)
   updatedById  String?
   updatedAt    DateTime            @updatedAt
 
@@ -12671,6 +12706,7 @@ model AppDevice {
   calls        CallLog[]
   callRequests AppCallRequest[]
   locations    AttendanceLocation[]
+  visitLocations VisitLocation[]
 
   @@index([userId])
   @@map("app_devices")

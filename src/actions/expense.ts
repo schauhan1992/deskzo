@@ -40,6 +40,8 @@ import {
   reimburseExpenseSchema,
 } from "@/lib/validation/expense";
 import type { ActionResult } from "@/actions/company";
+import { receiptRefusal, receiptRequiredAbove } from "@/lib/expenses/receipts";
+import { notMigratedYet } from "@/lib/not-migrated";
 
 /**
  * Whose expenses you can see. An expense claim is somebody's money, so it isn't company-readable by
@@ -357,6 +359,11 @@ export async function createExpense(input: unknown): Promise<ActionResult<{ id: 
   }
 
   const submitting = data.submit;
+  // Over the company's amount, a claim goes in with its receipt (src/lib/expenses/receipts.ts) — a draft can wait.
+  if (submitting) {
+    const refusal = receiptRefusal(data.amount, !!data.receiptDataUrl, await receiptRequiredAbove());
+    if (refusal) return { ok: false, error: refusal };
+  }
   const route = submitting ? await routeClaim(claimantId) : null;
   const expense = await db.expense.create({
     data: {
@@ -455,6 +462,9 @@ export async function submitExpense(id: string): Promise<ActionResult<{ id: stri
   if (!expense) return { ok: false, error: "That expense no longer exists." };
   if (expense.userId !== user.id) return { ok: false, error: "You can only submit your own claims." };
   if (!isExpenseEditable(expense.status)) return { ok: false, error: "This claim has already been submitted." };
+  const hasReceipt = (await db.expense.count({ where: { id, receiptDataUrl: { not: null } } })) > 0;
+  const refusal = receiptRefusal(Number(expense.amount), hasReceipt, await receiptRequiredAbove());
+  if (refusal) return { ok: false, error: refusal };
 
   const route = await routeClaim(user.id);
   await db.expense.update({
@@ -811,6 +821,55 @@ export async function setExpenseApprovalFlow(input: unknown): Promise<ActionResu
   }
   revalidatePath("/settings/expense-approvals");
   return { ok: true, data: { approvalFlow } };
+}
+
+/** When a claim needs its receipt (Settings › Expense approvals; owner, 22 Oct 2026): the amount above which, or null. */
+export async function getExpenseReceiptRule(): Promise<{ above: number | null }> {
+  await requireModuleUser("expenses");
+  return { above: await receiptRequiredAbove() };
+}
+
+/**
+ * Sets the amount above which a claim can't be submitted without a photo of its receipt — on the web and the Deskzo
+ * app alike — or clears it (`above: null`). HR's to change (`hr.manage`), as who approves is. Claims already
+ * submitted aren't asked again.
+ */
+export async function setExpenseReceiptRule(input: unknown): Promise<ActionResult<{ above: number | null }>> {
+  const user = await requireModuleUser("expenses");
+  if (!(await hasEffectivePermission(user.id, "hr.manage"))) {
+    return { ok: false, error: "Only HR administrators can change when a receipt is needed." };
+  }
+  const raw = input && typeof input === "object" ? (input as { above?: unknown }).above : undefined;
+  const asked = raw === null || raw === undefined || raw === "" ? null : Number(raw);
+  if (asked !== null && (!Number.isFinite(asked) || asked < 0 || asked > 10_000_000)) {
+    return { ok: false, error: "Give an amount in rupees, or leave it empty for never." };
+  }
+  const above = asked === null ? null : Math.round(asked * 100) / 100;
+  const before = await receiptRequiredAbove();
+  try {
+    await db.expenseSettings.upsert({
+      where: { id: "global" },
+      create: { id: "global", receiptRequiredAbove: above === null ? null : new Prisma.Decimal(above), updatedById: user.id },
+      update: { receiptRequiredAbove: above === null ? null : new Prisma.Decimal(above), updatedById: user.id },
+      select: { id: true },
+    });
+  } catch (err) {
+    if (notMigratedYet(err)) return { ok: false, error: "Your workspace is being updated for this — try again in a few minutes." };
+    throw err;
+  }
+  if (before !== above) {
+    const said = (v: number | null) => (v === null ? "Never" : `Over ₹${v.toLocaleString("en-IN")}`);
+    await recordAudit({
+      userId: user.id,
+      action: "UPDATE",
+      entityType: "ExpenseSettings",
+      entityId: "global",
+      entityLabel: "When a claim needs its receipt",
+      changes: [{ field: "receiptRequiredAbove", label: "Receipt needed", from: said(before), to: said(above) }],
+    });
+  }
+  revalidatePath("/settings/expense-approvals");
+  return { ok: true, data: { above } };
 }
 
 // ─── Accounts (Accounting › Expense claims) ─────────────────────────────────────────────────────

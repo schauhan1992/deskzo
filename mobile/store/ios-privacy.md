@@ -18,12 +18,13 @@ seen there as the company's own records.
 
 | Apple's type | Collected | Purpose | Notes |
 |---|---|---|---|
-| **Location › Precise Location** | Yes | App Functionality | The phone's position when the person clocks in or out, if they allow it; once when they sign in, if their company requires location at sign-in. Asked "While Using the App" only — never in the background (no background location key, no background modes; `npm run ios:check` refuses one). |
+| **Location › Precise Location** | Yes | App Functionality | The phone's position when the person clocks in or out, or checks in at a customer's on a visit and checks out again, if they allow it; once when they sign in, if their company requires location at sign-in. Kept with the attendance, or the visit. Asked "While Using the App" only — never in the background (no background location key, no background modes; `npm run ios:check` refuses one). |
 | **Location › Coarse Location** | Yes | App Functionality | The same reading; iOS may give it approximately if the person chooses. |
 | **User Content › Emails or Text Messages** | Yes | App Functionality | The messages the person sends in team chat. |
-| **User Content › Photos or Videos** | Yes | App Functionality | Only the photos the person picks (iOS's own picker — the app has no access to the library) or takes, to send in chat or add on a Deskzo page. |
-| **User Content › Other User Content** | Yes | App Functionality | A call the person logs from the after-call sheet or Log a call — the customer's number, when, how it went, the notes, a callback; tasks they add or tick off; leave they ask for; their decisions on approvals; documents sent in chat. |
-| **Identifiers › Device ID** | Yes | App Functionality | The phone's own sign-in — an identifier Deskzo makes when it is paired — with its model and the app's version, and Apple's push address for it. Administrators see the phone in Security › Devices and can sign it out. |
+| **User Content › Photos or Videos** | Yes | App Functionality | Only the photos the person picks (iOS's own picker — the app has no access to the library) or takes, to send in chat, add to an expense claim as its receipt (made smaller on the phone first), or add on a Deskzo page. |
+| **User Content › Other User Content** | Yes | App Functionality | A call the person logs from the after-call sheet or Log a call — the customer's number, when, how it went, the notes, a callback; leads, companies and contacts they add or change; visits they plan and write up, and meetings they schedule; tasks they add or tick off; leave they ask for; their decisions on approvals; documents sent in chat. |
+| **Financial Info › Other Financial Info** | Yes | App Functionality | The expense claims the person makes in the app: the amount, what it was for, when and how it was paid. No card or bank details. |
+| **Identifiers › Device ID** | Yes | App Functionality | The phone's own sign-in — an identifier Deskzo makes when it is paired — with its model and the app's version, and, if the person allows notifications, Apple's push address for it (a notification carries only its title and where it leads). Administrators see the phone in Security › Devices and can sign it out. |
 | **Usage Data › Other Usage Data** | Yes | App Functionality | Where the person's company limits screenshots: that one was taken in the app, when, and on which screen — never the image. |
 
 ## Data not linked to you
@@ -38,16 +39,17 @@ seen there as the company's own records.
   signing out.
 - **Call history** — an iPhone gives no app its calls; nothing is read.
 - **Audio** — calls are not recorded; the microphone is never asked for.
-- **Health, Financial Info, Sensitive Info, Browsing History, Search History, Purchases, Diagnostics** — none. The app
-  has no crash reporter or analytics.
+- **Health, Sensitive Info, Browsing History, Search History, Purchases, Diagnostics** — none. The app has no crash
+  reporter or analytics. Financial info: only the expense claims above — no payment details.
+- **Calendar** — the app's calendar is the person's Deskzo calendar; the phone's own calendar is never read.
 
 ## Permissions the app asks for
 
 | Info.plist key | When | Words shown |
 |---|---|---|
-| `NSCameraUsageDescription` | Scanning a pairing code; taking a photo for chat or a Deskzo page | Deskzo uses the camera to scan the code that pairs this phone, and to take photos you send in chat or add on a Deskzo page. |
-| `NSPhotoLibraryUsageDescription` | Picking photos to send (iOS's picker needs no permission; the key is there for the pages' own file inputs) | Deskzo opens your photos only to send the ones you pick — in chat, or on a Deskzo page. |
-| `NSLocationWhenInUseUsageDescription` | Clocking in or out; signing in where the company requires it | Deskzo checks you are at your office, and saves where you are with your attendance, when you clock in or out — and when you sign in, if your company asks. Only then, never in the background. |
+| `NSCameraUsageDescription` | Scanning a pairing code; taking a photo for chat, a receipt or a Deskzo page | Deskzo uses the camera to scan the code that pairs this phone, and to take photos you send in chat, add to an expense claim or add on a Deskzo page. |
+| `NSPhotoLibraryUsageDescription` | Picking photos to send (iOS's picker needs no permission; the key is there for the pages' own file inputs) | Deskzo opens your photos only to send the ones you pick — in chat, with an expense claim, or on a Deskzo page. |
+| `NSLocationWhenInUseUsageDescription` | Clocking in or out; checking in or out of a visit; signing in where the company requires it | Deskzo reads where you are only when you clock in or out (to check you are at your office, and save it with your attendance), check in or out of a customer visit, or sign in if your company asks. Never in the background. |
 | Notifications (no key) | Turning on calls on this iPhone, or "Turn on notifications" — never at launch | iOS's own question |
 
 Not asked for, and refused by `npm run ios:check` if it ever appears: the microphone, contacts, Face ID, motion,

@@ -1,7 +1,7 @@
 /**
  * The rules of advanced tasks (owner, 16 Oct 2026) — pure, for the screens, the actions and the checks.
  *
- *   · Status: To do, In progress, Need help, Done or Cancelled; an open task whose start day is still to come
+ *   · Status: To do, In progress, Need help, Complete (DONE) or Cancelled; an open task whose start day is still to come
  *     shows as Upcoming. Need help and Cancelled each need a note saying why (owner, 22 Oct 2026), kept as a
  *     comment on the task. `done` stays the one "closed" flag the rest of the app reads — Done and Cancelled set
  *     it — and a task closed through the old tick reads as Done whatever its status says.
@@ -25,7 +25,7 @@ export const STATUS_LABELS: Record<ShownStatus, string> = {
   TODO: "To do",
   IN_PROGRESS: "In progress",
   NEED_HELP: "Need help",
-  DONE: "Done",
+  DONE: "Complete",
   CANCELLED: "Cancelled",
 };
 export const STATUS_TONES: Record<ShownStatus, Tone> = { UPCOMING: "blue", TODO: "default", IN_PROGRESS: "amber", NEED_HELP: "red", DONE: "green", CANCELLED: "red" };

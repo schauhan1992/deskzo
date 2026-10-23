@@ -23,7 +23,10 @@ export function onSignedOut(listener: Listener): () => void {
 }
 
 /** A page Deskzo itself answers 404 to, not in its own words: a company whose Deskzo is older than this app. */
-export const NOT_ON_SERVER = "Your company's Deskzo hasn't been updated for this part of the app yet — ask your administrator. Everything else is on the Deskzo tab.";
+export const NOT_ON_SERVER = "Your company's Deskzo hasn't been updated for this part of the app yet — ask your administrator. Everything else is under More.";
+
+/** Where a list is: Deskzo sends it beside a list's rows (src/lib/app/handler.ts). */
+export type Page = { page: number; page_size: number; total: number; has_more: boolean };
 
 export async function request<T>(
   where: { baseUrl: string; host: string | null; token?: string | null },
@@ -31,6 +34,15 @@ export async function request<T>(
   path: string,
   body?: unknown,
 ): Promise<T> {
+  return (await requestWithPage<T>(where, method, path, body)).data;
+}
+
+async function requestWithPage<T>(
+  where: { baseUrl: string; host: string | null; token?: string | null },
+  method: "GET" | "POST" | "PATCH" | "DELETE",
+  path: string,
+  body?: unknown,
+): Promise<{ data: T; page: Page | null }> {
   const headers: Record<string, string> = { accept: "application/json" };
   if (where.token) headers.authorization = `Bearer ${where.token}`;
   if (where.host) headers.host = where.host;
@@ -42,7 +54,7 @@ export async function request<T>(
     throw new ApiError(0, "offline", "Can't reach Deskzo. Check the phone's internet connection.");
   }
   const text = await res.text();
-  let json: { data?: T; error?: { code: string; message: string; fields?: Record<string, string> } } = {};
+  let json: { data?: T; page?: Page; error?: { code: string; message: string; fields?: Record<string, string> } } = {};
   try {
     json = text ? JSON.parse(text) : {};
   } catch {
@@ -53,7 +65,7 @@ export async function request<T>(
     if (res.status === 401 && err.code === "signed_out") signedOutListeners.forEach((l) => l());
     throw new ApiError(res.status, err.code, err.message, err.fields);
   }
-  return json.data as T;
+  return { data: json.data as T, page: json.page ?? null };
 }
 
 /** As this phone's person. */
@@ -61,6 +73,13 @@ export function api<T>(method: "GET" | "POST" | "PATCH" | "DELETE", path: string
   const session = calls.getSession();
   if (!session) return Promise.reject(new ApiError(401, "signed_out", "This phone isn't paired."));
   return request<T>(session, method, path, body);
+}
+
+/** One page of a list, as this phone's person, with where it is in the list. */
+export function apiPage<T>(path: string): Promise<{ data: T[]; page: Page | null }> {
+  const session = calls.getSession();
+  if (!session) return Promise.reject(new ApiError(401, "signed_out", "This phone isn't paired."));
+  return requestWithPage<T[]>(session, "GET", path);
 }
 
 /** The phone's own sign-in, for what fetch() doesn't carry: a picture in chat, the live stream. Null when not paired. */
@@ -72,20 +91,32 @@ export function signedIn(): { baseUrl: string; headers: Record<string, string> }
   return { baseUrl: session.baseUrl, headers };
 }
 
-/** A form with files, as this phone's person — React Native writes the multipart boundary itself. */
+/**
+ * A form with files, as chat and expense claims send them. Not through fetch: the app's fetch is Expo's, which can't send
+ * a file given by its address on the phone (`{ uri, name, type }`) — React Native's own XMLHttpRequest can.
+ */
 export async function upload<T>(path: string, form: FormData): Promise<T> {
   const where = signedIn();
   if (!where) throw new ApiError(401, "signed_out", "This phone isn't paired.");
-  let res: Response;
+  const sent = await new Promise<{ status: number; text: string } | null>((resolve) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${where.baseUrl}${path}`);
+    for (const [name, value] of Object.entries({ accept: "application/json", ...where.headers })) xhr.setRequestHeader(name, value);
+    xhr.onload = () => resolve({ status: xhr.status, text: xhr.responseText });
+    xhr.onerror = () => resolve(null);
+    xhr.ontimeout = () => resolve(null);
+    xhr.send(form);
+  });
+  if (!sent) throw new ApiError(0, "offline", "Can't reach Deskzo. Check the phone's internet connection.");
+  let json: { data?: T; error?: { code: string; message: string } } = {};
   try {
-    res = await fetch(`${where.baseUrl}${path}`, { method: "POST", headers: { accept: "application/json", ...where.headers }, body: form });
+    json = JSON.parse(sent.text) as typeof json;
   } catch {
-    throw new ApiError(0, "offline", "Can't reach Deskzo. Check the phone's internet connection.");
+    // Not JSON — said below by its status.
   }
-  const json = (await res.json().catch(() => ({}))) as { data?: T; error?: { code: string; message: string } };
-  if (!res.ok) {
-    if (res.status === 401 && json.error?.code === "signed_out") signedOutListeners.forEach((l) => l());
-    throw new ApiError(res.status, json.error?.code ?? `http_${res.status}`, json.error?.message ?? "Deskzo didn't take that. Try again.");
+  if (sent.status < 200 || sent.status >= 300) {
+    if (sent.status === 401 && json.error?.code === "signed_out") signedOutListeners.forEach((l) => l());
+    throw new ApiError(sent.status, json.error?.code ?? `http_${sent.status}`, json.error?.message ?? "Deskzo didn't take that. Try again.");
   }
   return json.data as T;
 }
@@ -97,7 +128,9 @@ export type Me = {
   workspace: { name: string | null };
   phone: { id: string; name: string; platform: string; call_sync: boolean };
   /** Older servers answer only calls: a part they don't name, they don't have (src/app/(tabs)/_layout.tsx). */
-  can: { calls: boolean; attendance?: boolean; tasks?: boolean; chat?: boolean };
+  can: { calls: boolean; attendance?: boolean; tasks?: boolean; chat?: boolean; leads?: boolean; companies?: boolean; contacts?: boolean; visits?: boolean; expenses?: boolean; calendar?: boolean };
+  /** The web's menu for the More tab — what the person may open (src/lib/app/sales.ts); none from an older server. */
+  modules?: { group: string; items: { label: string; href: string }[] }[];
   /** The workspace's screen rules for this person (src/lib/app/dlp.ts); none from an older server. */
   screen?: ScreenRulesFromServer;
 };

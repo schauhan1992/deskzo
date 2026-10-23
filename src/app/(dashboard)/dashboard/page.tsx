@@ -3,20 +3,20 @@ import type { ReactNode } from "react";
 import {
   getDashboardSummary,
   getDashboardWidgetOptions,
-  getDashboardPreferences,
+  getDashboardLayout,
   getDashboardPresetOptions,
-  setDashboardPreferences,
 } from "@/actions/dashboard";
 import { Card, CardContent, CardHeader, Badge } from "@/components/ui/card";
-import { DashboardCustomizeButton } from "@/components/dashboard/dashboard-customize-button";
-import { WidgetGrid, type GridItem } from "@/components/dashboard/widget-grid";
+import { DashboardBoard, type CardOption } from "@/components/dashboard/dashboard-board";
 import { Bell, Pin } from "lucide-react";
 import { formatCurrency, cn } from "@/lib/utils";
 import { workspaceClock } from "@/lib/time/workspace";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { formatOrderId } from "@/lib/order-id";
 import { companyPath, leadPath } from "@/lib/record-links";
-import { SCOPE_LABEL, getDashboardWidgetDefinition } from "@/lib/dashboard-widgets";
+import { SCOPE_LABEL } from "@/lib/dashboard-widgets";
+import { DEFAULT_RANGE, LAYOUT_MARKER, decodeChart, isChartEntry, isRangeKey, resultKey, type ChartSpec } from "@/lib/dashboard/charts";
+import { chartCatalog, dashboardContext, kpiCards, widgetData } from "@/lib/dashboard/data";
 import type { ProjectHealth, ProjectStatus } from "@prisma/client";
 import { projectHealthLabels, projectHealthTone, projectStatusLabels } from "@/lib/projects/status";
 import { noteColorClasses } from "@/components/notes/note-card";
@@ -134,8 +134,8 @@ function TargetCard({
   );
 }
 
-export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
-  const { tab: requested } = await searchParams;
+export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ tab?: string; range?: string }> }) {
+  const { tab: requested, range: requestedRange } = await searchParams;
 
   // The band across the top is the same on every tab: the greeting (which resolves the name itself,
   // from todaysMoments()), the company, and the helpline.
@@ -213,26 +213,70 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     );
   }
 
-  const [summary, widgetOptions, prefs, presets] = await Promise.all([
-    getDashboardSummary(),
+  // The dashboard tab: headline figures, then the charts and cards in the order this person put them
+  // (src/components/dashboard/dashboard-board.tsx). Every figure is read here, through the rule its own
+  // list follows (src/lib/dashboard/data.ts).
+  const range = isRangeKey(requestedRange) ? requestedRange : DEFAULT_RANGE;
+  const ctx = await dashboardContext(user.id);
+  const [layout, widgetOptions, presets, catalog] = await Promise.all([
+    getDashboardLayout(),
     getDashboardWidgetOptions(),
-    getDashboardPreferences(),
     getDashboardPresetOptions(),
+    chartCatalog(ctx),
   ]);
+  const offered = new Set(widgetOptions.map((w) => w.key));
+  // What can be shown: charts whose source is open to them, cards still offered to them.
+  const shown = (entry: string) => {
+    if (entry === LAYOUT_MARKER) return true;
+    if (!isChartEntry(entry)) return offered.has(entry);
+    const spec = decodeChart(entry);
+    return !!spec && catalog.sources.includes(spec.source);
+  };
+  const entries = layout.entries.filter(shown);
+  const specs = entries.map(decodeChart).filter((s): s is ChartSpec => s !== null);
+  const cardKeys = entries.filter((e) => e !== LAYOUT_MARKER && !isChartEntry(e));
 
-  const availableKeys = new Set(widgetOptions.map((w) => w.key));
-  // An array, not a set. The order *is* the preference now — somebody who drags Outstanding balance
-  // to the top has said something, and a Set would throw it away on the next render. Uncustomised
-  // still means "the set for your role" rather than everything they may open, intersected with what
-  // is available so a role default for a switched-off module stays hidden.
-  const visibleKeys = (prefs.customized ? prefs.widgets : prefs.defaults).filter((k) => availableKeys.has(k));
+  const [kpis, chartResults, cardNodes] = await Promise.all([
+    kpiCards(ctx, range),
+    Promise.all(specs.map(async (spec) => [resultKey(spec, range), await widgetData(ctx, spec, range)] as const)),
+    // The older cards' figures are the expensive part, and read only when one is on the dashboard.
+    cardKeys.length ? cardsFor(user.id, clock, cardKeys) : Promise.resolve({}),
+  ]);
+  const cards: CardOption[] = widgetOptions.map((w) => ({ key: w.key, label: w.label, description: w.description, size: w.size === "wide" ? 2 : 1 }));
+
+  return (
+    <div>
+      {/* The greeting knows the time of day and who has a birthday; the splash for anything bigger is
+          mounted in the layout, so it reaches every page. */}
+      {header()}
+      <DashboardBoard
+        today={clock.today()}
+        range={range}
+        kpis={kpis}
+        // A card whose figures came back empty (its module since switched off) is left out rather than
+        // shown loading for ever.
+        entries={entries.filter((e) => e === LAYOUT_MARKER || isChartEntry(e) || e in cardNodes)}
+        defaults={layout.defaults}
+        results={Object.fromEntries(chartResults)}
+        catalog={catalog}
+        cards={cards}
+        cardNodes={cardNodes}
+        presets={presets}
+      />
+    </div>
+  );
+}
+
+/**
+ * The older cards on this person's dashboard — finance, notes, renewals and the rest — rendered here,
+ * and handed to the board as nodes to arrange.
+ */
+async function cardsFor(userId: string, clock: Awaited<ReturnType<typeof workspaceClock>>, keys: string[]): Promise<Record<string, ReactNode>> {
+  const summary = await getDashboardSummary();
 
   /**
-   * Every widget this person could be shown, by key.
-   *
-   * Built as a map rather than laid out in place, because the arrangement belongs to them now. A
-   * widget whose data came back null — a module switched off, a figure they may not see — simply
-   * has no entry here, and drops out below without needing a second condition anywhere.
+   * Every card this person could be shown, by key. A card whose data came back null — a module switched
+   * off, a figure they may not see — simply has no entry here, and drops out without a second condition.
    */
   const widgets: Record<string, ReactNode> = {};
 
@@ -398,7 +442,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         subtitle="Total unpaid invoices"
         data={f.receivables}
         href="/receivables"
-        newHref={(await can(user.id, "documents.issue")) ? "/documents/new?type=INVOICE" : undefined}
+        newHref={(await can(userId, "documents.issue")) ? "/documents/new?type=INVOICE" : undefined}
         newLabel="New"
       />
     );
@@ -599,37 +643,5 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     </ListCard>
   );
 
-  const items: GridItem[] = visibleKeys
-    .filter((key) => Boolean(widgets[key]))
-    .map((key) => {
-      const def = getDashboardWidgetDefinition(key);
-      return { key, label: def?.label ?? key, size: def?.size ?? "stat", node: widgets[key] };
-    });
-
-  return (
-    <div>
-      {/* The greeting knows the time of day and who has a birthday; the splash for anything bigger is
-          mounted in the layout, so it reaches every page. */}
-      {header(
-        <DashboardCustomizeButton
-          options={widgetOptions}
-          selected={visibleKeys}
-          customized={prefs.customized}
-          presets={presets}
-        />,
-      )}
-
-      {items.length === 0 ? (
-        <Card className="mt-6">
-          <CardContent className="py-8 text-center text-sm text-muted">
-            Your dashboard is empty — click Customize to choose what to show.
-          </CardContent>
-        </Card>
-      ) : (
-        // The dashboard saves order and selection together, because ticking a widget off in
-        // Customize and dragging one are the same array here.
-        <WidgetGrid items={items} onReorder={setDashboardPreferences} />
-      )}
-    </div>
-  );
+  return Object.fromEntries(keys.filter((k) => k in widgets).map((k) => [k, widgets[k]]));
 }

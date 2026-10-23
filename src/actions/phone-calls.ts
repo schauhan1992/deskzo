@@ -93,17 +93,11 @@ export async function ringMyPhone(input: {
 
   let pushed = false;
   if (phone.pushToken) {
-    // Android's app wakes to the data and offers the call itself; an iPhone is shown an alert to tap (owner,
-    // 22 Oct 2026), one ring replacing another still on its screen, gone when the ring runs out.
+    // Shown by the phone even with the app closed (owner, 22 Oct 2026); a tap opens Calls, where the ring waits — and on an
+    // iPhone its Call button dials. A new ring replaces one still showing; it is gone when the ring runs out.
     const sent = await pushToDevice(
       { platform: phone.platform, pushToken: phone.pushToken },
-      {
-        data: { type: "call", request: request.id, number: phoneNumber, label },
-        alert: { title: `Call ${label}`, body: `${phoneNumber} — tap to call. You asked from Deskzo on your computer.` },
-        category: "deskzo-call",
-        ttlSeconds: REQUEST_SECONDS,
-        collapseId: request.id,
-      },
+      { data: { type: "call", request: request.id, number: phoneNumber, label }, title: `Call ${label}`, body: phoneNumber, group: "deskzo-ring", category: "deskzo-call", ttlSeconds: REQUEST_SECONDS },
     );
     pushed = sent === "sent";
     if (sent === "gone") await db.appDevice.update({ where: { id: phone.id }, data: { pushToken: null } });

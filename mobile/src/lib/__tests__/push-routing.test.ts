@@ -24,8 +24,17 @@ describe("routeFor — where a notification takes the person", () => {
     expect(routeFor({ type: "chat" })).toEqual({ kind: "open", pathname: "/chat" });
   });
 
-  it("opens Approvals for something waiting for a decision", () => {
-    expect(routeFor({ type: "approval" })).toEqual({ kind: "open", pathname: "/approvals" });
+  it("opens what the bell's notice links to — natively where the app has a screen, else the page", () => {
+    expect(routeFor({ type: "notice", link: "/leads/LEAD-0042" })).toEqual({ kind: "open", pathname: "/lead/[ref]", params: { ref: "LEAD-0042" } });
+    expect(routeFor({ type: "notice", link: "/companies/COM-0007?tab=contacts" })).toEqual({ kind: "open", pathname: "/company/[ref]", params: { ref: "COM-0007" } });
+    expect(routeFor({ type: "notice", link: "/tasks?view=today" })).toEqual({ kind: "open", pathname: "/tasks" });
+    expect(routeFor({ type: "notice", link: "/people/leave#requests" })).toEqual({ kind: "open", pathname: "/web", params: { path: "/people/leave#requests" } });
+  });
+
+  it("never leaves the workspace for a notice's link", () => {
+    expect(routeFor({ type: "notice", link: "https://evil.example/" })).toEqual({ kind: "open", pathname: "/" });
+    expect(routeFor({ type: "notice", link: "//evil.example/" })).toEqual({ kind: "open", pathname: "/" });
+    expect(routeFor({ type: "notice" })).toEqual({ kind: "open", pathname: "/" });
   });
 
   it("opens the after-call sheet from the app's own reminder", () => {
@@ -52,9 +61,9 @@ describe("showWhileOpen", () => {
     expect(showWhileOpen({ type: "after-call" })).toBe(false);
   });
 
-  it("shows a ring and an approval", () => {
+  it("shows a ring and a notice", () => {
     expect(showWhileOpen({ type: "call" })).toBe(true);
-    expect(showWhileOpen({ type: "approval" })).toBe(true);
+    expect(showWhileOpen({ type: "notice", link: "/leads/LEAD-1" })).toBe(true);
     expect(showWhileOpen(null)).toBe(true);
   });
 });

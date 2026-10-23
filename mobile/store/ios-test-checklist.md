@@ -3,8 +3,8 @@
 What the automated checks can't show — they need a real iPhone, Apple's push service or a Mac with Xcode 26.4+:
 
 - `npm test` (the unit tests), `npx tsc --noEmit`, `npm run lint`, `npx expo-doctor` and `npm run ios:check` (ios/ as a
-  release generates it) run anywhere; the server's `npm run check:phone-app` and `check:app-daily` run against the
-  database.
+  release generates it) run anywhere; the server's `npm run check:phone-app`, `check:app-daily`, `check:app-sales`,
+  `check:app-field` and `check:app-chat` run against the database.
 - The Swift (`modules/deskzo-ios`, `targets/call-directory`) has only been type-checked, against the iOS 18 SDK — the
   whole app has never been compiled or run on a device. That is what this list is for.
 
@@ -41,9 +41,25 @@ site or the demo workspace, with a second phone to call from. Note the iPhone mo
 - [ ] The keyboard doesn't cover the message field, on an iPhone with a home bar and on an iPhone SE.
 - [ ] With the app open on another tab, a message shows the app's own banner, not iOS's.
 
-## 4. The Deskzo tab
+## 4. Sales
 
-- [ ] Opens signed in (Dashboard), no sign-in page.
+- [ ] **Sales** tab: Leads, Companies and Contacts; pull to refresh; the pipeline's stages; a lead given to someone else isn't there unless the person may see it.
+- [ ] A lead: its stage, move it on; mark it won (green), then lost with a reason (red) — dark mode too; add a note; it shows on the lead in Deskzo on a computer.
+- [ ] A contact's **Call** button: iOS asks "Call …?"; after the call, back in the app, the after-call sheet with the contact's name. **WhatsApp** opens a chat with them in WhatsApp (its web page where WhatsApp isn't installed); **Email** opens Mail.
+- [ ] The **+** button: a new lead, a new company, a new contact — saved, and open on the computer.
+- [ ] **Search** (More): a lead's name, a company, a person's number — each opens its own screen.
+
+## 5. Field work
+
+- [ ] **Visits** (More, and the card on Today): plan one for a customer and a time.
+- [ ] **Check in** at the customer: iOS asks for location While Using (the words mention visits); checked in, with where the phone was; **check out** — the visit's length; write up how it went. On a computer: the visit with both places.
+- [ ] Check in with location refused: the app says so and how to allow it.
+- [ ] **Expense claims**: a new claim with a **receipt photo** from the Camera, and one from Photos — the photo arrives smaller than taken; the claim waits for approval and appears in the approver's Approvals.
+- [ ] **Meetings**: schedule one; it is on the calendar in Deskzo.
+
+## 6. Deskzo's pages (More)
+
+- [ ] **More › All of Deskzo** opens signed in (Dashboard), no sign-in page; a row under More for a page the app has no screen of opens that page.
 - [ ] Swipe from the left edge goes back a page.
 - [ ] A link to another site opens in Safari; an email address opens Mail.
 - [ ] A phone number on a contact dials (iOS asks "Call …?") and, back in the app after the call, the after-call sheet opens.
@@ -51,9 +67,9 @@ site or the demo workspace, with a second phone to call from. Note the iPhone mo
 - [ ] Download a file the server sends (a document's PDF, a chat file): the share sheet; Save to Files saves it; no "Save Image" (it would need a permission the app doesn't have).
 - [ ] Download an export the page makes itself (Leads › Export, the aging report): the share sheet with the CSV or Excel file, named as on a computer.
 - [ ] A page with something embedded from another site (a map, a payment form) shows it inside the page — Safari doesn't open.
-- [ ] Sign out of Deskzo (Settings) and sign in again — the Deskzo tab asks nothing and opens as the new sign-in (the old cookies went).
+- [ ] Sign out of Deskzo (Settings) and sign in again — More's pages ask nothing and open as the new sign-in (the old cookies went).
 
-## 5. Calls on this iPhone
+## 7. Calls on this iPhone
 
 - [ ] Calls › Set up calls on this iPhone: the words say iPhones don't let apps read calls; Turn on — iOS asks to send notifications.
 - [ ] Settings › Phone › Call Blocking & Identification lists **Deskzo**; turn it on. Back in the app, Settings shows "Caller ID is on" and how many numbers were loaded.
@@ -70,28 +86,28 @@ site or the demo workspace, with a second phone to call from. Note the iPhone mo
 - [ ] With the app open on Calls, a ring appears there without a notification banner getting in the way.
 - [ ] Turn calls off on this iPhone: caller ID no longer shows names; Ring my phone says no phone of yours has calling on.
 
-## 6. Notifications
+## 8. Notifications
 
 - [ ] A colleague sends a message with the app closed: "New message from Priya" — never what it says; tapping it opens that conversation.
 - [ ] A muted chat: nothing.
-- [ ] A leave request that the person approves: "… waiting for your decision"; tapping it opens Approvals.
+- [ ] What the bell says, with the app closed: a lead given to the person — "A lead was assigned to you", tapping it opens the lead's screen; a leave request they approve — "Leave request", tapping it opens the page it links to; their own leave approved — "Leave approved". Never what the request says.
 - [ ] Notifications off in iOS Settings: Settings › Notifications in the app offers to open iOS's settings.
 - [ ] Sign out: Notification Centre has nothing of Deskzo's left; a message to the person afterwards doesn't reach the phone.
 
-## 7. Screen rules (a workspace that limits screenshots or watermarks)
+## 9. Screen rules (a workspace that limits screenshots or watermarks)
 
 - [ ] A screenshot in the app is counted in the workspace's security log, and the app says how many are left. (iOS can't block them — past the allowance they are still counted.)
-- [ ] The watermark shows on the customer screens and not on the Deskzo tab.
+- [ ] The watermark shows on the app's own screens (Sales, a lead, Calls) and not on Deskzo's pages under More, which draw the website's.
 
-## 8. How it looks and reads
+## 10. How it looks and reads
 
-- [ ] **Dark mode** (Control Centre): every screen dark — Today, Calls, the after-call sheet, chat (dark bubbles and wallpaper), Settings, the tab bar and headers; nothing white left, all text readable.
+- [ ] **Dark mode** (Control Centre): every screen dark — Today, Sales, a lead and a company, Visits, an expense claim, Calls, the after-call sheet, chat (dark bubbles and wallpaper), Settings, the tab bar and headers; nothing white left, all text readable.
 - [ ] **Dynamic Type** at the largest accessibility size (Settings › Accessibility › Display & Text Size): text grows, nothing overlaps or is cut off on Today, the calendar on Leave, chat bubbles, the after-call sheet.
 - [ ] **VoiceOver**: every button and field says what it is — the gear, the tabs, Call, Done, the chips (as selected or not), the attach and send buttons, the calendar's days; Approve/Reject on each item.
 - [ ] **Notch and Dynamic Island**: nothing under them, on an iPhone 15 Pro or later and an iPhone SE.
 - [ ] **iPad**, portrait and landscape: the screens sit in a column of readable width; the share sheet for a download appears as a popover; pairing by QR works with the iPad's camera.
 
-## 9. Once, before submitting
+## 11. Once, before submitting
 
 - [ ] `npm run ios:check` passes on the commit being built.
 - [ ] The build's Info.plist (App Store Connect › TestFlight › the build › Build Metadata) lists only camera, photos and location when in use.

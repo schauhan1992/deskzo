@@ -42,6 +42,8 @@ const ALLOWED_PERMISSIONS = [
   "android.permission.RECEIVE_BOOT_COMPLETED",
   "android.permission.FOREGROUND_SERVICE",
   "android.permission.VIBRATE",
+  // Firebase Cloud Messaging receiving Deskzo's notifications (expo-notifications, 22 Oct 2026 — store/data-safety.md).
+  "com.google.android.c2dm.permission.RECEIVE",
   "com.deskzo.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
 ];
 

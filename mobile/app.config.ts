@@ -1,5 +1,9 @@
 import type { ExpoConfig } from "expo/config";
 
+// Read by Node when Expo loads this file; the app's own types don't include Node's.
+declare const require: (id: "node:fs") => { existsSync: (file: string) => boolean };
+declare const __dirname: string;
+
 /**
  * The Deskzo app (owner, 18 Oct 2026) — Android first, calling first; and the iPhone (owner, 22 Oct 2026), from the
  * same code, with what iOS allows instead of the call log (README.md, "On an iPhone").
@@ -9,6 +13,14 @@ import type { ExpoConfig } from "expo/config";
  * 127.0.0.1). A release build only ever talks HTTPS to a real workspace.
  */
 const dev = process.env.DESKZO_APP_DEV === "1";
+
+/**
+ * Notifications with the app closed (owner, 22 Oct 2026) come through Firebase Cloud Messaging on Android: Deskzo's own
+ * Firebase project's google-services.json, kept beside this file (it holds only public identifiers). Without it the app
+ * still builds and works — it just asks nothing of Firebase, and gets no notifications while closed. An iPhone's come
+ * through Apple's own service (APNs), which needs no file here.
+ */
+const firebase = require("node:fs").existsSync(`${__dirname}/google-services.json`);
 
 /** Shared with the caller ID extension (targets/call-directory), which reads the customers' numbers from it. */
 const APP_GROUP = "group.com.deskzo.app";
@@ -49,9 +61,33 @@ const config: ExpoConfig = {
       "android.permission.ACCESS_BACKGROUND_LOCATION",
       "android.permission.FOREGROUND_SERVICE_LOCATION",
       "android.permission.ACTIVITY_RECOGNITION",
+      // Asked for by expo-notifications' launcher-badge library and by an install-referrer library: the app sets no
+      // badge counts (src/lib/push.ts — shouldSetBadge: false) and tracks no installs (22 Oct 2026).
+      "com.google.android.finsky.permission.BIND_GET_INSTALL_REFERRER_SERVICE",
+      "android.permission.READ_APP_BADGE",
+      "com.android.launcher.permission.READ_SETTINGS",
+      "com.android.launcher.permission.WRITE_SETTINGS",
+      "com.android.launcher.permission.INSTALL_SHORTCUT",
+      "com.android.launcher.permission.UNINSTALL_SHORTCUT",
+      "com.sec.android.provider.badge.permission.READ",
+      "com.sec.android.provider.badge.permission.WRITE",
+      "com.htc.launcher.permission.READ_SETTINGS",
+      "com.htc.launcher.permission.UPDATE_SHORTCUT",
+      "com.sonyericsson.home.permission.BROADCAST_BADGE",
+      "com.sonymobile.home.permission.PROVIDER_INSERT_BADGE",
+      "com.anddoes.launcher.permission.UPDATE_COUNT",
+      "com.majeur.launcher.permission.UPDATE_BADGE",
+      "com.huawei.android.launcher.permission.CHANGE_BADGE",
+      "com.huawei.android.launcher.permission.READ_SETTINGS",
+      "com.huawei.android.launcher.permission.WRITE_SETTINGS",
+      "com.oppo.launcher.permission.READ_SETTINGS",
+      "com.oppo.launcher.permission.WRITE_SETTINGS",
+      "me.everything.badger.permission.BADGE_COUNT_READ",
+      "me.everything.badger.permission.BADGE_COUNT_WRITE",
     ],
     allowBackup: false,
     predictiveBackGestureEnabled: false,
+    ...(firebase ? { googleServicesFile: "./google-services.json" } : {}),
   },
   ios: {
     bundleIdentifier: "com.deskzo.app",
@@ -92,14 +128,16 @@ const config: ExpoConfig = {
         { NSPrivacyAccessedAPIType: "NSPrivacyAccessedAPICategoryDiskSpace", NSPrivacyAccessedAPITypeReasons: ["E174.1", "85F4.1"] },
       ],
       NSPrivacyCollectedDataTypes: [
-        // Where the phone is when somebody clocks in or out, or signs in where their company requires it.
+        // Where the phone is when somebody clocks in or out, checks in or out of a visit, or signs in where their company requires it.
         { NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypePreciseLocation", NSPrivacyCollectedDataTypeLinked: true, NSPrivacyCollectedDataTypeTracking: false, NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"] },
         { NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeCoarseLocation", NSPrivacyCollectedDataTypeLinked: true, NSPrivacyCollectedDataTypeTracking: false, NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"] },
         // Team chat's messages.
         { NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeEmailsOrTextMessages", NSPrivacyCollectedDataTypeLinked: true, NSPrivacyCollectedDataTypeTracking: false, NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"] },
-        // The photos somebody picks or takes to send in chat.
+        // The photos somebody picks or takes to send in chat, and a receipt's for an expense claim.
         { NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypePhotosorVideos", NSPrivacyCollectedDataTypeLinked: true, NSPrivacyCollectedDataTypeTracking: false, NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"] },
-        // A call logged from the after-call sheet, its notes; tasks, leave, decisions; documents sent in chat.
+        // Expense claims made in the app: the amount and what it was for — never a card or bank details.
+        { NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeOtherFinancialInfo", NSPrivacyCollectedDataTypeLinked: true, NSPrivacyCollectedDataTypeTracking: false, NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"] },
+        // A call logged from the after-call sheet, its notes; leads, visits, meetings, tasks, leave, decisions; documents sent in chat.
         { NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeOtherUserContent", NSPrivacyCollectedDataTypeLinked: true, NSPrivacyCollectedDataTypeTracking: false, NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"] },
         // The phone's own sign-in, its model and the app's version — administrators see it in Security › Devices.
         { NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeDeviceID", NSPrivacyCollectedDataTypeLinked: true, NSPrivacyCollectedDataTypeTracking: false, NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"] },
@@ -116,7 +154,7 @@ const config: ExpoConfig = {
       {
         recordAudioAndroid: false,
         barcodeScannerEnabled: true,
-        cameraPermission: "Deskzo uses the camera to scan the code that pairs this phone, and to take photos you send in chat or add on a Deskzo page.",
+        cameraPermission: "Deskzo uses the camera to scan the code that pairs this phone, and to take photos you send in chat, add to an expense claim or add on a Deskzo page.",
         microphonePermission: false,
       },
     ],
@@ -124,15 +162,15 @@ const config: ExpoConfig = {
     [
       "expo-image-picker",
       {
-        photosPermission: "Deskzo opens your photos only to send the ones you pick — in chat, or on a Deskzo page.",
-        cameraPermission: "Deskzo uses the camera to scan the code that pairs this phone, and to take photos you send in chat or add on a Deskzo page.",
+        photosPermission: "Deskzo opens your photos only to send the ones you pick — in chat, with an expense claim, or on a Deskzo page.",
+        cameraPermission: "Deskzo uses the camera to scan the code that pairs this phone, and to take photos you send in chat, add to an expense claim or add on a Deskzo page.",
         microphonePermission: false,
       },
     ],
     [
       "expo-location",
       {
-        locationWhenInUsePermission: "Deskzo checks you are at your office, and saves where you are with your attendance, when you clock in or out — and when you sign in, if your company asks. Only then, never in the background.",
+        locationWhenInUsePermission: "Deskzo reads where you are only when you clock in or out (to check you are at your office, and save it with your attendance), check in or out of a customer visit, or sign in if your company asks. Never in the background.",
         locationAlwaysAndWhenInUsePermission: false,
         locationAlwaysPermission: false,
         motionUsagePermission: false,
@@ -155,6 +193,8 @@ const config: ExpoConfig = {
         },
       },
     ],
+    // Deskzo's notifications — a lead given to you, something to approve, a task, a ticket's reply (src/lib/push.ts).
+    ["expo-notifications", { icon: "./assets/android-icon-monochrome.png", color: "#4F46E5", defaultChannel: "deskzo" }],
     "./plugins/with-short-native-paths",
     "./plugins/with-release-signing",
     // iOS: the caller ID extension (targets/call-directory), and the launch screen — light, and dark for a dark phone.
@@ -163,7 +203,7 @@ const config: ExpoConfig = {
   ],
   experiments: { typedRoutes: false },
   // The app's project on EAS (eas.json), where its iOS builds are made.
-  extra: { dev, eas: { projectId: "41dff9e9-46dd-4253-99c9-b85e40e7122e" } },
+  extra: { dev, firebase, eas: { projectId: "41dff9e9-46dd-4253-99c9-b85e40e7122e" } },
 };
 
 export default config;

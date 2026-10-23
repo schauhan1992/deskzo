@@ -124,6 +124,16 @@ export const guide: SeedGuide = {
         p("Nothing changes until your manager approves it. Leave isn't corrected here: withdraw the leave request instead."),
       ),
       task(
+        "See your own in and out, by week or month",
+        ol(
+          runs("Open ", { b: "People › Attendance" }, " or ", { b: "People › My HR" }, " and find ", { b: "My in & out" }, "."),
+          runs("It opens on this week, Monday to Sunday. Select ", { b: "Month" }, " for the whole month, and ", { b: "Week" }, " to go back."),
+          runs("Step back a week or a month with the arrows beside the dates. The forward arrow stops at the current week or month."),
+        ),
+        p("Each day shows when you came in, when you left and the total hours between — In is your first punch of the day and Out your last. Above the days are the days present, total hours, the average a worked day and the leave taken in that week or month. A week off or a holiday says so; a working day with nothing recorded says Not recorded, which isn't an absence."),
+        p("Only you see this card's days. If a time is wrong, ask for a correction from My HR."),
+      ),
+      task(
         "Clock in at an office that checks your location",
         ol(
           runs("Select ", { b: "Clock in" }, " (or ", { b: "Clock out" }, ") in the {siteName} app's Today screen, or on ", { b: "People › My HR" }, "."),
@@ -212,6 +222,7 @@ export const guide: SeedGuide = {
           runs("To correct a day, select it, choose the ", { b: "Status" }, ", add a ", { b: "Note" }, " saying why, and select ", { b: "Save" }, "."),
         ),
         p("A dashed square is a working day nobody has recorded — not an absence. Corrections are stamped with your name. A day covered by approved leave can't be changed here."),
+        p(runs("Somebody with nobody reporting to them and no HR permission sees only themselves: the page is ", { b: "My attendance" }, ", with their own in and out and no Team or Person to pick. Managers see their own and their team's; HR sees everyone's.")),
       ),
       task(
         "Post a celebration",
@@ -240,8 +251,9 @@ export const guide: SeedGuide = {
       setting(
         "Biometric terminals",
         "Settings › Biometric terminals (also People › Biometric)",
-        p(runs("For eSSL and other ZKTeco-based terminals. The page shows the server address and port to enter on the terminal, under Menu → Comm → Cloud Server / ADMS. Select", { b: "Register terminal" }, " and enter its ", { b: "Serial number" }, " and a ", { b: "Name" }, " — a terminal that isn't registered has its uploads refused.")),
-        p(runs("Under ", { b: "Unmapped enrolment numbers" }, ", choose who each number belongs to and select ", { b: "Map" }, "; punches already collected for that number are recovered. The first punch of a day becomes the check-in and the last the check-out. ", { b: "Import a file" }, " takes a terminal's exported file for a site it can't reach the server from, and ", { b: "Reprocess" }, " rebuilds the days from the punches.")),
+        p(runs("For eSSL and other ZKTeco-based terminals. Select ", { b: "Register terminal" }, " and enter its ", { b: "Serial number" }, " and a ", { b: "Name" }, " — a terminal that isn't registered has its uploads refused. The serial is on the sticker underneath, and on the terminal under Menu → System → Device Info.")),
+        p("Then, on the terminal, under Menu → Comm → Cloud Server / ADMS: the server's IP number as the server address, port 80, Enable domain name off, and HTTPS off — most terminals can't speak HTTPS. With the workspace's address instead of the IP number, turn Enable domain name on. The page shows what to enter. A minute after saving, the terminal's Last seen changes from never."),
+        p(runs("Under ", { b: "Unmapped enrolment numbers" }, ", choose who each number belongs to and select ", { b: "Map" }, "; punches already collected for that number are recovered. The first punch of a day becomes the check-in and the last the check-out, at the time the terminal showed. ", { b: "Import a file" }, " takes a terminal's exported file for a site it can't reach the server from, and ", { b: "Reprocess" }, " works out every day from its punches again.")),
         note("These terminals' protocol carries no authentication. Keep the server reachable only from the office network or over a VPN.", "warning"),
       ),
       setting(
@@ -294,6 +306,15 @@ export const guide: SeedGuide = {
       qa(
         "Punches from our biometric terminal aren't showing.",
         p("Check the terminal is registered and enabled on the Biometric page, and that the person's enrolment number is mapped — unmapped punches are kept and recovered when you map the number. Days with leave or a manual correction are never overwritten by punches."),
+        p("If the terminal's Last seen still says never, it isn't reaching the server: check its Cloud Server settings — the server's IP number, port 80, Enable domain name off, HTTPS off — and that the office network lets it out. The person punching must be enrolled on the terminal too: an unknown finger or card makes no record to send."),
+      ),
+      qa(
+        "The check-in time from our terminal looks hours out.",
+        p("Check the terminal's own date, time and time zone first — the time it shows is the time recorded. Then select Reprocess on the Biometric page: it works out every day from its punches again, so days recorded before a fix to how times were read come out right. Days with leave or a manual correction are left as they are."),
+      ),
+      qa(
+        "Who can see my attendance?",
+        p("You, the people above you in the reporting line, and HR. Colleagues can't see your days, and the My in & out card only ever shows your own."),
       ),
       qa(
         "Who can see my personal and bank details?",

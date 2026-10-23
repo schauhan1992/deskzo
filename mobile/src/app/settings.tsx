@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
-import { Alert, ScrollView, Text } from "react-native";
+import { Alert, Linking, ScrollView, Text } from "react-native";
+import * as Notifications from "expo-notifications";
 import { useFocusEffect, useRouter } from "expo-router";
 import { CallerIdCard, NotificationsCard } from "@/components/iphone-calls";
 import { Button, Card, Heading, Notice, styles } from "@/components/ui";
@@ -8,10 +9,11 @@ import { when } from "@/lib/format";
 import { calls, phone } from "@/lib/native";
 import { notifications } from "@/lib/notifications";
 import { useSession } from "@/lib/session";
+import { PUSH_BUILT_IN, registerForPush } from "@/lib/push";
 
 /**
- * Who this phone is signed in as, call sync, and signing out. On an iPhone, its calls instead of call sync — caller ID
- * and refreshing it — and its notifications (src/components/iphone-calls.tsx).
+ * Who this phone is signed in as, notifications, call sync, and signing out. On an iPhone, its calls instead of call
+ * sync — caller ID and refreshing it — and its own notifications (src/components/iphone-calls.tsx).
  */
 export default function Settings() {
   const router = useRouter();
@@ -21,10 +23,15 @@ export default function Settings() {
   const [result, setResult] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Whether Deskzo may notify this phone (src/lib/push.ts) — the phone's own say, changed in its settings once refused.
+  const [notifying, setNotifying] = useState<boolean | null>(null);
+  const [asking, setAsking] = useState(false);
+
   useFocusEffect(
     useCallback(() => {
       setSync(calls.getCallSync());
       setIphoneOn(phone.callsOn());
+      if (PUSH_BUILT_IN) void Notifications.getPermissionsAsync().then((p) => setNotifying(p.granted)).catch(() => setNotifying(null));
     }, []),
   );
 
@@ -38,6 +45,37 @@ export default function Settings() {
           {me?.workspace.name ?? ""} · this phone: {me?.phone.name ?? ""}
         </Text>
       </Card>
+
+      {/* Android's (src/lib/push.ts); an iPhone's are further down (src/components/iphone-calls.tsx). */}
+      {!notifications.available && (
+        <>
+      <Heading>Notifications</Heading>
+      <Card>
+        {!PUSH_BUILT_IN ? (
+          <Text style={styles.body}>This version of the app doesn&apos;t receive Deskzo&apos;s notifications yet — they&apos;re in your bell on the web.</Text>
+        ) : notifying ? (
+          <Text style={styles.body}>On — a lead given to you, something to approve, a task or a ticket&apos;s reply shows on this phone, even with the app closed.</Text>
+        ) : (
+          <>
+            <Text style={styles.body}>Off — Deskzo can&apos;t tell you anything while the app is closed.</Text>
+            <Button
+              title="Turn on notifications"
+              kind="secondary"
+              busy={asking}
+              onPress={async () => {
+                setAsking(true);
+                const state = await registerForPush();
+                setAsking(false);
+                setNotifying(state === "on");
+                // Refused before: Android asks no more — the app's own settings are where it's switched on.
+                if (state === "denied") void Linking.openSettings();
+              }}
+            />
+          </>
+        )}
+      </Card>
+        </>
+      )}
 
       {calls.available && (
         <>
@@ -80,8 +118,8 @@ export default function Settings() {
         <>
           <Heading>Notifications</Heading>
           <NotificationsCard
-            why={'Get told when Deskzo rings this phone, a colleague messages you, or something waits for your decision — who and where, never what.'}
-            on={'On — for "Ring my phone", chat messages and what waits for your decision.'}
+            why={"Get told what your bell says on the web — a lead given to you, something to approve, a task, a ticket's reply — and when a colleague messages you or Deskzo rings this phone."}
+            on={'On — what your bell says, chat messages and "Ring my phone", even with the app closed.'}
           />
         </>
       )}

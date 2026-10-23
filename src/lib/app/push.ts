@@ -67,13 +67,40 @@ async function googleToken(account: ServiceAccount): Promise<string> {
   return json.access_token;
 }
 
+/** The channel the app's notifications arrive on (mobile/src/lib/push.ts). */
+const APP_CHANNEL = "deskzo";
+
+type PushOptions = {
+  /** Dropped after this long undelivered — two minutes unless said: a ring is no use later, a notice is. */
+  ttlSeconds?: number;
+  /**
+   * What the phone shows by itself, even with the app closed (the app's `deskzo` channel); without it, a data
+   * message only the open app reads.
+   */
+  shown?: { title: string; body?: string };
+  /** One shown with the same tag replaces the last — a new ring the one before it. */
+  tag?: string;
+};
+
 /**
- * A data message to one phone, delivered at once (high priority, dropped after two minutes): "sent";
- * "gone" when the address no longer reaches the app (uninstalled, or another Firebase project's) and should
- * be forgotten; "failed"; or "off" when pushes aren't set up here.
+ * A message to one phone, delivered at once (high priority): "sent"; "gone" when the address no longer reaches the
+ * app (uninstalled, or another Firebase project's) and should be forgotten; "failed"; or "off" when pushes aren't
+ * set up here.
  */
-export async function pushToPhone(pushToken: string, data: Record<string, string>): Promise<"sent" | "gone" | "failed" | "off"> {
-  const message = { message: { token: pushToken, data, android: { priority: "HIGH", ttl: "120s" } } };
+export async function pushToPhone(pushToken: string, data: Record<string, string>, options: PushOptions = {}): Promise<"sent" | "gone" | "failed" | "off"> {
+  const { ttlSeconds = 120, shown, tag } = options;
+  const message = {
+    message: {
+      token: pushToken,
+      data,
+      ...(shown ? { notification: { title: shown.title, ...(shown.body ? { body: shown.body } : {}) } } : {}),
+      android: {
+        priority: "HIGH",
+        ttl: `${ttlSeconds}s`,
+        ...(shown ? { notification: { channel_id: APP_CHANNEL, ...(tag ? { tag } : {}) } } : {}),
+      },
+    },
+  };
   const verdict = (status: number) => (status >= 200 && status < 300 ? "sent" : status === 404 || status === 403 ? "gone" : "failed");
   if (testSend) {
     const answer = await testSend(message);
@@ -252,19 +279,24 @@ function deliver(message: ApnsMessage, bearer: string): Promise<ApnsAnswer> {
   });
 }
 
-/** What a phone is sent: what the app routes on, and — on an iPhone — the alert it shows. */
+/**
+ * What a phone is sent (owner, 22 Oct 2026): what the app routes on, and what the phone shows by itself — on Android,
+ * through Firebase on the app's own channel; on an iPhone, as Apple's alert.
+ */
 export type PhonePush = {
-  /** Ids and what the phone shows — never the record behind them. On Android it is the whole message; on an iPhone, the payload's `body`. */
+  /** Ids and where it leads — never the record behind them. On Android the message's data; on an iPhone, the payload's `body`. */
   data: Record<string, string>;
-  alert: { title: string; body: string };
-  /** The iPhone's notification category — which buttons it offers ("deskzo-call", "deskzo-approval"). */
-  category?: string;
-  /** Pushes with the same thread are grouped together on the iPhone. */
-  threadId?: string;
-  /** How long Apple keeps trying a phone that's off — a day unless said. */
+  /** What the phone shows, even with the app closed. */
+  title: string;
+  body?: string;
+  /** Dropped after this long undelivered — two minutes unless said: a ring is no use later, a notice is. */
   ttlSeconds?: number;
-  /** A later push with the same id replaces an earlier one still on the screen. */
-  collapseId?: string;
+  /** One with the same group replaces the last still showing — a new ring the one before it, a chat's latest message. */
+  group?: string;
+  /** Shown together on an iPhone: a chat's messages. */
+  thread?: string;
+  /** The iPhone's buttons for it: "deskzo-call" offers Call. */
+  category?: string;
 };
 
 /**
@@ -280,17 +312,17 @@ export async function pushToIphone(pushToken: string, push: PhonePush): Promise<
     "apns-topic": key?.topic ?? APNS_TOPIC,
     "apns-push-type": "alert",
     "apns-priority": "10",
-    "apns-expiration": String(Math.floor(Date.now() / 1000) + (push.ttlSeconds ?? 86_400)),
-    ...(push.collapseId ? { "apns-collapse-id": push.collapseId.slice(0, 64) } : {}),
+    "apns-expiration": String(Math.floor(Date.now() / 1000) + (push.ttlSeconds ?? 120)),
+    ...(push.group ? { "apns-collapse-id": push.group.slice(0, 64) } : {}),
   };
   // What the app routes on goes under `body`: expo-notifications reads a remote notification's data from that key
   // alone (its iOS NotificationRecords.swift, `userInfo["body"]`) — not to be confused with `aps.alert.body`, the text shown.
   const payload = {
     aps: {
-      alert: { title: push.alert.title, body: push.alert.body },
+      alert: { title: push.title, ...(push.body ? { body: push.body } : {}) },
       sound: "default",
       ...(push.category ? { category: push.category } : {}),
-      ...(push.threadId ? { "thread-id": push.threadId } : {}),
+      ...(push.thread ? { "thread-id": push.thread } : {}),
     },
     body: { ...push.data },
   };
@@ -320,34 +352,56 @@ export async function pushToIphone(pushToken: string, push: PhonePush): Promise<
   }
 }
 
-/** A push to one phone, by its platform: an iPhone through APNs, any other through Firebase exactly as before. */
+/**
+ * A push to one phone, by its platform: an iPhone through APNs; an Android phone through Firebase, shown on the app's
+ * channel with the group as its tag — the same message as before iPhones were pushed to.
+ */
 export async function pushToDevice(phone: { platform: string; pushToken: string }, push: PhonePush): Promise<"sent" | "gone" | "failed" | "off"> {
-  return phone.platform === "ios" ? pushToIphone(phone.pushToken, push) : pushToPhone(phone.pushToken, push.data);
+  if (phone.platform === "ios") return pushToIphone(phone.pushToken, push);
+  return pushToPhone(phone.pushToken, push.data, { ttlSeconds: push.ttlSeconds, shown: { title: push.title, ...(push.body ? { body: push.body } : {}) }, ...(push.group ? { tag: push.group } : {}) });
+}
+
+/** Pushes to these phones, each its own way; a push address the phone's service no longer knows is forgotten. */
+async function pushToPhones(phones: { id: string; platform: string; pushToken: string | null }[], push: PhonePush): Promise<number> {
+  const verdicts = await Promise.all(
+    phones.map(async (phone) => {
+      const verdict = await pushToDevice({ platform: phone.platform, pushToken: phone.pushToken! }, push);
+      // Only the address that was refused: one the phone sent since is kept.
+      if (verdict === "gone") await db.appDevice.updateMany({ where: { id: phone.id, pushToken: phone.pushToken }, data: { pushToken: null } }).catch(() => {});
+      return verdict;
+    }),
+  );
+  return verdicts.filter((v) => v === "sent").length;
+}
+
+/** Whether anything can be pushed here: Firebase for Android phones, APNs for iPhones, or a check's stand-in. */
+const anyPush = () => !!testSend || pushConfigured() || apnsConfigured();
+
+/**
+ * A Deskzo notification on the person's phones too (owner, 22 Oct 2026 — push in the native app's first phase):
+ * a lead given to them, something waiting for their decision, a task, a ticket's reply — whatever their bell
+ * says. Only its title and where it leads go, never what's behind it; the phone opens the record through
+ * /api/app as anywhere else, so the person's access still decides. To each of their approved phones with a push
+ * address — an Android phone through Firebase, an iPhone through Apple's APNs; an address its service no longer knows
+ * is forgotten. Nothing goes while pushes aren't set up here.
+ */
+export async function pushNoticeToPhones(userId: string, notice: { id: string; type: string; title: string; link: string | null }): Promise<number> {
+  if (!anyPush()) return 0;
+  const phones = await db.appDevice.findMany({ where: { userId, pushToken: { not: null }, device: { status: "APPROVED" } }, select: { id: true, platform: true, pushToken: true } });
+  // Shown by the phone itself, the title only; kept for a phone that's off for a while — six hours — not the two
+  // minutes a ring is.
+  const title = notice.title.slice(0, 160);
+  return pushToPhones(phones, { data: { type: "notice", notice: notice.id, kind: notice.type, title, link: notice.link ?? "" }, title, ttlSeconds: 6 * 3600 });
 }
 
 /**
- * The same push to these people's iPhones (owner, 22 Oct 2026) — a chat message, something waiting for their
- * decision. iPhones only: Android's app has no receiver for these yet. A phone signed in, its device row
- * approved — as "Ring my phone" asks (src/actions/phone-calls.ts) — and its person still active. Nothing is
- * looked up while APNs is off. All at once, each bounded by its ten seconds, and never a failure for whatever
- * asked: a token Apple says is gone is forgotten.
+ * A chat message on the other members' phones (owner, 22 Oct 2026): who and where — "New message from Asha", "Asha in
+ * Sales team" — never what, as the app's own chat banner; the message stays in the chat. One a chat on the phone, the
+ * latest replacing the last; kept an hour. The caller leaves out whoever muted the chat.
  */
-export async function pushToIphonesOf(userIds: string[], push: PhonePush): Promise<void> {
-  if (userIds.length === 0 || (!testSend && !apnsConfigured())) return;
-  try {
-    const phones = await db.appDevice.findMany({
-      where: { userId: { in: [...new Set(userIds)] }, platform: "ios", pushToken: { not: null }, device: { status: "APPROVED" }, user: { active: true } },
-      select: { id: true, platform: true, pushToken: true },
-      take: 500,
-    });
-    await Promise.allSettled(
-      phones.map(async (phone) => {
-        const sent = await pushToDevice({ platform: phone.platform, pushToken: phone.pushToken! }, push);
-        // Only the token that was refused: one the phone sent since is kept.
-        if (sent === "gone") await db.appDevice.updateMany({ where: { id: phone.id, pushToken: phone.pushToken }, data: { pushToken: null } });
-      }),
-    );
-  } catch (err) {
-    console.error("[app] iPhone push failed", err);
-  }
+export async function pushChatToPhones(userIds: string[], chat: { id: string; title: string }): Promise<number> {
+  if (userIds.length === 0 || !anyPush()) return 0;
+  const phones = await db.appDevice.findMany({ where: { userId: { in: userIds }, pushToken: { not: null }, device: { status: "APPROVED" } }, select: { id: true, platform: true, pushToken: true } });
+  const title = chat.title.slice(0, 160);
+  return pushToPhones(phones, { data: { type: "chat", chat: chat.id, title, link: `/chat?c=${chat.id}` }, title, ttlSeconds: 3600, group: `chat-${chat.id}`, thread: chat.id });
 }

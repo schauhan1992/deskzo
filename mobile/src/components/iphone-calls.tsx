@@ -99,7 +99,7 @@ export function NotificationsOffer() {
   if (!notifications.available || declined || push !== "undetermined") return null;
   return (
     <Card>
-      <Text style={styles.body}>Get a notification when something waits for your decision, a colleague messages you, or Deskzo rings this phone — who and where, never what.</Text>
+      <Text style={styles.body}>Get a notification when a lead is given to you, something waits for your decision, a colleague messages you, or Deskzo rings this phone — even with the app closed.</Text>
       <Button title="Turn on notifications" onPress={async () => setPush(await notifications.turnOn())} />
       <Button
         title="Not now"

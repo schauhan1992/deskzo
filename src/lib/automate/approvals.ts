@@ -39,8 +39,7 @@ export async function approversToTell(approverIds: string[], role: string | null
 
 export async function tellApprovers(userIds: string[], title: string, workflowName: string): Promise<void> {
   for (const userId of userIds) {
-    // On their iPhone too: a workflow's approval is on the Deskzo app's Approvals screen, unlike its other messages.
-    await notifyUser({ userId, type: "WORKFLOW_MESSAGE", title: `Approval needed: ${title}`.slice(0, 200), message: `The workflow "${workflowName}" is waiting for you to approve or reject.`, link: "/approvals", awaitsDecision: true }).catch(() => undefined);
+    await notifyUser({ userId, type: "WORKFLOW_MESSAGE", title: `Approval needed: ${title}`.slice(0, 200), message: `The workflow "${workflowName}" is waiting for you to approve or reject.`, link: "/approvals" }).catch(() => undefined);
   }
 }
 

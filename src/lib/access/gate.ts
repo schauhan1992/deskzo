@@ -155,10 +155,9 @@ export async function writeActivity(input: {
 
 /**
  * Tells everybody who holds a permission. Resolved per person, so a personal grant or deny counts
- * exactly as it does everywhere else. `awaitsDecision` for one that asks them to decide something — a device
- * waiting for approval, on the Deskzo app's Approvals screen — so it reaches their iPhone too (src/lib/notify.ts).
+ * exactly as it does everywhere else.
  */
-export async function alertHolders(permission: string, alert: { title: string; message: string; link: string; awaitsDecision?: boolean }) {
+export async function alertHolders(permission: string, alert: { title: string; message: string; link: string }) {
   try {
     const [{ can }, { notifyUser }] = await Promise.all([import("@/lib/authz/resolve"), import("@/lib/notify")]);
     const people = await db.user.findMany({ where: { active: true }, select: { id: true } });
@@ -243,7 +242,6 @@ export async function evaluateAccess(input: GateInput): Promise<GateVerdict> {
           title: `${user.name} is waiting for a device to be approved`,
           message: `${device.label}${place ? `, from ${place}` : ""}. They can't use the app on it until it is approved.`,
           link: "/settings/security/access?tab=devices",
-          awaitsDecision: true,
         });
       }
     } catch {

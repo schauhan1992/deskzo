@@ -16,6 +16,9 @@ module.exports = defineConfig([
       "react-hooks/set-state-in-effect": "off",
       "react-hooks/refs": "off",
       "react-hooks/purity": "off",
+      // TypeScript already checks every name read from a namespace; this rule can't follow expo-notifications'
+      // re-exports and calls real ones missing (Notifications.AndroidImportance).
+      "import/namespace": "off",
     },
   },
   {

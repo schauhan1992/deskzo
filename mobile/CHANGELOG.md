@@ -3,27 +3,33 @@
 Each version as people see it (`version` in `app.config.ts`, shared by both phones), newest first. Android's
 `versionCode` goes up with every Play upload; the iPhone's build number is EAS's own (`eas.json`).
 
-## 0.3.0 — the iPhone (22 Oct 2026) · Android versionCode 4
+## 0.3.0 — the native app, on Android and the iPhone (23 Oct 2026) · Android versionCode 4
 
-The app on iPhone and iPad, from the same code as Android's — every screen and feature, with calling as iOS allows it
-(README.md, "On an iPhone"):
+The app made native, and the same app on iPhone and iPad, from the same code — every screen and feature on both
+phones, with calling as iOS allows it (README.md, "On an iPhone"):
 
-- Signing in by the browser, a QR or a code; the phone's token in the iOS Keychain, on this iPhone only.
-- Today, Tasks, Approvals, Leave, team chat (photos, the camera, files, copy) and all of Deskzo's pages — WKWebView
-  signed in, uploads, downloads to the share sheet (exports the page makes itself too), other sites in Safari, the back
-  swipe.
-- Calls: no call log on an iPhone, so the after-call sheet asks how a call started in the app went, and **Log a call**
-  notes any other; caller ID through CallKit's Call Directory, loaded with the customers the person may see; "Ring my
-  phone" as a notification with a Call button.
-- Notifications through Apple's push service — "Ring my phone", chat messages, approvals — asked for when they are
-  first needed, never at launch; a quiet reminder after a call.
-- Dark mode, Dynamic Type, the notch and Dynamic Island, iPad in a readable column, VoiceOver labels.
-- No microphone, no background location, no Face ID; HTTPS only; a privacy manifest.
+- **Sales first:** leads, companies and contacts as the app's own screens — the pipeline, a lead's stage, won or lost,
+  calling, WhatsApp or emailing a contact in a tap, adding a lead, company or contact, and search across them. The rest
+  of Deskzo's pages under **More**.
+- **Field work:** visits planned, checked in and out with where the phone was, and written up; expense claims with a
+  receipt photo (made smaller on the phone first); meetings and the calendar.
+- **Notifications** — what the bell says on the web, chat messages and "Ring my phone", even with the app closed;
+  a tap opens the lead, company, task or chat it is about. Through Firebase on Android and Apple's push service on an
+  iPhone, asked for when they are first needed, never at launch.
+- **The iPhone:** signing in by the browser, a QR or a code, the phone's token in the iOS Keychain on this iPhone only;
+  Today, Tasks, Approvals, Leave, team chat and all of Deskzo's pages (WKWebView signed in, uploads, downloads to the
+  share sheet, other sites in Safari, the back swipe). Calls: no call log on an iPhone, so the after-call sheet asks how
+  a call started in the app went, and **Log a call** notes any other; caller ID through CallKit's Call Directory,
+  loaded with the customers the person may see; "Ring my phone" with a Call button. Dark mode, Dynamic Type, the notch
+  and Dynamic Island, iPad in a readable column, VoiceOver labels. No microphone, no background location, no Face ID;
+  HTTPS only; a privacy manifest.
 
-On the server: pushes to iPhones (`DESKZO_APP_APNS_KEY`), calls logged by hand with their length marked unknown, and
-the caller ID list (`/api/app/calls/directory`).
+On the server: pushes to iPhones (`DESKZO_APP_APNS_KEY`) beside Android's (`FIREBASE_SERVICE_ACCOUNT`), one call for
+both (`pushToDevice`); calls logged by hand with their length marked unknown; the caller ID list
+(`/api/app/calls/directory`).
 
-Android is unchanged: the same screens, the same build (the iPhone's packages are left out of it), version 0.3.0.
+Android's calling — calls that log themselves, the after-call card, caller ID — is unchanged; the iPhone's packages are
+left out of its build.
 
 ## 0.2.1 (18 Oct 2026) · versionCode 3
 

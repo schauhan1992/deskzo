@@ -288,7 +288,9 @@ export async function reprocessPunches(): Promise<ActionResult<{ days: number; p
   if (!allowed) return { ok: false, error: "Only HR can reprocess attendance." };
 
   await linkPunchesToUsers();
-  const result = await rollupPunches();
+  // Every mapped punch's day again, so days written under older rules (a punch's time before it was read in
+  // the terminal's zone) come out right. Leave and hand-corrected days are still never touched.
+  const result = await rollupPunches({ rebuild: true });
   revalidatePath("/people/attendance");
   revalidatePath("/people/devices");
   return { ok: true, data: { days: result.daysWritten, punches: result.punchesProcessed, skipped: result.skipped.length } };

@@ -11,8 +11,9 @@ import { calls, phone } from "@/lib/native";
 import { PAGE_DOWNLOADS, readPageFile } from "@/lib/web-downloads";
 
 /**
- * All of Deskzo in the app (owner, 18 Oct 2026): the workspace's own pages, signed in by this phone and as this
- * phone (src/lib/app/web-session.ts on the server).
+ * A page of Deskzo in the app (owner, 18 Oct 2026): the workspace's own pages, signed in by this phone and as this
+ * phone (src/lib/app/web-session.ts on the server). Since the app went native (owner, 22 Oct 2026) it is the fallback,
+ * opened from More for whatever has no screen of the app's own yet: `/web?path=/orders`.
  *
  * The pages keep their own sign-in, as a browser does, so they open straight in; only when Deskzo shows its
  * sign-in page does the app sign them in again — with a one-time pass, or, for somebody with two-factor, by
@@ -67,14 +68,12 @@ export default function DeskzoPages() {
     [origin],
   );
 
-  useEffect(() => {
-    if (origin) setSource({ uri: `${origin}/dashboard` });
-  }, [origin]);
-
-  // Opened at a page from elsewhere in the app — a chat's file, say: `/web?path=/chat?c=…`. Only a page of this workspace.
+  // Opened at a page — from More, or a chat's file: `/web?path=/chat?c=…`. Only a page of this workspace; else its dashboard.
   const { path: openAt } = useLocalSearchParams<{ path?: string }>();
   useEffect(() => {
-    if (origin && openAt && openAt.startsWith("/") && !openAt.startsWith("//")) setSource({ uri: `${origin}${openAt}` });
+    if (!origin) return;
+    const page = openAt && openAt.startsWith("/") && !openAt.startsWith("//") ? openAt : "/dashboard";
+    setSource({ uri: `${origin}${page}` });
   }, [origin, openAt]);
 
   // Android's back button goes back a page while there is one.
@@ -128,7 +127,7 @@ export default function DeskzoPages() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.surface }} edges={["top"]}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.surface }} edges={[]}>
       {source && (
         <WebView
           ref={view}

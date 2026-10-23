@@ -1,6 +1,7 @@
-jest.mock("expo-constants", () => ({ __esModule: true, default: { expoConfig: { version: "0.3.0", extra: { dev: true } } } }));
-
 import { webOrigin, workspaceAddress } from "@/lib/config";
+
+// Hoisted above the import by Jest: the config reads a development build's expo-constants.
+jest.mock("expo-constants", () => ({ __esModule: true, default: { expoConfig: { version: "0.3.0", extra: { dev: true } } } }));
 
 /** A development build on the iOS Simulator (jest-expo runs as iOS): this Mac's Deskzo, as Apple's networking reaches it. */
 describe("a development build on the iOS Simulator", () => {

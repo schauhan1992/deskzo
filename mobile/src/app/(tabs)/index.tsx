@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { BOXED_TEXT_SCALE, Button, Card, Heading, Notice, colors, styles } from "@/components/ui";
 import { TaskRow } from "@/components/task-row";
 import { ClockCard } from "@/components/clock-card";
+import { FieldToday } from "@/components/field";
 import { NotificationsOffer } from "@/components/iphone-calls";
 import { notifications } from "@/lib/notifications";
 import { ApiError, api, type Today } from "@/lib/api";
@@ -13,8 +14,8 @@ import { dayOf, days, span } from "@/lib/format";
 import { useSession } from "@/lib/session";
 
 /**
- * Today (owner, 18 Oct 2026): the app's home — clocking in and out, the tasks due today, what waits for the
- * person's decision, and their leave. Each part only for somebody whose workspace has it and who may use it
+ * Today (owner, 18 Oct 2026): the app's home — clocking in and out, today's visits and meetings (22 Oct 2026), the
+ * tasks due today, what waits for the person's decision, and their leave. Each part only for somebody whose workspace has it and who may use it
  * (src/lib/app/daily.ts todayFor).
  */
 
@@ -29,6 +30,8 @@ export default function TodayScreen() {
   const [today, setToday] = useState<Today | null>(null);
   const [loading, setLoading] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  // Each pull on the screen, so today's visits and meetings are fetched again with the rest.
+  const [reloads, setReloads] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -53,7 +56,7 @@ export default function TodayScreen() {
   const first = me?.person.name.split(" ")[0];
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} />}>
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={loading} onRefresh={() => (setReloads((n) => n + 1), void load())} />}>
       <View>
         <Text style={styles.title}>
           {greeting()}
@@ -99,6 +102,8 @@ export default function TodayScreen() {
           </Card>
         </Pressable>
       )}
+
+      <FieldToday reload={reloads} />
 
       {today?.tasks && (
         <>
@@ -156,7 +161,7 @@ export default function TodayScreen() {
       )}
 
       {today && !today.attendance && !today.tasks && !today.leave && today.approvals_waiting === 0 && !problem && (
-        <Notice>Nothing here for you yet. Everything else in Deskzo is on the Deskzo tab.</Notice>
+        <Notice>Nothing here for you yet. Everything else in Deskzo is under More.</Notice>
       )}
     </ScrollView>
   );

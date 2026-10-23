@@ -405,7 +405,22 @@ async function main() {
     browserUser = { id: rep.id, name: rep.name, email: rep.email, role: "SALES" };
     ok("the call dialog finds the rep's phone", (await phoneCalls.myCallingPhone())?.id === phoneId);
     const ring = await phoneCalls.ringMyPhone({ companyId: company.id, contactId: ravi.id, phoneNumber: ravi.phone!, leadId: lead.id });
-    ok("rung: a push to the phone with the number and who — nothing more", ring.ok && ring.data.pushed && JSON.stringify(pushed[0]) === JSON.stringify({ message: { token: "fcm-token-zzphone-0001", data: { type: "call", request: ring.ok ? ring.data.id : "", number: ravi.phone, label: `${TAG} Ravi, ${TAG} Acme` }, android: { priority: "HIGH", ttl: "120s" } } }));
+    const label = `${TAG} Ravi, ${TAG} Acme`;
+    ok(
+      "rung: a push to the phone with the number and who — nothing more — shown by the phone even with the app closed, replacing an earlier ring",
+      ring.ok &&
+        ring.data.pushed &&
+        JSON.stringify(pushed[0]) ===
+          JSON.stringify({
+            message: {
+              token: "fcm-token-zzphone-0001",
+              data: { type: "call", request: ring.ok ? ring.data.id : "", number: ravi.phone, label },
+              notification: { title: `Call ${label}`, body: ravi.phone },
+              android: { priority: "HIGH", ttl: "120s", notification: { channel_id: "deskzo", tag: "deskzo-ring" } },
+            },
+          }),
+      JSON.stringify(pushed[0]),
+    );
     const handed = (await call("GET", "/calls/requests", { token })).body.data as { id: string; number: string }[];
     ok("  handed to the phone once", handed.length === 1 && handed[0]!.number === ravi.phone && ((await call("GET", "/calls/requests", { token })).body.data as unknown[]).length === 0);
     ok("  the dialog sees the phone has it", ring.ok && (await phoneCalls.ringState(ring.data.id)) === "TAKEN");
@@ -444,11 +459,11 @@ async function main() {
       apnsSent.push(message);
       return 200;
     });
-    const plain = await push.pushToIphone("ab".repeat(32), { data: { type: "zz" }, alert: { title: "Title", body: "Body" } });
+    const plain = await push.pushToIphone("ab".repeat(32), { data: { type: "zz" }, title: "Title", body: "Body" });
     const plainHeaders = (apnsSent[0] as { apns: { headers: Record<string, string> } } | undefined)?.apns.headers ?? {};
     ok(
-      "the key as it is, with its own topic: on — a push with that topic, kept a day, no category, thread or collapse id",
-      push.apnsConfigured() && plain === "sent" && plainHeaders["apns-topic"] === "com.example.zzphone" && Math.abs(Number(plainHeaders["apns-expiration"]) - (Math.floor(Date.now() / 1000) + 86_400)) <= 5 && !("apns-collapse-id" in plainHeaders) &&
+      "the key as it is, with its own topic: on — a push with that topic, kept two minutes as Android's, no category, thread or collapse id",
+      push.apnsConfigured() && plain === "sent" && plainHeaders["apns-topic"] === "com.example.zzphone" && Math.abs(Number(plainHeaders["apns-expiration"]) - (Math.floor(Date.now() / 1000) + 120)) <= 5 && !("apns-collapse-id" in plainHeaders) &&
         JSON.stringify((apnsSent[0] as { apns: { payload: unknown } }).apns.payload) === JSON.stringify({ aps: { alert: { title: "Title", body: "Body" }, sound: "default" }, body: { type: "zz" } }),
       JSON.stringify(apnsSent[0]),
     );
@@ -486,23 +501,22 @@ async function main() {
       return apns ? answer(apns.host) : 200;
     });
     type ApnsSent = { apns: { host: string; token: string; headers: Record<string, string>; payload: unknown } };
-    const label = `${TAG} Ravi, ${TAG} Acme`;
     const iRing = await phoneCalls.ringMyPhone({ companyId: company.id, contactId: ravi.id, phoneNumber: ravi.phone!, leadId: lead.id });
     const iRingId = iRing.ok ? iRing.data.id : "";
     const sentToApple = toApple[0] as ApnsSent | undefined;
     const expiresIn = Number(sentToApple?.apns.headers["apns-expiration"] ?? 0) - Math.floor(Date.now() / 1000);
     ok("rung: the iPhone, pushed", iRing.ok && iRing.data.pushed && iRing.data.phone === `${TAG} iPhone 15`);
     ok(
-      "  one alert through APNs: who to call, the number, the call category, gone with the ring, a later ring replacing it",
+      "  one alert through APNs: who to call, the number, the call category, gone with the ring, a later ring replacing it — as Android's shows",
       toApple.length === 1 &&
         JSON.stringify(sentToApple) ===
           JSON.stringify({
             apns: {
               host: "api.push.apple.com",
               token: IPHONE_TOKEN,
-              headers: { "apns-topic": "com.deskzo.app", "apns-push-type": "alert", "apns-priority": "10", "apns-expiration": sentToApple?.apns.headers["apns-expiration"], "apns-collapse-id": iRingId },
+              headers: { "apns-topic": "com.deskzo.app", "apns-push-type": "alert", "apns-priority": "10", "apns-expiration": sentToApple?.apns.headers["apns-expiration"], "apns-collapse-id": "deskzo-ring" },
               payload: {
-                aps: { alert: { title: `Call ${label}`, body: `${ravi.phone} — tap to call. You asked from Deskzo on your computer.` }, sound: "default", category: "deskzo-call" },
+                aps: { alert: { title: `Call ${label}`, body: ravi.phone }, sound: "default", category: "deskzo-call" },
                 body: { type: "call", request: iRingId, number: ravi.phone, label },
               },
             },
@@ -545,8 +559,19 @@ async function main() {
     const androidRing = await phoneCalls.ringMyPhone({ companyId: company.id, contactId: ravi.id, phoneNumber: ravi.phone!, leadId: lead.id });
     const androidRingId = androidRing.ok ? androidRing.data.id : "";
     ok(
-      "the Android phone seen last: rung through Firebase with exactly the message it always had",
-      androidRing.ok && androidRing.data.pushed && toFirebase.length === 1 && JSON.stringify(toFirebase[0]) === JSON.stringify({ message: { token: "fcm-token-zzphone-0001", data: { type: "call", request: androidRingId, number: ravi.phone, label }, android: { priority: "HIGH", ttl: "120s" } } }),
+      "the Android phone seen last: rung through Firebase with exactly Android's own message — shown on the app's channel, a later ring replacing it",
+      androidRing.ok &&
+        androidRing.data.pushed &&
+        toFirebase.length === 1 &&
+        JSON.stringify(toFirebase[0]) ===
+          JSON.stringify({
+            message: {
+              token: "fcm-token-zzphone-0001",
+              data: { type: "call", request: androidRingId, number: ravi.phone, label },
+              notification: { title: `Call ${label}`, body: ravi.phone },
+              android: { priority: "HIGH", ttl: "120s", notification: { channel_id: "deskzo", tag: "deskzo-ring" } },
+            },
+          }),
       JSON.stringify(toFirebase[0]),
     );
     await db.appCallRequest.updateMany({ where: { id: androidRingId }, data: { status: "EXPIRED" } });

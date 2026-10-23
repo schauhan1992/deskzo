@@ -18,7 +18,7 @@ import type { Clock } from "@/lib/time/zone";
 import { companyPath, personPath, ticketPath } from "@/lib/record-links";
 import { notMigratedYet } from "@/lib/custom-fields/server";
 import { nextReminder } from "@/lib/tasks/rules";
-import { pushToIphonesOf } from "@/lib/app/push";
+import { pushNoticeToPhones } from "@/lib/app/push";
 
 const DAY_MS = 86_400_000;
 
@@ -29,23 +29,7 @@ const DAY_MS = 86_400_000;
  * into other action files instead (same pattern `computeOrderFinancials` uses in payment.ts).
  */
 
-/**
- * The kinds that always mean something now waits for this person's decision, on the Deskzo app's Approvals
- * screen (src/lib/app/daily.ts approvalsFor): leave, an attendance correction, an expense claim, a clock-in
- * away from the office. A kind that carries other news too — a workflow's message, a security alert — says
- * so where it is a decision (`awaitsDecision`); a document's sign-off isn't on that screen, nor is short leave.
- */
-const DECISION_TYPES = new Set<NotificationType>(["LEAVE_REQUESTED", "REGULARISATION_REQUESTED", "EXPENSE_SUBMITTED", "ATTENDANCE_EXCEPTION_REQUESTED"]);
-
-export async function notifyUser(input: {
-  userId: string;
-  type: NotificationType;
-  title: string;
-  message?: string;
-  link?: string;
-  /** Whether it waits for their decision on the app's Approvals screen — by its kind unless said. */
-  awaitsDecision?: boolean;
-}) {
+export async function notifyUser(input: { userId: string; type: NotificationType; title: string; message?: string; link?: string }) {
   try {
     /**
      * What this person has asked not to be told about.
@@ -72,18 +56,18 @@ export async function notifyUser(input: {
         })
       : null;
     /**
-     * A decision waiting for them goes to their iPhone too (owner, 22 Oct 2026) — only what was told them in
-     * Deskzo, so a kind they muted is never pushed. The title, and that it waits: the rest is in the app.
-     */
-    if (notification && (input.awaitsDecision ?? DECISION_TYPES.has(input.type))) {
-      await pushToIphonesOf([input.userId], { alert: { title: input.title, body: "Waiting for your decision." }, data: { type: "approval" }, category: "deskzo-approval" });
-    }
-    /**
      * The email is the workspace's choice, not the person's (src/lib/notifications/email-settings.ts):
      * an admin's switch for everyone, so it goes whether or not they've muted the kind in their bell.
      * Awaited, so it goes before the request ends; it never throws.
      */
     await sendEmailNotification({ userId: input.userId, type: input.type, subject: input.title, body: input.message ?? "", link: input.link });
+    /**
+     * And on their phones (src/lib/app/push.ts): what the bell shows, as the bell shows it — so only when it rang,
+     * never for a kind they muted. Its title and link, nothing more. Never throws.
+     */
+    if (notification) {
+      await pushNoticeToPhones(input.userId, { id: notification.id, type: input.type, title: input.title, link: input.link ?? null }).catch((err) => console.error("[app] notice push failed", err));
+    }
     return notification;
   } catch (err) {
     // A notification is a side effect of the action that triggered it — it should never fail the action itself.

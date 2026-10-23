@@ -35,6 +35,19 @@ import { salesLeads } from "@/lib/pipeline/server";
 import { clientSide, vendorSide } from "@/lib/companies/roles";
 import type { ActionResult } from "@/actions/company";
 import { listLeadMasker, maskLeads } from "@/lib/leads/masking";
+import {
+  DEFAULT_CHARTS,
+  DEFAULT_RANGE,
+  LAYOUT_MARKER,
+  SUPERSEDED_CARDS,
+  decodeChart,
+  encodeChart,
+  isChartEntry,
+  isRangeKey,
+  validChart,
+  type WidgetResult,
+} from "@/lib/dashboard/charts";
+import { dashboardContext, sourceOpen, widgetData } from "@/lib/dashboard/data";
 
 export type DashboardSummary = {
   /** The raw sourcing pool — everyone who hasn't bought anything from us yet (see `customers` for who has). */
@@ -653,4 +666,60 @@ export async function resetDashboardPreferences(): Promise<ActionResult<null>> {
   });
   revalidatePath("/dashboard");
   return { ok: true, data: null };
+}
+
+// ─── Charts (src/lib/dashboard/charts.ts) ────────────────────────────────────
+
+/**
+ * The dashboard as this person has it: charts and older cards in one array, in their order.
+ *
+ * Never customised, it is the default charts and then their role's cards (less the ones a chart now
+ * stands in for). Customised before charts existed, the default charts go in front of what they chose —
+ * the array has no `layout:2` until this dashboard saves it — so the upgrade happens once and is theirs
+ * to change after.
+ */
+export async function getDashboardLayout(): Promise<{ entries: string[]; customized: boolean; defaults: string[] }> {
+  const prefs = await getDashboardPreferences();
+  const charts = DEFAULT_CHARTS.map(encodeChart);
+  const defaults = [LAYOUT_MARKER, ...charts, ...prefs.defaults.filter((k) => !SUPERSEDED_CARDS.has(k))];
+  if (!prefs.customized) return { entries: defaults, customized: false, defaults };
+  if (prefs.widgets.includes(LAYOUT_MARKER)) return { entries: prefs.widgets, customized: true, defaults };
+  return { entries: [LAYOUT_MARKER, ...charts, ...prefs.widgets], customized: true, defaults };
+}
+
+/**
+ * Saves the arrangement — charts and cards, in order. Each chart is checked field by field and kept only
+ * while its source is open to this person; each card only while it is offered to them. What a browser
+ * sends is a suggestion.
+ */
+export async function saveDashboardLayout(entries: unknown): Promise<ActionResult<null>> {
+  const user = await requireUser();
+  if (!Array.isArray(entries) || entries.length > 60) return { ok: false, error: "That layout couldn't be saved." };
+  const ctx = await dashboardContext(user.id);
+  const cards = new Set((await getDashboardWidgetOptions()).map((w) => w.key));
+  const kept: string[] = [LAYOUT_MARKER];
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    if (typeof entry !== "string" || entry === LAYOUT_MARKER) continue;
+    if (isChartEntry(entry)) {
+      const spec = decodeChart(entry);
+      if (!spec || seen.has(spec.id) || !(await sourceOpen(ctx, spec.source))) continue;
+      seen.add(spec.id);
+      kept.push(encodeChart(spec));
+    } else if (cards.has(entry) && !seen.has(entry)) {
+      seen.add(entry);
+      kept.push(entry);
+    }
+  }
+  await db.user.update({ where: { id: user.id }, data: { dashboardWidgets: kept, dashboardCustomized: true } });
+  revalidatePath("/dashboard");
+  return { ok: true, data: null };
+}
+
+/** One chart's figures — for the widget builder's preview, and a chart just added or changed. */
+export async function getChartWidget(spec: unknown, range: unknown): Promise<WidgetResult> {
+  const user = await requireUser();
+  const chart = validChart(spec);
+  if (!chart) return { ok: false, error: "That chart isn't one the dashboard can draw." };
+  return widgetData(await dashboardContext(user.id), chart, isRangeKey(range) ? range : DEFAULT_RANGE);
 }

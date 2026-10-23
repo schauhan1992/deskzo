@@ -18,6 +18,7 @@ import { spanWords, timingWithShortLeave } from "@/lib/hr/short-leave-rules";
 import type { ActionResult } from "@/actions/company";
 import { clockPolicyFor, recordClock, type ClockOutcome, type ClockPolicy, type ClockRefusal } from "@/lib/hr/clock";
 import { readReading } from "@/lib/hr/geofence";
+import { dayKey, daysBetween } from "@/lib/hr/period";
 
 /**
  * Daily attendance: clocking in and out, and the month grid HR reads it from.
@@ -236,10 +237,12 @@ export async function attendanceMonth(params: {
   const allowed = await visibleUserIds(user.id);
   const { from, to } = monthRange(params.year, params.month);
 
+  // The Person filter narrows what the viewer may see — never past it. Spread after `allowed` as it was, a
+  // `?userId=` of anybody replaced the limit and showed that person's month to whoever asked.
+  const ids = allowed ? (params.userId ? allowed.filter((id) => id === params.userId) : allowed) : params.userId ? [params.userId] : null;
   const where: Prisma.UserWhereInput = {
     active: true,
-    ...(allowed ? { id: { in: allowed } } : {}),
-    ...(params.userId ? { id: params.userId } : {}),
+    ...(ids ? { id: { in: ids } } : {}),
     ...(params.departmentId ? { departmentId: params.departmentId } : {}),
     ...(params.search
       ? {
@@ -365,7 +368,79 @@ export async function attendanceMonth(params: {
           ? rows.filter((r) => r.leave > 0)
           : rows;
 
-  return { days: days.map(toKey), rows: filtered, totalPeople: rows.length, officeHours: hours };
+  return {
+    days: days.map(toKey),
+    rows: filtered,
+    totalPeople: rows.length,
+    officeHours: hours,
+    /**
+     * Whose attendance this viewer may see: "self" — only their own (no HR permission, nobody reporting to
+     * them); "team" — theirs and their reports'; "all" — everyone's.
+     */
+    scope: (allowed === null ? "all" : allowed.length <= 1 ? "self" : "team") as "self" | "team" | "all",
+    /** The people the Person filter may offer — everyone, when null. */
+    visibleIds: allowed,
+  };
+}
+
+export type MyDay = {
+  /** yyyy-mm-dd */
+  date: string;
+  status: AttendanceStatus | null;
+  checkInAt: string | null;
+  checkOutAt: string | null;
+  workedMinutes: number | null;
+  /** Corrected by HR or a manager. */
+  regularised: boolean;
+  /** Not a working day — and so not a gap when nothing is recorded. */
+  offDay: "week off" | "holiday" | null;
+};
+
+/**
+ * The signed-in person's own days from one date to another — in, out and the hours between — newest first, up
+ * to today (owner, 22 Oct 2026: everybody sees their own attendance, when in and when out, by week or month).
+ *
+ * Only ever the caller's own: there is no person to pass. Every day in the range is listed, recorded or not, so
+ * a week shows all seven; a terminal's punches become a record (src/lib/hr/punch-rollup.ts), In the first of the
+ * day and Out the last. At most 62 days.
+ */
+export async function myDays(params: { from: string; to: string }): Promise<MyDay[]> {
+  const user = await requireModuleUser("hr");
+  const fromKey = dayKey(params.from);
+  const toKeyIn = dayKey(params.to);
+  if (!fromKey || !toKeyIn || fromKey > toKeyIn || daysBetween(fromKey, toKeyIn) > 62) return [];
+
+  const clock = await workspaceClock();
+  const today = clock.calendarDate(new Date());
+  const from = dateOnly(fromKey);
+  const to = dateOnly(toKeyIn) > today ? today : dateOnly(toKeyIn);
+  if (from > to) return [];
+
+  const [records, holidays] = await Promise.all([
+    db.attendanceDay.findMany({
+      where: { userId: user.id, date: { gte: from, lte: to } },
+      select: { date: true, status: true, checkInAt: true, checkOutAt: true, workedMinutes: true, regularisedAt: true },
+    }),
+    db.holiday.findMany({ where: { date: { gte: from, lte: to } }, select: { date: true, optional: true } }),
+  ]);
+  const byDay = new Map(records.map((r) => [toKey(r.date), r]));
+  const closed = closedDates(holidays);
+
+  return eachDay(from, to)
+    .reverse()
+    .map((day) => {
+      const key = toKey(day);
+      const r = byDay.get(key);
+      return {
+        date: key,
+        status: r?.status ?? null,
+        checkInAt: r?.checkInAt ? r.checkInAt.toISOString() : null,
+        checkOutAt: r?.checkOutAt ? r.checkOutAt.toISOString() : null,
+        workedMinutes: r?.workedMinutes ?? null,
+        regularised: !!r?.regularisedAt,
+        offDay: isWeekOff(day) ? "week off" : closed.has(key) ? "holiday" : null,
+      };
+    });
 }
 
 /**
