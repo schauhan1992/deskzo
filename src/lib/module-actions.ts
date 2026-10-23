@@ -267,6 +267,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "trade-document.ts": ["sales_documents", "purchase_documents"],
   // Open documents from the system used before Deskzo (src/lib/portability/documents.ts).
   "document-import.ts": ["sales_documents", "purchase_documents"],
+  // Which lead a proposal is for: the form's picker and "Link to lead" (src/lib/leads/quotes.ts).
+  "document-lead.ts": ["sales_documents"],
   "transporter.ts": ["sales_documents", "it_assets"],
   "user-photo.ts": "core",
   "user.ts": "core",

@@ -166,6 +166,7 @@ export const TABLE_REGISTRY: TableDefinition[] = [
       { key: "source", label: "Source", default: true, hint: "Where the enquiry came from — website, referral, a call…" },
       { key: "owner", label: "Owner", default: true },
       { key: "value", label: "Value", default: true, hint: "The estimated value of the deal." },
+      { key: "quote", label: "Quotation", default: true, hint: "The furthest of its proposals, proformas and invoices — and \"No quote\" on a deal at Proposal sent or past it with none. Only for somebody who may see sales documents." },
       { key: "expectedClose", label: "Expected close", default: true },
       { key: "updated", label: "Updated", default: true },
     ],

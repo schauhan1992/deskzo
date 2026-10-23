@@ -40,9 +40,16 @@ import { cn } from "@/lib/utils";
  * their own, then bundles and add-ons, then internal plans. One plan for each product, and Deskzo
  * One with no other — the save refuses otherwise (src/lib/billing/plan-choice.ts), and the list says
  * so as soon as the ticks break the rule.
+ *
+ * Only a bundle or add-on asks how many (owner, 23 Oct 2026): a main plan is taken once, and more
+ * seats or AI credits on it are a limit (the Limits panel). A plan given by hand has no price, so
+ * none of these is charged per person.
  */
 
 const QUANTITY_MAX = 10_000;
+
+/** Taken more than once, its allowances adding up — the others are a workspace's main plan. */
+const stacks = (kind: Choice["kind"]) => kind === "BUNDLE" || kind === "ADDON";
 const INTEGER = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
 
 type Choice = PlanPanel["choices"][number];
@@ -164,7 +171,8 @@ export function PlansEditor({
   return (
     <form onSubmit={submit} className="space-y-3">
       <p className="text-xs text-muted">
-        Tick the plans it is on; a quantity multiplies what a plan includes. Plans offered in {country}
+        Tick the plans it is on. A bundle or add-on can be taken more than once, its allowances adding up; for
+        more seats or AI credits on a main plan, set a limit. Plans offered in {country}
         {owner ? ", internal ones included" : ""}.
       </p>
 
@@ -204,7 +212,13 @@ export function PlansEditor({
                           </span>
                         )}
                       </label>
-                      {on && !locked && (
+                      {/* A main plan taken more than once before this rule: shown, so it can be put back to one. */}
+                      {on && !locked && !stacks(plan.kind) && text !== "1" && (
+                        <Button type="button" size="sm" variant="ghost" onClick={() => setQuantity(plan.key, "1")}>
+                          {`×${text || "?"} — make it 1`}
+                        </Button>
+                      )}
+                      {on && !locked && stacks(plan.kind) && (
                         <span className="inline-flex items-center rounded-base border border-line-strong bg-surface shadow-sm">
                           <IconButton icon={Minus} label={`Fewer of ${plan.name}`} onClick={() => step(plan.key, -1)} disabled={q !== null && q <= 1} />
                           <input

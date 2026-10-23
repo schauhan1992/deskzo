@@ -241,7 +241,8 @@ export async function workspaceHeader(slug: string, viewerId: string, now = new 
 
 export type PlanPanel = {
   /** The plans on its live subscriptions, by hand or at a gateway. */
-  items: { planKey: string; planName: string; kind: PlanKindKey; productKey: string | null; active: boolean; quantity: number; subscriptionId: string; gateway: GatewayKey; status: SubscriptionStatusKey }[];
+  /** `perSeat`: charged per person, so the quantity is the people paid for. A plan given by hand has no price, so never. */
+  items: { planKey: string; planName: string; kind: PlanKindKey; productKey: string | null; active: boolean; quantity: number; perSeat: boolean; subscriptionId: string; gateway: GatewayKey; status: SubscriptionStatusKey }[];
   entitlements: Entitlements;
   /**
    * Every module a plan decides, and where this workspace stands with it: "plan" (it has it, from its
@@ -278,6 +279,7 @@ export async function workspacePlan(tenantId: string, now = new Date()): Promise
       orderBy: [{ plan: { sortOrder: "asc" } }, { plan: { name: "asc" } }],
       select: {
         quantity: true,
+        price: { select: { perSeat: true } },
         subscription: { select: { id: true, gateway: true, status: true } },
         plan: { select: { key: true, name: true, kind: true, productKey: true, active: true } },
       },
@@ -320,6 +322,7 @@ export async function workspacePlan(tenantId: string, now = new Date()): Promise
       productKey: i.plan.productKey,
       active: i.plan.active,
       quantity: i.quantity,
+      perSeat: !!i.price?.perSeat,
       subscriptionId: i.subscription.id,
       gateway: i.subscription.gateway,
       status: i.subscription.status,

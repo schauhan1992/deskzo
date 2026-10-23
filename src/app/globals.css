@@ -13,6 +13,13 @@
   --brand: #4f46e5;
   --brand-contrast: #ffffff;
   /*
+   * Deskzo's own blue and logo colour (owner, 23 Oct 2026; src/lib/brand/deskzo-logo.ts) — for Deskzo's
+   * surfaces, not a workspace's: --brand above stays each workspace's own. The logo is blue on a light page
+   * and white on a dark one, where #0249fe would be too dark to read (redefined under .dark below).
+   */
+  --deskzo-blue: #0249fe;
+  --deskzo-logo: #0249fe;
+  /*
    * The focus indicator, which is NOT simply the brand colour.
    *
    * WCAG 1.4.11 wants 3:1 between the indicator and what it sits on. Indigo #4f46e5 manages that
@@ -73,6 +80,7 @@
 
 .dark {
   --brand-contrast: #ffffff;
+  --deskzo-logo: #ffffff;
 
   --bg: #0d0f12;
   --surface: #15181d;

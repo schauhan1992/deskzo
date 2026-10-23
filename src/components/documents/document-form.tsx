@@ -14,6 +14,9 @@ import {
   listPartyOrders,
 } from "@/actions/trade-document";
 import { getNumberSetting, previewNextNumber } from "@/actions/document-number";
+import { listPartyLeads, type PartyLead } from "@/actions/document-lead";
+import { useWording } from "@/components/terms/wording-provider";
+import { slot } from "@/lib/terms/dictionary";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, Badge } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -254,6 +257,10 @@ export function DocumentForm({
   const isCreditNote = docType === "CREDIT_NOTE";
   // A credit or debit note is raised against an issued invoice (owner, 23 Oct 2026 for the debit note).
   const isNote = isCreditNote || docType === "DEBIT_NOTE";
+  const isProposal = docType === "PROPOSAL";
+  const [leadId, setLeadId] = useState(defaults.leadId);
+  const [fetchedLeads, setFetchedLeads] = useState<{ companyId: string; rows: PartyLead[] }>({ companyId: "", rows: [] });
+  const w = useWording();
   const gstinRequired = registeredTreatments.includes(gstTreatment as (typeof registeredTreatments)[number]);
 
   // Locations decide the default addresses and the place of supply, so they're fetched as soon as a
@@ -299,11 +306,35 @@ export function DocumentForm({
     };
   }, [companyId, isSales, defaults.id]);
 
+  // Which deal a proposal is for (owner, 19 Oct 2026; src/actions/document-lead.ts): the customer's leads,
+  // asked for once one is chosen. A new proposal for a customer with one open lead is that lead's; one
+  // opened from a lead keeps it; a draft keeps what it has. Invoices never ask — they take the lead of what
+  // they were made from.
+  useEffect(() => {
+    if (!isProposal || !companyId) return;
+    let cancelled = false;
+    listPartyLeads(companyId).then((rows) => {
+      if (cancelled) return;
+      setFetchedLeads({ companyId, rows });
+      setLeadId((current) => {
+        if (current && rows.some((r) => r.id === current)) return current;
+        if (defaults.id || (current && current === defaults.leadId && companyId === defaults.companyId)) return current;
+        const open = rows.filter((r) => r.open);
+        return open.length === 1 ? open[0]!.id : "";
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId, isProposal, defaults.id, defaults.leadId, defaults.companyId]);
+
   locationIdRef.current = locationId;
 
   const locations = fetchedLocations.companyId === companyId ? fetchedLocations.rows : EMPTY_LOCATIONS;
   const creditable = fetchedCreditable.companyId === companyId ? fetchedCreditable.rows : [];
   const orders = fetchedOrders.companyId === companyId ? fetchedOrders.rows : EMPTY_ORDERS;
+  // The open leads, and the one linked even if it has closed since.
+  const leadChoices = (fetchedLeads.companyId === companyId ? fetchedLeads.rows : []).filter((l) => l.open || l.id === leadId);
 
   /**
    * On a tax invoice, each order its lines bill against what it has already been invoiced (owner, 15 Oct
@@ -571,9 +602,10 @@ export function DocumentForm({
       adjustmentLabel,
       adjustment,
       sourceDocumentId: defaults.sourceDocumentId,
-      // No control for this one: the deal is decided by where the form was opened from, and a
-      // picker would only invite someone to attribute an invoice to the wrong lead.
-      leadId: defaults.leadId,
+      // A proposal's is chosen on the form ("For lead"). Anything else has no control for it: its deal is
+      // where it was opened or made from, and a picker would only invite someone to attribute an invoice
+      // to the wrong lead.
+      leadId: isProposal ? leadId : defaults.leadId,
       againstDocumentId,
       lines: lines.map((l) => ({
         itemId: l.itemId,
@@ -968,6 +1000,22 @@ export function DocumentForm({
             <Label htmlFor="reference">Reference # / their PO</Label>
             <Input id="reference" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="PO-2026-118" />
           </div>
+
+          {isProposal && leadChoices.length > 0 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="leadId">{slot(w, "For lead", "lead", "For {one:lower}")}</Label>
+              <Select id="leadId" value={leadId} onChange={(e) => setLeadId(e.target.value)}>
+                <option value="">{slot(w, "No lead", "lead", "No {one:lower}")}</option>
+                {leadChoices.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.ref} · {l.title}
+                    {l.stage ? ` — ${l.stage}` : ""}
+                  </option>
+                ))}
+              </Select>
+              <p className="text-xs text-subtle">{slot(w, "Once issued, the lead shows it as its quotation.", "lead", "Once issued, the {one:lower} shows it as its quotation.")}</p>
+            </div>
+          )}
 
           {isSales && (
             <div className="space-y-1.5">

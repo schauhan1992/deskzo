@@ -15,6 +15,8 @@ import { AvatarStack } from "@/components/ui/avatar";
 import { useClock } from "@/components/time/clock-provider";
 import { formatCalendarDay } from "@/lib/time/zone";
 import type { LeadBoardExtras } from "@/lib/leads/board-extras";
+import { quoteBadge, type LeadQuote } from "@/lib/leads/quotes";
+import { LeadQuoteChip } from "@/components/leads/lead-quote-badge";
 import { useWording } from "@/components/terms/wording-provider";
 import { slot } from "@/lib/terms/dictionary";
 
@@ -59,16 +61,20 @@ const dayOf = (value: Date | string) => (typeof value === "string" ? value : val
  *
  * A card (owner, 16 Oct 2026): the lead and its company, its tasks done of all, products asked for,
  * calls and notes logged, the people on it, and when it's expected to close — red once that's passed
- * on a deal still open.
+ * on a deal still open. And its quotation (owner, 19 Oct 2026), for somebody who sees sales documents:
+ * the furthest sent, or "No quote" on a deal at Proposal sent or past it without one.
  */
 export function LeadsBoard({
   leads,
   stages,
   extras = {},
+  quotes = null,
 }: {
   leads: BoardLead[];
   stages: LeadStageDef[];
   extras?: Record<string, LeadBoardExtras>;
+  /** Each lead's quotation, or null where this person doesn't see them (src/lib/leads/quote-status.ts). */
+  quotes?: Record<string, LeadQuote | null> | null;
 }) {
   const router = useRouter();
   const clock = useClock();
@@ -162,7 +168,7 @@ export function LeadsBoard({
                       setDragOverStage(null);
                     }}
                   >
-                    <LeadCard lead={lead} extra={extras[lead.id]} today={today} dragging={draggedId === lead.id} />
+                    <LeadCard lead={lead} extra={extras[lead.id]} quote={quotes ? (quotes[lead.id] ?? null) : undefined} today={today} dragging={draggedId === lead.id} />
                   </div>
                 ))}
                 {columnLeads.length === 0 && (
@@ -188,7 +194,8 @@ function Chip({ icon: Icon, value, label, className }: { icon: typeof ShoppingCa
   );
 }
 
-function LeadCard({ lead, extra, today, dragging }: { lead: BoardLead; extra: LeadBoardExtras | undefined; today: string; dragging: boolean }) {
+/** `quote` undefined: this person doesn't see quotations, so the card says nothing of them. */
+function LeadCard({ lead, extra, quote, today, dragging }: { lead: BoardLead; extra: LeadBoardExtras | undefined; quote: LeadQuote | null | undefined; today: string; dragging: boolean }) {
   const closeDay = lead.expectedCloseDate ? dayOf(lead.expectedCloseDate) : null;
   const open = lead.status !== "WON" && lead.status !== "LOST" && lead.status !== "DISQUALIFIED";
   const overdue = !!closeDay && open && closeDay < today;
@@ -212,6 +219,12 @@ function LeadCard({ lead, extra, today, dragging }: { lead: BoardLead; extra: Le
       {lead.lostReason && (
         <div className="mt-1.5">
           <LeadStatusBadge status={lead.status} stage={lead.stage} lostReason={lead.lostReason} />
+        </div>
+      )}
+      {/* Its quotation — or "No quote" on a deal at Proposal sent or past it with none (src/lib/leads/quotes.ts). */}
+      {quote !== undefined && quoteBadge(quote, lead.status) && (
+        <div className="mt-1.5">
+          <LeadQuoteChip quote={quote} status={lead.status} />
         </div>
       )}
 

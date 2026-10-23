@@ -2,11 +2,12 @@
 
 import type { StaffRole } from "@deskzo/control-client";
 import type { ConsoleResult } from "@/actions/platform/console";
+import { CloudflareError, cloudflareConfig, cloudflareConnection, type CloudflareConnection } from "@/lib/platform/cloudflare-hostnames";
 import { ENTER, MANAGERS, OWNERS, cleanText, consoleAudit, consoleRefusal, revalidateConsole } from "@/lib/platform/console-guard";
 import { controlDb } from "@/lib/platform/control-db";
 import { addDomain, checkDomain, clearPrimary, makePrimary, removeDomain } from "@/lib/platform/domains";
 import { ConsoleRefused } from "@/lib/platform/refused";
-import { setSetting } from "@/lib/platform/settings";
+import { setSecret, setSetting } from "@/lib/platform/settings";
 import { StaffRefused, requireStaff, type Staff } from "@/lib/platform/staff-session";
 
 /**
@@ -20,6 +21,9 @@ import { StaffRefused, requireStaff, type Staff } from "@/lib/platform/staff-ses
  *   Check now                   owners, admins and support (ENTER): it asks DNS and moves the address
  *                               on, as the owner's own button does, at most every 30 seconds.
  *   domains.offered             owners only, like every platform setting.
+ *   Cloudflare                  the zone and API token their HTTPS certificates are issued through
+ *                               (src/lib/platform/cloudflare-hostnames.ts): saved by owners only;
+ *                               Check connection by owners and admins.
  *
  * Every change is in the platform audit log under the staff member; `addedBy` is "staff:<email>".
  */
@@ -127,5 +131,54 @@ export async function consoleSetDomainsOffered(offered: boolean): Promise<Consol
     await consoleAudit(staff, "domains.settings", { offered });
     revalidateConsole();
     return null;
+  });
+}
+
+/** A zone's id is 32 hexadecimal characters; an API token, some 40 letters, digits, hyphens and underscores. */
+const ZONE_ID = /^[a-f0-9]{32}$/;
+const API_TOKEN = /^[A-Za-z0-9_-]{30,200}$/;
+
+/**
+ * Cloudflare for SaaS: the zone workspaces' addresses are custom hostnames of, and the API token Deskzo uses
+ * there — sealed, never shown back. An empty field leaves a value as it is; `clearToken` disconnects. Owners
+ * only. Both are checked before either is written.
+ */
+export async function consoleSaveCloudflare(input: { zoneId?: string; token?: string; clearToken?: boolean }): Promise<ConsoleResult<null>> {
+  return asStaff(OWNERS, async (staff) => {
+    const zoneId = typeof input?.zoneId === "string" ? input.zoneId.trim().toLowerCase() : "";
+    const token = typeof input?.token === "string" ? input.token.trim() : "";
+    const clearToken = input?.clearToken === true;
+    if (zoneId && !ZONE_ID.test(zoneId)) throw new ConsoleRefused("A zone id is 32 letters and digits — copy it from the zone's Overview page in Cloudflare, under API.");
+    if (token && !API_TOKEN.test(token)) throw new ConsoleRefused("That doesn't look like a Cloudflare API token — paste it exactly as Cloudflare showed it when it was made.");
+    if (!zoneId && !token && !clearToken) throw new ConsoleRefused("Type the zone id or the token to save.");
+    const changed: string[] = [];
+    if (zoneId) {
+      await setSetting("cloudflare.zoneId", zoneId, staff.id);
+      changed.push("zone id");
+    }
+    if (clearToken) {
+      await setSecret("cloudflare.apiToken", null, staff.id);
+      changed.push("token removed");
+    } else if (token) {
+      await setSecret("cloudflare.apiToken", token, staff.id);
+      changed.push("token");
+    }
+    await consoleAudit(staff, "domains.cloudflare", { changed });
+    revalidateConsole();
+    return null;
+  });
+}
+
+/** Asks Cloudflare, with what is saved, where workspaces' own addresses' requests go. Owners and admins. */
+export async function consoleCheckCloudflare(): Promise<ConsoleResult<CloudflareConnection>> {
+  return asStaff(MANAGERS, async () => {
+    const cfg = await cloudflareConfig();
+    if (!cfg) throw new ConsoleRefused("Save the zone id and the API token first.");
+    try {
+      return await cloudflareConnection(cfg);
+    } catch (err) {
+      if (err instanceof CloudflareError) throw new ConsoleRefused(err.message);
+      throw err;
+    }
   });
 }

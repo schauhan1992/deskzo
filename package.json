@@ -133,6 +133,7 @@
     "check:address": "tsx scripts/check-address.ts",
     "check:leads": "tsx scripts/check-leads.ts",
     "check:lead-capture": "tsx scripts/check-lead-capture.ts",
+    "check:lead-quotes": "tsx scripts/check-lead-quotes.ts",
     "check:public-api": "tsx scripts/check-public-api.ts",
     "check:phone-app": "tsx scripts/check-phone-app.ts",
     "check:app-daily": "tsx scripts/check-app-daily.ts",
@@ -274,6 +275,7 @@
     "check:close-core": "tsx scripts/check-close-core.ts",
     "check:close-ui": "tsx scripts/check-close-ui.ts",
     "check:domains": "tsx scripts/check-domains.ts",
+    "check:domain-edge": "tsx scripts/check-domain-edge.ts",
     "site:seed-pages": "tsx scripts/site-seed-pages.ts"
   },
   "dependencies": {

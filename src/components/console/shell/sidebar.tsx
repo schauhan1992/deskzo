@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId } from "react";
+import { DeskzoIcon } from "@/components/brand/deskzo-logo";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronRight, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
@@ -82,8 +83,8 @@ function NavItem({ page, active, badge, rail, onNavigate }: { page: ConsolePage;
 function Brand({ rail, onNavigate }: { rail: boolean; onNavigate?: () => void }) {
   return (
     <Link href="/" onClick={onNavigate} aria-label={rail ? "Deskzo console, Overview" : undefined} className="flex min-w-0 items-center gap-2.5 rounded-base">
-      <span aria-hidden="true" className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-brand text-[11px] font-bold text-brand-contrast">
-        W
+      <span aria-hidden="true" className="shrink-0">
+        <DeskzoIcon className="h-7 w-7 rounded-[22%] shadow-sm ring-1 ring-line" />
       </span>
       {!rail && <span className="truncate text-sm font-semibold text-text">Deskzo console</span>}
     </Link>

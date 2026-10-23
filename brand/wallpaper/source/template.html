@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deskzo</title>
+<!--
+  Deskzo desktop wallpaper, with the official wordmark and icon in Deskzo blue (#0249FE). Live in Lively
+  Wallpaper (drag the zip, or this file, into Lively); the same page opened with ?static=1 is what the still
+  8K and 4K pictures are rendered from, without the clock. Everything scales from one unit, --u, a hundredth
+  of the screen's height on a 16:9 screen, so it is sharp at any size. The left fifth stays dark and quiet
+  for desktop icons; nothing sits where the taskbar goes. Single file: the font and the logo shapes are inside.
+-->
+<style>
+  @font-face {
+    font-family: "Geist";
+    /* Geist (SIL Open Font License), for the address and the small type — the name is the official wordmark. */
+    src: url("data:font/woff2;base64,__GEIST__") format("woff2");
+    font-weight: 100 900;
+    font-display: block;
+  }
+
+  :root {
+    --u: min(1vh, 0.5625vw);
+    --ink: #01040f;
+    --blue: #0249fe;
+    --blue-light: #6b95ff;
+    --sky: #38bdf8;
+    --white: #f8fafc;
+    --wordmark: url("data:image/png;base64,__WORDMARK__");
+    --dmark: url("data:image/png;base64,__DMARK__");
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--ink);
+    color: var(--white);
+    font-family: "Geist", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: geometricPrecision;
+  }
+
+  .stage { position: fixed; inset: 0; overflow: hidden; }
+
+  /* ── The sky: deep navy, with three slow lights in Deskzo blue moving in it ── */
+  .sky {
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(120% 90% at 78% 30%, #0a1f63 0%, #04103a 45%, var(--ink) 80%),
+      var(--ink);
+  }
+
+  .glow {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(calc(var(--u) * 9));
+    opacity: 0.9;
+    will-change: transform;
+  }
+  .glow.a {
+    width: calc(var(--u) * 95); height: calc(var(--u) * 80);
+    right: calc(var(--u) * -18); top: calc(var(--u) * -22);
+    background: radial-gradient(closest-side, rgba(2, 73, 254, 0.8), rgba(2, 73, 254, 0));
+    animation: drift-a 38s ease-in-out infinite alternate;
+  }
+  .glow.b {
+    width: calc(var(--u) * 80); height: calc(var(--u) * 70);
+    left: 34%; bottom: calc(var(--u) * -36);
+    background: radial-gradient(closest-side, rgba(37, 99, 235, 0.5), rgba(37, 99, 235, 0));
+    animation: drift-b 46s ease-in-out infinite alternate;
+  }
+  .glow.c {
+    width: calc(var(--u) * 42); height: calc(var(--u) * 36);
+    right: 16%; top: 52%;
+    background: radial-gradient(closest-side, rgba(56, 189, 248, 0.26), rgba(56, 189, 248, 0));
+    animation: drift-c 31s ease-in-out infinite alternate;
+  }
+  @keyframes drift-a { to { transform: translate(calc(var(--u) * -14), calc(var(--u) * 9)) scale(1.08); } }
+  @keyframes drift-b { to { transform: translate(calc(var(--u) * 16), calc(var(--u) * -8)) scale(1.12); } }
+  @keyframes drift-c { to { transform: translate(calc(var(--u) * -10), calc(var(--u) * -12)) scale(0.9); } }
+
+  /* A fine dot grid, fading out towards the icons and the edges. */
+  .grid {
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(rgba(147, 178, 255, 0.22) calc(var(--u) * 0.09), transparent calc(var(--u) * 0.11));
+    background-size: calc(var(--u) * 3.2) calc(var(--u) * 3.2);
+    -webkit-mask-image: radial-gradient(70% 75% at 66% 48%, #000 0%, rgba(0, 0, 0, 0.35) 45%, transparent 75%);
+            mask-image: radial-gradient(70% 75% at 66% 48%, #000 0%, rgba(0, 0, 0, 0.35) 45%, transparent 75%);
+    opacity: 0.55;
+  }
+
+  /* The official D, very large and faint, half off the right edge — and the icon's tile, outlined. */
+  .echo-d {
+    position: absolute;
+    width: calc(var(--u) * 86);
+    height: calc(var(--u) * 90.4);
+    right: calc(var(--u) * -24);
+    top: calc(var(--u) * 14);
+    background: linear-gradient(160deg, rgba(107, 149, 255, 0.10), rgba(107, 149, 255, 0.02));
+    -webkit-mask: var(--dmark) center / contain no-repeat;
+            mask: var(--dmark) center / contain no-repeat;
+    will-change: transform;
+    animation: float 24s ease-in-out infinite alternate;
+  }
+  @keyframes float { to { transform: translate(calc(var(--u) * -3), calc(var(--u) * 2.5)); } }
+  .echo-tile {
+    position: absolute;
+    width: calc(var(--u) * 58);
+    height: calc(var(--u) * 58);
+    right: calc(var(--u) * 6);
+    top: calc(var(--u) * -12);
+    border: calc(var(--u) * 0.26) solid rgba(107, 149, 255, 0.09);
+    border-radius: 22%;
+    transform: rotate(12deg);
+    will-change: transform;
+    animation: turn 140s linear infinite;
+  }
+  @keyframes turn { to { transform: rotate(372deg); } }
+
+  /* Darker at the edges, so the eye lands in the middle and icons stay legible on the left. */
+  .vignette {
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(90deg, rgba(1, 4, 15, 0.86) 0%, rgba(1, 4, 15, 0.35) 20%, rgba(1, 4, 15, 0) 34%),
+      radial-gradient(130% 110% at 62% 46%, rgba(0, 0, 0, 0) 55%, rgba(0, 0, 0, 0.55) 100%);
+  }
+
+  /* Film grain: no banding in the dark gradients, even at 8K. */
+  .grain {
+    position: absolute;
+    inset: -50%;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.55 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    background-size: calc(var(--u) * 12) calc(var(--u) * 12);
+    opacity: 0.06;
+    mix-blend-mode: overlay;
+    pointer-events: none;
+  }
+
+  /* ── The logo and the address ── */
+  .brand {
+    position: absolute;
+    left: 37%;
+    top: 47%;
+    transform: translateY(-50%);
+  }
+
+  .lockup {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--u) * 4.4);
+  }
+
+  /* The official icon: Deskzo blue D on a white tile, placed as the icon file places it. */
+  .icon {
+    position: relative;
+    flex: none;
+    width: calc(var(--u) * 15.5);
+    height: calc(var(--u) * 15.5);
+    border-radius: 22%;
+    background: linear-gradient(180deg, #ffffff 0%, #f1f5ff 100%);
+    box-shadow:
+      0 calc(var(--u) * 1.6) calc(var(--u) * 5) rgba(2, 73, 254, 0.45),
+      0 0 0 calc(var(--u) * 0.12) rgba(255, 255, 255, 0.6),
+      inset 0 calc(var(--u) * -0.35) calc(var(--u) * 0.9) rgba(2, 40, 140, 0.12);
+  }
+  .icon::before {
+    content: "";
+    position: absolute;
+    /* The icon file: a 1341 px tile, the D (with its 12 px margin) at 364, 318, 710 × 746. */
+    left: 27.1%;
+    top: 23.7%;
+    width: 52.9%;
+    height: 55.6%;
+    background: var(--blue);
+    -webkit-mask: var(--dmark) center / 100% 100% no-repeat;
+            mask: var(--dmark) center / 100% 100% no-repeat;
+  }
+  .icon::after {
+    content: "";
+    position: absolute;
+    inset: calc(var(--u) * -3);
+    border-radius: 30%;
+    background: radial-gradient(closest-side, rgba(2, 73, 254, 0.5), rgba(2, 73, 254, 0));
+    z-index: -1;
+    animation: breathe 7s ease-in-out infinite;
+  }
+  @keyframes breathe { 50% { opacity: 0.45; transform: scale(0.94); } }
+
+  /* The official wordmark, in white fading to a pale Deskzo blue. */
+  .wordmark {
+    flex: none;
+    width: calc(var(--u) * 64);
+    height: calc(var(--u) * 14.99);
+    background: linear-gradient(180deg, #ffffff 0%, #ffffff 50%, #c9d8ff 100%);
+    -webkit-mask: var(--wordmark) center / 100% 100% no-repeat;
+            mask: var(--wordmark) center / 100% 100% no-repeat;
+    filter: drop-shadow(0 calc(var(--u) * 0.6) calc(var(--u) * 2.2) rgba(2, 30, 120, 0.45));
+  }
+
+  .address {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: calc(var(--u) * 1.6);
+    margin-top: calc(var(--u) * 5.4);
+    padding: calc(var(--u) * 1.5) calc(var(--u) * 3.4) calc(var(--u) * 1.5) calc(var(--u) * 2.4);
+    border-radius: 999px;
+    border: calc(var(--u) * 0.14) solid rgba(173, 198, 255, 0.26);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.03));
+    box-shadow: 0 calc(var(--u) * 1.2) calc(var(--u) * 4) rgba(0, 0, 0, 0.35), inset 0 calc(var(--u) * 0.12) 0 rgba(255, 255, 255, 0.12);
+    overflow: hidden;
+  }
+  .address svg {
+    width: calc(var(--u) * 4.2);
+    height: calc(var(--u) * 4.2);
+    flex: none;
+  }
+  .address b {
+    font-size: calc(var(--u) * 5.4);
+    font-weight: 540;
+    letter-spacing: -0.02em;
+    line-height: 1;
+    color: #f1f5ff;
+  }
+  .address b i {
+    font-style: normal;
+    color: var(--blue-light);
+  }
+  /* A light passing across the address now and then — the one thing on the screen that moves quickly. */
+  .address::after {
+    content: "";
+    position: absolute;
+    top: 0; bottom: 0;
+    left: -40%;
+    width: 30%;
+    background: linear-gradient(100deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0));
+    transform: skewX(-18deg);
+    animation: sweep 11s ease-in-out infinite;
+    animation-delay: 3s;
+  }
+  @keyframes sweep { 0%, 78% { left: -40%; } 100% { left: 130%; } }
+
+  .line {
+    margin-top: calc(var(--u) * 4.4);
+    margin-left: calc(var(--u) * 0.4);
+    font-size: calc(var(--u) * 2.75);
+    font-weight: 400;
+    letter-spacing: -0.005em;
+    color: rgba(219, 230, 255, 0.72);
+  }
+  .line em {
+    font-style: normal;
+    color: rgba(235, 241, 255, 0.96);
+  }
+
+  .products {
+    display: flex;
+    gap: calc(var(--u) * 1.1);
+    margin-top: calc(var(--u) * 2.6);
+    margin-left: calc(var(--u) * 0.2);
+  }
+  .products span {
+    font-size: calc(var(--u) * 1.75);
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    color: rgba(190, 210, 255, 0.82);
+    padding: calc(var(--u) * 0.75) calc(var(--u) * 1.7);
+    border-radius: 999px;
+    border: calc(var(--u) * 0.1) solid rgba(147, 178, 255, 0.2);
+    background: rgba(2, 73, 254, 0.12);
+  }
+
+  /* ── The clock (live only): the reason to look at the screen many times a day ── */
+  .clock {
+    position: absolute;
+    right: calc(var(--u) * 7);
+    top: calc(var(--u) * 6);
+    text-align: right;
+  }
+  .clock .time {
+    font-size: calc(var(--u) * 8.6);
+    font-weight: 250;
+    letter-spacing: -0.04em;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    color: rgba(248, 250, 252, 0.92);
+  }
+  .clock .time small {
+    font-size: 0.32em;
+    font-weight: 400;
+    letter-spacing: 0.02em;
+    margin-left: 0.25em;
+    color: rgba(190, 210, 255, 0.72);
+  }
+  .clock .date {
+    margin-top: calc(var(--u) * 1.3);
+    font-size: calc(var(--u) * 1.85);
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: rgba(190, 210, 255, 0.72);
+  }
+
+  /* With the clock in the top corner, the logo sits a little lower to give it room. */
+  html:not(.static):not(.frame) .brand { top: 53%; }
+  .static .clock, .frame .clock { display: none; }
+  /* ?frame=1…8: one of eight lightings of the live version, for Windows' own slideshow — no app needed. */
+  .frame .glow, .frame .echo-d, .frame .echo-tile, .frame .icon::after { animation: none; }
+  .frame .address::after { display: none; }
+  .frame .glow, .frame .echo-d, .frame .echo-tile { will-change: auto; }
+  .frame .grain { inset: 0; }
+  .static .glow, .static .echo-d, .static .echo-tile, .static .icon::after, .static .address::after { animation: none; }
+  .static .address::after { display: none; }
+  /* Painted flat for the still: no layers of its own, which an 8K render drops. */
+  .static .glow, .static .echo-d, .static .echo-tile { will-change: auto; }
+  .static .grain { inset: 0; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .glow, .echo-d, .echo-tile, .icon::after, .address::after { animation: none; }
+  }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="sky"></div>
+  <div class="glow a"></div>
+  <div class="glow b"></div>
+  <div class="glow c"></div>
+  <div class="grid"></div>
+  <div class="echo-tile"></div>
+  <div class="echo-d"></div>
+  <div class="vignette"></div>
+
+  <div class="brand">
+    <div class="lockup" role="img" aria-label="Deskzo">
+      <div class="icon"></div>
+      <div class="wordmark"></div>
+    </div>
+    <div class="address">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#8fb0ff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="9.2"></circle>
+        <path d="M2.8 12h18.4"></path>
+        <path d="M12 2.8c2.6 2.6 3.9 5.7 3.9 9.2s-1.3 6.6-3.9 9.2c-2.6-2.6-3.9-5.7-3.9-9.2S9.4 5.4 12 2.8z"></path>
+      </svg>
+      <b>deskzo<i>.com</i></b>
+    </div>
+    <p class="line"><em>One workspace</em> for sales, accounts, people and support.</p>
+    <div class="products">
+      <span>CRM</span><span>Books</span><span>People</span><span>Desk</span><span>Inventory</span><span>Projects</span>
+    </div>
+  </div>
+
+  <div class="clock" aria-hidden="true">
+    <div class="time" id="time"></div>
+    <div class="date" id="date"></div>
+  </div>
+
+  <div class="grain"></div>
+</div>
+
+<script>
+  // ?static=1: the still picture — no clock, nothing moving. ?frame=1…8: the slideshow's pictures, the light in
+  // a different place in each, so that Windows, fading from one to the next, moves it round the logo.
+  const query = new URLSearchParams(location.search);
+  if (query.has("static")) document.documentElement.classList.add("static");
+  if (query.has("frame")) {
+    document.documentElement.classList.add("frame");
+    // Per picture, in units of --u: the main light (x, y, scale), the low light (x, y), the cyan light (x, y),
+    // the tile outline's turn, and the large D's drift.
+    const LIGHTS = [
+      [0, 0, 1, 0, 0, 0, 0, 12, 0],
+      [-22, 12, 1.1, 14, -6, -8, -14, 34, -3],
+      [-48, 4, 0.95, 30, -10, -30, -6, 58, -6],
+      [-30, 30, 1.15, 10, -18, -46, 8, 80, -4],
+      [-6, 38, 1.05, -18, -4, -20, 22, 104, 2],
+      [8, 14, 1.2, -30, -14, 6, 14, 126, 4],
+      [-14, -6, 0.9, -8, -22, 12, -18, 150, 1],
+      [-36, 18, 1.08, 22, 4, -16, -20, 172, -2],
+    ];
+    const [ax, ay, as, bx, by, cx, cy, turn, drift] = LIGHTS[(Math.max(1, Math.min(8, Number(query.get("frame")) || 1)) - 1)];
+    const u = (n) => "calc(var(--u) * " + n + ")";
+    document.querySelector(".glow.a").style.transform = "translate(" + u(ax) + ", " + u(ay) + ") scale(" + as + ")";
+    document.querySelector(".glow.b").style.transform = "translate(" + u(bx) + ", " + u(by) + ")";
+    document.querySelector(".glow.c").style.transform = "translate(" + u(cx) + ", " + u(cy) + ")";
+    document.querySelector(".echo-tile").style.transform = "rotate(" + turn + "deg)";
+    document.querySelector(".echo-d").style.transform = "translate(" + u(drift) + ", " + u(-drift / 2) + ")";
+  }
+
+  // The clock, in the computer's own time, refreshed on the minute — nothing runs in between.
+  const time = document.getElementById("time");
+  const date = document.getElementById("date");
+  function tick() {
+    const now = new Date();
+    const h = now.getHours();
+    const hour = ((h + 11) % 12) + 1;
+    time.innerHTML = hour + ":" + String(now.getMinutes()).padStart(2, "0") + "<small>" + (h < 12 ? "AM" : "PM") + "</small>";
+    date.textContent = now.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" });
+    setTimeout(tick, 60000 - (now.getSeconds() * 1000 + now.getMilliseconds()) + 50);
+  }
+  tick();
+</script>
+</body>
+</html>

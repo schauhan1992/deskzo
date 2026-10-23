@@ -12,6 +12,7 @@ import { DefinitionList, Panel } from "@/components/console/kit/panel";
 import { RelativeTime } from "@/components/console/kit/relative-time";
 import { StatusPill } from "@/components/console/kit/status";
 import { GatewayKeysEditor } from "@/components/console/settings/gateway-keys";
+import { CloudflareConnectionEditor } from "@/components/console/settings/cloudflare-connection";
 import { DomainsOfferedSwitch } from "@/components/console/settings/domains-offered-setting";
 import { ConsoleTimeZoneSetting } from "@/components/console/settings/time-zone-setting";
 import { consoleZone } from "@/lib/platform/console-clock";
@@ -299,9 +300,19 @@ export default async function ConsoleSettingsPage() {
           <Panel
             id="custom-domains"
             title="Custom domains"
-            description="Whether workspace owners may reach their workspace at an address of their own. Each plan says how many; staff add them from a workspace's page either way."
+            description="Whether workspace owners may reach their workspace at an address of their own. Each plan says how many; staff add them from a workspace's page either way. Their HTTPS certificates come through Cloudflare."
           >
             <DomainsOfferedSwitch offered={domainsOffered} change={changeOf(row("domains.offered"))} readOnly={!caps.owner} />
+            <div className="mt-5 border-t border-line pt-5">
+              <CloudflareConnectionEditor
+                zoneId={row("cloudflare.zoneId")?.value ?? null}
+                tokenSet={row("cloudflare.apiToken")?.set ?? false}
+                zoneChange={changeOf(row("cloudflare.zoneId"))}
+                tokenChange={changeOf(row("cloudflare.apiToken"))}
+                readOnly={!caps.owner}
+                canCheck={caps.manage}
+              />
+            </div>
           </Panel>
 
           <Panel id="time-zone" title="Time zone" description="The zone every time in this console is shown in, for all staff. Each workspace keeps its own, chosen by its owner.">

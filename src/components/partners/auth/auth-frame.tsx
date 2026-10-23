@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { Building2, HandCoins, Handshake, Ticket } from "lucide-react";
+import { DeskzoIcon } from "@/components/brand/deskzo-logo";
+import { Building2, HandCoins, Ticket } from "lucide-react";
 import { EnvBadge } from "@/components/console/kit/env-badge";
 import type { PlatformEnv } from "@/lib/console-shared/types";
 
@@ -30,8 +31,8 @@ export function PartnerAuthFrame({
     <div className="flex min-h-screen flex-col bg-surface-sunken lg:grid lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
       <header className="flex items-center justify-between gap-3 border-b border-line bg-surface px-4 py-3 lg:flex-col lg:items-stretch lg:border-r lg:border-b-0 lg:bg-[radial-gradient(120%_70%_at_0%_0%,color-mix(in_srgb,var(--brand)_9%,transparent),transparent_70%)] lg:px-10 lg:py-10 xl:px-14">
         <div className="flex min-w-0 items-center gap-2.5">
-          <span aria-hidden="true" className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-brand text-brand-contrast">
-            <Handshake className="h-4 w-4" />
+          <span aria-hidden="true" className="shrink-0">
+            <DeskzoIcon className="h-7 w-7 rounded-[22%] shadow-sm ring-1 ring-line" />
           </span>
           <p className="truncate text-sm font-semibold text-text">Partner portal</p>
         </div>

@@ -10,13 +10,16 @@ import { openForPlatform, sealForPlatform } from "@/lib/platform/kek";
  * environment, so a key is changed without a deploy and never sits in a file.
  */
 
-export const SECRET_KEYS = ["stripe.secretKey", "stripe.webhookSecret", "razorpay.keyId", "razorpay.keySecret", "razorpay.webhookSecret"] as const;
+export const GATEWAY_SECRET_KEYS = ["stripe.secretKey", "stripe.webhookSecret", "razorpay.keyId", "razorpay.keySecret", "razorpay.webhookSecret"] as const;
+/** `cloudflare.apiToken`: workspaces' own addresses on Cloudflare for SaaS (src/lib/platform/cloudflare-hostnames.ts). */
+export const SECRET_KEYS = [...GATEWAY_SECRET_KEYS, "cloudflare.apiToken"] as const;
 export type SecretKey = (typeof SECRET_KEYS)[number];
 /**
  * `platform.lastTick`: what the platform tick did last, as JSON (src/lib/platform/tick-summary.ts).
  * `support.*`: Contact Support — typed, with their defaults, in src/lib/support/settings.ts.
  * `partners.*`: the partner programme — typed, with their defaults, in src/lib/partners/settings.ts.
  * `domains.offered`: whether workspaces may add custom domains (`customDomainsOffered`).
+ * `cloudflare.zoneId`: the zone their addresses are custom hostnames of (src/lib/platform/cloudflare-hostnames.ts).
  */
 export const PLAIN_KEYS = [
   "signup.open",
@@ -40,6 +43,7 @@ export const PLAIN_KEYS = [
   "staff.twoFactor",
   "platform.lastTick",
   "domains.offered",
+  "cloudflare.zoneId",
   "console.timezone",
   "support.enabled",
   "support.email",

@@ -55,6 +55,10 @@ import {
 } from "@/lib/trade-documents";
 import { companyPath, leadPath } from "@/lib/record-links";
 import { documentWriteKey } from "@/lib/documents/write-permission";
+import { DocumentLeadLink } from "@/components/documents/document-lead-link";
+import { leadsInPlan } from "@/lib/leads/shown";
+import { mayAccess } from "@/lib/authz/access";
+import { requireUser } from "@/lib/session";
 
 /**
  * A document's full detail. Rendered on its own page and again inside the split view on a document
@@ -111,6 +115,16 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
   // Paying online (owner, 23 Oct 2026 — src/lib/collect): a rupee invoice with something left to pay, where a
   // gateway is connected.
   const payOnline = settlement && settlement.balance >= 1 && document.currency === "INR" ? await invoicePayLinkState(document.id) : null;
+
+  // Which deal a proposal is for (owner, 19 Oct 2026; src/actions/document-lead.ts): linked or changed
+  // here by whoever may write proposals and see leads — draft or issued, since it is no part of what was sent.
+  const canLinkLead =
+    document.docType === "PROPOSAL" &&
+    document.status !== "CANCELLED" &&
+    (await leadsInPlan()) &&
+    (await viewerHas("leads.view")) &&
+    (await viewerHas(documentWriteKey("PROPOSAL", "issue"))) &&
+    (await mayAccess((await requireUser()).id, "documents", "edit", document.id));
 
   // Collections: what sales and accounts have said to the customer about paying this invoice, and any
   // promise — for anybody who can see the account's money (null otherwise). Receivables' own, so only
@@ -426,14 +440,21 @@ export async function DocumentDetail({ id, embedded = false }: { id: string; emb
             </Card>
           )}
 
-          {document.lead && (
+          {(document.lead || canLinkLead) && (
             <Card>
-              <CardHeader className="text-sm font-medium text-text">Raised from</CardHeader>
-              <CardContent className="flex flex-wrap items-center justify-between gap-2 py-3">
-                <Link href={leadPath(document.lead.leadSeq)} className="text-sm text-text hover:underline">
-                  {document.lead.title}
-                </Link>
-                <Badge tone="default">{document.lead.status.replaceAll("_", " ")}</Badge>
+              <CardHeader className="text-sm font-medium text-text">{document.docType === "PROPOSAL" ? "For lead" : "Raised from"}</CardHeader>
+              <CardContent className="space-y-2 py-3">
+                {document.lead ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <Link href={leadPath(document.lead.leadSeq)} className="text-sm text-text hover:underline">
+                      {document.lead.title}
+                    </Link>
+                    <Badge tone="default">{document.lead.status.replaceAll("_", " ")}</Badge>
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted">Not linked to a lead, so no lead shows it as its quotation.</p>
+                )}
+                {canLinkLead && <DocumentLeadLink documentId={document.id} companyId={document.companyId} currentId={document.lead?.id ?? null} />}
               </CardContent>
             </Card>
           )}

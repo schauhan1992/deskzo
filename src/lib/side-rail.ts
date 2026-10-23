@@ -11,12 +11,14 @@
  * recognise them by shape.
  */
 
-export type SideRailTool = "chat" | "tasks" | "notes" | "calculator" | "prorata" | "currency" | "lookup" | "updates" | "help" | "videos" | "support-access";
+export type SideRailTool = "chat" | "tasks" | "calendar" | "notes" | "calculator" | "prorata" | "currency" | "lookup" | "updates" | "help" | "videos" | "support-access";
 
 export const SIDE_RAIL_TOOLS: SideRailTool[] = [
   // Chat beside whatever you are working on: a colleague's question answered without leaving the page.
   "chat",
   "tasks",
+  // The day's meetings and what else is on, at a glance (src/components/layout/rail-calendar.tsx).
+  "calendar",
   "notes",
   "calculator",
   "prorata",

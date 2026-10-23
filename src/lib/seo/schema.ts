@@ -46,7 +46,7 @@ export type OrganizationLdSource = {
   origin: string;
   /** The social profiles the footer links to. */
   social: { href: string }[];
-  /** A real logo image, when the site has one — the letter mark it shows today is not, so this is left out. */
+  /** A real logo image — the official icon since 23 Oct 2026 (src/app/platform-site/brand); left out when there is none. */
   logo?: string | null;
 };
 
@@ -180,7 +180,8 @@ export function jsonLdFor(input: Omit<SeoInput, "jsonLd">): JsonLd[] {
   const out: (JsonLd | null)[] = [];
   switch (input.kind) {
     case "home":
-      out.push(organizationLd({ siteName: site.siteName, origin, social: site.social }), webSiteLd({ siteName: site.siteName, description: site.description }, origin), faq);
+      // The official icon (owner, 23 Oct 2026), served by src/app/platform-site/brand — a picture, as search engines prefer.
+      out.push(organizationLd({ siteName: site.siteName, origin, social: site.social, logo: "/brand/deskzo-icon-512.png" }), webSiteLd({ siteName: site.siteName, description: site.description }, origin), faq);
       break;
     case "page": {
       // A nested page's trail is the breadcrumb it shows (Home › Product › CRM), itself by its title as

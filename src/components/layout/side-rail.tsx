@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import { BadgeCheck, CalendarRange, Calculator, CheckSquare, CircleHelp, Coins, Headset, Megaphone, MessageCircle, MonitorPlay, ShieldCheck, Sparkles, StickyNote, X } from "lucide-react";
+import { BadgeCheck, CalendarDays, Calculator, CheckSquare, CircleHelp, Coins, Divide, Headset, Megaphone, MessageCircle, MonitorPlay, ShieldCheck, Sparkles, StickyNote, X } from "lucide-react";
 import { COPILOT_OPEN_EVENT, SIDE_RAIL_STORAGE_KEY, UPDATES_SEEN_EVENT, parseTool, type SideRailTool } from "@/lib/side-rail";
 import { RailTasks } from "@/components/layout/rail-tasks";
+import { RailCalendar } from "@/components/layout/rail-calendar";
 import { RailNotes } from "@/components/layout/rail-notes";
 import { RailCalculator } from "@/components/layout/rail-calculator";
 import { RailCurrency } from "@/components/layout/rail-currency";
@@ -18,9 +19,10 @@ import { useChatLive } from "@/components/chat/chat-live";
 const TOOLS: { key: SideRailTool; label: string; icon: typeof Calculator; group: "work" | "help" }[] = [
   { key: "chat", label: "Chat", icon: MessageCircle, group: "work" },
   { key: "tasks", label: "My tasks", icon: CheckSquare, group: "work" },
+  { key: "calendar", label: "My calendar", icon: CalendarDays, group: "work" },
   { key: "notes", label: "Sticky notes", icon: StickyNote, group: "work" },
   { key: "calculator", label: "GST & margin", icon: Calculator, group: "work" },
-  { key: "prorata", label: "Pro-rata", icon: CalendarRange, group: "work" },
+  { key: "prorata", label: "Pro-rata", icon: Divide, group: "work" },
   { key: "currency", label: "Currency", icon: Coins, group: "work" },
   { key: "lookup", label: "GSTIN check", icon: BadgeCheck, group: "work" },
   { key: "updates", label: "What's new", icon: Megaphone, group: "help" },
@@ -50,6 +52,7 @@ export function SideRail({
   proRata = true,
   proRataProposals = false,
   tasks = true,
+  calendar = false,
   notes = true,
   country = "IN",
   support = false,
@@ -62,8 +65,9 @@ export function SideRail({
   proRata?: boolean;
   /** This person may raise a proposal — the pro-rata panel then offers to draft one from its figures. */
   proRataProposals?: boolean;
-  /** The person may open Tasks / Sticky Notes — the rail's panels are those modules'. */
+  /** The person may open Tasks / Calendar / Sticky Notes — the rail's panels are those modules'. */
   tasks?: boolean;
+  calendar?: boolean;
   notes?: boolean;
   /** The workspace's: the GST calculator and the GSTIN check are India's. */
   country?: string;
@@ -130,7 +134,7 @@ export function SideRail({
 
   // Only the tools this workspace has: nothing here asks for a module outside its plan.
   const tools = TOOLS.filter(
-    (t) => (t.key !== "prorata" || proRata) && (t.key !== "tasks" || tasks) && (t.key !== "notes" || notes) && ((t.key !== "calculator" && t.key !== "lookup") || country === "IN") && (t.key !== "support-access" || !!supportAccess) && (t.key !== "chat" || chat),
+    (t) => (t.key !== "prorata" || proRata) && (t.key !== "tasks" || tasks) && (t.key !== "calendar" || calendar) && (t.key !== "notes" || notes) && ((t.key !== "calculator" && t.key !== "lookup") || country === "IN") && (t.key !== "support-access" || !!supportAccess) && (t.key !== "chat" || chat),
   );
   const active = tools.find((t) => t.key === open);
 
@@ -165,6 +169,7 @@ export function SideRail({
           <div className={active.key === "chat" ? "min-h-0 flex-1" : "min-h-0 flex-1 overflow-y-auto p-3"}>
             {active.key === "chat" && <ChatApp compact />}
             {active.key === "tasks" && <RailTasks />}
+            {active.key === "calendar" && <RailCalendar />}
             {active.key === "notes" && <RailNotes />}
             {active.key === "calculator" && <RailCalculator />}
             {active.key === "prorata" && <RailProRata canPropose={proRataProposals} />}

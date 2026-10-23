@@ -15,7 +15,7 @@ import { moduleAvailableForTenant } from "@/lib/modules-access";
 export default async function Page() {
   const gate = await planGate(["leads", "orders"], "Pipeline");
   if (gate) return gate;
-  const [leadsHere, ordersHere] = await Promise.all([moduleAvailableForTenant("leads"), moduleAvailableForTenant("orders")]);
+  const [leadsHere, ordersHere, quotesHere] = await Promise.all([moduleAvailableForTenant("leads"), moduleAvailableForTenant("orders"), moduleAvailableForTenant("sales_documents")]);
   const [leads, automations, orders] = await Promise.all([
     leadsHere ? listPipelineForManage() : null,
     leadsHere ? listAutomationsForManage() : null,
@@ -42,6 +42,7 @@ export default async function Page() {
               people={automations?.people ?? []}
               automationsReady={automations?.ready ?? false}
               canAutomate={automations?.canAutomate ?? false}
+              quotes={quotesHere}
             />
           </section>
         )}
