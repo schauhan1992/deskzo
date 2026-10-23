@@ -75,7 +75,8 @@ function Screens() {
 
   return (
     <>
-      <Stack screenOptions={{ headerTintColor: tint.brand, headerTitleStyle: { fontWeight: "600", color: tint.text }, contentStyle: { backgroundColor: colors.sunken } }}>
+      {/* The back button an arrow alone, as on Android — iOS would name the screen behind, the tabs' "(tabs)". */}
+      <Stack screenOptions={{ headerTintColor: tint.brand, headerTitleStyle: { fontWeight: "600", color: tint.text }, headerBackButtonDisplayMode: "minimal", contentStyle: { backgroundColor: colors.sunken } }}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="pair" options={{ title: "Sign in", headerBackVisible: false, gestureEnabled: false }} />
         <Stack.Screen name="signed-in" options={{ title: "Signing in", headerBackVisible: false }} />
