@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { requireUser } from "@/lib/session";
 import { hasEffectivePermission } from "@/actions/permission";
 import { createDepartmentSchema, updateDepartmentSchema } from "@/lib/validation/department";
-import { DASHBOARD_WIDGET_REGISTRY } from "@/lib/dashboard-widgets";
+import { CARD_WIDGETS } from "@/lib/dashboard/charts";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -99,7 +99,8 @@ export async function setDepartmentDashboardWidgets(id: string, widgetKeys: stri
   if (!(await hasEffectivePermission(user.id, "users.manage"))) {
     return { ok: false, error: "You can't manage departments." };
   }
-  const validKeys = new Set(DASHBOARD_WIDGET_REGISTRY.map((w) => w.key));
+  // The widgets a layout can name, kept by their older card's key (src/lib/dashboard/charts.ts CARD_WIDGETS).
+  const validKeys = new Set(Object.keys(CARD_WIDGETS));
   const filtered = widgetKeys.filter((k) => validKeys.has(k));
 
   await db.department.update({ where: { id }, data: { defaultDashboardWidgets: filtered } });
