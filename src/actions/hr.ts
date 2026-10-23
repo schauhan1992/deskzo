@@ -7,7 +7,7 @@ import { requireModuleUser } from "@/lib/modules-access";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
-import { getDownlineUserIds } from "@/lib/org-chart";
+import { hrPeopleReached } from "@/lib/authz/access";
 import { dateOnly, toKey } from "@/lib/hr/calendar";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { employeeProfileSchema, exitEmployeeSchema, holidaySchema, leaveTypeSchema } from "@/lib/validation/hr";
@@ -35,9 +35,8 @@ async function canManage(userId: string) {
  * scope (see `visibleUserIds` in src/actions/visit.ts) — worth matching so the two read the same.
  */
 async function visibleUserIds(userId: string): Promise<string[] | null> {
-  if (await hasEffectivePermission(userId, "hr.viewAll")) return null;
-  if (await canManage(userId)) return null;
-  return [userId, ...(await getDownlineUserIds(userId))];
+  // Theirs and their reports', or everyone's with "See all HR" or "Manage HR" — unless Record access says otherwise.
+  return hrPeopleReached(userId, "employees");
 }
 
 /** Turns a form's empty string into a null, and a date string into a date-only value. */

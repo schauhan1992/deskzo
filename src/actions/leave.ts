@@ -9,6 +9,7 @@ import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
 import { hasEffectivePermission } from "@/actions/permission";
 import { getDownlineUserIds } from "@/lib/org-chart";
+import { hrPeopleReached } from "@/lib/authz/access";
 import { addDays, countLeaveDays, dateOnly, eachDay, financialYearOf, toKey } from "@/lib/hr/calendar";
 import { ensureBalance } from "@/lib/hr/leave-balance";
 import { workspaceClock } from "@/lib/time/workspace";
@@ -27,9 +28,8 @@ import type { ActionResult } from "@/actions/company";
 const n = (value: Prisma.Decimal | number) => Number(value);
 
 async function visibleUserIds(userId: string): Promise<string[] | null> {
-  if (await hasEffectivePermission(userId, "hr.viewAll")) return null;
-  if (await hasEffectivePermission(userId, "hr.manage")) return null;
-  return [userId, ...(await getDownlineUserIds(userId))];
+  // Theirs and their reports', or everyone's with "See all HR" or "Manage HR" — unless Record access says otherwise.
+  return hrPeopleReached(userId, "leave");
 }
 
 /**

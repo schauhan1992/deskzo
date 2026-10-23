@@ -8,6 +8,7 @@ import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
 import { getDownlineUserIds } from "@/lib/org-chart";
+import { hrPeopleReached } from "@/lib/authz/access";
 import { closedDates, dateOnly, eachDay, isWeekOff, monthRange, toKey } from "@/lib/hr/calendar";
 import { workspaceClock } from "@/lib/time/workspace";
 import { attendanceMarkSchema } from "@/lib/validation/hr";
@@ -29,9 +30,8 @@ import { dayKey, daysBetween } from "@/lib/hr/period";
  */
 
 async function visibleUserIds(userId: string): Promise<string[] | null> {
-  if (await hasEffectivePermission(userId, "hr.viewAll")) return null;
-  if (await hasEffectivePermission(userId, "hr.manage")) return null;
-  return [userId, ...(await getDownlineUserIds(userId))];
+  // Theirs and their reports', or everyone's with "See all HR" or "Manage HR" — unless Record access says otherwise.
+  return hrPeopleReached(userId, "attendance");
 }
 
 async function canMarkFor(actorId: string, targetId: string) {

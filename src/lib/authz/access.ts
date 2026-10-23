@@ -80,6 +80,9 @@ export const ACCESS_RECORD_KEYS = [
   "activities",
   "tasks",
   "expenses",
+  "employees",
+  "attendance",
+  "leave",
 ] as const;
 export type AccessRecord = (typeof ACCESS_RECORD_KEYS)[number];
 
@@ -108,6 +111,8 @@ type RecordDefinition = {
 const OWNED_LEVELS: readonly AccessLevel[] = ["NONE", "OWN", "TEAM", "BRANCH", "ALL"];
 const CHILD_LEVELS: readonly AccessLevel[] = ["NONE", "OWN", "TEAM", "BRANCH", "ALL", "FOLLOW"];
 const EVERY_ACTION = ["view", "edit", "delete", "assign"] as const;
+/** HR records offer no NONE: whatever else is set, a person reaches their own. */
+const HR_LEVELS: readonly AccessLevel[] = ["OWN", "TEAM", "BRANCH", "ALL"];
 
 /** One permission decides every action alike: held, one level; not held, another. */
 const byKey =
@@ -248,6 +253,30 @@ export const ACCESS_RECORDS: readonly RecordDefinition[] = [
           : { level: "TEAM", from: "expenses.viewAll", held: false }
         : { level: "OWN", from: "section.expenses", held: has("section.expenses") },
   },
+  // ── HR: whose people records, attendance and leave somebody sees ─────────────────────────────────
+  ...(
+    [
+      ["employees", "Employee profiles"],
+      ["attendance", "Attendance"],
+      ["leave", "Leave & short leave"],
+    ] as const
+  ).map(
+    ([key, label]): RecordDefinition => ({
+      // Everyone has always seen their own and their reports' — or everybody's with "See all HR" or
+      // "Manage HR". Never less than their own: a person always sees their own attendance and leave.
+      key,
+      label,
+      ownMeans: "the employee",
+      levels: HR_LEVELS,
+      actions: ["view"],
+      derive: (has) =>
+        has("hr.viewAll")
+          ? { level: "ALL", from: "hr.viewAll", held: true }
+          : has("hr.manage")
+            ? { level: "ALL", from: "hr.manage", held: true }
+            : { level: "TEAM", from: "hr.viewAll", held: false },
+    }),
+  ),
 ];
 
 const RECORD_BY_KEY = new Map(ACCESS_RECORDS.map((r) => [r.key, r]));
@@ -627,6 +656,10 @@ const CHILD_SHAPES: Record<ChildRecord, ChildShape> = {
     inBranch: (p) => peopleBranch(p, "assignedToUserId"),
   },
   expenses: { ownedBy: (ids) => ({ userId: { in: ids } }), inBranch: (p) => peopleBranch(p, "userId") },
+  // An employee profile, an attendance day and a leave request each say whose they are in `userId`.
+  employees: { ownedBy: (ids) => ({ userId: { in: ids } }), inBranch: (p) => peopleBranch(p, "userId") },
+  attendance: { ownedBy: (ids) => ({ userId: { in: ids } }), inBranch: (p) => peopleBranch(p, "userId") },
+  leave: { ownedBy: (ids) => ({ userId: { in: ids } }), inBranch: (p) => peopleBranch(p, "userId") },
 };
 
 async function childClause(userId: string, record: ChildRecord, action: AccessAction): Promise<object> {
@@ -809,7 +842,22 @@ export async function mayAccess(userId: string, record: AccessRecord, action: Ac
       return (await db.task.count({ where: { AND: [{ id }, await taskAccess(userId, action)] } })) > 0;
     case "expenses":
       return (await db.expense.count({ where: { AND: [{ id }, await expenseAccess(userId, action)] } })) > 0;
+    case "employees":
+      return (await db.employeeProfile.count({ where: { AND: [{ id }, await childAccess(userId, record, action)] } })) > 0;
+    case "attendance":
+      return (await db.attendanceDay.count({ where: { AND: [{ id }, await childAccess(userId, record, action)] } })) > 0;
+    case "leave":
+      return (await db.leaveRequest.count({ where: { AND: [{ id }, await childAccess(userId, record, action)] } })) > 0;
   }
+}
+
+/**
+ * The people whose HR records of this kind this person may see — null for everybody's. HR's screens list
+ * people rather than records, so they ask for the people: Settings › Roles and a person's own Record access
+ * decide it, and with nothing set it is what it always was (see `ACCESS_RECORDS`).
+ */
+export async function hrPeopleReached(userId: string, record: "employees" | "attendance" | "leave"): Promise<string[] | null> {
+  return peopleReached(userId, record, "view");
 }
 
 /**

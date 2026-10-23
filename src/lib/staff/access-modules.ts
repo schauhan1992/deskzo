@@ -153,7 +153,7 @@ export const ACCESS_MODULES: readonly AccessModule[] = [
     label: "HR",
     description: "Employees, Leave, Payroll, Hiring",
     icon: "hr",
-    records: [],
+    records: ["employees", "attendance", "leave"],
     keys: ["visitors.view", "visitors.manage"],
     groups: ["People & HR"],
     sections: ["section.hr", "section.visitors", "section.engagement", "section.payroll"],
@@ -240,6 +240,9 @@ export function accessModule(key: string): AccessModule | undefined {
 
 export type ModuleStanding = "full" | "limited" | "none";
 
+/** Records nobody reaches less than their own of — HR's (src/lib/authz/access.ts `HR_LEVELS`). */
+const EVERYONE_REACHES_OWN = new Set<AccessRecord>(["employees", "attendance", "leave"]);
+
 /**
  * How much of a module somebody (or a role) has: every permission and every record they could see,
  * some, or nothing — the badge beside each module. Menu sections don't count towards it: they decide
@@ -247,7 +250,9 @@ export type ModuleStanding = "full" | "limited" | "none";
  */
 export function moduleStanding(module: AccessModule, holds: (key: string) => boolean, recordView: (record: AccessRecord) => boolean): ModuleStanding {
   const keys = permissionsOfModule(module.key).filter((d) => !d.everyone);
-  const checks = [...keys.map((d) => holds(d.key)), ...module.records.map((r) => recordView(r))];
+  // Like an everyone key, a record everybody reaches their own of (HR's) says nothing about this person.
+  const records = module.records.filter((r) => !EVERYONE_REACHES_OWN.has(r));
+  const checks = [...keys.map((d) => holds(d.key)), ...records.map((r) => recordView(r))];
   if (checks.length === 0) return "none";
   const yes = checks.filter(Boolean).length;
   return yes === checks.length ? "full" : yes === 0 ? "none" : "limited";
@@ -296,6 +301,9 @@ const NOUN: Record<AccessRecord, string> = {
   activities: "calls & notes",
   tasks: "tasks",
   expenses: "expenses",
+  employees: "employee profiles",
+  attendance: "attendance",
+  leave: "leave",
 };
 
 export type ActionRowSpec =

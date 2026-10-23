@@ -10,6 +10,7 @@ import { notifyUser } from "@/lib/notify";
 import { notMigratedYet } from "@/lib/not-migrated";
 import { hasEffectivePermission } from "@/actions/permission";
 import { getDownlineUserIds } from "@/lib/org-chart";
+import { hrPeopleReached } from "@/lib/authz/access";
 import { closedDates, dateOnly, isWeekOff, monthRange, toKey } from "@/lib/hr/calendar";
 import { workspaceClock } from "@/lib/time/workspace";
 import { officeHours } from "@/lib/hr/office-hours";
@@ -249,13 +250,13 @@ export type ShortLeaveFilters = {
 /**
  * Everybody's short leave the viewer may see, as leave's register is (owner, 21 Oct 2026: HR had only
  * what was waiting and the last ten decided): everyone's for HR — `hr.viewAll` or `hr.manage` — their
- * own and their team's for anybody else. Newest first; null while the tables aren't there.
+ * own and their team's for anybody else, unless Record access › Leave says otherwise. Newest first; null
+ * while the tables aren't there.
  */
 export async function allShortLeaves(filters?: ShortLeaveFilters) {
   const user = await requireModuleUser("hr");
   if (!(await policy())) return null;
-  const everyone = (await hasEffectivePermission(user.id, "hr.viewAll")) || (await hasEffectivePermission(user.id, "hr.manage"));
-  const allowed = everyone ? null : [user.id, ...(await getDownlineUserIds(user.id))];
+  const allowed = await hrPeopleReached(user.id, "leave");
   const statuses = ["PENDING", "APPROVED", "REJECTED", "CANCELLED"];
   const where = {
     ...(allowed ? { userId: { in: allowed } } : {}),
@@ -273,5 +274,5 @@ export async function allShortLeaves(filters?: ShortLeaveFilters) {
     db.shortLeaveRequest.count({ where }),
     db.shortLeaveRequest.count({ where: { ...where, status: "PENDING" } }),
   ]);
-  return { rows: toPlain(rows), total, pendingCount, everyone };
+  return { rows: toPlain(rows), total, pendingCount, everyone: allowed === null };
 }
