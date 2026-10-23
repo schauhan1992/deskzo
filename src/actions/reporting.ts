@@ -768,3 +768,46 @@ export async function exportReportChart(input: unknown): Promise<ActionResult<{ 
     throw err;
   }
 }
+
+const valuesSchema = z.object({
+  source: z.string().max(40),
+  field: z.string().max(120),
+  dateField: z.string().max(120).optional(),
+  dateRange: dateRangeSchema.optional(),
+  search: z.string().trim().max(100).optional().default(""),
+});
+
+/**
+ * The values a field takes, with how many rows have each — for a filter's list. Read from the same rows a report
+ * would count for this person (their access, the window), so it never offers a value they can't see, nor hints
+ * at one on an account they weren't given.
+ */
+export async function fieldValues(input: unknown): Promise<ActionResult<{ values: { value: string; rows: number }[]; distinct: number; capped: boolean }>> {
+  const user = await reportingUser();
+  if (!user) return { ok: false, error: OFF };
+  const q = valuesSchema.safeParse(input);
+  if (!q.success) return { ok: false, error: "That request isn't valid." };
+  const found = await openSource(q.data.source, user.id, isModuleEnabled);
+  if (!found.ok) return { ok: false, error: found.error };
+  const { source } = found.open;
+  const dim = source.dimensions.find((d) => d.key === q.data.field);
+  if (!dim) return { ok: false, error: `“${q.data.field}” isn't something you can filter ${source.label.toLowerCase()} by — it may have been removed, or not be open to you.` };
+  const clock = await workspaceClock();
+  const days = rangeDays(q.data.dateRange ?? { preset: "thisFy" }, clock.today());
+  const bounds = reportWindow(clock, days.from, days.to);
+  if ("error" in bounds) return { ok: false, error: bounds.error };
+  try {
+    const rows = await source.load({ userId: user.id, from: bounds.from, to: bounds.to, dateColumn: resolveDateColumn(source, q.data.dateField) });
+    const counts = new Map<string, number>();
+    for (const row of rows) {
+      const v = dim.of(row);
+      for (const value of Array.isArray(v) ? v : [v]) counts.set(value, (counts.get(value) ?? 0) + 1);
+    }
+    const needle = q.data.search.toLocaleLowerCase("en-IN");
+    const all = [...counts.entries()].filter(([v]) => !needle || v.toLocaleLowerCase("en-IN").includes(needle)).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    return { ok: true, data: { values: all.slice(0, 300).map(([value, n]) => ({ value, rows: n })), distinct: all.length, capped: all.length > 300 } };
+  } catch (err) {
+    if (notMigratedYet(err)) return { ok: false, error: MIGRATE };
+    throw err;
+  }
+}

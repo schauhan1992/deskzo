@@ -34,7 +34,17 @@ export type RunRequest = {
 };
 
 export type RunOutcome =
-  | { ok: true; charts: Record<string, ChartRun>; window: DayWindow | null; scopeNote: string; rows: number; truncated: boolean }
+  | {
+      ok: true;
+      charts: Record<string, ChartRun>;
+      window: DayWindow | null;
+      scopeNote: string;
+      /** Every row read, comparison periods included — what the activity log counts. */
+      rows: number;
+      /** The rows in the report's own window before any filter, when this run read it: "99 rows in range". */
+      windowRows: number | null;
+      truncated: boolean;
+    }
   | { ok: false; error: string; code: "denied" | "field" | "migrate" | "source" };
 
 export async function runDefinition(user: { id: string; name: string }, req: RunRequest, moduleOn: ModuleOn): Promise<RunOutcome> {
@@ -145,5 +155,7 @@ export async function runOpen(user: { id: string; name: string }, open: OpenSour
     });
   }
 
-  return { ok: true, charts: out, window: snapshot ? null : mainWindow, scopeNote, rows: loaded, truncated };
+  const mainLoad = loads.get(snapshot ? "snapshot" : `${mainWindow.from}|${mainWindow.to}`);
+  const windowRows = mainLoad ? (await mainLoad).length : null;
+  return { ok: true, charts: out, window: snapshot ? null : mainWindow, scopeNote, rows: loaded, windowRows, truncated };
 }
