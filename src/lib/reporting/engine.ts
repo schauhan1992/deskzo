@@ -306,6 +306,8 @@ export type RunInput = {
   /** A score's comparison rows, already loaded over the period compared against. */
   compareRows?: Row[] | null;
   compareLabel?: string | null;
+  /** A snapshot of today (stock on hand): its rows' dates aren't a history, so a score draws no trend line. */
+  snapshot?: boolean;
 };
 
 export function runChart(input: RunInput): ChartResult {
@@ -380,7 +382,7 @@ function score(input: RunInput, reader: ReturnType<typeof metricReaders>[number]
     if (!at) continue;
     byPeriod.get(bucketOf(at, grain, clock).key)?.push(row);
   }
-  const spark = periods.map((p) => reader.read(byPeriod.get(p.key) ?? []) ?? 0);
+  const spark = input.snapshot ? [] : periods.map((p) => reader.read(byPeriod.get(p.key) ?? []) ?? 0);
   return {
     kind: "score",
     metric: reader.meta,

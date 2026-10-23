@@ -18,9 +18,6 @@ export type ReportTemplate = {
   definition: ReportDefinition;
 };
 
-let seq = 0;
-const nextId = () => `t${(seq += 1)}`;
-
 type ChartOpts = Partial<Pick<ReportChart, "title" | "grain" | "limit" | "series" | "compare" | "showValues">> & {
   width?: ChartWidth;
   agg?: "sum" | "avg" | "min" | "max" | "count";
@@ -31,7 +28,8 @@ type ChartOpts = Partial<Pick<ReportChart, "title" | "grain" | "limit" | "series
 };
 
 function chart(type: ChartKind, metric: string, dimension: string | null, o: ChartOpts = {}): ReportChart {
-  const base = blankChart(nextId(), type, metric, dimension);
+  // Its id is given by `def`, from where it sits — nothing here is state kept between calls.
+  const base = blankChart("t", type, metric, dimension);
   return {
     ...base,
     title: o.title ?? "",
@@ -50,10 +48,23 @@ function chart(type: ChartKind, metric: string, dimension: string | null, o: Cha
 const score = (metric: string, title: string, compare: ReportChart["compare"] = "previousYear") => chart("score", metric, null, { title, compare, width: 3 });
 const COLLECTION_RATE: CalculatedField = { id: "crate", label: "Collection rate", expression: "{received} / {net}", format: "percent" };
 const AVG_INVOICE: CalculatedField = { id: "cavg", label: "Average invoice value", expression: "{net} / {count}", format: "currency" };
-const isFilter = (field: string, values: string[]): ReportFilter => ({ id: nextId(), field, op: "in", values });
+const isFilter = (field: string, values: string[]): ReportFilter => ({ id: "f", field, op: "in", values });
 
 function def(source: string, dateField: string, preset: DatePreset, pages: { name: string; charts: ReportChart[] }[], calculated: CalculatedField[] = []): ReportDefinition {
-  return { v: 1, source, dateField, dateRange: { preset }, filters: [], calculated, pages: pages.map((p, i) => ({ id: `p${i + 1}`, name: p.name, charts: p.charts })) };
+  return {
+    v: 1,
+    source,
+    dateField,
+    dateRange: { preset },
+    filters: [],
+    calculated,
+    pages: pages.map((p, i) => ({
+      id: `p${i + 1}`,
+      name: p.name,
+      // Ids from position: the same template always makes the same ids, page by page and chart by chart.
+      charts: p.charts.map((c, j) => ({ ...c, id: `p${i + 1}c${j + 1}`, filters: c.filters.map((f, k) => ({ ...f, id: `p${i + 1}c${j + 1}f${k + 1}` })) })),
+    })),
+  };
 }
 
 export const REPORT_TEMPLATES: ReportTemplate[] = [

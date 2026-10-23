@@ -40,8 +40,7 @@ export function filterWords(f: ReportFilter, source: Source): string {
   return `${label} ${sym[f.op] ?? FILTER_OP_LABELS[f.op]} ${n(f.number)}`;
 }
 
-let seq = 0;
-export const newFilterId = () => `f${Date.now().toString(36)}${(seq += 1)}`;
+export const newFilterId = () => `f${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
 export function FilterEditor({
   source,

@@ -203,7 +203,51 @@ async function main() {
       ok("…running it anyway is refused", !stockRun.ok && stockRun.code === "denied", stockRun.ok ? "ran" : stockRun.error);
       const make = await R.createReport({ name: `${PREFIX} stock`, source: "stock" });
       ok("…and so is making a report over it", !make.ok, make.ok ? "made" : make.error);
+      const theirValues = await R.fieldValues({ source: "stock", field: "warehouse" });
+      ok("…and listing a stock field's values for a filter", !theirValues.ok, theirValues.ok ? "listed" : theirValues.error);
+      // A stock report shared with them: listed, marked as reading a source they can't open, never run.
+      await as("admin@acme.example");
+      const stockReport = await R.createReport({ name: `${PREFIX} stock shared`, source: "stock", templateKey: "stock-by-warehouse" });
+      if (stockReport.ok) {
+        await R.shareReport({ id: stockReport.data.id, shares: [{ userId: who.id, canEdit: false }] });
+        await as(noStock);
+        const list = await R.listReports({ tab: "shared", search: PREFIX });
+        const row = list.ok ? list.data.rows.find((r) => r.id === stockReport.data.id) : undefined;
+        ok("a stock report shared with them is listed as one whose source they can't open", !!row && row.sourceOpen === false && row.access === "view", row ?? (list.ok ? "not listed" : list.error));
+        const openedLocked = await R.openReport(stockReport.data.id);
+        ok("…opening it says the source is locked and sends none of its fields", openedLocked.ok && !openedLocked.data.source.available && !("measures" in openedLocked.data.source), openedLocked.ok ? openedLocked.data.source : openedLocked.error);
+        const runLocked = await R.runReport({ reportId: stockReport.data.id });
+        ok("…and running it is refused", !runLocked.ok && runLocked.code === "denied", runLocked.ok ? "ran" : runLocked.error);
+        ok("…while they can ask its owner for access", (await R.requestReportAccess(stockReport.data.id)).ok);
+      } else ok("the admin makes a stock report to share", false, stockReport.error);
     } else ok("(everybody here can read stock — the locked case wasn't exercised)", true);
+
+    section("Filter values, cross-filters and the overview");
+    await as("admin@acme.example");
+    const adminBranches = await R.fieldValues({ source: "invoices", field: "branch", dateField: "issueDate", dateRange: def.dateRange });
+    ok("the admin's branch values count every invoice in the window once", adminBranches.ok && adminBranches.data.values.reduce((t, v) => t + v.rows, 0) === direct.length, adminBranches.ok ? adminBranches.data.values : adminBranches.error);
+    const unknownValues = await R.fieldValues({ source: "invoices", field: "cf:invoice:secret_cost" });
+    ok("values of a field the source hasn't are refused, in the same words as any unknown field", !unknownValues.ok && unknownValues.error.includes("may have been removed, or not be open to you"), unknownValues.ok ? "listed" : unknownValues.error);
+    await as("nisha.bhat12@demo.deskzo.invalid");
+    const salesBranches = await R.fieldValues({ source: "invoices", field: "branch", dateField: "issueDate", dateRange: def.dateRange });
+    ok("the salesperson's values come from their own invoices only", salesBranches.ok && salesBranches.data.values.reduce((t, v) => t + v.rows, 0) === salesDirect.length, salesBranches.ok ? salesBranches.data.values : salesBranches.error);
+    await as("admin@acme.example");
+    const overdueOnly = await R.runReport({ reportId: id, chartIds: [revenueId], crossFilters: [{ id: "x1", field: "paymentStatus", op: "in", values: ["Overdue"] }] });
+    const overdueRevenue = overdueOnly.ok && overdueOnly.charts[revenueId]?.ok ? (overdueOnly.charts[revenueId] as { result: { value: number | null } }).result.value : null;
+    const overdueExpected = direct.filter((r) => (invoices.dimensions.find((d) => d.key === "paymentStatus")!.of(r) as string) === "Overdue").reduce((t, r) => t + net.value(r), 0);
+    ok("a cross-filter narrows the report to the clicked value", overdueRevenue !== null && Math.abs(overdueRevenue - overdueExpected) < 0.01, { overdueRevenue, overdueExpected });
+    const badCross = await R.runReport({ reportId: id, crossFilters: [{ id: "x2", field: "cf:invoice:secret_cost", op: "gt", number: 0 }] });
+    ok("a cross-filter on a field the source hasn't is refused", !badCross.ok && badCross.code === "field", badCross.ok ? "ran" : badCross.error);
+    await R.setReportFavourite(id, true);
+    const home = await R.reportingHome();
+    const fav = home.ok ? home.data.favourites.find((f) => f.id === id) : undefined;
+    ok("the overview lists it as a favourite, with a chart to draw small", !!fav && !!fav.previewChart && !["score", "table", "pivot"].includes(fav.previewChart.type), fav?.previewChart?.type ?? (home.ok ? "not listed" : home.error));
+    const homeRevenue = home.ok ? home.data.kpis.find((k) => k.key === "revenue")?.run : undefined;
+    ok("its headline revenue is the invoices source's own total this year", !!homeRevenue && homeRevenue.ok && homeRevenue.result.kind === "score" && Math.abs((homeRevenue.result.value ?? NaN) - expected) < 0.01, homeRevenue);
+    await as("nisha.bhat12@demo.deskzo.invalid");
+    const salesHome = await R.reportingHome();
+    const salesKpiRevenue = salesHome.ok ? salesHome.data.kpis.find((k) => k.key === "revenue")?.run : undefined;
+    ok("the salesperson's overview revenue is their own invoices' total", !!salesKpiRevenue && salesKpiRevenue.ok && salesKpiRevenue.result.kind === "score" && Math.abs((salesKpiRevenue.result.value ?? NaN) - salesExpected) < 0.01, salesKpiRevenue);
 
     section("Downloads");
     for (const email of ["admin@acme.example", "nisha.bhat12@demo.deskzo.invalid"]) {

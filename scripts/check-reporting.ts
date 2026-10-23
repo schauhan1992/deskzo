@@ -146,6 +146,8 @@ section("Charts");
   ok("a pivot crosses customer and status", piv.columns.length === 3 && near(aarav.total, 300) && near(piv.grand, 1000), piv);
   const sc = runChart({ ...base, rows: thisYear, chart: make("score", "net", null), calc, compareRows: lastYear, compareLabel: "vs last year" }) as ScoreResult;
   ok("a score, against last year", near(sc.value, 1000) && near(sc.previous, 1000) && sc.compareLabel === "vs last year" && sc.spark.length >= 3, sc);
+  const snap = runChart({ ...base, rows: thisYear, chart: make("score", "net", null), calc, snapshot: true }) as ScoreResult;
+  ok("a snapshot's score has the same figure and no trend line — its dates aren't a history", near(snap.value, 1000) && snap.spark.length === 0, snap);
   let refused = "";
   try {
     runChart({ ...base, rows: thisYear, chart: make("donut", "net", null), calc });

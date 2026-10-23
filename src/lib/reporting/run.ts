@@ -129,6 +129,7 @@ export async function runOpen(user: { id: string; name: string }, open: OpenSour
             window: instants(win),
             compareRows,
             compareLabel,
+            snapshot,
           });
           out[chart.id] = { ok: true, result, rowCount: rows.length, truncated, scopeNote: "" };
         } catch (err) {
