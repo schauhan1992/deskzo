@@ -1,9 +1,10 @@
 import type { Clock } from "@/lib/time/zone";
 
 // Guards against formula injection if the CSV is opened in Excel/Sheets — a cell value
-// starting with one of these characters can be interpreted as a formula.
+// starting with one of these characters can be interpreted as a formula. A tab or a carriage return
+// first too (security review, 23 Oct 2026), as PapaParse's own escapeFormulae counts them.
 export function sanitizeCsvCell(value: string): string {
-  return /^[=+\-@]/.test(value) ? `'${value}` : value;
+  return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
 }
 
 /**
@@ -13,12 +14,12 @@ export function sanitizeCsvCell(value: string): string {
  * and an import of the file we just exported overwrites the stored value with the apostrophe
  * version. Every subsequent export adds another one.
  *
- * Only a quote followed by one of the four characters the sanitiser acts on is removed, so a value
+ * Only a quote followed by one of the characters the sanitiser acts on is removed, so a value
  * that genuinely begins with an apostrophe is left alone. This is also what Excel itself does — a
  * leading apostrophe is its own "treat this as text" marker and is not part of the value.
  */
 export function desanitizeCsvCell(value: string): string {
-  return /^'[=+\-@]/.test(value) ? value.slice(1) : value;
+  return /^'[=+\-@\t\r]/.test(value) ? value.slice(1) : value;
 }
 
 /**

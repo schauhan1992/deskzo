@@ -67,6 +67,9 @@ import { relistBackups } from "../src/lib/backup/relist";
 import { openBackupFileTo } from "../src/lib/backup/at-rest";
 import { reindexCurrentWorkspace } from "../src/lib/platform/email-index";
 import { resyncDeviceRoutes } from "../src/lib/platform/device-routes";
+import { seatsInUse } from "../src/lib/seats";
+import { alertHolders } from "../src/lib/access/gate";
+import { currentTenant } from "../src/lib/tenancy/resolve";
 
 /** How long the copy taken before a restore is kept, whatever the retention says. */
 const SAFETY_COPY_DAYS = 30;
@@ -340,6 +343,23 @@ async function main(tenant: Tenant, id: string) {
     await afterRestore();
   } catch (err) {
     console.error("[restore] Automate's runs could not be let go", err instanceof Error ? err.message : err);
+  }
+
+  // More people switched on than the plan has seats: a backup from before some were switched off brings them back
+  // (security review, 23 Oct 2026). Nobody is switched off for it — whoever manages billing is told, and it is logged.
+  try {
+    const seats = (await currentTenant()).entitlements.seats;
+    const used = await seatsInUse();
+    if (seats !== null && used > seats) {
+      console.warn(`[restore] ${used} people switched on for ${seats} seats`);
+      await alertHolders("billing.manage", {
+        title: "More people are switched on than your plan has seats",
+        message: `The restore brought back ${used} people switched on; your plan includes ${seats}. Switch some off, or add seats in Settings › Plan & billing.`,
+        link: "/settings/users",
+      });
+    }
+  } catch (err) {
+    console.error("[restore] the seats could not be checked", err instanceof Error ? err.message : err);
   }
 
   status.phase = "done";

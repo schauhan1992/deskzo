@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { SafeFetchError, publicAddressOf } from "@/lib/net/safe-fetch";
 import {
   allRecipients,
   asError,
@@ -183,10 +184,39 @@ function smtpRetryable(err: unknown): boolean {
   return true;
 }
 
-function smtpTransport(settings: SmtpSettings, password: string) {
+/** The ports mail servers listen on for clients. */
+const SMTP_PORTS = [25, 465, 587, 2525] as const;
+
+/** A server the workspace named that this won't connect to, in words for whoever set it up. */
+class SmtpRefused extends Error {}
+
+let testLocalServers = false;
+
+/** Set only by check scripts: their fake mail server listens on this machine, on a port of its own. */
+export function allowTestSmtpServers(allow: boolean) {
+  testLocalServers = allow;
+}
+
+/**
+ * The transport, to the server's checked public address (security review, 23 Oct 2026). Whatever host and port were
+ * typed was connected to, and the error said whether it answered — a scan of the server's own network, its database
+ * included, for any workspace admin. Now only a mail port, only a public address (src/lib/net/safe-fetch.ts), and the
+ * connection goes to that address with the name kept for TLS, so the name can't be pointed elsewhere in between.
+ */
+async function smtpTransport(settings: SmtpSettings, password: string) {
+  if (testLocalServers) return nodemailer.createTransport({ host: settings.host, port: settings.port, secure: settings.port === 465, auth: { user: settings.user, pass: password }, connectionTimeout: 15_000, greetingTimeout: 15_000, socketTimeout: 30_000 });
+  if (!(SMTP_PORTS as readonly number[]).includes(settings.port)) throw new SmtpRefused(`Mail servers take mail on port 587, 465, 2525 or 25 — not ${settings.port}.`);
+  let address: string;
+  try {
+    address = await publicAddressOf(settings.host);
+  } catch (err) {
+    if (!(err instanceof SafeFetchError)) throw err;
+    throw new SmtpRefused(err.code === "no-address" ? `There is no server called ${settings.host} — check the host.` : `${settings.host} isn't a mail server on the internet — use your provider's SMTP host.`);
+  }
   return nodemailer.createTransport({
-    host: settings.host,
+    host: address,
     port: settings.port,
+    tls: { servername: settings.host },
     // 587 is STARTTLS, 465 is implicit TLS. Getting this backwards fails with a timeout that
     // looks like a firewall problem and is not.
     secure: settings.port === 465,
@@ -203,7 +233,9 @@ function smtpTransport(settings: SmtpSettings, password: string) {
  * password, when nothing ever got as far as asking for one.
  */
 function smtpFailure(err: unknown, settings: SmtpSettings): string {
-  const said = asError(err);
+  if (err instanceof SmtpRefused) return err.message;
+  // The server's own words only in part: what it said is shown to whoever set it up, never at length.
+  const said = asError(err).slice(0, 200);
   const code = (err as { code?: string })?.code ?? "";
   const where = `${settings.host}:${settings.port}`;
   if (/greeting never received/i.test(said)) {
@@ -231,7 +263,7 @@ async function smtpSend(
   if (!password) return { ok: false, retryable: false, error: "No SMTP password saved." };
 
   try {
-    const info = await smtpTransport(settings, password).sendMail({
+    const info = await (await smtpTransport(settings, password)).sendMail({
       from: fromHeader(config, message),
       to: allRecipients(message).map((r) => (r.name ? { name: r.name, address: r.email } : r.email)),
       ...(message.cc?.length ? { cc: message.cc } : {}),
@@ -258,7 +290,7 @@ async function smtpVerify(config: ProviderConfig, settings: SmtpSettings | null)
   const password = requireSecret(config);
   if (!password) return { ok: false, detail: "No password saved." };
   try {
-    await smtpTransport(settings, password).verify();
+    await (await smtpTransport(settings, password)).verify();
     return { ok: true, detail: `${settings.host} accepted the credentials.` };
   } catch (err) {
     return { ok: false, detail: smtpFailure(err, settings) };

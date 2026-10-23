@@ -119,12 +119,19 @@ class Refused extends Error {
   }
 }
 
+/**
+ * How far away a refused reading was, roughly (security review, 23 Oct 2026): the exact metres of three refusals
+ * pinned the office's own point, which nothing else gives away. Up to the next 100 m under a kilometre, the next
+ * whole kilometre beyond — enough to know how far to walk.
+ */
+const rough = (metres: number) => (metres < 1000 ? Math.ceil(metres / 100) * 100 : Math.ceil(metres / 1000) * 1000);
+
 const refuse = (code: ClockRefusal, error: string, extra: { distanceM?: number; canRequestException?: boolean } = {}): Extract<ClockOutcome, { ok: false }> => ({
   ok: false,
   code,
   error,
   canRequestException: extra.canRequestException ?? false,
-  ...(extra.distanceM !== undefined ? { distanceM: extra.distanceM } : {}),
+  ...(extra.distanceM !== undefined ? { distanceM: rough(extra.distanceM) } : {}),
 });
 
 const minutesBetween = (from: Date, to: Date) => Math.max(0, Math.round((to.getTime() - from.getTime()) / 60000));

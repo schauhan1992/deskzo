@@ -11,6 +11,7 @@ import { replySubject } from "@/lib/support-mail/rules";
 import { companyAddressing, deskzoAddressing, isReplyFrom, type ReplyFrom } from "@/lib/support-mail/reply-from";
 import { helpdeskFromOwnAddress } from "@/lib/platform/helpdesk-from";
 import { screenAddresses } from "@/lib/calendar/invitees";
+import { helpdeskMailRefusal, recordHelpdeskSend } from "@/lib/documents/deskzo-mail-allowance";
 
 /**
  * An email from the helpdesk to a customer: an agent's reply, or the acknowledgement of a new ticket.
@@ -129,6 +130,17 @@ export async function sendSupportEmail(input: SupportSend): Promise<{ ok: true; 
     }
   }
 
+  // Through Deskzo's own mail only within the day's helpdesk allowance (security review, 23 Oct 2026): nothing limited
+  // these, so a ticket's replies could carry anything to anybody from Deskzo's address.
+  const recipients = 1 + copied.length;
+  if (!fromAddress) {
+    const over = await helpdeskMailRefusal(input.sentByUserId, recipients);
+    if (over) {
+      failure = over;
+      fromAddress = helpdesk;
+    }
+  }
+  const viaDeskzo = !fromAddress;
   if (!fromAddress) {
     const mail: PlatformMail = { type: "SUPPORT", to: input.to, cc: copied, subject, text: input.body, fromName, messageId, inReplyTo: input.answering?.messageId ?? undefined, references };
     const own = deskzoAddressing(await helpdeskFromOwnAddress(), helpdesk);
@@ -152,6 +164,8 @@ export async function sendSupportEmail(input: SupportSend): Promise<{ ok: true; 
       }
     }
   }
+
+  if (viaDeskzo && !failure) await recordHelpdeskSend(input.sentByUserId, input.ticket.id, recipients);
 
   const row = await db.supportEmail.create({
     data: {

@@ -11,7 +11,7 @@ import { hasEffectivePermission } from "@/actions/permission";
 import { actorContext, assertMayActOnTarget, assertMayStartInRole, assertNotSelf, assertRoleAssignable, assertSuperAdminRemains, AuthzError } from "@/lib/authz/guards";
 import { updateUserAssignmentSchema, createUserSchema, updateWorkProfileSchema } from "@/lib/validation/user";
 import type { ActionResult } from "@/actions/company";
-import { seatProblem } from "@/lib/seats";
+import { SeatsFull, claimSeats, seatProblem } from "@/lib/seats";
 import { accountsChanged } from "@/lib/platform/account-hooks";
 import { awaitingSetup, mayPassOnSetupLink, sendSetupInvitation, type SetupInvitation } from "@/lib/account-setup";
 import { AWAITING_SETUP, noPasswordYet } from "@/lib/no-password";
@@ -268,6 +268,7 @@ export async function createUser(
   let user: { id: string; name: string; email: string };
   try {
     user = await db.$transaction(async (tx) => {
+      if (startsActive) await claimSeats(tx);
       const made = await tx.user.create({
         data: {
           name: name.trim(),
@@ -290,6 +291,7 @@ export async function createUser(
       return made;
     });
   } catch (err) {
+    if (err instanceof SeatsFull) return { ok: false, error: err.message };
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
       return { ok: false, error: "A user with this email already exists." };
     }
@@ -375,9 +377,11 @@ export async function setUserActive(id: string, active: boolean): Promise<Action
       // every permission, so switching off the last super admin leaves nobody who can switch them
       // back on.
       if (target.isSuperAdmin && !active) await assertSuperAdminRemains(tx, id);
+      if (active && !target.active) await claimSeats(tx);
       await tx.user.update({ where: { id }, data: { active } });
     });
   } catch (err) {
+    if (err instanceof SeatsFull) return { ok: false, error: err.message };
     return refuse(err);
   }
 

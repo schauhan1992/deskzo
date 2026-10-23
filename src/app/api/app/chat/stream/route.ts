@@ -1,6 +1,8 @@
-import { db } from "@/lib/db";
-import { appRoute } from "@/lib/app/handler";
+import { appRoute, phoneStillAllowed } from "@/lib/app/handler";
 import { needAppModule } from "@/lib/app/daily";
+import { normaliseIp } from "@/lib/access/ip";
+import { clientIpFrom } from "@/lib/client-ip";
+import { moduleAccessFor } from "@/lib/modules-access";
 import { currentTenant, runAsTenant } from "@/lib/tenancy/resolve";
 import { isListening, listeningIn, publishIn, subscribe } from "@/lib/chat/bus";
 import { deliverPending, recordLastSeen } from "@/lib/chat/server";
@@ -8,8 +10,9 @@ import type { ChatEvent } from "@/lib/chat/types";
 
 /**
  * Team chat, live, for the Deskzo app: the same server-sent events the website's chat gets (src/app/api/chat/stream) —
- * new messages, ticks, typing, who is online — signed in by the phone. The person is checked again every minute, and
- * the stream ends after twenty, so the app's reconnect runs every check again.
+ * new messages, ticks, typing, who is online — signed in by the phone. The phone and its person are checked again every
+ * minute — revoked, signed out, locked, outside their rules, or Chat closed to them ends it at once (security review,
+ * 23 Oct 2026) — and the stream ends after twenty, so the app's reconnect runs every check again.
  */
 
 export const dynamic = "force-dynamic";
@@ -18,8 +21,9 @@ const RECHECK_MS = 60_000;
 const HEARTBEAT_MS = 25_000;
 const LIFETIME_MS = 20 * 60_000;
 
-export const GET = appRoute({}, async ({ actor, req }) => {
+export const GET = appRoute({}, async ({ actor, req, device }) => {
   await needAppModule("chat", actor.userId);
+  const ip = normaliseIp(clientIpFrom(req.headers));
   const tenant = await currentTenant();
   const encoder = new TextEncoder();
   const userId = actor.userId;
@@ -43,8 +47,8 @@ export const GET = appRoute({}, async ({ actor, req }) => {
       const heartbeat = setInterval(() => write(": keep-alive\n\n"), HEARTBEAT_MS);
       const recheck = setInterval(() => {
         void runAsTenant(tenant, async () => {
-          const row = await db.user.findUnique({ where: { id: userId }, select: { active: true, lockedAt: true } }).catch(() => null);
-          if (!row || !row.active || row.lockedAt) close();
+          const allowed = (await phoneStillAllowed(device.id, ip).catch(() => false)) && (await moduleAccessFor(userId, "chat").catch(() => null)) === "available";
+          if (!allowed) close();
         });
       }, RECHECK_MS);
       const lifetime = setTimeout(() => close(), LIFETIME_MS);

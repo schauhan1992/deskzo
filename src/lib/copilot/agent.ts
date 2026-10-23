@@ -138,10 +138,6 @@ export async function runCopilot(input: RunInput): Promise<void> {
           },
         });
       } catch (err) {
-        if (input.signal?.aborted) {
-          if (written) await save("assistant", { text: written, toolCalls: [] });
-          return;
-        }
         if (written) await save("assistant", { text: written, toolCalls: [] });
         if (err instanceof AiRefusal) throw new CopilotRefusal(err.message);
         throw err;
@@ -156,6 +152,10 @@ export async function runCopilot(input: RunInput): Promise<void> {
         },
         { provider: outcome.family, model: outcome.modelKey, inputTokens: outcome.usage.input, outputTokens: outcome.usage.output },
       );
+
+      // The person went away: what was answered is kept (and was charged), and nothing more is started for them —
+      // no tools run on their behalf, no further step (aiTurn's `signal`).
+      if (input.signal?.aborted) return;
 
       if (outcome.stop === "refused") {
         const note = "Deskzo AI declined to answer that one. Try asking it differently.";

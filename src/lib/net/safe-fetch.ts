@@ -157,6 +157,29 @@ async function checkedTarget(raw: string, options: SafeFetchOptions): Promise<{ 
   return { url, address: chosen, family: isIP(chosen) === 6 ? 6 : 4 };
 }
 
+/**
+ * The one public address a host may be reached on, for a connection that isn't a web request — an SMTP server a
+ * workspace names (src/lib/marketing/providers/email.ts; security review, 23 Oct 2026). The same rules as a URL's host
+ * here: an address that isn't public, or a name with any answer that isn't, is refused with `SafeFetchError`. Connect
+ * to the address returned, not the name, so the answer can't change between this check and the connection.
+ */
+export async function publicAddressOf(hostname: string, options: Pick<SafeFetchOptions, "resolve" | "blocked"> = {}): Promise<string> {
+  const blocked = options.blocked ?? isBlockedAddress;
+  const host = hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
+  if (isIP(host)) {
+    const ip = parseIp(host);
+    if (!ip || blocked(ip)) throw new SafeFetchError("blocked-address", `${host} is not a public address.`);
+    return host;
+  }
+  const addresses = await (options.resolve ?? publicDnsAddresses)(host);
+  if (addresses.length === 0) throw new SafeFetchError("no-address", `${host} has no address.`);
+  for (const address of addresses) {
+    const ip = parseIp(address);
+    if (!ip || blocked(ip)) throw new SafeFetchError("blocked-address", `${host} points at ${address}, which is not a public address.`);
+  }
+  return addresses.find((a) => isIP(a) === 4) ?? addresses[0]!;
+}
+
 function decoded(response: http.IncomingMessage): NodeJS.ReadableStream {
   const encoding = String(response.headers["content-encoding"] ?? "").toLowerCase();
   const decoder =

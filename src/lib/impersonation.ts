@@ -1,7 +1,8 @@
 import { cookies } from "next/headers";
 import type { Role } from "@/lib/roles";
 import { db } from "@/lib/db";
-import { can } from "@/lib/authz/resolve";
+import { can, permissionsFor } from "@/lib/authz/resolve";
+import { assertGrantWithinOwnAuthority } from "@/lib/authz/guards";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import { isAutomationKind } from "@/lib/people";
 
@@ -84,6 +85,24 @@ async function readTicket(raw: string | undefined): Promise<Ticket | null> {
  * simply waiting an hour ends the session on the very next request without anything needing to
  * notice and revoke it.
  */
+/**
+ * Whether somebody holds nothing an admin couldn't grant them — the rule for handing on a setup link
+ * (mayPassOnSetupLink, src/lib/account-setup.ts), here for viewing as them (security review, 23 Oct 2026). Inside a
+ * borrowed session every action is the borrowed person's, so viewing as somebody who holds a permission this admin was
+ * denied — payroll, say — handed it straight back to them.
+ */
+export async function holdsNothingBeyond(actor: { id: string; isSuperAdmin: boolean }, targetId: string): Promise<boolean> {
+  if (actor.isSuperAdmin) return true;
+  for (const key of await permissionsFor(targetId)) {
+    try {
+      await assertGrantWithinOwnAuthority(actor, key);
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
 export async function resolveViewAs(sessionUserId: string): Promise<ViewAsContext | null> {
   const store = await cookies();
   const ticket = await readTicket(store.get(COOKIE)?.value);
@@ -121,6 +140,8 @@ export async function resolveViewAs(sessionUserId: string): Promise<ViewAsContex
    */
   if (target.isSuperAdmin && !actor.isSuperAdmin) return null;
   if (!(await can(actor.id, "impersonation.use"))) return null;
+  // And the target's permissions, which can grow after the ticket was issued.
+  if (!(await holdsNothingBeyond(actor, target.id))) return null;
 
   return {
     user: { id: target.id, name: target.name, email: target.email, role: target.role },

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { Prisma, type AssetKind, type AssetMovementType, type AssetOwnership, type AssetStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
+import { canSeeCompany } from "@/lib/authz/company-scope";
 import { toPlain } from "@/lib/serialize";
 import { recordAudit } from "@/lib/audit";
 import { notifyUser } from "@/lib/notify";
@@ -76,29 +77,36 @@ export async function listAssets(filters?: AssetFilters) {
   // Without the view-all permission somebody sees exactly what they are holding, which is the
   // useful default for everybody else — "what have I got, and when does it go back".
   const mine = !viewAll || filters?.scope === "mine";
+  // Text only: a server action is handed whatever the caller sends, and an object here would be a Prisma filter.
+  const text = (value: unknown) => (typeof value === "string" && value ? value : null);
+  const custodian = text(filters?.custodianUserId);
+  const companyId = text(filters?.companyId);
+  const search = text(filters?.search);
 
   return toPlain(
     await db.asset.findMany({
+      // The scope apart from the filters, under AND (security review, 23 Oct 2026): spread in one object, a
+      // custodian filter after it took its place, and the company's OR and the search's OR overwrote each other.
       where: {
-        ...(mine ? { custodianUserId: user.id } : {}),
-        ...(filters?.ownership ? { ownership: filters.ownership as AssetOwnership } : {}),
-        ...(filters?.status ? { status: filters.status as AssetStatus } : {}),
-        ...(filters?.kind ? { kind: filters.kind as AssetKind } : {}),
-        ...(filters?.custodianUserId ? { custodianUserId: filters.custodianUserId } : {}),
-        ...(filters?.companyId
-          ? { OR: [{ ownerCompanyId: filters.companyId }, { siteCompanyId: filters.companyId }] }
-          : {}),
-        ...(filters?.search
-          ? {
-              OR: [
-                { assetTag: { contains: filters.search, mode: "insensitive" as const } },
-                { serialNumber: { contains: filters.search, mode: "insensitive" as const } },
-                { name: { contains: filters.search, mode: "insensitive" as const } },
-                { make: { contains: filters.search, mode: "insensitive" as const } },
-                { model: { contains: filters.search, mode: "insensitive" as const } },
-              ],
-            }
-          : {}),
+        AND: [
+          mine ? { custodianUserId: user.id } : {},
+          text(filters?.ownership) ? { ownership: filters!.ownership as AssetOwnership } : {},
+          text(filters?.status) ? { status: filters!.status as AssetStatus } : {},
+          text(filters?.kind) ? { kind: filters!.kind as AssetKind } : {},
+          custodian ? { custodianUserId: custodian } : {},
+          companyId ? { OR: [{ ownerCompanyId: companyId }, { siteCompanyId: companyId }] } : {},
+          search
+            ? {
+                OR: [
+                  { assetTag: { contains: search, mode: "insensitive" as const } },
+                  { serialNumber: { contains: search, mode: "insensitive" as const } },
+                  { name: { contains: search, mode: "insensitive" as const } },
+                  { make: { contains: search, mode: "insensitive" as const } },
+                  { model: { contains: search, mode: "insensitive" as const } },
+                ],
+              }
+            : {},
+        ],
       },
       orderBy: [{ status: "asc" }, { assetTag: "asc" }],
       take: 500,
@@ -548,7 +556,10 @@ export async function assetFormOptions() {
 
 /** Sites for one company, for the location pickers. */
 export async function locationsFor(companyId: string) {
-  await requireModuleUser("it_assets");
+  const user = await requireModuleUser("it_assets");
+  // Only an account the person may see (security review, 23 Oct 2026): this listed any company's offices by its id.
+  const company = await db.company.findUnique({ where: { id: String(companyId ?? "") }, select: { id: true, ownerUserId: true, relationshipType: true } });
+  if (!company || !(await canSeeCompany(user.id, company))) return [];
   return db.companyLocation.findMany({
     where: { companyId },
     orderBy: { label: "asc" },

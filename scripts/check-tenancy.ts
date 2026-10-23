@@ -51,6 +51,7 @@ const ENV_READS: Record<string, Allowed> = {
   "src/lib/platform/provisioner.ts": { reason: "DATABASE_URL: in development, the provisioner is the same server's maintenance database" },
   "src/lib/tenancy/render-target.ts": { reason: "INTERNAL_APP_URL: where the server's own browser reaches the app, used with the workspace's hostname" },
   "src/lib/tenancy/direct-client.ts": { reason: "DATABASE_URL: the default address of a script's or seed's own client — requests go through db, never here" },
+  "src/lib/backup/at-rest.ts": { reason: "AUTH_SECRET: only where no platform key is set (a workspace from the environment) — the key a backup there is sealed under, derived per workspace" },
 };
 
 /** `x-forwarded-host` is a claim anybody can send; only src/lib/tenancy/host.ts may weigh it. */
@@ -77,6 +78,8 @@ const PER_WORKSPACE: Allowed = { reason: "remembers something about one workspac
 /** Keyed by strings its callers build; each caller prefixes the workspace (see the grep below). */
 const CALLER_KEYED = (why: string): Allowed => ({ reason: `per workspace — ${why}` });
 const STATE: Record<string, Allowed> = {
+  // Turns running now, per person and per workspace, so a burst can't overdraw AI credits (security review, 23 Oct 2026).
+  "src/lib/ai/gateway.ts:running": PER_WORKSPACE,
   "src/lib/access/gate.ts:verdicts": PER_WORKSPACE,
   "src/lib/branches/identity.ts:adopted": PER_WORKSPACE,
   "src/lib/access/gate.ts:rulesCache": PER_WORKSPACE,
@@ -152,6 +155,7 @@ const STATE: Record<string, Allowed> = {
   "src/lib/time/zone.ts:clocks": { reason: "a clock per time zone name — pure functions of the zone; no workspace data" },
   "src/lib/platform/mailer.ts:testSender": { reason: "test override, set only by check scripts — no check sends platform mail" },
   "src/lib/platform/domains.ts:testResolver": { reason: "test override, set only by check scripts — no check asks real DNS" },
+  "src/lib/marketing/providers/email.ts:testLocalServers": { reason: "test override, set only by check scripts — their fake mail server is on this machine" },
   "src/lib/platform/document-mail-limits.ts:cached": { reason: "shared: Deskzo's two daily limits on documents sent through its mail, the same for every workspace — read every minute" },
   "src/lib/platform/document-mail-limits.ts:testLimits": { reason: "test override, set only by check scripts" },
   "src/lib/platform/helpdesk-from.ts:cached": { reason: "shared: whether helpdesk replies through Deskzo's mail go from each workspace's own address, the same for every workspace — read every minute" },

@@ -47,16 +47,26 @@ export async function listCompanyLocationOptions(companyId: string) {
   });
 }
 
+/**
+ * One of an account's addresses, only for somebody who may see that account — as every other company write is scoped
+ * (security review, 23 Oct 2026). These four took any id from whoever was signed in, and an address's GSTIN is what
+ * its tax invoices are built from. "Not found" either way, so the answer says nothing about accounts out of reach.
+ */
+async function reachableLocation(userId: string, id: string) {
+  const location = await db.companyLocation.findUnique({ where: { id: String(id ?? "") }, include: { company: { select: { id: true, ownerUserId: true, relationshipType: true } } } });
+  return location && (await canSeeCompany(userId, location.company)) ? location : null;
+}
+
 export async function addCompanyLocation(input: unknown): Promise<ActionResult<{ id: string }>> {
-  await requireUser();
+  const user = await requireUser();
   const parsed = addCompanyLocationSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
   const { companyId, ...fields } = parsed.data;
 
-  const company = await db.company.findUnique({ where: { id: companyId } });
-  if (!company) {
+  const company = await db.company.findUnique({ where: { id: companyId }, select: { id: true, ownerUserId: true, relationshipType: true } });
+  if (!company || !(await canSeeCompany(user.id, company))) {
     return { ok: false, error: "Company not found." };
   }
 
@@ -69,14 +79,14 @@ export async function addCompanyLocation(input: unknown): Promise<ActionResult<{
 }
 
 export async function updateCompanyLocation(input: unknown): Promise<ActionResult<{ id: string }>> {
-  await requireUser();
+  const user = await requireUser();
   const parsed = updateCompanyLocationSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
   const { id, ...fields } = parsed.data;
 
-  const location = await db.companyLocation.findUnique({ where: { id } });
+  const location = await reachableLocation(user.id, id);
   if (!location) {
     return { ok: false, error: "Location not found." };
   }
@@ -91,8 +101,8 @@ export async function updateCompanyLocation(input: unknown): Promise<ActionResul
 }
 
 export async function setPrimaryLocation(id: string): Promise<ActionResult<null>> {
-  await requireUser();
-  const location = await db.companyLocation.findUnique({ where: { id } });
+  const user = await requireUser();
+  const location = await reachableLocation(user.id, id);
   if (!location) {
     return { ok: false, error: "Location not found." };
   }
@@ -107,8 +117,8 @@ export async function setPrimaryLocation(id: string): Promise<ActionResult<null>
 }
 
 export async function deleteCompanyLocation(id: string): Promise<ActionResult<null>> {
-  await requireUser();
-  const location = await db.companyLocation.findUnique({ where: { id } });
+  const user = await requireUser();
+  const location = await reachableLocation(user.id, id);
   if (!location) {
     return { ok: false, error: "Location not found." };
   }

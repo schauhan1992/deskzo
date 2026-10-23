@@ -120,7 +120,9 @@ async function main() {
   ok("  never anything that could break a header", senderDisplayName('Zz "Evil" <x@y>\r\nBcc: a@b', "Acme") === "Zz Evil x@y Bcc: a@b (Acme)");
 
   /* eslint-disable @typescript-eslint/no-require-imports */
-  const { smtpProvider, resendProvider, elasticProvider } = require("../src/lib/marketing/providers/email") as typeof import("../src/lib/marketing/providers/email");
+  const { smtpProvider, resendProvider, elasticProvider, allowTestSmtpServers } = require("../src/lib/marketing/providers/email") as typeof import("../src/lib/marketing/providers/email");
+  // The fake mail server is on this machine, which the providers refuse unless a check says so.
+  allowTestSmtpServers(true);
   const route = require("../src/lib/documents/mail-route") as typeof import("../src/lib/documents/mail-route");
   const mailer = require("../src/lib/platform/mailer") as typeof import("../src/lib/platform/mailer");
   const catalogue = require("../src/lib/console-shared/mail-catalogue") as typeof import("../src/lib/console-shared/mail-catalogue");

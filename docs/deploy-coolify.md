@@ -96,6 +96,7 @@ REFERENCE_DATABASE_URL=postgresql://postgres:<password>@<host>:5432/deskzo_refer
 PLATFORM_PROVISIONER_URL=postgresql://postgres:<password>@<host>:5432/postgres
 TRUST_PROXY=1
 TRUST_PROXY_HOPS=1
+TRUST_PROXY_CLOUDFLARE=1
 INTERNAL_APP_URL=http://127.0.0.1:3000
 TENANCY_DEFAULT_SLUG=deskzo
 TENANCY_DEFAULT_NAME=Deskzo
@@ -105,6 +106,13 @@ PLATFORM_SALES_EMAIL=
 DNS_RESOLVERS=1.1.1.1,8.8.8.8
 DESKZO_WORKER=in-app
 ```
+
+`TRUST_PROXY_CLOUDFLARE=1` is for deskzo.com's records proxied by Cloudflare (an orange cloud). Traefik then sees every
+visitor as a Cloudflare address, so lockouts would lock out everybody behind the same Cloudflare location together and
+IP rules would never match. With it, Deskzo takes the visitor's own address from Cloudflare's `CF-Connecting-IP` — but
+only on a request that came from one of Cloudflare's own addresses, so a request sent straight to the server's IP can't
+make one up. Check it after a release: sign in, and Settings › Security's activity log should show your own address, not
+a 104.x or 172.6x one.
 
 `DESKZO_WEB_PROCESSES=2` (optional; one when unset) runs two copies of the web app in the container, so one slow page doesn't hold every other request — what they keep in memory is kept in step between them. See docs/runbook.md §7.1 before raising it.
 

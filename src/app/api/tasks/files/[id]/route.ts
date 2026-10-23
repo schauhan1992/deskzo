@@ -1,3 +1,4 @@
+import { contentDisposition } from "@/lib/content-disposition";
 import { db } from "@/lib/db";
 import { currentUser } from "@/lib/session";
 import { moduleAccessFor } from "@/lib/modules-access";
@@ -22,12 +23,11 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (!visible) return new Response("Not found", { status: 404 });
 
   const inline = new URL(request.url).searchParams.get("download") !== "1" && opensInBrowser(file.mimeType);
-  const name = file.fileName.replace(/["\r\n]/g, "");
   return new Response(new Uint8Array(file.data), {
     headers: {
       // Only what a browser shows safely is labelled as itself; anything else is just bytes.
       "content-type": inline ? file.mimeType : "application/octet-stream",
-      "content-disposition": `${inline ? "inline" : "attachment"}; filename="${name}"; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
+      "content-disposition": contentDisposition(inline ? "inline" : "attachment", file.fileName),
       "x-content-type-options": "nosniff",
       // A file opened on its own can't run anything in the app's name. Not on a PDF: Chrome won't show
       // one under a sandbox, and its viewer runs apart from the page anyway.

@@ -6,7 +6,7 @@ import { hasEffectivePermission } from "@/actions/permission";
 import { auth } from "@/lib/auth";
 import { recordAudit } from "@/lib/audit";
 import { logActivity } from "@/lib/activity";
-import { clearViewAsCookie, resolveViewAs, setViewAsCookie } from "@/lib/impersonation";
+import { clearViewAsCookie, holdsNothingBeyond, resolveViewAs, setViewAsCookie } from "@/lib/impersonation";
 import { isAutomationKind, PEOPLE_ONLY } from "@/lib/people";
 import { UnauthorizedError } from "@/lib/session";
 import type { ActionResult } from "@/actions/company";
@@ -74,6 +74,10 @@ export async function startViewingAs(targetUserId: string): Promise<ActionResult
    */
   if (target.isSuperAdmin && !actor.isSuperAdmin) {
     return { ok: false, error: "Only a super admin can view the app as another super admin." };
+  }
+  // Nor as somebody holding a permission this admin couldn't grant — see holdsNothingBeyond.
+  if (!(await holdsNothingBeyond(actor, target.id))) {
+    return { ok: false, error: `${target.name} holds permissions you don't, so you can't view the app as them. A super admin can.` };
   }
 
   await setViewAsCookie(actor.id, target.id);

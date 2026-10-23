@@ -367,6 +367,9 @@ const COMING_WHERE = { OR: [{ attending: true }, { attending: null }] } satisfie
  * mostly isn't there. The source is hashed rather than stored: rate limiting needs to know how
  * often, never who.
  */
+/** Answers to one form an hour: from one address, and in all (security review, 23 Oct 2026). */
+const FORM_RATE = { perAddress: 5, perForm: 300, windowMs: 60 * 60_000 } as const;
+
 export async function submitForm(input: {
   slug: string;
   /**
@@ -467,6 +470,17 @@ export async function submitForm(input: {
 
   // Rate limiting needs to know how often, never who — so the same hash whichever path is taken.
   const submissionHash = createHash("sha256").update(`${email}:${form.id}`).digest("hex").slice(0, 32);
+  /**
+   * And it is asked now (security review, 23 Oct 2026): the hash was kept but never counted, so a script could post
+   * a form a thousand times, each a company, a contact and a lead. Counted as a booking page counts its bookings
+   * (src/lib/booking/server.ts): by address on this form, and by the form in all, over the last hour.
+   */
+  const since = new Date(Date.now() - FORM_RATE.windowMs);
+  const [fromAddress, onForm] = await Promise.all([
+    db.formSubmission.count({ where: { formId: form.id, sourceHash: submissionHash, createdAt: { gte: since } } }),
+    db.formSubmission.count({ where: { formId: form.id, createdAt: { gte: since } } }),
+  ]);
+  if (fromAddress >= FORM_RATE.perAddress || onForm >= FORM_RATE.perForm) return { ok: false, error: "Too many answers to this form just now. Try again in a little while." };
 
   // Where a lead from the form starts (src/lib/pipeline) — read before the transaction, which holds a connection.
   const entry = makesLead ? await newLeadStage() : null;

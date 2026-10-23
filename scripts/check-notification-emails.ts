@@ -247,6 +247,8 @@ async function main() {
     const { notifyUser } = require("../src/lib/notify") as typeof import("../src/lib/notify");
     const { sendEmailNotification } = require("../src/lib/email") as typeof import("../src/lib/email");
     const mailer = require("../src/lib/platform/mailer") as typeof import("../src/lib/platform/mailer");
+    // The fake mail server is on this machine, which the providers refuse unless a check says so.
+    (require("../src/lib/marketing/providers/email") as typeof import("../src/lib/marketing/providers/email")).allowTestSmtpServers(true);
     const { can } = require("../src/lib/authz/resolve") as typeof import("../src/lib/authz/resolve");
     const { encryptSecret } = require("../src/lib/crypto") as typeof import("../src/lib/crypto");
     /* eslint-enable @typescript-eslint/no-require-imports */

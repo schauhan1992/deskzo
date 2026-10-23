@@ -2,7 +2,8 @@ import { Prisma } from "@prisma/client";
 import { ZodError } from "zod";
 import { db } from "@/lib/db";
 import { allowsKind, networkStanding } from "@/lib/access/decide";
-import { activeIpRules, personPolicy } from "@/lib/access/gate";
+import { activeIpRules, noteNetworkFor, personPolicy } from "@/lib/access/gate";
+import { can } from "@/lib/authz/resolve";
 import { companyLock, companyLockActive, personalLockActive } from "@/lib/access/lock";
 import { normaliseIp } from "@/lib/access/ip";
 import { runAsApiActor, type ApiActor } from "@/lib/api/actor";
@@ -71,7 +72,7 @@ const failure = (status: number, code: string, message: string, fields?: Record<
 
 const UNAUTHORIZED = () => failure(401, "unauthorized", "The API key is missing, wrong, expired or revoked.", undefined, { "www-authenticate": 'Bearer realm="Deskzo API"' });
 
-export type PersonRefusal = "switched_off" | "locked" | "workspace_locked" | "network" | "device" | "location" | "mobile" | "tablet";
+export type PersonRefusal = "switched_off" | "locked" | "workspace_locked" | "network" | "device" | "location" | "mobile" | "tablet" | "computer";
 
 /**
  * What a person's standing says about acting as them now, from `ip` — null when they may. Shared with the
@@ -85,7 +86,7 @@ export async function personRefusal(
   user: { id: string; role: string; isSuperAdmin: boolean; active: boolean; kind: string; lockedAt: Date | null; lockedUntil: Date | null },
   ip: string | null,
   approvedDevice = false,
-  kind: "MOBILE" | "TABLET" | null = null,
+  kind: "MOBILE" | "TABLET" | "COMPUTER" | null = null,
   locationShared = false,
 ): Promise<PersonRefusal | null> {
   if (!user.active || user.kind !== "MEMBER") return "switched_off";
@@ -97,7 +98,7 @@ export async function personRefusal(
   const [rules, policy] = await Promise.all([activeIpRules(), personPolicy(user.id, user.role)]);
   const network = networkStanding(ip, user.role, rules, new Date());
   if (network.standing === "BLOCKED" || (network.standing === "UNKNOWN" && (policy.unknownNetwork === "BLOCK" || policy.unknownNetwork === "HOLD"))) return "network";
-  if (kind && !allowsKind(policy, kind)) return kind === "TABLET" ? "tablet" : "mobile";
+  if (kind && !allowsKind(policy, kind)) return kind === "TABLET" ? "tablet" : kind === "MOBILE" ? "mobile" : "computer";
   if (policy.requireDeviceApproval && !approvedDevice) return "device";
   if (policy.requireLocation && !locationShared) return "location";
   return null;
@@ -112,6 +113,7 @@ const KEY_REFUSALS: Record<PersonRefusal, string> = {
   location: "The key's person may only use Deskzo from an approved device — an API key can't be one.",
   mobile: "The key's person may not use Deskzo from a phone.",
   tablet: "The key's person may not use Deskzo from a tablet.",
+  computer: "The key's person may not use Deskzo from a computer — a program calling with a key counts as one.",
 };
 
 /** One more call in this key's minute; how many it has made in it. One statement, so every server counts the same. */
@@ -203,8 +205,13 @@ export function apiRoute(options: RouteOptions, handler: (call: ApiCall) => Prom
       }
       clearFailures([lockKey]);
 
-      const refusal = await personRefusal(key.user, ip);
+      // A key is a program on a computer, so a role that keeps people off computers keeps their keys off too; and the
+      // network it calls from is recorded as a browser's is (security review, 23 Oct 2026).
+      await noteNetworkFor(ip, key.user, { userAgent: req.headers.get("user-agent"), path: new URL(req.url).pathname }).catch(() => {});
+      const refusal = await personRefusal(key.user, ip, false, "COMPUTER");
       if (refusal) return failure(403, "person_not_allowed", KEY_REFUSALS[refusal]);
+      // A key acts as its person only while they may still make keys: taking "Use the API" away stops the ones they made.
+      if (!(await can(key.user.id, "api.manage"))) return failure(403, "person_not_allowed", "The key's person may no longer use the API — whoever manages the workspace's roles took it away.");
       if (options.scope && !key.scopes.includes(options.scope)) return failure(403, "insufficient_scope", `This key isn't allowed ${options.scope}. Give it that in Settings › Developers & API, or make a key that has it.`);
 
       const used = await countCall(key.id, ip);

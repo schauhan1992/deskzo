@@ -66,13 +66,14 @@ export default function Pair() {
     }
   }
 
-  // Opened from the QR's link: pair at once.
+  // Opened from a pairing link: the form filled in, for the person to see which Deskzo it is and press Pair themselves
+  // (security review, 23 Oct 2026). A link from anywhere — a message, a web page — paired the app at once, with
+  // whatever server it named, which then had its calls, places and receipts. Scanning the QR here pairs at once still.
   useEffect(() => {
-    if (params.host && params.code && !handled.current) {
-      handled.current = true;
-      void pair(params.host, params.code);
+    if (params.host && params.code) {
+      setHost(params.host);
+      setCode(params.code);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.host, params.code]);
 
   if (scanning && permission?.granted) {

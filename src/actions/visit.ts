@@ -175,27 +175,13 @@ export async function createVisit(input: unknown): Promise<ActionResult<{ id: st
     return { ok: false, error: "You can only plan visits for yourself or someone on your team." };
   }
 
-  const company = await db.company.findUnique({ where: { id: data.companyId }, select: { id: true, name: true } });
-  if (!company) return { ok: false, error: "That company no longer exists." };
+  // Only an account the person may see (security review, 23 Oct 2026): planning a visit read back any company's name,
+  // and its people through the visit's meeting form.
+  const company = await db.company.findUnique({ where: { id: data.companyId }, select: { id: true, name: true, ownerUserId: true, relationshipType: true } });
+  if (!company || !(await canSeeCompany(user.id, company))) return { ok: false, error: "That company no longer exists." };
 
-  if (data.contactId) {
-    const contact = await db.contact.findUnique({ where: { id: data.contactId }, select: { companyId: true } });
-    if (!contact || contact.companyId !== data.companyId) {
-      return { ok: false, error: "That contact doesn't belong to this company." };
-    }
-  }
-  if (data.locationId) {
-    const location = await db.companyLocation.findUnique({ where: { id: data.locationId }, select: { companyId: true } });
-    if (!location || location.companyId !== data.companyId) {
-      return { ok: false, error: "That location doesn't belong to this company." };
-    }
-  }
-  if (data.leadId) {
-    const lead = await db.lead.findUnique({ where: { id: data.leadId }, select: { companyId: true } });
-    if (!lead || lead.companyId !== data.companyId) {
-      return { ok: false, error: "That lead doesn't belong to this company." };
-    }
-  }
+  const parts = await partsOfCompany(data.companyId, data);
+  if (parts) return { ok: false, error: parts };
 
   // The form's "10:00" is 10:00 on the workspace's clock, wherever the server is — not the server's own 10:00.
   const scheduledFor = (await workspaceClock()).parseInput(data.scheduledFor);
@@ -239,6 +225,23 @@ export async function createVisit(input: unknown): Promise<ActionResult<{ id: st
   return { ok: true, data: { id: visit.id, visitSeq: visit.visitSeq } };
 }
 
+/** Why a visit's contact, location or lead isn't its company's own, or null when they are (or aren't given). */
+async function partsOfCompany(companyId: string, data: { contactId?: string | null; locationId?: string | null; leadId?: string | null }): Promise<string | null> {
+  if (data.contactId) {
+    const contact = await db.contact.findUnique({ where: { id: data.contactId }, select: { companyId: true } });
+    if (!contact || contact.companyId !== companyId) return "That contact doesn't belong to this company.";
+  }
+  if (data.locationId) {
+    const location = await db.companyLocation.findUnique({ where: { id: data.locationId }, select: { companyId: true } });
+    if (!location || location.companyId !== companyId) return "That location doesn't belong to this company.";
+  }
+  if (data.leadId) {
+    const lead = await db.lead.findUnique({ where: { id: data.leadId }, select: { companyId: true } });
+    if (!lead || lead.companyId !== companyId) return "That lead doesn't belong to this company.";
+  }
+  return null;
+}
+
 export async function updateVisit(input: unknown): Promise<ActionResult<{ id: string; visitSeq: number }>> {
   const user = await requireModuleUser("visits");
   const parsed = updateVisitSchema.safeParse(input);
@@ -252,6 +255,9 @@ export async function updateVisit(input: unknown): Promise<ActionResult<{ id: st
   if (!(await canActFor(user.id, existing.userId))) {
     return { ok: false, error: "You can only edit your own visits, or your team's." };
   }
+  // The same checks as planning it (security review, 23 Oct 2026): any contact's id here read their details back.
+  const parts = await partsOfCompany(existing.companyId, data);
+  if (parts) return { ok: false, error: parts };
 
   const scheduledFor = (await workspaceClock()).parseInput(data.scheduledFor);
   if (!scheduledFor) return { ok: false, error: "Pick a date and time." };

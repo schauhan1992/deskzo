@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { normaliseIp } from "@/lib/access/ip";
 import { runAsApiActor, type ApiActor } from "@/lib/api/actor";
 import { ApiError, personRefusal, readBody, zodFields, type PersonRefusal } from "@/lib/api/handler";
+import { noteNetworkFor } from "@/lib/access/gate";
 import { parsePhoneToken, secretMatches } from "@/lib/app/tokens";
 import { clientIpFrom } from "@/lib/client-ip";
 import { currentMaintenance } from "@/lib/maintenance";
@@ -68,6 +69,7 @@ export const PHONE_REFUSALS: Record<PersonRefusal, string> = {
   location: "Your role asks where you are when you sign in. Sign the app in again and let it share your location.",
   mobile: "Your role doesn't allow Deskzo on a phone.",
   tablet: "Your role doesn't allow Deskzo on a tablet.",
+  computer: "Your role doesn't allow Deskzo on a computer.",
 };
 
 /**
@@ -98,8 +100,32 @@ async function countCall(appDeviceId: string): Promise<number> {
 }
 
 /** The lockout bucket for wrong tokens and wrong pairing codes from one address. */
-export async function phoneLockKey(ip: string | null): Promise<string> {
-  return `${await tenantKey()}|app|${ip ?? "unknown"}`;
+export async function phoneLockKey(ip: string | null): Promise<string | null> {
+  // No address known, no lockout: one bucket for every caller nobody can tell apart would let a few junk requests
+  // lock everybody out (as src/lib/client-ip.ts says of every per-caller lockout).
+  return ip ? `${await tenantKey()}|app|${ip}` : null;
+}
+
+/** A phone nobody has used for this long is signed out — its token works no longer than a forgotten browser's. */
+const PHONE_IDLE_MS = 90 * 24 * 60 * 60 * 1000;
+
+/**
+ * Whether a phone may still be served now: what appRoute checked when the request came in, asked again by whatever
+ * runs on after it — the chat's live stream (src/app/api/app/chat/stream), which would otherwise keep a revoked
+ * phone's messages coming until it ended (security review, 23 Oct 2026).
+ */
+export async function phoneStillAllowed(appDeviceId: string, ip: string | null): Promise<boolean> {
+  const phone = await db.appDevice.findUnique({
+    where: { id: appDeviceId },
+    select: {
+      id: true,
+      device: { select: { status: true, kind: true, locationSessionId: true, signIns: { where: { provider: { in: ["app-code", "app-browser"] } }, orderBy: { at: "desc" }, take: 1, select: { endedAt: true } } } },
+      user: { select: { id: true, role: true, isSuperAdmin: true, active: true, kind: true, lockedAt: true, lockedUntil: true } },
+    },
+  });
+  if (!phone || phone.device.status !== "APPROVED" || phone.device.signIns[0]?.endedAt) return false;
+  const kind = phone.device.kind === "TABLET" ? "TABLET" : "MOBILE";
+  return !(await personRefusal(phone.user, ip, true, kind, phone.device.locationSessionId === appLocationKey(phone.id)));
 }
 
 /** A /api/app route handler. The handler runs as the phone's person and returns `{ data }`, or throws an `ApiError`. */
@@ -114,9 +140,7 @@ export function appRoute(options: RouteOptions, handler: (call: AppCall) => Prom
       if (maintenance.phase === "on") return appFailure(503, "maintenance", maintenance.message, undefined, { "retry-after": "300" });
 
       const ip = normaliseIp(clientIpFrom(req.headers));
-      const lockKey = await phoneLockKey(ip);
-      const locked = lockoutState([lockKey]);
-      if (locked.lockedOut) return appFailure(429, "too_many_failures", "Too many wrong sign-ins from this address — wait and try again.", undefined, { "retry-after": String(Math.max(1, locked.retryInSeconds)) });
+      const lockKeys = [await phoneLockKey(ip)].filter((key): key is string => !!key);
 
       const token = parsePhoneToken(req.headers.get("authorization"));
       const phone = token
@@ -129,7 +153,19 @@ export function appRoute(options: RouteOptions, handler: (call: AppCall) => Prom
               callSync: true,
               createdAt: true,
               secretDigest: true,
-              device: { select: { id: true, tokenHash: true, status: true, lastSeenAt: true, lastIp: true, kind: true, locationSessionId: true } },
+              device: {
+                select: {
+                  id: true,
+                  tokenHash: true,
+                  status: true,
+                  lastSeenAt: true,
+                  lastIp: true,
+                  kind: true,
+                  locationSessionId: true,
+                  // The sign-in the phone made when it was paired (src/lib/app/pairing.ts) — ended with the person's others.
+                  signIns: { where: { provider: { in: ["app-code", "app-browser"] } }, orderBy: { at: "desc" }, take: 1, select: { endedAt: true } },
+                },
+              },
               user: { select: { id: true, name: true, email: true, role: true, isSuperAdmin: true, active: true, kind: true, lockedAt: true, lockedUntil: true } },
             },
           })
@@ -138,14 +174,24 @@ export function appRoute(options: RouteOptions, handler: (call: AppCall) => Prom
       // The phone's own secret; a phone paired before it had one uses its device row's (src/lib/app/web-session.ts).
       const matches = secretMatches(token?.secret ?? "x".repeat(43), phone?.secretDigest ?? phone?.device.tokenHash ?? "0".repeat(64));
       if (!token || !phone || !matches || phone.device.status === "REVOKED" || phone.device.status === "REJECTED") {
-        recordFailure([lockKey]);
+        // Only a wrong token is held against the address: a phone whose own token is good is never locked out by
+        // somebody else's junk from the same office network (security review, 23 Oct 2026).
+        const locked = lockoutState(lockKeys);
+        if (locked.lockedOut) return appFailure(429, "too_many_failures", "Too many wrong sign-ins from this address — wait and try again.", undefined, { "retry-after": String(Math.max(1, locked.retryInSeconds)) });
+        recordFailure(lockKeys);
         return SIGNED_OUT();
       }
-      clearFailures([lockKey]);
+      clearFailures(lockKeys);
+      // Signed out with the person's other sign-ins (security review, 23 Oct 2026): a password reset, an admin's
+      // temporary password and Security › Sign-ins' "End session" end the phone's sign-in row as well, and a phone
+      // whose row is ended — or that hasn't been used for 90 days — is signed out like a revoked one.
+      if (phone.device.signIns[0]?.endedAt || Date.now() - phone.device.lastSeenAt.getTime() > PHONE_IDLE_MS) return SIGNED_OUT();
       if (phone.device.status === "PENDING") return appFailure(403, "device_pending", "This phone is waiting for an administrator to approve it. You'll be able to use it once they have.");
 
       // As the phone or tablet it signed in as, and with the location it shared then.
       const kind = phone.device.kind === "TABLET" ? "TABLET" : "MOBILE";
+      // The network it calls from, recorded as a browser's is — before any refusal, so a held one reaches the list.
+      await noteNetworkFor(ip, phone.user, { userAgent: req.headers.get("user-agent"), path: new URL(req.url).pathname }).catch(() => {});
       const refusal = await personRefusal(phone.user, ip, true, kind, phone.device.locationSessionId === appLocationKey(phone.id));
       if (refusal) return appFailure(403, "person_not_allowed", PHONE_REFUSALS[refusal]);
 

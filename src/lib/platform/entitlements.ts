@@ -138,6 +138,36 @@ export function automationFrom(tenant: AutomationOverrides, items: EntItem[], on
 }
 
 /**
+ * The modules a workspace's plans bring (security review, 23 Oct 2026). An edition (or an internal plan) brings its
+ * modules and whatever they need. An add-on or a bundle brings a module only when what that module needs is there
+ * already — from an edition, or listed by an add-on on purpose — never through the add-on alone: `withDependencies`
+ * on everything at once let Revenue & Close bought without Books, or kept after Books was cancelled, bring the whole of
+ * accounting with it (the rule src/lib/billing/plan-choice.ts states for checkout, kept here for whatever is live).
+ */
+function modulesFromPlans(items: EntItem[]): Set<string> {
+  const keysOf = (list: EntItem[]) => list.flatMap((i) => i.plan.modules.map((m) => m.moduleKey)).filter((key) => getModuleDefinition(key));
+  const base = withDependencies(keysOf(items.filter((i) => BASE_KINDS.includes(i.plan.kind))));
+  const listed = new Set(keysOf(items.filter((i) => !BASE_KINDS.includes(i.plan.kind))));
+  const out = new Set(base);
+  for (const key of listed) {
+    const needs = [...withDependencies([key])].filter((need) => need !== key);
+    if (needs.every((need) => base.has(need) || listed.has(need))) out.add(key);
+  }
+  // A listed module kept only because another listed one needs it is kept only if that one was.
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const key of out) {
+      if (base.has(key)) continue;
+      if ((getModuleDefinition(key)?.requires ?? []).some((need) => !out.has(need))) {
+        out.delete(key);
+        changed = true;
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * What a workspace may use, from its country and limit overrides, the plans on its live
  * subscriptions, and its module overrides — the rules above, and nothing read.
  */
@@ -156,8 +186,7 @@ export function entitlementsFrom(
   overrides: { moduleKey: string; granted: boolean }[],
 ): Entitlements {
   const everything = items.some((i) => i.plan.allModules);
-  const fromPlans = everything ? MODULE_REGISTRY.map((m) => m.key) : items.flatMap((i) => i.plan.modules.map((m) => m.moduleKey));
-  const modules = withDependencies(fromPlans.filter((key) => getModuleDefinition(key)));
+  const modules = everything ? withDependencies(MODULE_REGISTRY.map((m) => m.key)) : modulesFromPlans(items);
   for (const o of overrides) if (o.granted && getModuleDefinition(o.moduleKey)) for (const key of withDependencies([o.moduleKey])) modules.add(key);
   const taken = overrides.filter((o) => !o.granted).map((o) => o.moduleKey);
   for (const key of taken) {

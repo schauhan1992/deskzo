@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireModuleUser } from "@/lib/modules-access";
 import { recordAudit } from "@/lib/audit";
 import { hasEffectivePermission } from "@/actions/permission";
+import { mayAccess } from "@/lib/authz/access";
 import { queueCustomerNotice, resolveNoticeRecipients } from "@/lib/marketing/order-notice";
 import type { NoticeKind } from "@/lib/marketing/customer-notices";
 import type { ActionResult } from "@/actions/company";
@@ -32,10 +33,18 @@ async function currentOrigin() {
   return tenantOrigin();
 }
 
+/**
+ * And only about an order the person may change (security review, 23 Oct 2026): the permissions above said who may
+ * write to customers at all, not about whose orders — any order's id read back its customer's people and mailed them.
+ */
+async function mayChangeOrder(userId: string, companyProductId: string): Promise<boolean> {
+  return typeof companyProductId === "string" && !!companyProductId && mayAccess(userId, "orders", "edit", companyProductId);
+}
+
 /** Who this could go to, and what would happen to each of them, before anybody presses send. */
 export async function noticeRecipients(companyProductId: string, kind: NoticeKind = "RENEWAL") {
-  const { allowed } = await access();
-  if (!allowed) return null;
+  const { user, allowed } = await access();
+  if (!allowed || !(await mayChangeOrder(user.id, companyProductId))) return null;
   return resolveNoticeRecipients(companyProductId, kind);
 }
 
@@ -48,6 +57,7 @@ export async function sendCustomerNotice(input: {
 }): Promise<ActionResult<{ sent: number; failed: number; skipped: { name: string; reason: string }[] }>> {
   const { user, allowed } = await access();
   if (!allowed) return { ok: false, error: "You can't write to customers about orders." };
+  if (!(await mayChangeOrder(user.id, input?.companyProductId))) return { ok: false, error: "That order isn't one of yours to write about." };
 
   const result = await queueCustomerNotice({ ...input, origin: await currentOrigin(), sentByUserId: user.id });
   if (!result.ok) return result;

@@ -34,9 +34,14 @@ async function visibleUserIds(userId: string): Promise<string[] | null> {
   return [userId, ...(await getDownlineUserIds(userId))];
 }
 
+/**
+ * Who may set a day directly: HR, and a manager for the people under them. Not somebody for their own days (security
+ * review, 23 Oct 2026) — that turned an absence into a paid day, or leave nobody approved, past the geofence and the
+ * approval a correction asks for; they ask for a correction (requestRegularisation) like everybody else, unless they are HR.
+ */
 async function canMarkFor(actorId: string, targetId: string) {
-  if (actorId === targetId) return true;
   if (await hasEffectivePermission(actorId, "hr.manage")) return true;
+  if (actorId === targetId) return false;
   return (await getDownlineUserIds(actorId)).includes(targetId);
 }
 

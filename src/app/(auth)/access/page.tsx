@@ -12,6 +12,7 @@ import { HOLD_MESSAGE } from "@/lib/access/decide";
 import { DEVICE_KIND_LABEL, deviceLabel } from "@/lib/access/device";
 import { lookupIp, placeText } from "@/lib/access/geo";
 import { normaliseIp } from "@/lib/access/ip";
+import { safeAppPath } from "@/lib/app/paths";
 import { leaveAccessPage } from "@/actions/access-gate";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -22,10 +23,13 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-/** Only somewhere inside this app — never an absolute address, never protocol-relative. */
+/**
+ * Only somewhere inside this app — never an absolute address, never protocol-relative. safeAppPath also refuses
+ * a backslash after the slash and control characters, which a browser reads as another site (security review, 23 Oct 2026).
+ */
 function safeNext(next: string | undefined): string {
-  if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/access")) return "/dashboard";
-  return next;
+  const path = safeAppPath(next);
+  return !path || path.startsWith("/access") ? "/dashboard" : path;
 }
 
 /**

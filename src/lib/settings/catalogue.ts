@@ -487,7 +487,8 @@ export const SETTINGS: SettingsSection[] = [
             description: "Keys for the public API that act as you — for Zapier, Make or your own systems — and its documentation.",
             href: "/settings/developers",
             icon: KeyRound,
-            permission: "api.manage",
+            // Security admins too, to see and revoke everybody's keys (src/actions/api-keys.ts).
+            permission: ["api.manage", "security.manage"],
           },
         ],
       },

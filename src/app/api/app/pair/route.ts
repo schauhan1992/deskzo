@@ -22,8 +22,8 @@ export async function POST(req: Request): Promise<Response> {
     const maintenance = await currentMaintenance();
     if (maintenance.phase === "on") return appFailure(503, "maintenance", maintenance.message, undefined, { "retry-after": "300" });
     const ip = normaliseIp(clientIpFrom(req.headers));
-    const lockKey = await phoneLockKey(ip);
-    const locked = lockoutState([lockKey]);
+    const lockKeys = [await phoneLockKey(ip)].filter((key): key is string => !!key);
+    const locked = lockoutState(lockKeys);
     if (locked.lockedOut) return appFailure(429, "too_many_failures", "Too many wrong codes from this address — wait and try again.", undefined, { "retry-after": String(Math.max(1, locked.retryInSeconds)) });
 
     const body = await readBody(req);
@@ -32,7 +32,7 @@ export async function POST(req: Request): Promise<Response> {
         { code: body.code, platform: body.platform, model: body.model, appVersion: body.app_version, verifier: body.verifier, formFactor: body.form_factor, location: readLocation(body) },
         ip,
       );
-      clearFailures([lockKey]);
+      clearFailures(lockKeys);
       const tenant = await currentTenantOrNull();
       return appAnswer(201, {
         data: {
@@ -43,7 +43,7 @@ export async function POST(req: Request): Promise<Response> {
         },
       });
     } catch (err) {
-      if (err instanceof ApiError && err.code === "wrong_code") recordFailure([lockKey]);
+      if (err instanceof ApiError && err.code === "wrong_code") recordFailure(lockKeys);
       throw err;
     }
   } catch (err) {

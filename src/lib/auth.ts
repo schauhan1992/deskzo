@@ -6,6 +6,8 @@ import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
 import { decryptSecret } from "@/lib/crypto";
 import { verifyTotpCode } from "@/lib/totp";
+import { clearFailures, lockoutState, recordFailure } from "@/lib/security/lockout";
+import { clientIpFrom } from "@/lib/client-ip";
 import { getCachedSecuritySettings } from "@/lib/security-settings";
 import { logActivity } from "@/lib/activity";
 import { doorCheck, recordSignIn } from "@/lib/access/record";
@@ -51,13 +53,26 @@ async function buildConfig(req?: Request) {
         password: { label: "Password", type: "password" },
         totpCode: { label: "Authenticator code", type: "text" },
       },
-      authorize: async (credentials) => {
+      authorize: async (credentials, request) => {
         const email = credentials?.email;
         const password = credentials?.password;
         const totpCode = typeof credentials?.totpCode === "string" ? credentials.totpCode.trim() : "";
         if (typeof email !== "string" || typeof password !== "string") {
           return null;
         }
+
+        /**
+         * The same counts as the sign-in page's own check (checkCredentials in src/actions/auth.ts), kept here too,
+         * where the password and the authenticator code are actually tested (security review, 23 Oct 2026): the
+         * page's check came first, but this is what signs somebody in, and it gave a caller who skipped the page
+         * as many tries as they liked. Per account and per caller, per workspace, under the same keys, so the two
+         * add up rather than each giving its own eight.
+         */
+        const address = email.trim().toLowerCase();
+        const caller = request ? clientIpFrom(request.headers) : null;
+        const keys = [`${tenantId}|account:${address}`, ...(caller ? [`${tenantId}|caller:${caller}`] : [])];
+        // Not logged while locked: a row per refused try is a log anybody could fill; the lockout itself was logged.
+        if (lockoutState(keys).lockedOut) return null;
 
         /**
          * The reason is recorded and never shown.
@@ -83,16 +98,21 @@ async function buildConfig(req?: Request) {
           });
           return null;
         };
+        /** A wrong guess — counted towards the lockout above, then refused like any other. */
+        const guessed = async (reason: string, user?: { id: string; name: string }) => {
+          recordFailure(keys);
+          return refuse(reason, user);
+        };
 
         const user = await db.user.findUnique({ where: { email } });
-        if (!user) return refuse("no account with that address");
+        if (!user) return guessed("no account with that address");
         // Nobody signs in as the workspace's Automation account (src/lib/automation-user.ts). Its
         // placeholder password can't match anything typed, and it is refused by kind as well.
         if (isAutomationKind(user.kind)) return refuse("the Automation account never signs in", user);
-        if (!user.active) return refuse("the account is deactivated", user);
+        if (!user.active) return guessed("the account is deactivated", user);
 
         const validPassword = await bcrypt.compare(password, user.passwordHash);
-        if (!validPassword) return refuse("wrong password", user);
+        if (!validPassword) return guessed("wrong password", user);
 
         // Whether a password is enough for this person: their own sign-in rule, their role's, or the
         // company's setting (src/lib/workplace/sign-in-rules.ts) — under which admins keep it as a
@@ -108,7 +128,7 @@ async function buildConfig(req?: Request) {
           }
           const secret = await decryptSecret(user.twoFactorSecretCipher);
           if (!verifyTotpCode(secret, totpCode)) {
-            return refuse("wrong two-factor code", user);
+            return guessed("wrong two-factor code", user);
           }
         }
 
@@ -120,6 +140,7 @@ async function buildConfig(req?: Request) {
           return refuse(held === "NETWORK_BLOCKED" ? "the network is blocked" : "their role only allows approved networks", user);
         }
 
+        clearFailures(keys);
         return {
           id: user.id,
           name: user.name,

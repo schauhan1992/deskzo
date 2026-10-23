@@ -209,13 +209,19 @@ export async function createFeedbackRequest(input: {
 
 /** Withdraws the link. The record stays — that we asked and then thought better of it is history. */
 export async function cancelFeedbackRequest(id: string, reason?: string): Promise<ActionResult<null>> {
-  const { user, canRequest } = await access();
+  const { user, viewAll } = await access();
   const request = await db.feedbackRequest.findUnique({
     where: { id },
-    select: { id: true, reference: true, status: true, requestedById: true, companyId: true },
+    select: { id: true, reference: true, status: true, requestedById: true, companyId: true, aboutUserId: true },
   });
   if (!request) return { ok: false, error: "That request no longer exists." };
-  if (!canRequest && request.requestedById !== user.id) {
+  /**
+   * Whoever asked may take it back; somebody who sees all feedback may take back anybody's — but nobody one about
+   * their own work (security review, 23 Oct 2026). Being allowed to ask for feedback let anybody withdraw any request,
+   * including the one asking a customer about them.
+   */
+  const mine = request.requestedById === user.id;
+  if (!mine && (!viewAll || request.aboutUserId === user.id)) {
     return { ok: false, error: "You can't withdraw somebody else's request." };
   }
   if (request.status === "ANSWERED") {

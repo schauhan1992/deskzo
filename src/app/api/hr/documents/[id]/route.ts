@@ -1,3 +1,4 @@
+import { contentDisposition } from "@/lib/content-disposition";
 import { NextResponse } from "next/server";
 import { getEmployeeDocument } from "@/actions/employee-docs";
 
@@ -24,9 +25,13 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       "Content-Type": doc.mimeType || "application/octet-stream",
       // `inline` so a PDF opens in the tab rather than landing in Downloads; the filename is still
       // there for whoever chooses to save it.
-      "Content-Disposition": `inline; filename="${doc.name.replace(/"/g, "")}"`,
+      "Content-Disposition": contentDisposition("inline", doc.name),
       // Personnel documents must not sit in a shared cache.
       "Cache-Control": "private, no-store",
+      // As the chat's and tasks' files are served (security review, 23 Oct 2026): never taken for anything but what it
+      // says it is, and — a PDF apart, which Chrome won't show under a sandbox — unable to run anything in the app's name.
+      "X-Content-Type-Options": "nosniff",
+      ...(doc.mimeType === "application/pdf" ? {} : { "Content-Security-Policy": "sandbox; default-src 'none'; img-src 'self'; style-src 'unsafe-inline'" }),
     },
   });
 }

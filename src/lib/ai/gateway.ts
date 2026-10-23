@@ -8,6 +8,7 @@ import { copilotConfig } from "@/lib/copilot/settings";
 import { adapterFor } from "@/lib/copilot/providers";
 import type { Connection, ToolSpec, Turn, TurnOutcome } from "@/lib/copilot/types";
 import { currentTenant } from "@/lib/tenancy/resolve";
+import { tenantKey } from "@/lib/tenancy/cache";
 import { clockOfTenant } from "@/lib/time/workspace";
 
 /**
@@ -69,6 +70,12 @@ export type AiTurn = {
   history: Turn[];
   tools: ToolSpec[];
   onText?: (delta: string) => void;
+  /**
+   * The caller going away. It no longer stops the model mid-turn (security review, 23 Oct 2026): a turn cut short
+   * threw before it was charged, so a script could read an answer and disconnect at the last word, and the workspace
+   * paid for nothing Deskzo had paid for. Every turn now runs to its end and is charged; the caller looks at this
+   * between steps and stops there.
+   */
   signal?: AbortSignal;
 };
 
@@ -80,10 +87,46 @@ export type AiTurnOutcome = TurnOutcome & {
   charge: Charge;
 };
 
+/**
+ * Turns running now in this process, per person and per workspace (security review, 23 Oct 2026). The credit check
+ * before a turn reserves nothing — a turn is charged when it ends — so twenty asked at once with one credit left all
+ * passed it and overdrew the workspace twenty times over. A person may have two running at once, a workspace eight:
+ * what one burst can overdraw is a few turns', not unbounded.
+ */
+const running = new Map<string, number>();
+const TURNS_PER_PERSON = 2;
+const TURNS_PER_WORKSPACE = 8;
+
+/** A place among the turns running now, and the way to give it back — or null when there is none. */
+async function startTurn(userId: string): Promise<(() => void) | null> {
+  const workspace = await tenantKey();
+  const person = `${workspace}|${userId}`;
+  const everybody = `${workspace}|*`;
+  if ((running.get(person) ?? 0) >= TURNS_PER_PERSON || (running.get(everybody) ?? 0) >= TURNS_PER_WORKSPACE) return null;
+  for (const key of [person, everybody]) running.set(key, (running.get(key) ?? 0) + 1);
+  return () => {
+    for (const key of [person, everybody]) {
+      const left = (running.get(key) ?? 1) - 1;
+      if (left > 0) running.set(key, left);
+      else running.delete(key);
+    }
+  };
+}
+
 /** One model turn for a person, through the feature's model, charged to the workspace. Throws `AiRefusal` with words for them. */
 export async function aiTurn(turn: AiTurn): Promise<AiTurnOutcome> {
   const refusal = await aiUnavailable(turn.userId, turn.feature);
   if (refusal) throw new AiRefusal(refusal);
+  const done = await startTurn(turn.userId);
+  if (!done) throw new AiRefusal("Deskzo AI is already answering a few questions here — wait for one to finish, then ask again.");
+  try {
+    return await chargedTurn(turn);
+  } finally {
+    done();
+  }
+}
+
+async function chargedTurn(turn: AiTurn): Promise<AiTurnOutcome> {
   const route = (await routeFor(turn.feature)) as Route;
   const family = familyOf(route.account.kind);
   let outcome: TurnOutcome;
@@ -96,11 +139,9 @@ export async function aiTurn(turn: AiTurn): Promise<AiTurnOutcome> {
       system: turn.system,
       history: turn.history,
       tools: turn.tools,
-      signal: turn.signal,
       onText: turn.onText ?? (() => {}),
     });
   } catch (err) {
-    if (turn.signal?.aborted) throw err;
     console.error(`[ai] ${turn.feature} on ${route.model.key} failed:`, redactSecrets(withoutSecrets(err instanceof Error ? err.message : String(err), connection)));
     const wrapped = new AiRefusal(friendlyError(err));
     (wrapped as Error & { cause?: unknown }).cause = err;

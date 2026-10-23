@@ -522,8 +522,11 @@ export async function decideDevice(
   const user = await requireUser();
   const s = await standing(user.id);
   if (!s.approve) return { ok: false, error: "You can't approve devices." };
-  const device = await db.userDevice.findUnique({ where: { id: deviceId }, select: { id: true, userId: true, label: true, status: true, user: { select: { name: true } } } });
+  const device = await db.userDevice.findUnique({ where: { id: deviceId }, select: { id: true, userId: true, label: true, status: true, app: { select: { id: true } }, user: { select: { name: true } } } });
   if (!device) return { ok: false, error: "That device is no longer on the list." };
+  // A phone or tablet revoked stays revoked (security review, 23 Oct 2026): approving it again would bring its old
+  // secret back to life, perhaps on a phone its owner signed out of on purpose. Pairing it again makes a new one.
+  if (decision === "APPROVE" && device.app && device.status === "REVOKED") return { ok: false, error: "A revoked phone stays revoked — its owner pairs it again from Settings › Deskzo app." };
   // Separation of duties: approving your own device is the one decision this exists to take away.
   const me = await db.user.findUnique({ where: { id: user.id }, select: { isSuperAdmin: true } });
   if (device.userId === user.id && !me?.isSuperAdmin) return { ok: false, error: "Somebody else has to decide on your own devices." };

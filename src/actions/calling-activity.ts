@@ -5,6 +5,7 @@ import type { CallerAllocationMethod, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireModuleUser } from "@/lib/modules-access";
 import { canViewContacts } from "@/lib/authz/contact-access";
+import { companyScope } from "@/lib/authz/company-scope";
 import { hasEffectivePermission } from "@/actions/permission";
 import { recordAudit } from "@/lib/audit";
 import { toPlain } from "@/lib/serialize";
@@ -51,8 +52,11 @@ export async function startCallingActivity(input: {
   const dueAt = input.dueAt ? (calendarDayRange(input.dueAt, null)?.gte ?? null) : null;
   if (input.dueAt && !dueAt) return { ok: false, error: "That deadline isn't a valid date." };
 
+  // Only accounts whoever starts it may see (security review, 23 Oct 2026), as runWorkbook lists them
+  // (src/actions/workspace.ts): the filters alone made a call sheet of every company in the business, contacts and all.
+  // `AND`, not a spread — both may write ownerUserId.
   const companies = await db.company.findMany({
-    where: buildWhere((workbook.filters ?? {}) as WorkbookFilters, await workspaceClock()),
+    where: { AND: [await companyScope(user.id), buildWhere((workbook.filters ?? {}) as WorkbookFilters, await workspaceClock())] },
     orderBy: { name: "asc" },
     select: { id: true, ownerUserId: true },
   });

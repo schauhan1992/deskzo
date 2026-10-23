@@ -318,11 +318,18 @@ async function main() {
 
     section("A key acts as its person — and never as more");
     const repKey = await keys.createApiKey(rep.id, { name: `${TAG} rep`, scopes: ["companies:read", "leads:read"] });
+    // A key works only while its person may use the API (security review, 23 Oct 2026) — a rep holds no "api.manage",
+    // as somebody it was taken from wouldn't; given it here, the key is theirs to use.
+    ok("a key whose person may not use the API: refused", (await call("GET", "/me", { token: repKey.token })).status === 403);
+    await db.userPermission.create({ data: { userId: rep.id, permission: "api.manage", allowed: true, reason: `${TAG} the rep may use the API` } });
+    ok("  given it, the same key works", (await call("GET", "/me", { token: repKey.token })).status === 200);
     const repSees = await canSeeCompany(rep.id, await db.company.findUniqueOrThrow({ where: { id: C.id } }));
     const repCompany = await call("GET", `/companies/${C.ref}`, { token: repKey.token });
     ok(`the rep's key sees the boss's company exactly as the rep's screens would (${repSees ? "visible" : "not found"})`, repSees ? repCompany.status === 200 : repCompany.status === 404, repCompany.status);
     const repList = await call("GET", `/leads?search=${encodeURIComponent("Microsoft 365 for 25")}`, { token: repKey.token });
     ok("  and its lists hold only what reaches the rep", repSees || ((repList.body.data as unknown[]) ?? []).length === 0, (repList.body.data as unknown[])?.length);
+    // Taken back: below, the rep is somebody without "Make API keys" again.
+    await db.userPermission.deleteMany({ where: { userId: rep.id, permission: "api.manage" } });
 
     section("Only the handler makes somebody the acting person");
     const files: string[] = [];

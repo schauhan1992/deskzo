@@ -1,6 +1,6 @@
 import { Prisma, type AttributionSource } from "@deskzo/control-client";
 import { partnerAudit, actorRef, type PartnerActor } from "@/lib/partners/audit";
-import { activeDealFor, cleanReferralCode, emailDomain, findActiveReferral } from "@/lib/partners/referrals";
+import { FREE_MAIL_DOMAINS, activeDealFor, cleanReferralCode, emailDomain, findActiveReferral } from "@/lib/partners/referrals";
 import { actorOf, cleanId, mailPartnerUsers, requiredText } from "@/lib/partners/registry";
 import { termsAt } from "@/lib/partners/terms";
 import { PartnerRefused } from "@/lib/partners/types";
@@ -26,7 +26,8 @@ import type { Staff } from "@/lib/platform/staff-session";
 
 export type SignupClaims = { inviteCodeHash: string | null; referralCode: string | null; email: string; country: string };
 
-export type AttributionFlags = { outsideTerritory?: true; conflicts?: { partnerId: string; source: AttributionSource }[] };
+/** `selfReferral`: the signup is the partner's own people or company — attributed, but earning nothing (security review, 23 Oct 2026). */
+export type AttributionFlags = { outsideTerritory?: true; conflicts?: { partnerId: string; source: AttributionSource }[]; selfReferral?: true };
 
 /**
  * What signup decided. `dealId` is the winning deal registration (marked WON). `referralLinkId` is
@@ -38,7 +39,8 @@ export type AttributionDecision = {
   partnerId: string;
   source: Exclude<AttributionSource, "STAFF">;
   reference: string;
-  commissionable: true;
+  /** False for a partner's own business (`selfReferral`): kept as theirs, earning nothing. */
+  commissionable: boolean;
   flags: AttributionFlags | null;
   dealId: string | null;
   referralLinkId: string | null;
@@ -65,6 +67,31 @@ async function territoryClaim(country: string, now: Date): Promise<Claim | null>
     if (holders.length > 1) return null;
   }
   return holders.length === 1 ? { partnerId: holders[0]!, source: "TERRITORY", reference: `territory:${country}` } : null;
+}
+
+/** A website's host, without "www." — "https://www.acme.in/about" is "acme.in". */
+function websiteDomain(website: string | null): string | null {
+  if (!website?.trim()) return null;
+  try {
+    const typed = website.trim();
+    return new URL(typed.includes("://") ? typed : `https://${typed}`).hostname.toLowerCase().replace(/^www[.]/, "") || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether a signup is the partner's own business (security review, 23 Oct 2026): one of their portal's people or its
+ * contact address, or — on a company's own domain, never a free mailbox — the domain of those addresses or of the
+ * partner's website. Commission on their own workspace's spend would only be a discount nobody gave them.
+ */
+async function partnersOwn(partnerId: string, email: string, domain: string | null): Promise<boolean> {
+  const partner = await controlDb().partner.findUnique({ where: { id: partnerId }, select: { contactEmail: true, website: true, users: { select: { email: true } } } });
+  if (!partner) return false;
+  const theirs = [partner.contactEmail, ...partner.users.map((u) => u.email)].map((e) => e.trim().toLowerCase());
+  if (theirs.includes(email.trim().toLowerCase())) return true;
+  if (!domain || FREE_MAIL_DOMAINS.includes(domain)) return false;
+  return [...theirs.map((e) => emailDomain(e)), websiteDomain(partner.website)].includes(domain);
 }
 
 /**
@@ -95,12 +122,15 @@ export async function resolveSignupAttribution(claims: SignupClaims, now: Date =
     const partner = await controlDb().partner.findUnique({ where: { id: winner.partnerId }, select: { territories: true } });
     if (partner && !partner.territories.includes(country)) flags.outsideTerritory = true;
   }
+  // Kept, so staff see who brought it — but earning nothing, and flagged for them to look at.
+  const own = await partnersOwn(winner.partnerId, String(claims?.email ?? ""), domain);
+  if (own) flags.selfReferral = true;
   return {
     partnerId: winner.partnerId,
     source: winner.source,
     reference: winner.reference.slice(0, 80),
-    commissionable: true,
-    flags: flags.conflicts || flags.outsideTerritory ? flags : null,
+    commissionable: !own,
+    flags: flags.conflicts || flags.outsideTerritory || flags.selfReferral ? flags : null,
     dealId: winner.source === "DEAL_REGISTRATION" && deal ? deal.id : null,
     referralLinkId: referral?.linkId ?? null,
   };
@@ -127,14 +157,14 @@ export async function recordSignupAttribution(tx: Prisma.TransactionClient, tena
   const partner = await tx.partner.findUnique({ where: { id: decision.partnerId }, select: { id: true, slug: true } });
   if (!partner) return null;
   const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { id: true, name: true } });
-  const flags = decision.flags && (decision.flags.conflicts?.length || decision.flags.outsideTerritory) ? decision.flags : null;
+  const flags = decision.flags && (decision.flags.conflicts?.length || decision.flags.outsideTerritory || decision.flags.selfReferral) ? decision.flags : null;
   const row = await tx.tenantAttribution.create({
     data: {
       tenantId: tenant.id,
       partnerId: partner.id,
       source: decision.source,
       reference: String(decision.reference ?? "").slice(0, 80) || null,
-      commissionable: true,
+      commissionable: decision.commissionable,
       // SQL NULL when nothing is flagged: the console's review badge counts rows whose flags are not null.
       flags: flags ? (flags as Prisma.InputJsonValue) : Prisma.DbNull,
       validFrom: now,

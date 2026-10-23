@@ -311,6 +311,19 @@ const HOLD_SUMMARY: Record<HoldReason, string> = {
 };
 
 /**
+ * The same recording for a request that isn't a browser's — a phone (src/lib/app/handler.ts) or an API key
+ * (src/lib/api/handler.ts) — so a role that asks to be told of a new network, or to hold one for approval, hears of it
+ * whichever way somebody arrives (security review, 23 Oct 2026). Before any refusal: a held network has to be on the
+ * list for an admin to allow it.
+ */
+export async function noteNetworkFor(ip: string | null, user: { id: string; name: string; email: string; role: string; isSuperAdmin: boolean }, input: { userAgent: string | null; path: string | null }): Promise<void> {
+  if (!ip) return;
+  const [rules, policy] = await Promise.all([activeIpRules(), personPolicy(user.id, user.role)]);
+  const network = networkStanding(ip, user.role, rules, new Date());
+  await noteNetwork({ ip, user, network, policy, geo: lookupIp(ip), input: { userId: user.id, sid: null, deviceToken: null, ip, userAgent: input.userAgent, mobileHint: null, path: input.path } });
+}
+
+/**
  * Recording an address, once per ten minutes per process, and telling the security admins the first
  * time somebody arrives on an unknown one when their role asks to be told or to hold them.
  */

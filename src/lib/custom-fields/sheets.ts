@@ -3,6 +3,7 @@ import { exportValue, type CustomFieldDef, type CustomFieldEntityKey, type Custo
 import { customTextMasker, fieldsFor, prepareCustomFields, valuesOf } from "@/lib/custom-fields/server";
 import { db } from "@/lib/db";
 import { PEOPLE_ONLY } from "@/lib/people";
+import { desanitizeCsvCell } from "@/lib/csv";
 
 /**
  * Custom fields in spreadsheets — the Settings → Data exports and imports (src/lib/portability), the
@@ -60,6 +61,9 @@ export async function exportCells(
   const { visible } = await fieldsFor(entity, userId);
   if (visible.length === 0) return () => ({});
   const heads = headings(visible, builtInColumns);
+  // The headings are a workspace's own labels, so they get the cells' guard too (security review, 23 Oct 2026);
+  // customSheetFor takes it off again when the file comes back.
+  if (options.sanitize) for (const [key, heading] of heads) heads.set(key, options.sanitize(heading));
   const values = await valuesOf(entity, ids);
   const names = await namesFor(visible, [...values.values()]);
   // A lead's field masked for this person is masked in the file too: an export is a list.
@@ -150,7 +154,7 @@ export async function customSheetFor(entity: CustomFieldEntityKey, userId: strin
       const input: Record<string, string> = {};
       const ignored: string[] = [];
       for (const [heading, cell] of Object.entries(row)) {
-        const def = byHeading.get(heading.trim().toLowerCase());
+        const def = byHeading.get(desanitizeCsvCell(heading.trim()).trim().toLowerCase());
         if (!def || String(cell ?? "").trim() === "") continue;
         if (skip.has(def.key)) ignored.push(heads.get(def.key)!);
         else input[def.key] = String(cell).trim();

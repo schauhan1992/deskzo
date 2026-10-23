@@ -26,6 +26,18 @@ type Opening = { open: { path: string; form: Record<string, string> }; sign_in: 
 
 const pathOf = (url: string) => url.replace(/^https?:\/\/[^/]+/, "") || "/";
 
+/**
+ * Whether an address is one of the workspace's own pages: its origin exactly, then nothing, a path, a query or a
+ * fragment (security review, 23 Oct 2026). Starting with the workspace's address was the test before, and
+ * "https://acme.deskzo.com.evil.example" and "https://acme.deskzo.com@evil.example" both do — opened here with no
+ * address bar to tell them apart, and able to ask for the phone's location.
+ */
+function ownPage(url: string, origin: string): boolean {
+  if (!origin || !url.startsWith(origin)) return false;
+  const next = url.charAt(origin.length);
+  return next === "" || next === "/" || next === "?" || next === "#";
+}
+
 export default function DeskzoPages() {
   const session = calls.getSession();
   const origin = session ? webOrigin(session) : "";
@@ -82,14 +94,17 @@ export default function DeskzoPages() {
   function navigated(nav: WebViewNavigation) {
     back.current = nav.canGoBack;
     const path = pathOf(nav.url);
-    if (nav.url.startsWith(origin) && /^\/login(\?|$)/.test(path)) {
+    if (ownPage(nav.url, origin) && /^\/login(\?|$)/.test(path)) {
       const next = /callbackUrl=([^&]+)/.exec(path)?.[1];
       void signIn(next ? decodeURIComponent(next) : "/dashboard");
     }
   }
 
   function allow({ url }: { url: string }): boolean {
-    if (url.startsWith(origin) || url.startsWith("about:") || url.startsWith("blob:") || url.startsWith("data:")) return true;
+    // The workspace's own pages only, by their exact origin; a file it made (blob:) only from them; and inline only a
+    // picture or a PDF — a page written inline (data:text/html) could be anything, sign-in forms included.
+    const inline = url.startsWith("data:image/") || url.startsWith("data:application/pdf");
+    if (ownPage(url, origin) || url.startsWith("about:") || (url.startsWith("blob:") && ownPage(url.slice(5), origin)) || inline) return true;
     // A number, an email, a map, another site: the phone's own app for it.
     void Linking.openURL(url).catch(() => {});
     return false;

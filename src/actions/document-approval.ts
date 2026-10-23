@@ -306,7 +306,7 @@ export async function decideApproval(input: {
   const verdict = mayApprove({
     policy,
     actor,
-    subject: { submittedById: document.submittedById, submitterManagerIds: await managerChain(document.submittedById) },
+    subject: { submittedById: document.submittedById, createdById: document.createdById, submitterManagerIds: await managerChain(document.submittedById) },
   });
   if (!verdict.may) {
     return {
@@ -396,6 +396,7 @@ export async function approvalContext(id: string): Promise<{
         actor,
         subject: {
           submittedById: document.submittedById,
+          createdById: document.createdById,
           submitterManagerIds: await managerChain(document.submittedById),
         },
       }).may,

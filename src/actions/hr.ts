@@ -235,9 +235,11 @@ export async function saveEmployeeProfile(input: unknown): Promise<ActionResult<
 
   const writable = isSelf && !(await canManage(user.id)) ? personal : { ...personal, ...employment };
 
+  // A new record too (security review, 23 Oct 2026): somebody HR hadn't set up yet wrote their own joining date and
+  // designation here, which leave accrual, gratuity and letters read. HR fills those in.
   await db.employeeProfile.upsert({
     where: { userId: data.userId },
-    create: { userId: data.userId, ...personal, ...employment },
+    create: { userId: data.userId, ...writable },
     update: writable,
   });
 

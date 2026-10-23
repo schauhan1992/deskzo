@@ -14,6 +14,9 @@ import { documentAccess, leadAccess, mayAccess, timelineAccess, type AccessActio
 import { toPlain } from "@/lib/serialize";
 import { isModuleEnabled } from "@/actions/module";
 import { hasEffectivePermission } from "@/actions/permission";
+import { logActivity as logSecurityActivity } from "@/lib/activity";
+import { getSecurityPolicy } from "@/lib/security/store";
+import { exportDecision } from "@/lib/security/policy";
 import { notifyUser } from "@/lib/notify";
 import { recordAudit } from "@/lib/audit";
 import { changedLabel, customFieldsForCreate, customSearchWhere, definitionsFor, notMigratedYet, saveCustomFields } from "@/lib/custom-fields/server";
@@ -853,11 +856,23 @@ export async function updateLeadCustomFields(leadId: string, input: unknown): Pr
 export async function exportLeadsCsv(): Promise<ActionResult<{ csv: string; filename: string }>> {
   const user = await requireModuleUser("leads");
   if (!(await canViewLeads(user.id))) return { ok: false, error: NO_LEADS };
+  /**
+   * The same rules as every other CRM export (security review, 23 Oct 2026): "Export CRM data", the workspace's row
+   * limit, and a line in the security log — this one skipped all three, so anybody who could see leads could take
+   * the file away, unrecorded.
+   */
+  if (!(await hasEffectivePermission(user.id, "data.exportCrm"))) {
+    await logSecurityActivity({ kind: "PERMISSION_DENIED", severity: "WARNING", summary: `${user.name} tried to export leads without the export permission`, metadata: { area: "leads" } });
+    return { ok: false, error: "You can't export leads. Ask an administrator for \"Export CRM data\"." };
+  }
+  const where = await leadListWhere(user.id);
+  const verdict = exportDecision(await db.lead.count({ where }), await getSecurityPolicy());
+  if (!verdict.allowed) return { ok: false, error: verdict.reason };
 
   const leads = await db.lead.findMany({
     // The export is the list with no screen in front of it, and it is the worse leak of the two:
     // a file of every deal, its value and its customer contact, kept after the session ends.
-    where: await leadListWhere(user.id),
+    where,
     orderBy: { updatedAt: "desc" },
     include: {
       company: { select: { name: true } },
@@ -897,6 +912,7 @@ export async function exportLeadsCsv(): Promise<ActionResult<{ csv: string; file
   // one, since the file's header is its first row's keys (src/lib/custom-fields/sheets.ts).
   const custom = await exportCells("LEAD", user.id, leads.map((l) => l.id), Object.keys(rows[0] ?? {}), { sanitize: sanitizeCsvCell });
   const csv = Papa.unparse(rows.map((row, i) => ({ ...row, ...custom(leads[i]!.id) })));
+  await logSecurityActivity({ kind: "EXPORT", severity: "NOTICE", summary: `${user.name} exported ${rows.length} lead(s)`, metadata: { area: "leads", rows: rows.length } });
   return { ok: true, data: { csv, filename: csvFilename("leads-export", new Date(), clock) } };
 }
 

@@ -16,7 +16,7 @@ import { dateOnly } from "@/lib/hr/calendar";
 import { canConvert, CANDIDATE_LETTERS, ONBOARDING_TASKS } from "@/lib/hr/onboarding";
 import { letterNumberFor, renderLetter, subjectFor, type LetterPayload } from "@/lib/hr/letters";
 import type { ActionResult } from "@/actions/company";
-import { seatProblem } from "@/lib/seats";
+import { SeatsFull, claimSeats, seatProblem } from "@/lib/seats";
 import { accountsChanged } from "@/lib/platform/account-hooks";
 import { actorContext } from "@/lib/authz/guards";
 import { sendSetupInvitation, type SetupInvitation } from "@/lib/account-setup";
@@ -336,7 +336,10 @@ export async function convertCandidate(
   const probationEndsOn = new Date(joinedOn.getTime() + probationMonths * 30 * 86400000);
   const intake = (candidate.intakeData ?? {}) as Record<string, string | undefined>;
 
+  // The seat is taken in the same transaction as the account (src/lib/seats.ts claimSeats); the check above is the quick answer.
+  let full: string | null = null;
   const created = await db.$transaction(async (tx) => {
+    await claimSeats(tx);
     const newUser = await tx.user.create({
       data: {
         name: candidate.name,
@@ -409,7 +412,12 @@ export async function convertCandidate(
     await emitPersonJoined(tx, newUser.id, user.id);
 
     return newUser;
+  }).catch((err: unknown) => {
+    if (!(err instanceof SeatsFull)) throw err;
+    full = err.message;
+    return null;
   });
+  if (!created) return { ok: false, error: full ?? "There's no seat free." };
   await accountsChanged([created.id], { by: `admin:${user.id}` });
   // HR is handed the link, when the email can't be sent, only if they hold everything the new login does.
   const invitation = await sendSetupInvitation(created, { by: await actorContext(user.id) });

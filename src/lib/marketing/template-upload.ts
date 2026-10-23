@@ -63,6 +63,42 @@ function dirOf(path: string): string {
   return i < 0 ? "" : path.slice(0, i);
 }
 
+/**
+ * An entry's bytes, inflated only as far as `cap` — or null past it (security review, 23 Oct 2026). The sizes in a
+ * zip's headers are whatever its maker wrote, so the check on them below is only a first look: a few megabytes of zip
+ * can inflate to gigabytes, and inflating an entry whole before measuring it took the server's memory with it.
+ */
+function readCapped(entry: JSZip.JSZipObject, cap: number): Promise<Buffer | null> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let done = false;
+    const stream = entry.nodeStream("nodebuffer");
+    stream
+      .on("data", (data: Buffer) => {
+        if (done) return;
+        total += data.length;
+        if (total > cap) {
+          done = true;
+          stream.pause();
+          resolve(null);
+          return;
+        }
+        chunks.push(data);
+      })
+      .on("error", (err: Error) => {
+        if (done) return;
+        done = true;
+        reject(err);
+      })
+      .on("end", () => {
+        if (done) return;
+        done = true;
+        resolve(Buffer.concat(chunks));
+      });
+  });
+}
+
 export async function readTemplateUpload(fileName: string, bytes: Buffer): Promise<ReadOutcome> {
   if (bytes.length > UPLOAD_LIMITS.fileBytes) return { ok: false, error: "That file is over 10 MB. An email template never needs to be." };
   const lower = fileName.toLowerCase();
@@ -92,10 +128,12 @@ export async function readTemplateUpload(fileName: string, bytes: Buffer): Promi
   const chosen =
     htmlFiles.filter((f) => /(^|\/)index\.html?$/i.test(f.name)).sort((a, b) => depth(a.name) - depth(b.name))[0] ??
     (htmlFiles.length === 1 ? htmlFiles[0] : null) ??
-    (await Promise.all(htmlFiles.map(async (f) => ({ f, size: (await f.async("nodebuffer")).length })))).sort((a, b) => b.size - a.size)[0]!.f;
+    (await Promise.all(htmlFiles.map(async (f) => ({ f, size: (await readCapped(f, UPLOAD_LIMITS.htmlBytes))?.length ?? -1 })))).sort((a, b) => b.size - a.size)[0]!.f;
 
-  const htmlBytes = await chosen.async("nodebuffer");
-  if (htmlBytes.length > UPLOAD_LIMITS.htmlBytes) return { ok: false, error: "The HTML in that .zip is over 1 MB — too big for an inbox." };
+  const htmlBytes = await readCapped(chosen, UPLOAD_LIMITS.htmlBytes);
+  if (!htmlBytes) return { ok: false, error: "The HTML in that .zip is over 1 MB — too big for an inbox." };
+  // And everything read from it together, whatever its headers said.
+  let inflated = htmlBytes.length;
 
   const images: UploadedImage[] = [];
   const skipped: string[] = [];
@@ -112,11 +150,13 @@ export async function readTemplateUpload(fileName: string, bytes: Buffer): Promi
       skipped.push(`${path} — more than ${UPLOAD_LIMITS.images} pictures`);
       continue;
     }
-    const data = await entry.async("nodebuffer");
-    if (data.length > UPLOAD_LIMITS.imageBytes) {
+    const data = await readCapped(entry, UPLOAD_LIMITS.imageBytes);
+    if (!data) {
       skipped.push(`${path} — over 2 MB; shrink it and upload again`);
       continue;
     }
+    inflated += data.length;
+    if (inflated > UPLOAD_LIMITS.inflatedBytes) return { ok: false, error: "That .zip unpacks to more than 40 MB. An email template never needs to." };
     const mimeType = sniffImage(data);
     if (!mimeType) {
       skipped.push(`${path} — the file isn't the picture its name says`);

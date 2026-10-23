@@ -15,7 +15,7 @@ import { RENDER_PARAM } from "@/lib/documents/render-token";
 import { PDF_MAX_BYTES, PdfError, renderPdf } from "@/lib/documents/pdf";
 import { mailboxState } from "@/lib/mail/mailbox";
 import { documentSender, sendDocumentMail, type SenderChoice } from "@/lib/documents/mail-route";
-import { allowanceRefusal, deskzoAllowance, recordDeskzoSend } from "@/lib/documents/deskzo-mail-allowance";
+import { allowanceRefusal, deskzoAllowance, recordDeskzoSend, releaseDeskzoSend, reserveDeskzoSend } from "@/lib/documents/deskzo-mail-allowance";
 import { MAIL_NAMES, SIGN_IN_NAMES, sayEither } from "@/lib/workplace/providers";
 import { DEFAULT_TEMPLATES, attachmentName, isEmailable, mergeTemplate, recipientNames, toEmailHtml, type EmailableType, type MergeValues } from "@/lib/documents/email-template";
 import { renderTarget } from "@/lib/tenancy/render-target";
@@ -261,6 +261,11 @@ export async function deliverDocumentSend(prepared: PreparedDocumentSend, byline
   }
   if (pdf.length > PDF_MAX_BYTES) return { ok: false, error: "The PDF is over 3 MB — too big to send this way. Nothing was sent.", lasting: true };
 
+  // Through Deskzo's mail: its recipients counted before it goes, so sends at the same moment can't share the last of
+  // the day's room (reserveDeskzoSend); given back below if it doesn't go that way after all.
+  const reserved = prepared.choice === "DESKZO" ? await reserveDeskzoSend(prepared.senderId, doc.id, recipients.length) : null;
+  if (reserved && !reserved.ok) return { ok: false, error: reserved.error, lasting: true };
+
   const outcome = await sendDocumentMail(prepared.choice, {
     senderUserId: prepared.senderId,
     senderName: prepared.senderName,
@@ -297,8 +302,9 @@ export async function deliverDocumentSend(prepared: PreparedDocumentSend, byline
       fromEmail: outcome.ok ? outcome.from : prepared.triedFrom,
     })),
   });
+  if (reserved?.ok && (!outcome.ok || outcome.via !== "DESKZO")) await releaseDeskzoSend(reserved.id);
   if (!outcome.ok) return { ok: false, error: outcome.error, lasting: false };
-  if (outcome.via === "DESKZO") await recordDeskzoSend(prepared.senderId, doc.id, recipients.length);
+  if (outcome.via === "DESKZO" && !reserved?.ok) await recordDeskzoSend(prepared.senderId, doc.id, recipients.length);
 
   await db.tradeDocument.update({ where: { id: doc.id }, data: { lastEmailedAt: now } });
   const to = recipients.map((r) => r.email);

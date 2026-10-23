@@ -197,6 +197,28 @@ async function inviteProblem(code: string, open: boolean): Promise<string | null
 
 const REFERRAL_VIA = ["link", "cookie", "typed"] as const;
 
+/** One mailbox however it is written: its case, a "+tag", and Gmail's dots all reach the same inbox. */
+function mailboxKey(local: string, domain: string): string {
+  const d = domain.toLowerCase() === "googlemail.com" ? "gmail.com" : domain.toLowerCase();
+  const l = local.toLowerCase().split("+")[0]!;
+  return `${d === "gmail.com" ? l.split(".").join("") : l}@${d}`;
+}
+
+/**
+ * Whether this mailbox already owns a workspace — or owned one, closed since (security review, 23 Oct 2026). Every
+ * signup was a fresh free trial with its seats and AI credits, so one person could start one after another. Another
+ * workspace for somebody who has one is set up by Deskzo (or by an invitation, which skips this), not by a new trial.
+ */
+async function ownedWorkspaceBefore(local: string, domain: string): Promise<boolean> {
+  const key = mailboxKey(local, domain);
+  const domains = ["gmail.com", "googlemail.com"].includes(domain.toLowerCase()) ? ["gmail.com", "googlemail.com"] : [domain.toLowerCase()];
+  const owners = await controlDb().tenant.findMany({ where: { OR: domains.map((d) => ({ ownerEmail: { endsWith: `@${d}`, mode: "insensitive" as const } })) }, select: { ownerEmail: true } });
+  return owners.some(({ ownerEmail }) => {
+    const at = ownerEmail?.lastIndexOf("@") ?? -1;
+    return at > 0 && mailboxKey(ownerEmail!.slice(0, at), ownerEmail!.slice(at + 1)) === key;
+  });
+}
+
 export async function startSignup(form: SignupForm): Promise<SignupResult<{ email: string }>> {
   const slow = await limited(form.email);
   if (slow) return refused({}, slow);
@@ -218,6 +240,9 @@ export async function startSignup(form: SignupForm): Promise<SignupResult<{ emai
   put("ownerName", ownerNameProblem(ownerName));
   put("email", emailShapeProblem(String(form.email ?? "")) ?? (email ? null : "That doesn't look like an email address — check it for a typo."));
   if (email && isDisposableDomain(email.domain)) put("email", disposableEmailMessage(email.domain));
+  if (email && !String(form.invite ?? "").trim() && (await ownedWorkspaceBefore(email.local, email.domain))) {
+    put("email", "This email address already has a Deskzo workspace — sign in to it. For another one, write to us and we'll set it up.");
+  }
   put("country", country ? null : countryProblem("", () => false));
   put("password", passwordProblem(password));
   const industryInput = String(form.industry ?? "").trim();

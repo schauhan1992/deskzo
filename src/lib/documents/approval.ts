@@ -97,6 +97,11 @@ export type ApprovalSubject = {
   /** Who asked for sign-off. Null before anybody has. */
   submittedById: string | null;
   /**
+   * Who wrote it. Their own work too (security review, 23 Oct 2026): "own" meaning only the submitter let an approver
+   * sign off a document they wrote by having a colleague press Submit.
+   */
+  createdById?: string | null;
+  /**
    * The submitter's managers, nearest first.
    *
    * The whole chain rather than the immediate manager alone, so a document does not become
@@ -144,7 +149,7 @@ export function mayApprove(params: {
 
   if (!policy.enabled) return { may: false, reason: "approval-not-enabled" };
 
-  const isOwn = Boolean(subject.submittedById && subject.submittedById === actor.id);
+  const isOwn = Boolean((subject.submittedById && subject.submittedById === actor.id) || (subject.createdById && subject.createdById === actor.id));
 
   // Checked before the own-document rule, which is what lets a super admin sign off their own.
   if (actor.isSuperAdmin) return { may: true, reason: isOwn ? "super-admin-own" : "super-admin" };
