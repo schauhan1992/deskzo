@@ -174,9 +174,19 @@ export const attendanceMarkSchema = z.object({
   note: optionalText(200),
 });
 
+const fixedRupees = z.coerce
+  .number()
+  .int("PF, ESI and TDS are in whole rupees.")
+  .min(0, "PF, ESI and TDS can't be negative.")
+  .max(1e8, "That's more than any salary.")
+  .optional();
+
 export const salaryStructureSchema = z.object({
   userId: z.string().min(1),
-  effectiveFrom: z.string().min(1, "From when does this apply?"),
+  effectiveFrom: z
+    .string()
+    .min(1, "From when does this apply?")
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Pick the day it applies from."),
   basic: z.coerce.number().min(0),
   hra: z.coerce.number().min(0).default(0),
   conveyance: z.coerce.number().min(0).default(0),
@@ -195,6 +205,13 @@ export const salaryStructureSchema = z.object({
     .array(z.object({ name: z.string().trim().min(1, "Name every component.").max(40, "Keep a component's name under 40 characters."), amount: z.coerce.number().min(0) }))
     .max(15, "Up to 15 of the company's own components.")
     .default([]),
+  /**
+   * PF, ESI and TDS typed over Deskzo's figures at the split (owner, 23 Oct 2026), whole rupees a month. A share
+   * left out is worked out; PF's and ESI's are dropped in src/actions/payroll.ts where the scheme is off.
+   */
+  statutoryFixed: z
+    .object({ pfEmployee: fixedRupees, pfEmployer: fixedRupees, esiEmployee: fixedRupees, esiEmployer: fixedRupees, tds: fixedRupees })
+    .default({}),
   /** The CTC it was split from, and how a revision was given — kept for the record and the letter. */
   annualCtc: z.coerce.number().positive().max(1e10).optional(),
   revisionBasis: z.enum(["PERCENT", "AMOUNT", "CTC"]).optional(),

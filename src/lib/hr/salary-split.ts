@@ -1,4 +1,16 @@
-import { annualCtcOf, computeEsi, computePf, ESI_EMPLOYER_RATE, monthlyGross, round2, type SalaryComponents, type SalaryCustomLine, type StatutoryFlags } from "@/lib/hr/payroll";
+import {
+  annualCtcOf,
+  computeEsi,
+  ESI_EMPLOYER_RATE,
+  monthlyGross,
+  monthlyStatutory,
+  round2,
+  STATUTORY_FIXED_KEYS,
+  type SalaryComponents,
+  type SalaryCustomLine,
+  type StatutoryFixed,
+  type StatutoryFlags,
+} from "@/lib/hr/payroll";
 
 /**
  * A CTC split into a salary structure, and a revision given as a percentage or an amount (owner, 21 Oct
@@ -9,6 +21,9 @@ import { annualCtcOf, computeEsi, computePf, ESI_EMPLOYER_RATE, monthlyGross, ro
  * basic, the fixed allowances and the company's own components at what they're set to, and lets the
  * special allowance take up what's left — so the structure costs exactly the CTC typed. The old split
  * left the employer's ESI out, and a CTC of ₹2,40,000 came out as ₹2,47,428.
+ *
+ * PF and ESI typed over Deskzo's figures at the split (owner, 23 Oct 2026; StatutoryFixed) are what the CTC
+ * counts: an employer's PF fixed at ₹1,800 costs ₹1,800, whatever basic is.
  *
  * Pure, so the salary dialog splits as HR types and check:salary-split can hold every figure to it.
  */
@@ -32,7 +47,7 @@ export type ComponentDefault = { name: string; mode: "FIXED" | "PERCENT_OF_BASIC
 export type RevisionBasis = "PERCENT" | "AMOUNT" | "CTC";
 
 /** The `omit` that reads a structure's columns from 21 Oct 2026 by name (src/lib/tenancy/clients.ts). */
-export const STRUCTURE_EXTRAS_READ = { customComponents: false, annualCtc: false, revisionBasis: false, revisionValue: false } as const;
+export const STRUCTURE_EXTRAS_READ = { customComponents: false, annualCtc: false, revisionBasis: false, revisionValue: false, statutoryFixed: false } as const;
 
 /** A structure's custom components as stored — anything that isn't a named, non-negative amount dropped. */
 export function customLinesOf(json: unknown): SalaryCustomLine[] {
@@ -41,6 +56,19 @@ export function customLinesOf(json: unknown): SalaryCustomLine[] {
     .filter((l): l is { name: string; amount: number } => !!l && typeof l === "object" && typeof (l as { name?: unknown }).name === "string" && Number.isFinite(Number((l as { amount?: unknown }).amount)))
     .map((l) => ({ name: l.name.trim(), amount: round2(Math.max(0, Number(l.amount))) }))
     .filter((l) => l.name !== "");
+}
+
+/** A structure's PF, ESI and TDS fixed at the split, as stored — whole, non-negative rupees; anything else left out. */
+export function statutoryFixedOf(json: unknown): StatutoryFixed {
+  if (!json || typeof json !== "object" || Array.isArray(json)) return {};
+  const fixed: StatutoryFixed = {};
+  for (const key of STATUTORY_FIXED_KEYS) {
+    const value = (json as Record<string, unknown>)[key];
+    if (value === null || value === undefined || value === "") continue;
+    const amount = Number(value);
+    if (Number.isFinite(amount) && amount >= 0) fixed[key] = Math.round(amount);
+  }
+  return fixed;
 }
 
 type Money = number | string | { toString(): string } | null | undefined;
@@ -52,6 +80,7 @@ type StructureRow = {
   specialAllowance: Money;
   otherAllowance: Money;
   customComponents?: unknown;
+  statutoryFixed?: unknown;
   pfApplicable?: boolean;
   esiApplicable?: boolean;
 };
@@ -71,9 +100,9 @@ export function componentsOfStructure(row: StructureRow): SalaryComponents {
   };
 }
 
-/** A stored structure's annual CTC, worked out from it as the salary card shows it. */
+/** A stored structure's annual CTC, worked out from it as the salary card shows it — PF and ESI fixed on it in. */
 export function ctcOfStructure(row: StructureRow): number {
-  return annualCtcOf(componentsOfStructure(row), { pfApplicable: row.pfApplicable ?? true, esiApplicable: row.esiApplicable ?? true });
+  return annualCtcOf(componentsOfStructure(row), { pfApplicable: row.pfApplicable ?? true, esiApplicable: row.esiApplicable ?? true }, statutoryFixedOf(row.statutoryFixed));
 }
 
 type Flags = Pick<StatutoryFlags, "pfApplicable" | "esiApplicable">;
@@ -83,25 +112,36 @@ type Flags = Pick<StatutoryFlags, "pfApplicable" | "esiApplicable">;
  * so. `short` is how much a year the other parts already go over the CTC by — then there's no special
  * allowance, and the structure costs more than the CTC typed.
  */
-export function balanceToCtc(parts: Omit<SalaryComponents, "specialAllowance">, annualCtc: number, flags: Flags): { components: SalaryComponents; short: number } {
+export function balanceToCtc(
+  parts: Omit<SalaryComponents, "specialAllowance">,
+  annualCtc: number,
+  flags: Flags,
+  fixed: StatutoryFixed = {},
+): { components: SalaryComponents; short: number } {
   const monthlyCtc = annualCtc / 12;
-  const employerPf = computePf(parts.basic, { applicable: flags.pfApplicable }).employer;
+  const employerPf = monthlyStatutory({ ...parts, specialAllowance: 0 }, flags, fixed).pfEmployer;
   const fixedGross = monthlyGross({ ...parts, specialAllowance: 0 });
   // Gross plus the employer's PF and ESI is the monthly CTC. ESI is a share of gross, and only up to its
   // wage limit — so the gross is solved for with it first, and without it if that gross is over the limit.
+  // Fixed, the employer's ESI is a sum like PF, and nothing to solve for.
+  const esiFixed = flags.esiApplicable && fixed.esiEmployer !== undefined;
   const withEsi = (monthlyCtc - employerPf) / (1 + ESI_EMPLOYER_RATE);
-  let gross = flags.esiApplicable && computeEsi(withEsi, { applicable: true }).applied ? withEsi : monthlyCtc - employerPf;
+  let gross = esiFixed
+    ? monthlyCtc - employerPf - fixed.esiEmployer!
+    : flags.esiApplicable && computeEsi(withEsi, { applicable: true }).applied
+      ? withEsi
+      : monthlyCtc - employerPf;
   let special = round2(gross - fixedGross);
   if (special < 0) {
     const components = { ...parts, specialAllowance: 0 };
-    return { components, short: round2(annualCtcOf(components, flags) - annualCtc) };
+    return { components, short: round2(annualCtcOf(components, flags, fixed) - annualCtc) };
   }
   // ESI is rounded up to the rupee, so the solved gross can be a rupee or two off: settled on the special
   // allowance, which absorbs it, rather than shown as a CTC that isn't the one typed.
   for (let i = 0; i < 3; i += 1) {
-    const off = annualCtcOf({ ...parts, specialAllowance: special }, flags) - annualCtc;
+    const off = annualCtcOf({ ...parts, specialAllowance: special }, flags, fixed) - annualCtc;
     if (Math.abs(off) < 0.5) break;
-    const esiOn = flags.esiApplicable && computeEsi(gross, { applicable: true }).applied;
+    const esiOn = !esiFixed && flags.esiApplicable && computeEsi(gross, { applicable: true }).applied;
     special = round2(Math.max(0, special - off / 12 / (esiOn ? 1 + ESI_EMPLOYER_RATE : 1)));
     gross = fixedGross + special;
   }
@@ -116,7 +156,7 @@ export function customDefaultsFor(basic: number, defaults: readonly ComponentDef
 }
 
 /** A CTC split by the company's rules, its own components in, the special allowance taking up the rest. */
-export function splitCtc(annualCtc: number, rules: SplitRules, defaults: readonly ComponentDefault[], flags: Flags) {
+export function splitCtc(annualCtc: number, rules: SplitRules, defaults: readonly ComponentDefault[], flags: Flags, fixed: StatutoryFixed = {}) {
   const monthlyCtc = Math.max(0, annualCtc) / 12;
   const basic = round2((monthlyCtc * rules.basicPercent) / 100);
   const hra = round2((basic * rules.hraPercent) / 100);
@@ -125,6 +165,7 @@ export function splitCtc(annualCtc: number, rules: SplitRules, defaults: readonl
     { basic, hra, conveyance: round2(rules.conveyance), medical: round2(rules.medical), otherAllowance: 0, ...(custom.length ? { custom } : {}) },
     annualCtc,
     flags,
+    fixed,
   );
 }
 
@@ -146,9 +187,9 @@ export function revisionWords(basis: RevisionBasis, value: number, fromCtc?: num
 /**
  * The current structure grown to a new CTC, its shape kept: every part but the special allowance scaled by
  * the same factor, the special allowance balancing to the CTC exactly. What a revision does by default —
- * the person's breakup stays theirs, only bigger.
+ * the person's breakup stays theirs, only bigger. PF, ESI and TDS fixed on it stay as they are: a sum, not a share.
  */
-export function scaleToCtc(current: SalaryComponents, currentCtc: number, newCtc: number, flags: Flags) {
+export function scaleToCtc(current: SalaryComponents, currentCtc: number, newCtc: number, flags: Flags, fixed: StatutoryFixed = {}) {
   const factor = currentCtc > 0 ? newCtc / currentCtc : 1;
   const scale = (v: number) => round2(v * factor);
   const custom = (current.custom ?? []).map((l) => ({ name: l.name, amount: scale(l.amount) }));
@@ -163,5 +204,6 @@ export function scaleToCtc(current: SalaryComponents, currentCtc: number, newCtc
     },
     newCtc,
     flags,
+    fixed,
   );
 }

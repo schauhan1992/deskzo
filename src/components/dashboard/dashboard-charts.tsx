@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowDown, ArrowUp, Check, Eye, KeyRound, Laptop, Minus, ShieldAlert, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { weekly, type ActivityIcon, type ChartData, type ChartType, type SeriesData, type Tone } from "@/lib/dashboard/charts";
+import { shortRupees, weekly, type ActivityIcon, type ChartData, type ChartType, type RowsData, type SeriesData, type Tone } from "@/lib/dashboard/charts";
 
 /**
  * The dashboard's charts, drawn from the figures src/lib/dashboard/data.ts hands over.
@@ -27,7 +27,7 @@ const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export const CHART_HEIGHT = 212;
 
-type Plot = { labels: string[]; series: { name: string; values: number[] }[]; stacked: boolean; unit?: string; yMax?: number };
+type Plot = { labels: string[]; series: { name: string; values: number[] }[]; stacked: boolean; unit?: string; yMax?: number; money?: boolean };
 
 /** A series as it is drawn for a type: by the week once a range is too long to show day by day. */
 function plotOf(data: SeriesData, type: ChartType): Plot {
@@ -39,7 +39,7 @@ function plotOf(data: SeriesData, type: ChartType): Plot {
     if (days <= 7) return WEEKDAYS[new Date(`${key}T00:00:00Z`).getUTCDay()]!;
     return `${MONTHS[Number(key.slice(5, 7)) - 1]} ${Number(key.slice(8, 10))}`;
   };
-  return { labels: shown.keys.map(label), series: shown.series, stacked: shown.stacked && type === "bar" };
+  return { labels: shown.keys.map(label), series: shown.series, stacked: shown.stacked && type === "bar", money: data.money };
 }
 
 export function ChartView({
@@ -56,7 +56,9 @@ export function ChartView({
 }) {
   switch (data.kind) {
     case "number":
-      return <NumberView value={data.value} delta={data.delta} tone={data.tone} height={height} />;
+      return <NumberView value={data.value} delta={data.delta} tone={data.tone} exact={data.exact} height={height} />;
+    case "rows":
+      return <RowsTable data={data} height={height} />;
     case "tasks":
       return <TaskList items={data.items} height={height} onToggle={onToggleTask} />;
     case "activity":
@@ -77,12 +79,14 @@ export function ChartView({
     case "series":
       return <SeriesChart mode={type === "line" || type === "area" ? type : "bar"} plot={plotOf(data, type)} height={height} empty="Nothing in this period yet." />;
     case "category":
-      if (type === "hbar") return <HBars items={data.items} height={height} />;
-      if (type === "donut" || type === "pie") return <Donut items={data.items} pie={type === "pie"} height={height} />;
+      // A figure that is also a split of itself (receivables: current and overdue) draws as either.
+      if (type === "number" && data.headline) return <NumberView {...data.headline} height={height} />;
+      if (type === "hbar") return <HBars items={data.items} money={data.money} height={height} />;
+      if (type === "donut" || type === "pie") return <Donut items={data.items} pie={type === "pie"} money={data.money} height={height} />;
       return (
         <SeriesChart
           mode={type === "line" || type === "area" ? type : "bar"}
-          plot={{ labels: data.items.map((i) => i.label), series: [{ name: "Count", values: data.items.map((i) => i.value) }], stacked: false }}
+          plot={{ labels: data.items.map((i) => i.label), series: [{ name: data.money ? "Amount" : "Count", values: data.items.map((i) => i.value) }], stacked: false, money: data.money }}
           height={height}
           empty="Nothing to show yet."
         />
@@ -121,14 +125,20 @@ function SeriesChart({ mode, plot, height, empty }: { mode: "bar" | "line" | "ar
     ro.observe(el);
     return () => ro.disconnect();
   }, [blank]);
-  const { labels, series, stacked, unit = "" } = plot;
+  const { labels, series, stacked, unit = "", money = false } = plot;
   const n = labels.length;
   if (blank) return <EmptyChart height={height}>{empty}</EmptyChart>;
 
-  const L = 32, T = 6, B = 22;
+  // Rupees are drawn short on the axis (₹2.6 Cr) and in full enough to read in the tooltip.
+  const axis = (v: number) => (money ? shortRupees(v, 1) : fmt(v));
+  const tip = (v: number) => (money ? shortRupees(v) : `${v}${unit}`);
+  const L = money ? 52 : 32, T = 6, B = 22;
   const peak = stacked ? Math.max(...labels.map((_, i) => series.reduce((a, s) => a + s.values[i]!, 0))) : Math.max(...series.flatMap((s) => s.values));
-  const max = plot.yMax ?? niceMax(peak * 1.05);
-  const pct = (v: number) => Math.max(0, (v / max) * 100);
+  // A line can go below nothing — a cash balance overdrawn — so its scale does too; columns start at zero.
+  const trough = mode === "bar" ? 0 : Math.min(0, ...series.flatMap((s) => s.values));
+  const min = trough < 0 ? -niceMax(-trough * 1.05) : 0;
+  const max = plot.yMax ?? (peak > 0 ? niceMax(peak * 1.05) : min < 0 ? 0 : 10);
+  const pct = (v: number) => Math.max(0, ((v - min) / (max - min)) * 100);
   const xAt = mode === "bar" ? (i: number) => ((i + 0.5) / n) * 100 : (i: number) => (n === 1 ? 50 : (i / (n - 1)) * 100);
   const plotBox = { left: L, right: 0, top: T, bottom: B };
   const step = Math.max(1, Math.ceil(n / room));
@@ -137,13 +147,13 @@ function SeriesChart({ mode, plot, height, empty }: { mode: "bar" | "line" | "ar
     <div className="flex flex-col gap-3" style={{ height }}>
       <div ref={box} className="relative min-h-0 flex-1">
         {[0, 1, 2, 3, 4].map((t) => {
-          const v = (max * t) / 4;
+          const v = min + ((max - min) * t) / 4;
           const top = `calc(${T}px + ${(100 - pct(v)) / 100} * (100% - ${T + B}px))`;
           return (
             <div key={t}>
               <div className={cn("absolute border-t", t === 0 ? "border-line" : "border-line/60")} style={{ left: L, right: 0, top }} />
               <div className="absolute -translate-y-1/2 text-right text-[11px] tabular-nums text-subtle" style={{ left: 0, width: L - 8, top }}>
-                {fmt(v)}
+                {axis(v)}
               </div>
             </div>
           );
@@ -240,10 +250,7 @@ function SeriesChart({ mode, plot, height, empty }: { mode: "bar" | "line" | "ar
               <div key={s.name} className="flex items-center gap-1.5 text-muted">
                 <span className="h-[7px] w-[7px] rounded-full" style={{ background: SERIES[si % SERIES.length] }} />
                 {s.name}
-                <span className="ml-auto pl-3 font-medium tabular-nums text-text">
-                  {s.values[hover]}
-                  {unit}
-                </span>
+                <span className="ml-auto pl-3 font-medium tabular-nums text-text">{tip(s.values[hover]!)}</span>
               </div>
             ))}
           </div>
@@ -269,13 +276,13 @@ function Legend({ items }: { items: { name: string; colour: string }[] }) {
 
 // ─── Bars, donuts, pies ──────────────────────────────────────────────────────
 
-function HBars({ items, unit = "", max: fixedMax, height }: { items: { label: string; value: number }[]; unit?: string; max?: number; height: number }) {
+function HBars({ items, unit = "", max: fixedMax, money = false, height }: { items: { label: string; value: number }[]; unit?: string; max?: number; money?: boolean; height: number }) {
   const max = fixedMax ?? Math.max(...items.map((x) => x.value), 0);
   if (items.length === 0 || max === 0) return <EmptyChart height={height}>Nothing to show yet.</EmptyChart>;
   return (
     <div
       className="grid content-center items-center gap-x-3.5"
-      style={{ height, gridTemplateColumns: "minmax(0,auto) minmax(0,1fr) 40px", rowGap: items.length > 4 ? 12 : 20 }}
+      style={{ height, gridTemplateColumns: `minmax(0,auto) minmax(0,1fr) ${money ? "72px" : "40px"}`, rowGap: items.length > 4 ? 12 : 20 }}
     >
       {items.flatMap((it, i) => [
         <span key={`l${i}`} className="truncate text-right text-[13px] text-muted">
@@ -284,16 +291,16 @@ function HBars({ items, unit = "", max: fixedMax, height }: { items: { label: st
         <div key={`t${i}`} className="h-3.5 overflow-hidden rounded bg-surface-sunken">
           <div className="h-full rounded bg-brand" style={{ width: `${(it.value / max) * 100}%` }} />
         </div>,
-        <span key={`v${i}`} className="text-right text-[13px] font-medium tabular-nums text-text">
-          {it.value}
-          {unit}
+        <span key={`v${i}`} className="whitespace-nowrap text-right text-[13px] font-medium tabular-nums text-text">
+          {money ? shortRupees(it.value) : `${it.value}${unit}`}
         </span>,
       ])}
     </div>
   );
 }
 
-function Donut({ items, pie, height }: { items: { label: string; value: number }[]; pie: boolean; height: number }) {
+function Donut({ items, pie, money = false, height }: { items: { label: string; value: number }[]; pie: boolean; money?: boolean; height: number }) {
+  const show = (v: number) => (money ? shortRupees(v) : String(v));
   const total = items.reduce((a, b) => a + b.value, 0);
   if (total === 0) return <EmptyChart height={height}>Nothing to show yet.</EmptyChart>;
   const S = 148, c = S / 2, R = pie ? 37 : 56, SW = pie ? 74 : 20, CIRC = 2 * Math.PI * R;
@@ -313,7 +320,7 @@ function Donut({ items, pie, height }: { items: { label: string; value: number }
         </svg>
         {!pie && (
           <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-2xl font-semibold leading-[1.1] tracking-tight text-text">{total}</span>
+            <span className={cn("font-semibold leading-[1.1] tracking-tight text-text", money ? "text-base" : "text-2xl")}>{show(total)}</span>
             <span className="text-[11.5px] text-muted">Total</span>
           </div>
         )}
@@ -325,7 +332,7 @@ function Donut({ items, pie, height }: { items: { label: string; value: number }
             {it.label}
           </span>,
           <span key={`v${i}`} className="whitespace-nowrap pl-2.5 text-right text-[13px] font-medium tabular-nums text-text">
-            {it.value}
+            {show(it.value)}
             <span className="font-normal text-subtle"> ({Math.round((it.value / total) * 100)}%)</span>
           </span>,
         ])}
@@ -342,10 +349,12 @@ export function ToneIcon({ tone, className }: { tone: Tone; className?: string }
   return <Icon className={className} aria-hidden="true" />;
 }
 
-function NumberView({ value, delta, tone, height }: { value: string; delta: string | null; tone: Tone; height: number }) {
+function NumberView({ value, delta, tone, exact, height }: { value: string; delta: string | null; tone: Tone; exact?: string; height: number }) {
   return (
     <div className="flex flex-col justify-center gap-2" style={{ height }}>
-      <span className="text-[44px] font-semibold leading-none tracking-tight text-text">{value}</span>
+      <span className="text-[44px] font-semibold leading-none tracking-tight text-text" title={exact}>
+        {value}
+      </span>
       {delta && (
         <span className={cn("inline-flex items-center gap-1 text-[13px] font-medium", TONE_CLASS[tone])}>
           <ToneIcon tone={tone} className="h-[13px] w-[13px]" />
@@ -369,6 +378,9 @@ const PILL: Record<string, string> = {
   Negotiation: "bg-warning-bg text-warning",
   Won: "bg-success-bg text-success",
   Lost: "bg-danger-bg text-danger",
+  "On track": "bg-success-bg text-success",
+  "At risk": "bg-warning-bg text-warning",
+  "Off track": "bg-danger-bg text-danger",
 };
 function Pill({ children }: { children: string }) {
   return <span className={cn("justify-self-start whitespace-nowrap rounded-[5px] px-[7px] py-px text-[11.5px] font-medium", PILL[children] ?? "bg-surface-sunken text-muted")}>{children}</span>;
@@ -482,6 +494,41 @@ function TeamTable({ rows, height }: { rows: { name: string; initials: string; d
           <span className="w-8 text-right text-[12.5px] tabular-nums text-muted">{x.onTime}%</span>
         </span>,
       ])}
+    </div>
+  );
+}
+
+/** A short table of records — renewals coming up, projects — each row opening its own. */
+function RowsTable({ data, height }: { data: RowsData; height: number }) {
+  if (data.rows.length === 0) return <EmptyChart height={height}>{data.empty}</EmptyChart>;
+  const td = "min-w-0 truncate whitespace-nowrap py-[7px] text-[13px]";
+  const template = data.columns.map((c, i) => (i === 0 ? "minmax(0,1.4fr)" : c.align === "right" ? "auto" : "minmax(0,1fr)")).join(" ");
+  return (
+    <div className="grid content-start items-center gap-x-3 overflow-hidden" style={{ height, gridTemplateColumns: template }}>
+      {data.columns.map((c) => (
+        <span key={c.label} className={cn(TH, c.align === "right" && "text-right")}>
+          {c.label}
+        </span>
+      ))}
+      {data.rows.flatMap((row) =>
+        row.cells.map((cell, i) => {
+          const key = `${row.id}-${i}`;
+          if (i === data.pill) return <span key={key}><Pill>{cell}</Pill></span>;
+          const align = data.columns[i]?.align === "right" && "text-right";
+          if (i === 0 && row.href) {
+            return (
+              <Link key={key} href={row.href} className={cn(td, "text-text hover:underline", align)}>
+                {cell}
+              </Link>
+            );
+          }
+          return (
+            <span key={key} className={cn(td, i === 0 ? "text-text" : "text-muted", align)}>
+              {cell}
+            </span>
+          );
+        }),
+      )}
     </div>
   );
 }

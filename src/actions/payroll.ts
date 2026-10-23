@@ -14,8 +14,8 @@ import { hasEffectivePermission } from "@/actions/permission";
 import { dateOnly, daysInMonth, monthLabel, monthRange } from "@/lib/hr/calendar";
 import { lossOfPayDays } from "@/lib/hr/loss-of-pay";
 import { hiddenFileIds, isFileHidden } from "@/lib/hr/file-visibility";
-import { computePayslip, salaryPartsInMonth } from "@/lib/hr/payroll";
-import { DEFAULT_SPLIT_RULES, STRUCTURE_EXTRAS_READ, componentsOfStructure, type ComponentDefault, type SplitRules } from "@/lib/hr/salary-split";
+import { computePayslip, monthlyGross, monthlyStatutory, salaryPartsInMonth, type StatutoryFixed } from "@/lib/hr/payroll";
+import { DEFAULT_SPLIT_RULES, STRUCTURE_EXTRAS_READ, componentsOfStructure, statutoryFixedOf, type ComponentDefault, type SplitRules } from "@/lib/hr/salary-split";
 import { formatCalendarDay } from "@/lib/time/zone";
 import { workOutTds } from "@/lib/hr/tds";
 import { computeProfessionalTax, normaliseState, ptRuleFor, seniorCitizenIn } from "@/lib/hr/professional-tax";
@@ -132,12 +132,14 @@ export async function saveSalaryStructure(input: unknown): Promise<ActionResult<
 
   const custom = customComponentsOrRefusal(data.customComponents);
   if (!custom.ok) return custom;
+  const fixed = statutoryFixedOrRefusal(data, custom.lines);
+  if (!fixed.ok) return fixed;
 
   const created = await db.salaryStructure.create({
     data: {
       userId: data.userId,
       effectiveFrom,
-      ...structureFields(data, custom.lines),
+      ...structureFields(data, custom.lines, fixed.fixed),
       createdById: user.id,
     },
     select: { id: true },
@@ -148,7 +150,7 @@ export async function saveSalaryStructure(input: unknown): Promise<ActionResult<
     action: "CREATE",
     entityType: "SalaryStructure",
     entityId: created.id,
-    entityLabel: `Salary set for ${target.name} from ${data.effectiveFrom}`,
+    entityLabel: `Salary set for ${target.name} from ${data.effectiveFrom}${fixedWords(fixed.fixed)}`,
   });
   revalidatePath("/people/payroll");
   revalidatePath(`/people/${data.userId}`);
@@ -157,8 +159,35 @@ export async function saveSalaryStructure(input: unknown): Promise<ActionResult<
 
 type StructureInput = ReturnType<typeof salaryStructureSchema.parse>;
 
+/**
+ * PF, ESI and TDS fixed at the split (owner, 23 Oct 2026), kept only for a scheme that's on — and refused when
+ * the person's own share and TDS would take more than the month's gross.
+ */
+function statutoryFixedOrRefusal(data: StructureInput, custom: { name: string; amount: number }[]): { ok: true; fixed: StatutoryFixed } | { ok: false; error: string } {
+  const typed = data.statutoryFixed;
+  const fixed: StatutoryFixed = {};
+  if (data.pfApplicable) Object.assign(fixed, { pfEmployee: typed.pfEmployee, pfEmployer: typed.pfEmployer });
+  if (data.esiApplicable) Object.assign(fixed, { esiEmployee: typed.esiEmployee, esiEmployer: typed.esiEmployer });
+  fixed.tds = typed.tds;
+  for (const key of Object.keys(fixed) as (keyof StatutoryFixed)[]) if (fixed[key] === undefined) delete fixed[key];
+
+  const components = componentsOf({ ...data, customComponents: custom });
+  const gross = monthlyGross(components);
+  const own = monthlyStatutory(components, data, fixed);
+  if (Object.keys(fixed).length && own.pfEmployee + own.esiEmployee + (fixed.tds ?? 0) > gross) {
+    return { ok: false, error: "PF, ESI and TDS come to more than the monthly gross. Check the amounts fixed for them." };
+  }
+  return { ok: true, fixed };
+}
+
+/** How the audit trail says PF, ESI or TDS were fixed — which of them, never the amounts. */
+function fixedWords(fixed: StatutoryFixed) {
+  const named = [fixed.pfEmployee !== undefined || fixed.pfEmployer !== undefined ? "PF" : null, fixed.esiEmployee !== undefined || fixed.esiEmployer !== undefined ? "ESI" : null, fixed.tds !== undefined ? "TDS" : null].filter(Boolean);
+  return named.length ? ` (${named.join(", ")} fixed by hand)` : "";
+}
+
 /** What a structure saves, from the form — the six, the flags, the company's own components, and how it was given. */
-function structureFields(data: StructureInput, custom: { name: string; amount: number }[]) {
+function structureFields(data: StructureInput, custom: { name: string; amount: number }[], fixed: StatutoryFixed) {
   return {
     basic: dec(data.basic),
     hra: dec(data.hra),
@@ -171,6 +200,7 @@ function structureFields(data: StructureInput, custom: { name: string; amount: n
     ptApplicable: data.ptApplicable,
     note: data.note?.trim() || null,
     customComponents: custom.length ? (custom as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
+    statutoryFixed: Object.keys(fixed).length ? (fixed as Prisma.InputJsonValue) : Prisma.DbNull,
     annualCtc: data.annualCtc !== undefined ? dec(data.annualCtc) : null,
     revisionBasis: data.revisionBasis ?? null,
     revisionValue: data.revisionBasis && data.revisionValue !== undefined ? dec(data.revisionValue) : null,
@@ -207,14 +237,16 @@ export async function updateSalaryStructure(id: string, input: unknown): Promise
   }
   const custom = customComponentsOrRefusal(data.customComponents);
   if (!custom.ok) return custom;
+  const fixed = statutoryFixedOrRefusal(data, custom.lines);
+  if (!fixed.ok) return fixed;
 
-  await db.salaryStructure.update({ where: { id }, data: { effectiveFrom, ...structureFields(data, custom.lines) } });
+  await db.salaryStructure.update({ where: { id }, data: { effectiveFrom, ...structureFields(data, custom.lines, fixed.fixed) } });
   await recordAudit({
     userId: user.id,
     action: "UPDATE",
     entityType: "SalaryStructure",
     entityId: id,
-    entityLabel: `Salary from ${data.effectiveFrom} corrected for ${existing.user.name}`,
+    entityLabel: `Salary from ${data.effectiveFrom} corrected for ${existing.user.name}${fixedWords(fixed.fixed)}`,
   });
   revalidatePath("/people/payroll");
   revalidatePath(`/people/${data.userId}`);
@@ -450,11 +482,14 @@ export async function runPayroll(input: unknown): Promise<ActionResult<{ id: str
     const backdated = salaryParts[0]?.backdated && employed.firstDay < salaryParts[0].structure.effectiveFrom.getUTCDate();
     const prior = carried.get(person.id);
     const flags = { pfApplicable: structure.pfApplicable, esiApplicable: structure.esiApplicable, ptApplicable: structure.ptApplicable };
+    // PF, ESI and TDS fixed at the split, on the structure in force at the month's end — as the flags are.
+    const fixed = statutoryFixedOf(structure.statutoryFixed);
     const workState = (person.branchId ? workStates.get(person.branchId) : null) ?? person.state ?? null;
     const slipInput = {
       components: componentsOf(structure),
       parts,
       flags,
+      fixed,
       monthDays,
       lopDays: lop,
       employment: person.employment,
@@ -470,29 +505,35 @@ export async function runPayroll(input: unknown): Promise<ActionResult<{ id: str
     };
 
     // TDS: a figure typed on this month's draft is kept — and so is one on a payslip from before Deskzo
-    // worked it out (no basis), where every figure was typed. Otherwise it's worked out from the tax
-    // year so far (src/lib/hr/tds.ts), on the payslip as computed without it; then the payslip is
-    // computed again with it, since Punjab's development tax follows income tax.
+    // worked it out (no basis), where every figure was typed. Then a monthly TDS fixed on the salary
+    // structure, taken whole in a month that pays salary: it's the year's tax spread over its months, not
+    // pay for time. Otherwise it's worked out from the tax year so far (src/lib/hr/tds.ts), on the payslip
+    // as computed without it; then the payslip is computed again with it, since Punjab's development tax
+    // follows income tax.
     const typed = !!prior && (prior.incomeTaxBasis === "TYPED" || (prior.incomeTaxBasis === null && n(prior.incomeTax) > 0));
+    const fixedTds = !typed && fixed.tds !== undefined;
     let incomeTax = typed ? n(prior.incomeTax) : 0;
     let tds: Awaited<ReturnType<typeof workOutTds>> = null;
-    if (!typed) {
+    if (fixedTds) {
+      const unpaid = computePayslip({ ...slipInput, incomeTax: 0, incomeTaxWorkedOut: true }).paidDays <= 0;
+      incomeTax = unpaid ? 0 : fixed.tds!;
+    } else if (!typed) {
       const first = computePayslip({ ...slipInput, incomeTax: 0, incomeTaxWorkedOut: true });
       tds = await workOutTds({
         userId: person.id,
         year,
         month,
         thisMonth: { gross: first.grossEarnings, pf: first.pfEmployee, pt: first.professionalTax },
-        rate: { components: componentsOf(structure), flags, state: workState, gender: person.gender },
+        rate: { components: componentsOf(structure), flags, fixed, state: workState, gender: person.gender },
         joinedOn: person.joinedOn,
         exitedOn: person.exitedOn,
         dateOfBirth: person.dateOfBirth,
       });
       incomeTax = tds?.amount ?? 0;
     }
-    const result = computePayslip({ ...slipInput, incomeTax, incomeTaxWorkedOut: !!tds });
-    const basis = typed ? ("TYPED" as const) : tds ? ("WORKED_OUT" as const) : null;
-    if (!typed && !tds && result.grossEarnings > 0) {
+    const result = computePayslip({ ...slipInput, incomeTax, incomeTaxWorkedOut: !!tds || fixedTds });
+    const basis = typed ? ("TYPED" as const) : fixedTds ? ("FIXED" as const) : tds ? ("WORKED_OUT" as const) : null;
+    if (!typed && !tds && !fixedTds && result.grossEarnings > 0) {
       result.warnings = [...result.warnings.filter((w) => !w.startsWith("No income tax entered")), "Deskzo doesn't work out TDS for this tax year — type it on the payslip."];
     }
     const otherDeduction = n(prior?.otherDeduction);
@@ -671,6 +712,7 @@ export async function adjustPayslip(input: unknown): Promise<ActionResult<null>>
       rate: {
         components: componentsOf(structure),
         flags: { pfApplicable: structure.pfApplicable, esiApplicable: structure.esiApplicable, ptApplicable: structure.ptApplicable },
+        fixed: statutoryFixedOf(structure.statutoryFixed),
         state,
         gender: profile?.gender ?? null,
       },

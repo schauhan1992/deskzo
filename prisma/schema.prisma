@@ -6507,6 +6507,12 @@ model SalaryStructure {
    */
   revisionBasis SalaryRevisionBasis?
   revisionValue Decimal?             @db.Decimal(14, 2)
+  /**
+   * PF, ESI and TDS typed at the split over Deskzo's own figures (owner, 23 Oct 2026), as
+   * { pfEmployee?, pfEmployer?, esiEmployee?, esiEmployer?, tds? } — whole rupees for a full month. A share
+   * left out is worked out, as it always was (src/lib/hr/payroll.ts, StatutoryFixed).
+   */
+  statutoryFixed Json?
 
   /**
    * Off by default for a consultant, or someone whose PF sits with a previous employer.
@@ -6669,7 +6675,8 @@ model Payslip {
   incomeTax          Decimal @default(0) @db.Decimal(12, 2)
   /**
    * WORKED_OUT, or TYPED by hand — which a recalculation keeps. Null on payslips from before Deskzo worked
-   * it out (owner, 17 Oct 2026): every one of those was typed, so a figure on one is kept as typed.
+   * it out (owner, 17 Oct 2026): every one of those was typed, so a figure on one is kept as typed. FIXED: the
+   * monthly TDS fixed on the salary structure (owner, 23 Oct 2026), taken again when the month is recalculated.
    */
   incomeTaxBasis     IncomeTaxBasis?
   /**
@@ -6705,6 +6712,7 @@ model Payslip {
 enum IncomeTaxBasis {
   WORKED_OUT
   TYPED
+  FIXED
 }
 
 /**
