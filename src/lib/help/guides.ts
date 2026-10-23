@@ -348,7 +348,7 @@ export const EXTRA_GUIDE_ROUTES: Readonly<Record<string, string>> = {
 };
 
 /** App pages that belong to no one module, so have no guide of their own. */
-export const NO_GUIDE_ROUTES: readonly string[] = ["/dashboard", "/activity", "/profile", "/settings"];
+export const NO_GUIDE_ROUTES: readonly string[] = ["/dashboard", "/activity", "/profile", "/settings", "/search"];
 
 type RouteEntry = { prefix: string; module: string };
 

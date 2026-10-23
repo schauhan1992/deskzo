@@ -665,9 +665,10 @@ async function main() {
 
     const { HeaderSearch } = load("../src/components/layout/header-search") as typeof import("../src/components/layout/header-search");
     as(seller);
-    const searchHtml = render(React.createElement(HeaderSearch, { scopes: await searchScopesForMe() }));
-    ok("the box names what it searches and the shortcut", searchHtml.includes("Search in Customers ( / )") || searchHtml.includes("Search in Companies ( / )"), searchHtml.slice(0, 200));
-    ok("the scope picker is a real, labelled select", searchHtml.includes('aria-label="Search in"') && searchHtml.includes("<select"));
+    const searchHtml = render(React.createElement(HeaderSearch, { scopes: await searchScopesForMe(), navigation: [] }));
+    // Everything is the default (owner, 23 Oct 2026): the lists, the menu's pages and the help, from one box.
+    ok("the box searches everything by default, and says the shortcut", searchHtml.includes("Search everything ( / )"), searchHtml.slice(0, 200));
+    ok("the scope picker is a real, labelled select — Everything first, then each list", searchHtml.includes('aria-label="Search in"') && searchHtml.includes("<select") && /<option value="all"[^>]*>Everything<\/option>/.test(searchHtml) && (searchHtml.includes(">Customers</option>") || searchHtml.includes(">Companies</option>")));
     ok("the field is a combobox", searchHtml.includes('role="combobox"'));
 
     const Dashboard = (load("../src/app/(dashboard)/dashboard/page") as { default: (p: { searchParams: Promise<{ tab?: string }> }) => Promise<unknown> }).default;

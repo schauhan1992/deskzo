@@ -3,6 +3,11 @@
 Each version as people see it (`version` in `app.config.ts`, shared by both phones), newest first. Android's
 `versionCode` goes up with every Play upload; the iPhone's build number is EAS's own (`eas.json`).
 
+## 0.3.1 (23 Oct 2026) · Android versionCode 5
+
+- Tasks is a screen of its own, opened from Today's **All my tasks** and from More — "All my tasks" used to bring
+  Today back instead of opening it.
+
 ## 0.3.0 — the native app, on Android and the iPhone (23 Oct 2026) · Android versionCode 4
 
 The app made native, and the same app on iPhone and iPad, from the same code — every screen and feature on both

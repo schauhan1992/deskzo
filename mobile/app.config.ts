@@ -28,14 +28,14 @@ const APP_GROUP = "group.com.deskzo.app";
 const config: ExpoConfig = {
   name: "Deskzo",
   slug: "deskzo",
-  version: "0.3.0",
+  version: "0.3.1",
   orientation: "portrait",
   icon: "./assets/icon.png",
   scheme: "deskzo",
   userInterfaceStyle: "light",
   android: {
     package: "com.deskzo.app",
-    versionCode: 4,
+    versionCode: 5,
     adaptiveIcon: {
       backgroundColor: "#4F46E5",
       foregroundImage: "./assets/android-icon-foreground.png",

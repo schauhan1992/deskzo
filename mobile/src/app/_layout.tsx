@@ -87,6 +87,9 @@ function Screens() {
         <Stack.Screen name="new-chat" options={{ title: "New chat" }} />
         <Stack.Screen name="approvals" options={{ title: "Approvals" }} />
         <Stack.Screen name="leave" options={{ title: "Leave" }} />
+        {/* A page of its own, opened from Today and More, since Sales took its place on the bar. As a hidden tab it
+            couldn't be opened at all: "All my tasks" only brought Today back. */}
+        <Stack.Screen name="tasks" options={{ title: "Tasks" }} />
         <Stack.Screen name="settings" options={{ title: "Settings" }} />
         {/* The sales screens (22 Oct 2026), and the web's own pages for whatever has no screen of the app's yet. */}
         <Stack.Screen name="lead/[ref]" options={{ title: "Lead" }} />

@@ -56,8 +56,6 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen name="calls" options={{ title: "Calls", href: can?.calls === false ? null : undefined, tabBarIcon: icon("call-outline") }} />
-      {/* Off the bar since Sales took its place; opened from Today and More. */}
-      <Tabs.Screen name="tasks" options={{ title: "Tasks", href: null }} />
       <Tabs.Screen name="more" options={{ title: "More", tabBarIcon: icon("grid-outline") }} />
     </Tabs>
   );
