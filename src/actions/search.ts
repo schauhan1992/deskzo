@@ -18,8 +18,10 @@ import { documentPath } from "@/lib/trade-documents";
 import { companyPath, itemPath, leadPath, orderPath, ticketPath } from "@/lib/record-links";
 import { formatCalendarDay } from "@/lib/time/zone";
 import {
+  SEARCH_GROUP_LIMIT,
   SEARCH_MAX_LENGTH,
   SEARCH_MIN_LENGTH,
+  SEARCH_PAGE_LIMIT,
   SEARCH_RESULT_LIMIT,
   SEARCH_SCOPES,
   searchScope,
@@ -69,6 +71,48 @@ export async function searchRecords(scopeKey: string, rawQuery: string): Promise
   const page = { page: 1, pageSize: SEARCH_RESULT_LIMIT + 1 };
   const hits = await run(scope.key, query, page);
   return { ok: true, hits: hits.slice(0, SEARCH_RESULT_LIMIT), more: hits.length > SEARCH_RESULT_LIMIT };
+}
+
+/** One list's matches, searching everything. */
+export type SearchGroup = { key: SearchScopeKey; label: string; listPath: string; hits: SearchHit[]; more: boolean };
+export type EverythingResult = { ok: true; groups: SearchGroup[] } | { ok: false; error: string };
+
+/**
+ * Every list this person may search, at once — the header's "Everything" (owner, 23 Oct 2026), and the full
+ * results page with a bigger share of each.
+ *
+ * The same lists as one at a time, each through its own page's action, so nothing is found here that the list
+ * wouldn't show. A list that fails is left out rather than failing the rest. A record found twice — a customer is
+ * a company too — is kept under the first list it is found in, in SEARCH_SCOPES' order. Only lists with a match.
+ */
+export async function searchEverything(rawQuery: string, perScope: number = SEARCH_GROUP_LIMIT): Promise<EverythingResult> {
+  const user = await requireUser();
+  const query = typeof rawQuery === "string" ? rawQuery.trim().slice(0, SEARCH_MAX_LENGTH) : "";
+  if (query.length < SEARCH_MIN_LENGTH) return { ok: true, groups: [] };
+  const limit = Math.min(SEARCH_PAGE_LIMIT, Math.max(1, Math.trunc(Number(perScope)) || SEARCH_GROUP_LIMIT));
+
+  const [allowed, wording] = await Promise.all([Promise.all(SEARCH_SCOPES.map((s) => mayUse(user.id, s))), getWording()]);
+  const scopes = SEARCH_SCOPES.filter((_, i) => allowed[i]);
+  const found = await Promise.all(
+    scopes.map(async (scope) => {
+      try {
+        return await run(scope.key, query, { page: 1, pageSize: limit + 1 });
+      } catch {
+        return [];
+      }
+    }),
+  );
+
+  const seen = new Set<string>();
+  const groups: SearchGroup[] = [];
+  scopes.forEach((scope, i) => {
+    const all = found[i]!.filter((h) => !seen.has(h.href));
+    const hits = all.slice(0, limit);
+    for (const h of hits) seen.add(h.href);
+    if (hits.length === 0) return;
+    groups.push({ key: scope.key, label: scope.term ? slot(wording, scope.label, scope.term) : scope.label, listPath: scope.listPath, hits, more: all.length > limit });
+  });
+  return { ok: true, groups };
 }
 
 const joined = (...parts: (string | null | undefined)[]) => parts.filter((p) => p && p.trim()).join(" · ") || null;

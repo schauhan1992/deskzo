@@ -431,6 +431,51 @@ export async function deskzoGuides(pathname?: string): Promise<DeskzoGuidesView>
   return { ok: got.ok, current: moduleKey ? (got.guides.find((g) => g.module === moduleKey) ?? null) : null, guides: got.guides, helpCenterUrl: helpCenterUrl() };
 }
 
+/** One piece of help the header's search can find — a guide, an article or a video, Deskzo's or the company's. */
+export type SearchableHelp = {
+  id: string;
+  title: string;
+  summary: string | null;
+  url: string;
+  /** Opens in a new tab: a Deskzo guide on the website, or a link that leaves the app. */
+  external: boolean;
+  kind: "guide" | "article" | "video";
+  source: "deskzo" | "company";
+  /** What a search matches beyond the title and summary. */
+  words: string;
+};
+
+/**
+ * Everything the Help panel holds, as one list for the header's search (owner, 23 Oct 2026): Deskzo's guides for
+ * this workspace's modules, Deskzo's articles and videos, and the company's own. Read once when somebody first
+ * searches everything, and matched in the browser. Deskzo's side failing is fewer results, never a throw.
+ */
+export async function searchableHelp(): Promise<SearchableHelp[]> {
+  await requireUser();
+  const [guides, content, company] = await Promise.all([
+    currentTenant()
+      .then((t) => deskzoGuidesFor(t))
+      .catch(() => ({ ok: false, guides: [] as DeskzoGuide[] })),
+    deskzoContent(),
+    listHelpLinks().catch(() => [] as HelpLinkView[]),
+  ]);
+  const link = (l: { id: string; kind: string; title: string; url: string; description: string | null; external: boolean }, source: "deskzo" | "company"): SearchableHelp => ({
+    id: `${source}:${l.id}`,
+    title: l.title,
+    summary: l.description,
+    url: l.url,
+    external: l.external,
+    kind: l.kind === "VIDEO" ? "video" : "article",
+    source,
+    words: "",
+  });
+  return [
+    ...guides.guides.map((g): SearchableHelp => ({ id: `guide:${g.module}`, title: g.title, summary: g.summary || null, url: g.url, external: true, kind: "guide", source: "deskzo", words: g.words })),
+    ...content.links.map((l) => link(l, "deskzo")),
+    ...company.map((l) => link(l, "company")),
+  ];
+}
+
 export async function deskzoUpdates(limit = 30): Promise<DeskzoFeed> {
   const user = await requireUser();
   const [me, content] = await Promise.all([

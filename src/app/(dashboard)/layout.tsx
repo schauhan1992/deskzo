@@ -292,7 +292,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-line bg-surface/85 px-4 backdrop-blur-md md:px-6">
           {/* Leaves room for the mobile menu button, which floats over this corner. */}
           <div className="w-9 shrink-0 md:hidden" />
-          {searchScopes.length > 0 && <HeaderSearch scopes={searchScopes} />}
+          {/* Everything a person may open, from one box — their lists, their menu's pages and the help. */}
+          {shownUser && <HeaderSearch scopes={searchScopes} navigation={navigation} />}
           {viewAs && (
             <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-warning-bg px-2.5 py-1 text-xs font-medium text-warning">
               <Eye className="h-3.5 w-3.5 shrink-0" />

@@ -64,8 +64,28 @@ export function searchScope(key: string): SearchScope | undefined {
   return SEARCH_SCOPES.find((s) => s.key === key);
 }
 
-/** Where a query first lands, and the one remembered per browser. */
-export const SEARCH_SCOPE_STORAGE_KEY = "deskzo.search-scope";
+/**
+ * "Everything": every list this person may search at once, the pages of their menu, and the help — the box's
+ * default (owner, 23 Oct 2026). One list at a time is still a choice in the box's menu.
+ */
+export const EVERYTHING = "all";
+
+/**
+ * Where a query first lands, and the one remembered per browser. ".v2" since Everything became the default, so
+ * a browser that remembered a list from before starts on Everything once.
+ */
+export const SEARCH_SCOPE_STORAGE_KEY = "deskzo.search-scope.v2";
+
+/** Matches from each list in the box, searching everything. */
+export const SEARCH_GROUP_LIMIT = 3;
+/** Matches from each list on the full results page. */
+export const SEARCH_PAGE_LIMIT = 10;
+
+/** The full results page for a query — Enter, searching everything. */
+export function searchPageHref(query: string): string {
+  const q = query.trim();
+  return q ? `/search?q=${encodeURIComponent(q)}` : "/search";
+}
 
 /** Shortest query worth sending: one letter matches half the database and helps nobody. */
 export const SEARCH_MIN_LENGTH = 2;
@@ -95,6 +115,19 @@ export function refShortcut(scope: SearchScope, query: string): { label: string;
   if (!Number.isSafeInteger(seq) || seq <= 0) return null;
   const ref = `${scope.ref.prefix}-${String(seq).padStart(6, "0")}`;
   return { label: `Open ${ref}`, href: `${scope.ref.path}/${ref}` };
+}
+
+/**
+ * "Open LEAD-000123" for a reference typed with its prefix, whichever list it belongs to — searching everything.
+ * A bare number names no list, so it opens nothing here.
+ */
+export function refShortcutAny(scopes: readonly SearchScope[], query: string): { label: string; href: string } | null {
+  if (!/^[A-Za-z]{2,4}-\d/.test(query.trim())) return null;
+  for (const scope of scopes) {
+    const hit = refShortcut(scope, query);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 /** One line in the results. `href` is always an in-app path. */
