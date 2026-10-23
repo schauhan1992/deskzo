@@ -273,6 +273,7 @@
     "check:close-core": "tsx scripts/check-close-core.ts",
     "check:close-ui": "tsx scripts/check-close-ui.ts",
     "check:domains": "tsx scripts/check-domains.ts",
+    "check:domain-edge": "tsx scripts/check-domain-edge.ts",
     "site:seed-pages": "tsx scripts/site-seed-pages.ts"
   },
   "dependencies": {

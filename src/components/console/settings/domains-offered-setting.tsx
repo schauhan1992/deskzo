@@ -14,8 +14,8 @@ import type { Tone } from "@/lib/console-shared/types";
 
 /**
  * Settings › Custom domains: `domains.offered`, whether workspace owners may add addresses of their own
- * from Settings › Domain (src/lib/platform/domains.ts). Off until HTTPS certificates for them are
- * automated. Switching it on is confirmed first — every workspace whose plan allows one can then add
+ * from Settings › Domain (src/lib/platform/domains.ts). Off until Cloudflare is connected below it, which
+ * issues their HTTPS certificates. Switching it on is confirmed first — every workspace whose plan allows one can then add
  * one; switching it off saves straight away and removes nothing. Staff add and check addresses from a
  * workspace's page whatever it says. `readOnly` (admins and billing staff) shows the state in words.
  */

@@ -15,7 +15,7 @@ import { giveTrialPlans, liveGatewaySubscription, savePlan, setLimitOverrides, s
 import { applyStanding } from "@/lib/billing/lifecycle";
 import { addPlanPrice, retirePlanPrice } from "@/lib/billing/prices";
 import { ConsoleRefused } from "@/lib/platform/refused";
-import { SECRET_KEYS, TRIAL_SEATS_MAX, setSecret, setSetting, trialSeats, type SecretKey } from "@/lib/platform/settings";
+import { GATEWAY_SECRET_KEYS, TRIAL_SEATS_MAX, setSecret, setSetting, trialSeats, type SecretKey } from "@/lib/platform/settings";
 import { refreshTrialWorkspaces } from "@/lib/platform/entitlements";
 import { forgetRegistry } from "@/lib/tenancy/registry";
 import { holdProblem, openInviteWhere } from "@/lib/platform/name-rules";
@@ -435,9 +435,9 @@ export async function consoleSaveGatewayKeys(input: { values: Partial<Record<Sec
   return asStaff(OWNERS, async (staff) => {
     const values: Partial<Record<string, unknown>> = input?.values && typeof input.values === "object" ? input.values : {};
     const clearing: unknown[] = Array.isArray(input?.clear) ? input.clear : [];
-    if (clearing.some((key) => !(SECRET_KEYS as readonly unknown[]).includes(key))) throw new ConsoleRefused("Choose the keys to remove from the list.");
+    if (clearing.some((key) => !(GATEWAY_SECRET_KEYS as readonly unknown[]).includes(key))) throw new ConsoleRefused("Choose the keys to remove from the list.");
     const writes: { key: SecretKey; value: string | null }[] = [];
-    for (const key of SECRET_KEYS) {
+    for (const key of GATEWAY_SECRET_KEYS) {
       if (clearing.includes(key)) {
         writes.push({ key, value: null });
         continue;

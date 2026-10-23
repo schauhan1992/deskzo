@@ -180,7 +180,7 @@ your DNS provider's API. Openprovider's API is open to reseller accounts only, a
 username and password. So move deskzo.com's DNS to **Cloudflare**, which is free. The domain stays registered at
 Openprovider.
 
-1. **Cloudflare:** add the site `deskzo.com` (Free plan). Make sure there are two records, an A record for `@` and one for `*`, both to the server's IP. Both must be **DNS only, a grey cloud, not proxied**.
+1. **Cloudflare:** add the site `deskzo.com` (Free plan). Make sure there are two records, an A record for `@` and one for `*`, both to the server's IP. Both must be **DNS only, a grey cloud, not proxied**, for now. Customers' own domains (below) need the `*` record proxied later.
 2. **Openprovider:** change deskzo.com's nameservers to the two Cloudflare gives you. Wait until Cloudflare says the site is active.
 3. **Cloudflare API token:** go to My Profile → API Tokens → Create Token → **Edit zone DNS**. Under Zone Resources, include *Specific zone: deskzo.com*. Copy the token.
 4. **Coolify proxy:** go to Servers → your server → Proxy → Configuration. In the `traefik` service:
@@ -221,7 +221,57 @@ Openprovider.
    If the site stops answering, **Reset Labels to Defaults** puts Coolify's own back.
 7. **Check two addresses that aren't set up anywhere**, e.g. `https://nobody.deskzo.com`. It should show "No such workspace" over HTTPS with no warning. Then open signups.
 
-Customers' own domains (Settings → Domain) need a certificate each, issued on demand. Traefik doesn't do that, so leave the console's **Offer custom domains** off on Coolify.
+## Customers' own domains
+
+A workspace can be reached at an address of its own, like `erp.acme.com`, as well as `acme.deskzo.com` (Settings ›
+Domain). Its owner adds two records at their DNS provider: a TXT record that proves the domain is theirs, and a CNAME
+to `acme.deskzo.com`.
+
+deskzo.com's records are proxied by Cloudflare, so Cloudflare answers every request for those addresses. It refuses
+an address on a domain outside Cloudflare with **Error 1001** until that address is a *custom hostname* of the
+deskzo.com zone, which is also what gives it an HTTPS certificate. Once Cloudflare is connected in the console, Deskzo
+does that itself: it adds the address to Cloudflare as soon as its records check out, puts it live when Cloudflare has
+issued its certificate, and removes it from Cloudflare when it is removed from the workspace. Cloudflare charges
+nothing for the first 100 addresses, then $0.10 a month for each.
+
+Set it up once:
+
+1. **Cloudflare → deskzo.com → DNS.** The `*` record must be **proxied** (an orange cloud): Cloudflare only serves a
+   custom hostname that points at a proxied name. Add an A record named `origin` to the server's IP, also proxied.
+2. **SSL/TLS → Custom Hostnames.** Enable Cloudflare for SaaS. Set the **Fallback Origin** to `origin.deskzo.com` and
+   wait until it says Active.
+3. **SSL/TLS → Overview.** If the mode is **Full (strict)**, Cloudflare would refuse the server's certificate for a
+   customer's address with Error 526, since the server holds certificates only for deskzo.com. Under **Rules →
+   Configuration Rules**, create a rule: *Custom filter expression*, field **Hostname**, operator **does not contain**,
+   value `deskzo.com`; then **SSL → Full**. deskzo.com's own addresses stay on Full (strict).
+4. **An API token:** My Profile → API Tokens → Create Token → **Create Custom Token**. Permissions: **Zone → SSL and
+   Certificates → Edit**. Zone Resources: **Include → Specific zone → deskzo.com**. Copy the token, which Cloudflare
+   shows once.
+5. **Coolify: every address to the app.** Traefik only hands the app the addresses its rules name. On the application,
+   with **Readonly labels** off, find the line ending `.service=…` in the `https` router's labels and note the name
+   after the `=`. Then add these five lines, with that name in the last one, and **Redeploy**:
+   ```
+   traefik.http.routers.deskzo-own-domains.rule=HostRegexp(`.+`)
+   traefik.http.routers.deskzo-own-domains.entryPoints=https
+   traefik.http.routers.deskzo-own-domains.priority=1
+   traefik.http.routers.deskzo-own-domains.tls=true
+   traefik.http.routers.deskzo-own-domains.service=<the name>
+   ```
+   Priority 1 means it only catches addresses no other rule on the server names, so other applications on this
+   server are untouched. The app itself answers an address it doesn't know with "No such workspace".
+6. **Console → Settings → Custom domains → Cloudflare for SaaS.** Add the **zone id** (deskzo.com's Overview page,
+   under API) and the **API token**, then press **Check connection**. It should say the addresses are served through
+   `origin.deskzo.com`.
+7. When it does, switch on **Offer custom domains to workspaces**, if you want owners to add their own. Staff can add
+   one from a workspace's page either way.
+
+An address that was added before Cloudflare was connected goes onto Cloudflare at its next check, so press **Check
+now** on it. A certificate usually comes within a few minutes, and the page says "HTTPS certificate being issued"
+meanwhile. A domain whose CAA records name other certificate authorities gets no certificate until it allows
+Cloudflare's.
+
+With the proxy on, Cloudflare's own limits apply to every address: an upload of at most 100 MB, and an answer within
+100 seconds.
 
 ## Tickets by email
 
