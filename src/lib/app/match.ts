@@ -1,4 +1,4 @@
-import type { CallOutcome, LeadStatus } from "@prisma/client";
+import type { CallOutcome, LeadStatus, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { phoneKey } from "@/lib/companies/duplicates";
 import { STILL_THERE } from "@/lib/contacts/left";
@@ -68,6 +68,57 @@ export async function matchNumbers(userId: string, numbers: string[]): Promise<M
     });
   }
   return found;
+}
+
+/** As many numbers as an iPhone is given ahead of time — a Call Directory loads them all at once. */
+export const DIRECTORY_MAX = 20_000;
+const DIRECTORY_PAGE = 2_000;
+
+export type DirectoryEntry = { number: string; label: string };
+
+/**
+ * Caller ID ahead of time, for an iPhone (owner, 22 Oct 2026). iOS never lets an app look a ringing number up;
+ * it asks a Call Directory extension the app has loaded beforehand. So the app is given every number this person
+ * could be called from by a customer they may see — exactly whom `matchNumbers` would match: the contact's own
+ * reach and their account's, still at the company, never a reseller's customer, a number of ten digits or more —
+ * each as it is stored (the app writes it as iOS wants it), named "contact · company" as their screens show
+ * them (field access covers leads, not contacts).
+ *
+ * One entry a contact, in an order that doesn't change between asks: their own accounts first, then primary
+ * contacts, then by name — so where two contacts carry one number, the first is the one caller ID would name,
+ * and the one to keep. At most `DIRECTORY_MAX`, and `truncated` when there were more.
+ */
+export async function directoryEntries(userId: string, max = DIRECTORY_MAX): Promise<{ entries: DirectoryEntry[]; truncated: boolean }> {
+  const scope: Prisma.ContactWhereInput[] = [
+    { phone: { not: null } },
+    STILL_THERE,
+    { company: { managedByResellerId: null } },
+    await throughAccount(userId, "view"),
+    await contactAccess(userId, "view"),
+  ];
+  const entries: DirectoryEntry[] = [];
+  const whose: Prisma.ContactWhereInput[] = [{ company: { ownerUserId: userId } }, { company: { OR: [{ ownerUserId: null }, { ownerUserId: { not: userId } }] } }];
+  for (const theirs of whose) {
+    let after: string | null = null;
+    for (;;) {
+      const page: { id: string; name: string; phone: string | null; company: { name: string } }[] = await db.contact.findMany({
+        where: { AND: [...scope, theirs] },
+        orderBy: [{ isPrimary: "desc" }, { name: "asc" }, { id: "asc" }],
+        ...(after ? { cursor: { id: after }, skip: 1 } : {}),
+        take: DIRECTORY_PAGE,
+        select: { id: true, name: true, phone: true, company: { select: { name: true } } },
+      });
+      for (const c of page) {
+        // A number too short to be one caller ID matches.
+        if (!c.phone || !phoneKey(c.phone)) continue;
+        if (entries.length === max) return { entries, truncated: true };
+        entries.push({ number: c.phone, label: `${c.name} · ${c.company.name}` });
+      }
+      if (page.length < DIRECTORY_PAGE) break;
+      after = page[page.length - 1]!.id;
+    }
+  }
+  return { entries, truncated: false };
 }
 
 const CLOSED: LeadStatus[] = ["WON", "LOST", "DISQUALIFIED"];

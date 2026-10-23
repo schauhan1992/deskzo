@@ -45,7 +45,7 @@ export async function callingReport(params: { from?: string; to?: string }): Pro
   const [calls, overdue, callers] = await Promise.all([
     db.callLog.findMany({
       where: { AND: [scope, { startedAt: range }] },
-      select: { userId: true, direction: true, outcome: true, durationSeconds: true, startedAt: true, source: true, reviewedAt: true, followUpAt: true },
+      select: { userId: true, direction: true, outcome: true, durationSeconds: true, lengthUnknown: true, startedAt: true, source: true, reviewedAt: true, followUpAt: true },
     }),
     db.callLog.groupBy({ by: ["userId"], where: { AND: [scope, { followUpAt: { lt: now }, followUpDone: false }] }, _count: { _all: true } }),
     // Who calls here: anybody within reach who logged a call in the last month — so somebody who made none

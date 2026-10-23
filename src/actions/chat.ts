@@ -8,6 +8,7 @@ import { tenantKey } from "@/lib/tenancy/cache";
 import { PEOPLE_ONLY } from "@/lib/people";
 import { getDownlineUserIds } from "@/lib/org-chart";
 import { notifyUser } from "@/lib/notify";
+import { pushToIphonesOf } from "@/lib/app/push";
 import { notMigratedYet } from "@/lib/not-migrated";
 import { parseRecordRef } from "@/lib/record-url";
 import { companyAccess, leadAccess, orderAccess, ticketAccess } from "@/lib/authz/access";
@@ -291,6 +292,17 @@ export async function sendChatMessage(form: FormData): Promise<ActionResult<Chat
     }),
   );
   await deliverToListening(chatId, members.map((m) => m.userId), user.id);
+
+  // On their iPhones too (owner, 22 Oct 2026): who and where, never what — as the banner in the app. Not to the
+  // sender, nor to anybody who muted the chat. Android's app has no receiver for it yet (src/lib/app/push.ts).
+  await pushToIphonesOf(
+    members.filter((m) => m.userId !== user.id && !mutedBy.get(m.userId)).map((m) => m.userId),
+    {
+      alert: { title: member.chat.kind === "GROUP" ? `New message · ${member.chat.name ?? "a group"}` : `New message from ${user.name}`, body: "Open Deskzo to read it." },
+      data: { type: "chat", chat: chatId },
+      threadId: chatId,
+    },
+  );
 
   // Who and where, never what: the message stays in the chat.
   for (const mentioned of mentionIds) {

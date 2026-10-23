@@ -13,6 +13,9 @@
  *   · Leave: the days a span takes, asking, cancelling before it starts.
  *   · Approvals: the manager sees the report's leave and never their own; decided from the phone, by the leave
  *     action's own rule; a kind there isn't, a 404.
+ *   · On an iPhone (owner, 22 Oct 2026): leave asked for pushes the approver's iPhone that a decision waits —
+ *     the title, never the request; not their Android phone, not news that isn't a decision, and nothing for a
+ *     kind they muted.
  *   · Screen rules: the app is told the screenshot allowance and the watermark; a screenshot taken in it counts
  *     where the website's do, and past the allowance is logged as blocked. The workspace's own rules are put back.
  *
@@ -28,6 +31,8 @@ import { directClient } from "../src/lib/tenancy/direct-client";
 process.env.DESKZO_TENANCY_FALLBACK = "legacy";
 process.env.TRUST_PROXY = "1";
 process.env.DESKZO_APP = "on";
+// Never Apple's real service from a check: iPhones' pushes go to the stand-in.
+delete process.env.DESKZO_APP_APNS_KEY;
 
 const TAG = "ZZAPPDAY";
 const MAIL = "@zzappday.invalid";
@@ -96,6 +101,7 @@ async function cleanup() {
 const ROUTES: [RegExp, string, string[]][] = [
   [/^\/pair$/, "pair", []],
   [/^\/me$/, "me", []],
+  [/^\/device$/, "device", []],
   [/^\/today$/, "today", []],
   [/^\/attendance$/, "attendance", []],
   [/^\/tasks$/, "tasks", []],
@@ -149,6 +155,7 @@ async function main() {
   const { attendanceLocations } = require("../src/actions/attendance-location") as typeof import("../src/actions/attendance-location");
   const { workspaceClock } = require("../src/lib/time/workspace") as typeof import("../src/lib/time/workspace");
   const { workableTask } = require("../src/lib/tasks/server") as typeof import("../src/lib/tasks/server");
+  const push = require("../src/lib/app/push") as typeof import("../src/lib/app/push");
   /* eslint-enable @typescript-eslint/no-require-imports */
 
   await cleanup();
@@ -164,11 +171,11 @@ async function main() {
     const manager = await db.user.create({ data: { name: `${TAG} Manager`, email: `manager${MAIL}`, role: "SALES_MANAGER", passwordHash: "x".repeat(60) } });
     const worker = await db.user.create({ data: { name: `${TAG} Worker`, email: `worker${MAIL}`, role: "SALES", passwordHash: "x".repeat(60), managerId: manager.id } });
     const stranger = await db.user.create({ data: { name: `${TAG} Stranger`, email: `stranger${MAIL}`, role: "SALES", passwordHash: "x".repeat(60) } });
-    const pair = async (userId: string, model: string) => {
+    const pair = async (userId: string, model: string, platform = "android") => {
       const code = await pairing.startPairing(userId);
       /* eslint-disable-next-line @typescript-eslint/no-require-imports */
       const mod = require("../src/app/api/app/pair/route") as { POST: (req: Request) => Promise<Response> };
-      const res = await mod.POST(new Request("http://deskzo.localhost:3000/api/app/pair", { method: "POST", headers: { ...Object.fromEntries(requestHeaders), "content-type": "application/json" }, body: JSON.stringify({ code: code.code, platform: "android", model }) }));
+      const res = await mod.POST(new Request("http://deskzo.localhost:3000/api/app/pair", { method: "POST", headers: { ...Object.fromEntries(requestHeaders), "content-type": "application/json" }, body: JSON.stringify({ code: code.code, platform, model }) }));
       return ((await res.json()) as { data: { token: string } }).data.token;
     };
     const workerPhone = await pair(worker.id, `${TAG} worker phone`);
@@ -239,8 +246,28 @@ async function main() {
     const half = await call<{ days: number }>(workerPhone, "POST", "/leave/preview", { from, to, to_half_day: true });
     ok("  a half day on the last day: one and a half", half.data.days === 1.5, half.data.days);
     ok("  dates not as Deskzo takes them: refused", (await call(workerPhone, "POST", "/leave/preview", { from: "next week", to })).status === 400);
+    // Both of them with an iPhone too, to hear what waits for them.
+    const managerIphone = await pair(manager.id, `${TAG} manager iPhone`, "ios");
+    const workerIphone = await pair(worker.id, `${TAG} worker iPhone`, "ios");
+    await call(managerIphone, "PATCH", "/device", { push_token: "apns-zzappday-manager" });
+    await call(workerIphone, "PATCH", "/device", { push_token: "apns-zzappday-worker" });
+    type Pushed = { apns?: { token: string; payload: unknown }; message?: unknown };
+    const pushed: Pushed[] = [];
+    push.setTestPush(async (message) => {
+      pushed.push(message as Pushed);
+      return 200;
+    });
     const asked = await call<{ id: string; days: number }>(workerPhone, "POST", "/leave", { type_id: type.id, from, to, reason: `${TAG} family wedding` });
     ok("asked for from the phone: the web's own applyForLeave", asked.status === 201 && asked.data.days === 2 && (await db.leaveRequest.findUnique({ where: { id: asked.data.id } }))?.status === "PENDING", asked.error?.message ?? asked.status);
+    ok(
+      "  the manager's iPhone told a decision waits — the title, never the request — and nothing to an Android phone",
+      pushed.length === 1 &&
+        pushed[0]!.apns?.token === "apns-zzappday-manager" &&
+        JSON.stringify(pushed[0]!.apns?.payload) === JSON.stringify({ aps: { alert: { title: "Leave request", body: "Waiting for your decision." }, sound: "default", category: "deskzo-approval" }, body: { type: "approval" } }) &&
+        !JSON.stringify(pushed).includes("wedding"),
+      JSON.stringify(pushed),
+    );
+    pushed.length = 0;
     const mine = await call<{ requests: { id: string; status: string; days: number }[] }>(workerPhone, "GET", "/leave");
     ok("  in their requests, its days a number", mine.data.requests.some((r) => r.id === asked.data.id && r.status === "PENDING" && r.days === 2));
     const coming = await call<Today>(workerPhone, "GET", "/today");
@@ -259,6 +286,7 @@ async function main() {
     const approved = await call(managerPhone, "POST", `/approvals/leave/${asked.data.id}`, { approve: true, note: "Enjoy" });
     const decided = await db.leaveRequest.findUnique({ where: { id: asked.data.id } });
     ok("approved from the manager's phone, with the note, as the manager", approved.status === 200 && decided?.status === "APPROVED" && decided.decisionNote === "Enjoy" && decided.approverId === manager.id, approved.error?.message ?? approved.status);
+    ok("  the worker told in Deskzo, but not pushed — it isn't a decision waiting for them", (await db.notification.count({ where: { userId: worker.id, type: "LEAVE_DECIDED" } })) >= 1 && pushed.length === 0, JSON.stringify(pushed));
     ok("  gone from the queue", !(await call<Approval[]>(managerPhone, "GET", "/approvals")).data.some((a) => a.id === asked.data.id));
     ok("  and approved on the worker's Today", !!(await call<Today>(workerPhone, "GET", "/today")).data.leave?.upcoming.some((l) => l.id === asked.data.id && l.status === "APPROVED"));
     const again = await call(managerPhone, "POST", `/approvals/leave/${asked.data.id}`, { approve: false });
@@ -299,10 +327,17 @@ async function main() {
     section("Cancelling leave");
     const cancelled = await call(workerPhone, "DELETE", `/leave/${asked.data.id}`);
     ok("the worker cancels it before it starts", cancelled.status === 200 && (await db.leaveRequest.findUnique({ where: { id: asked.data.id } }))?.status === "CANCELLED", cancelled.error?.message ?? cancelled.status);
+    // The manager no longer wants to hear of leave asked for: not in Deskzo, so not on the iPhone either.
+    await db.notificationPreference.upsert({ where: { userId_type: { userId: manager.id, type: "LEAVE_REQUESTED" } }, create: { userId: manager.id, type: "LEAVE_REQUESTED", inApp: false }, update: { inApp: false } });
+    pushed.length = 0;
+    const toldBefore = await db.notification.count({ where: { userId: manager.id, type: "LEAVE_REQUESTED" } });
     const second = await call<{ id: string }>(workerPhone, "POST", "/leave", { type_id: type.id, from, to: from, reason: `${TAG} errand` });
+    ok("a kind the manager muted: neither told nor pushed", second.status === 201 && pushed.length === 0 && (await db.notification.count({ where: { userId: manager.id, type: "LEAVE_REQUESTED" } })) === toldBefore, JSON.stringify(pushed));
+    push.setTestPush(null);
     const notTheirs = await call(managerPhone, "DELETE", `/leave/${second.data.id}`);
     ok("somebody else's: refused, and left as it was", notTheirs.status === 422 && (await db.leaveRequest.findUnique({ where: { id: second.data.id } }))?.status === "PENDING", notTheirs.error?.message);
   } finally {
+    push.setTestPush(null);
     await cleanup();
   }
 }

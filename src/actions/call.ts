@@ -23,6 +23,7 @@ const callSelect = {
   outcome: true,
   startedAt: true,
   durationSeconds: true,
+  lengthUnknown: true,
   notes: true,
   source: true,
   followUpAt: true,

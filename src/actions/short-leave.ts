@@ -101,6 +101,8 @@ export async function applyForShortLeave(input: ShortLeaveDraft): Promise<Action
       title: "Short leave request",
       message: `${outcome.name} has asked for a short leave on ${words}.`,
       link: "/people/leave#short-leave",
+      // Not on the Deskzo app's Approvals screen (src/lib/app/daily.ts), so not pushed to an iPhone as if it were.
+      awaitsDecision: false,
     });
   }
   await recordAudit({ userId: user.id, action: "CREATE", entityType: "ShortLeaveRequest", entityId: outcome.id, entityLabel: `Short leave ${words}` });

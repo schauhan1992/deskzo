@@ -6,6 +6,7 @@
  *     the first and last call of the day (the middle value across days), what the Deskzo app logged and what
  *     still waits for a word, callbacks promised and overdue, and how fast new leads were first called.
  *   · Team totals and a count for each day.
+ *   · A call logged by hand on an iPhone, its length not known: a call, connected, but not in the average.
  *   · Somebody who called lately but not in the period shows, with nothing.
  *   · Within the viewer's reach: a rep sees what the Calls list shows them; without Calls, no report.
  *   · A period longer than three months is cut to its last three; the page renders.
@@ -95,6 +96,13 @@ async function main() {
     ok("9:15 am, 6:00 pm, nothing", lib.minuteOfDay(555) === "9:15 am" && lib.minuteOfDay(1080) === "6:00 pm" && lib.minuteOfDay(0) === "12:00 am" && lib.minuteOfDay(null) === "—");
     ok("15 min, 2 h 10 min, 3 days", lib.waited(15) === "15 min" && lib.waited(130) === "2 h 10 min" && lib.waited(3 * 1440) === "3 days" && lib.waited(null) === "—");
     ok("the middle value", lib.median([3, 1, 2]) === 2 && lib.median([1, 2, 3, 10]) === 3 && lib.median([]) === null);
+    const byHand = (durationSeconds: number, lengthUnknown: boolean) => ({ userId: "zz", direction: "OUTBOUND" as const, outcome: "CONNECTED" as const, durationSeconds, lengthUnknown, startedAt: new Date(), source: "PHONE" as const, reviewedAt: null, followUpAt: null });
+    const unknownLength = lib.buildCallReport({ clock, people: [{ id: "zz", name: "Zz" }], calls: [byHand(90, false), byHand(0, true)], overdue: [], leads: null, dayKeys: [] });
+    ok(
+      "a call logged by hand on an iPhone, its length not known: counted and connected, but not dragging the average down",
+      unknownLength.rows[0]?.calls === 2 && unknownLength.rows[0].connected === 2 && unknownLength.rows[0].talkSeconds === 90 && unknownLength.rows[0].averageSeconds === 90 && unknownLength.totals.averageSeconds === 90,
+      JSON.stringify(unknownLength.totals),
+    );
 
     section("The team and their calls");
     // Days well ahead, where no real call is — the totals are the fixture's alone.

@@ -181,6 +181,7 @@ export async function pairPhone(input: PairInput, ip: string | null): Promise<{ 
       title: `${user.name} is waiting for a phone to be approved`,
       message: `${label}. They can't use the Deskzo app on it until it is approved.`,
       link: "/settings/security/access?tab=devices",
+      awaitsDecision: true,
     });
   }
 

@@ -8,6 +8,8 @@
  *   · Sending, editing and deleting for everyone, with their windows; files kept and refused.
  *   · Unread counts, muting, @mentions told without their text, delivery and read ticks, the live bus.
  *   · Groups: admins, adding, removing, leaving, and never left without an admin.
+ *   · On an iPhone (owner, 22 Oct 2026): a push saying who and where, never what — not to the sender, nobody who
+ *     muted the chat, an Android phone or a signed-out iPhone; an iPhone Apple no longer knows forgotten.
  *   · Search, the files route, the export refused to anybody but the super admin, nightly retention.
  *
  * Everything is named ZZPROBE_CHAT and removed in a finally.
@@ -16,6 +18,9 @@
  */
 import "dotenv/config";
 import Module from "node:module";
+
+// Never Apple's real service from a check: iPhones' pushes go to the stand-in.
+delete process.env.DESKZO_APP_APNS_KEY;
 import { chatChimes } from "../src/lib/reminder-sounds";
 import { directClient } from "../src/lib/tenancy/direct-client";
 import {
@@ -141,6 +146,7 @@ async function main() {
   const filesRoute = require("../src/app/api/chat/files/[id]/route") as typeof import("../src/app/api/chat/files/[id]/route");
   const exportRoute = require("../src/app/api/chat/export/[id]/route") as typeof import("../src/app/api/chat/export/[id]/route");
   const { workspaceClock } = require("../src/lib/time/workspace") as typeof import("../src/lib/time/workspace");
+  const push = require("../src/lib/app/push") as typeof import("../src/lib/app/push");
 
   const settingsBefore = await db.chatSettings.findUnique({ where: { id: "global" } });
   const today = (await workspaceClock()).calendarDate(new Date());
@@ -394,6 +400,64 @@ async function main() {
     await chat.leaveGroupChat(groupId);
     const admins = (await server.membersView(groupId)).filter((m) => !m.leftAt && m.isAdmin);
     ok("the last admin leaving hands the group to the longest-standing member", admins.length === 1 && admins[0]!.userId === bob.id, admins.map((a) => a.name).join());
+
+    section("On their iPhones");
+
+    const erin = await make("erin", "Erin Chat");
+    // A paired phone of theirs, as /api/app/pair leaves one: its device row, and the app's.
+    const phoneOf = async (u: { id: string }, platform: "ios" | "android", pushToken: string, status: "APPROVED" | "REVOKED" = "APPROVED") => {
+      const device = await db.userDevice.create({ data: { userId: u.id, tokenHash: `${TAG}-${pushToken}`, kind: "MOBILE", label: `${TAG} ${platform}`, status } });
+      return db.appDevice.create({ data: { deviceId: device.id, userId: u.id, platform, pushToken } });
+    };
+    await phoneOf(alice, "ios", "apns-zzprobe-alice");
+    const bobIphone = await phoneOf(bob, "ios", "apns-zzprobe-bob");
+    await phoneOf(carol, "ios", "apns-zzprobe-carol");
+    await phoneOf(carol, "ios", "apns-zzprobe-carol-old", "REVOKED");
+    await phoneOf(erin, "android", "fcm-zzprobe-erin");
+    type Pushed = { apns?: { token: string; payload: { aps: { alert: { title: string; body: string } }; body: Record<string, string> } }; message?: unknown };
+    const pushed: Pushed[] = [];
+    let status = 200;
+    push.setTestPush(async (m) => {
+      pushed.push(m as Pushed);
+      return status;
+    });
+    try {
+      as(alice);
+      const team = await chat.createGroupChat({ name: `${TAG} Pushes`, memberIds: [bob.id, carol.id, erin.id] });
+      const teamId = team.ok ? team.data.chatId : "";
+      as(bob);
+      await chat.muteChat(teamId, 8);
+      as(alice);
+      pushed.length = 0;
+      await send(teamId, "The price is 4242 — keep it quiet");
+      ok("a group message: one push, to the iPhone of the member who hasn't muted it", pushed.length === 1 && pushed[0]!.apns?.token === "apns-zzprobe-carol", pushed.map((p) => p.apns?.token ?? "firebase").join());
+      ok(
+        "  who and where, never what — opening that chat, grouped by it",
+        JSON.stringify(pushed[0]?.apns?.payload) === JSON.stringify({ aps: { alert: { title: `New message · ${TAG} Pushes`, body: "Open Deskzo to read it." }, sound: "default", "thread-id": teamId }, body: { type: "chat", chat: teamId } }) && !JSON.stringify(pushed).includes("4242"),
+        JSON.stringify(pushed[0]?.apns?.payload),
+      );
+      ok("  not the sender's, not Bob's who muted it, not Erin's Android phone, not an iPhone signed out", !pushed.some((p) => !p.apns || ["apns-zzprobe-alice", "apns-zzprobe-bob", "apns-zzprobe-carol-old"].includes(p.apns.token)));
+      pushed.length = 0;
+      await send(teamId, "@Zzprobe Bob Chat — one for you");
+      ok("  Bob @mentioned in the chat he muted: told in Deskzo, still not pushed", pushed.every((p) => p.apns?.token !== "apns-zzprobe-bob") && (await db.notification.count({ where: { userId: bob.id, type: "CHAT_MENTION", title: { contains: "Pushes" } } })) === 1);
+      pushed.length = 0;
+      await send(directId, "Bob, the 4242 again");
+      ok(
+        "a direct message: to the other one's iPhone, saying from whom",
+        pushed.length === 1 && pushed[0]!.apns?.token === "apns-zzprobe-bob" && pushed[0]!.apns.payload.aps.alert.title === "New message from Zzprobe Alice Chat" && pushed[0]!.apns.payload.body.chat === directId && !JSON.stringify(pushed).includes("4242"),
+        JSON.stringify(pushed[0]?.apns?.payload),
+      );
+      status = 410;
+      await send(directId, "Still there?");
+      ok("an iPhone Apple says is gone: forgotten", (await db.appDevice.findUnique({ where: { id: bobIphone.id } }))?.pushToken === null);
+      await db.appDevice.update({ where: { id: bobIphone.id }, data: { pushToken: "apns-zzprobe-bob" } });
+      status = 500;
+      pushed.length = 0;
+      const sentAnyway = await send(directId, "Apple is having a bad day");
+      ok("Apple failing: the message is sent all the same, and the iPhone kept", sentAnyway.ok && pushed.length === 1 && (await db.appDevice.findUnique({ where: { id: bobIphone.id } }))?.pushToken === "apns-zzprobe-bob");
+    } finally {
+      push.setTestPush(null);
+    }
 
     section("Drawn");
 

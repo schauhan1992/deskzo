@@ -6,7 +6,7 @@ import { isModuleEnabled } from "@/actions/module";
 import { viewAsContext } from "@/lib/session";
 import { canSeeCompany } from "@/lib/authz/company-scope";
 import { hasDialableNumber } from "@/lib/calls";
-import { pushToPhone } from "@/lib/app/push";
+import { pushToDevice } from "@/lib/app/push";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -93,7 +93,18 @@ export async function ringMyPhone(input: {
 
   let pushed = false;
   if (phone.pushToken) {
-    const sent = await pushToPhone(phone.pushToken, { type: "call", request: request.id, number: phoneNumber, label });
+    // Android's app wakes to the data and offers the call itself; an iPhone is shown an alert to tap (owner,
+    // 22 Oct 2026), one ring replacing another still on its screen, gone when the ring runs out.
+    const sent = await pushToDevice(
+      { platform: phone.platform, pushToken: phone.pushToken },
+      {
+        data: { type: "call", request: request.id, number: phoneNumber, label },
+        alert: { title: `Call ${label}`, body: `${phoneNumber} — tap to call. You asked from Deskzo on your computer.` },
+        category: "deskzo-call",
+        ttlSeconds: REQUEST_SECONDS,
+        collapseId: request.id,
+      },
+    );
     pushed = sent === "sent";
     if (sent === "gone") await db.appDevice.update({ where: { id: phone.id }, data: { pushToken: null } });
   }
