@@ -47,6 +47,8 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "addon-proposal.ts": ["renewals"],
   "addon.ts": ["renewals"],
   "analytics.ts": ["reports"],
+  // Reporting & Analytics — saved reports, the builder, sharing (owner, 23 Oct 2026).
+  "reporting.ts": ["reports"],
   // The public API's keys (src/lib/api), Settings › Developers & API — each endpoint checks its own module.
   "api-keys.ts": "core",
   // Pairing your phone with the Deskzo app (src/lib/app) — the app's calling asks Calls itself.

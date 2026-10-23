@@ -67,7 +67,6 @@ const source = {
     { key: "tag", label: "Tag", multi: true, of: (r: Inv) => (r.tags.length ? r.tags : NONE) },
   ],
 } as unknown as FactSource<never>;
-const rows = ROWS as unknown as never[];
 const thisYear = ROWS.slice(0, 4) as unknown as never[];
 const lastYear = ROWS.slice(4) as unknown as never[];
 const window = { from: indiaClock.startOfDay("2026-04-01")!, to: indiaClock.endOfDay("2026-06-30")! };
