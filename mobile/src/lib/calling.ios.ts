@@ -1,7 +1,7 @@
 import { AppState, Linking } from "react-native";
 import * as SecureStore from "expo-secure-store";
 import * as AfterCall from "@/lib/after-call";
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 import { phone } from "@/lib/native";
 import { notifications } from "@/lib/notifications";
 import { dialString, directoryEntries } from "@/lib/phone-numbers";
@@ -50,7 +50,7 @@ async function loadCallerIds(): Promise<Shared.CallerIdState | null> {
     const error = await phone.reloadCallerIds();
     callerIds = { at: Date.now(), count, truncated: list.truncated, error };
   } catch (e) {
-    callerIds = { at: Date.now(), count: callerIds?.count ?? 0, truncated: false, error: e instanceof Error ? e.message : "unknown" };
+    callerIds = { at: Date.now(), count: callerIds?.count ?? 0, truncated: false, error: e instanceof ApiError ? e.code : e instanceof Error ? e.message : "unknown" };
   }
   keep("caller-ids", callerIds);
   return callerIds;

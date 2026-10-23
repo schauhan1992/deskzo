@@ -35,6 +35,8 @@ function useStatus() {
 const describeLoad = (state: CallerIdState | null) => {
   if (!state) return "Not loaded yet.";
   if (state.error === "disabled" || state.error === "no_extension") return `${state.count.toLocaleString()} numbers ready — iOS loads them once caller ID is on in Settings.`;
+  if (state.error === "not_on_server") return "Your company's Deskzo hasn't been updated for caller ID yet — ask your administrator.";
+  if (state.error === "offline") return "No internet when it last tried — try again once there is.";
   if (state.error) return `Couldn't load them ${when(new Date(state.at).toISOString()).toLowerCase()} — try again.`;
   return `${state.count.toLocaleString()} customer number${state.count === 1 ? "" : "s"}, loaded ${when(new Date(state.at).toISOString()).toLowerCase()}${state.truncated ? " (the first 20,000)" : ""}.`;
 };
