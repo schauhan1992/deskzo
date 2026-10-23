@@ -7,6 +7,9 @@ Each version as people see it (`version` in `app.config.ts`, shared by both phon
 
 - Tasks is a screen of its own, opened from Today's **All my tasks** and from More — "All my tasks" used to bring
   Today back instead of opening it.
+- **Updates over the air**: the app's own screens come from deskzo.com when a newer version is published
+  (`npm run app:update`, signed with Deskzo's key), on Android and on the iPhone (`--platform ios`); Settings › This
+  app says which version runs and can take a newer one at once.
 
 ## 0.3.0 — the native app, on Android and the iPhone (23 Oct 2026) · Android versionCode 4
 

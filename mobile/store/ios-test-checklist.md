@@ -22,6 +22,7 @@ site or the demo workspace, with a second phone to call from. Note the iPhone mo
 - [ ] Restart the iPhone, open the app before and after unlocking — signed in once unlocked.
 - [ ] Delete the app and install it again — it starts on the sign-in screen (the token isn't left in the Keychain).
 - [ ] An administrator revokes the phone in Security › Devices — the next screen says this iPhone was signed out.
+- [ ] **Settings › This app**: "Deskzo app 0.3.1", "Screens as installed"; Check for a newer version says it's the newest. After `npm run app:update -- publish --platform ios`, the app takes it at the next launch (or Restart with the new version) and says when the screens were updated.
 
 ## 2. Today, Tasks, Approvals, Leave
 
@@ -106,6 +107,7 @@ site or the demo workspace, with a second phone to call from. Note the iPhone mo
 - [ ] **VoiceOver**: every button and field says what it is — the gear, the tabs, Call, Done, the chips (as selected or not), the attach and send buttons, the calendar's days; Approve/Reject on each item.
 - [ ] **Notch and Dynamic Island**: nothing under them, on an iPhone 15 Pro or later and an iPhone SE.
 - [ ] **iPad**, portrait and landscape: the screens sit in a column of readable width; the share sheet for a download appears as a popover; pairing by QR works with the iPad's camera.
+
 
 ## 11. Once, before submitting
 

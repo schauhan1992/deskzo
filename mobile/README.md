@@ -20,11 +20,11 @@ phone (`src/lib/receipt.ts`) and sent as a form; a receipt is needed over the am
 Settings › Expense approvals — and the person's **calendar**, with meetings scheduled from a lead, company or
 visit.
 
-It talks only to Deskzo's `/api/app/*` (`src/lib/app` and `src/app/api/app` in the main project); the
-server's suites `npm run check:phone-app` (pairing, calling, the pages, the iPhone's pushes, calls logged by hand
-and caller ID list), `npm run check:app-daily` (the everyday screens), `npm run check:app-sales` (the sales screens,
-and notifications pushed to the phone) and `npm run check:app-field` (visits, claims and meetings) cover everything
-the app relies on.
+It talks only to Deskzo's `/api/app/*` (`src/lib/app` and `src/app/api/app` in the main project), and to
+deskzo.com for newer versions of its own screens (Updates over the air, below); the server's suites
+`npm run check:phone-app` (pairing, calling, the pages, the iPhone's pushes, calls logged by hand and caller ID list),
+`npm run check:app-daily` (the everyday screens), `npm run check:app-sales` (the sales screens, and notifications
+pushed to the phone) and `npm run check:app-field` (visits, claims and meetings) cover everything the app relies on.
 
 ## How it is put together
 
@@ -152,3 +152,48 @@ sends each phone its own way (`pushToDevice`).
 
 `npm run check:app-sales`, `check:app-chat` and `check:phone-app` (in the main project) check what is sent, with
 Firebase and Apple stood in for.
+
+## Updates over the air
+
+The app's own screens — its JavaScript — reach phones without a store release (owner, 23 Oct 2026). At each launch
+the app asks `https://deskzo.com/api/app-updates/manifest` whether there's a newer version for its native build,
+downloads it in the background, and runs it from the next launch (Settings › This app can take it at once). Pushing
+to main changes no phone: an update goes out only when it's published, by hand.
+
+```
+npm run app:update -- publish               # this commit's screens, to every Android phone on a matching build
+npm run app:update -- publish --platform ios   # the same for iPhones — each phone takes only its own
+npm run app:update -- list                  # what's been published
+npm run app:update -- rollback              # back to the update before the newest
+npm run app:update -- rollback --embedded   # back to the screens that came inside the installed app
+```
+
+(Run from the main project's folder.) What needs a store release instead: anything native — a new library from
+npm with Android or iOS code, a permission, a config plugin, `app.config.ts` itself, Firebase. The runtime version is a
+fingerprint of exactly those parts (`runtimeVersion: { policy: "fingerprint" }`), so an update made after a native
+change goes only to phones that have the release with it; phones on the older release keep the screens they have.
+`node scripts/android.js release` prints the native build it made.
+
+**The update key.** Every update is signed with Deskzo's update key, kept at
+`~/.deskzo/app-updates/private-key.pem` — never in the repository. The app runs only updates whose signature checks
+out against `certs/certificate.pem`, built into it; the server (`src/lib/app-updates`) keeps nothing it can't
+verify against the same certificate, so the key is all publishing takes, and there's no password on the server.
+**Back the key up somewhere safe**: lose it and no update reaches the phones already installed — only a store
+release with a new certificate would; leak it and whoever has it can publish screens to every phone (make a new
+key and certificate, and release).
+
+**Trying it on the emulator.** `node scripts/android.js updates-test` builds a release-like APK that asks the Deskzo
+on this computer (`http://localhost:3000`, through `adb reverse tcp:3000 tcp:3000`) instead. Publish to it with the
+same address, so the update is for that build:
+
+```
+DESKZO_APP_UPDATES_URL=http://localhost:3000/api/app-updates/manifest npm run app:update -- publish --server http://localhost:3000 --allow-uncommitted
+```
+
+**On an iPhone** the same: the app asks the same address as an iPhone, and takes only an update published with
+`--platform ios` for its own native build — each `list` and `rollback` takes `--platform ios` too. Apple allows an
+app to update its own JavaScript this way as long as it doesn't change what the app is for; anything bigger goes
+through App Review as a new build.
+
+`npm run check:app-updates` (main project) checks the server: what's served, what's refused, rollbacks, and that an
+iPhone is answered but never handed Android's update.

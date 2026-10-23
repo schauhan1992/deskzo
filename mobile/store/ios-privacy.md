@@ -42,6 +42,9 @@ seen there as the company's own records.
 - **Health, Sensitive Info, Browsing History, Search History, Purchases, Diagnostics** — none. The app has no crash
   reporter or analytics. Financial info: only the expense claims above — no payment details.
 - **Calendar** — the app's calendar is the person's Deskzo calendar; the phone's own calendar is never read.
+- **Update checks** (23 Oct 2026) — at each launch the app asks deskzo.com whether a newer version of its own screens
+  is published, saying which version and native build it runs (`expo-updates`). No user, account or device
+  identifier goes with it, and nothing is kept.
 
 ## Permissions the app asks for
 
