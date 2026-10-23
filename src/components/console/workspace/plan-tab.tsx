@@ -170,7 +170,7 @@ export function PlanTab({ header, plan, caps }: { header: WorkspaceHeader; plan:
   );
 }
 
-/** The plans it is on, read-only, in product order: name ×quantity, kind, the product it sells, and where each comes from. */
+/** The plans it is on, read-only, in product order: name with the people paid for (or ×quantity), kind, the product it sells, and where each comes from. */
 function PlanList({ items }: { items: PlanPanel["items"] }) {
   if (items.length === 0) return <p className="text-sm text-muted">No plan — it has the core modules only.</p>;
   // Editions by product (Deskzo One first), then everything else as listed.
@@ -182,7 +182,11 @@ function PlanList({ items }: { items: PlanPanel["items"] }) {
           <span className="flex min-w-0 items-center gap-2">
             <span className="min-w-0 truncate text-sm font-medium text-text">
               {item.planName}
-              {item.quantity > 1 && <span className="ml-1 text-muted tabular-nums">×{item.quantity}</span>}
+              {item.perSeat ? (
+                <span className="ml-1 font-normal text-muted tabular-nums">· {plural(item.quantity, "person", "people")}</span>
+              ) : (
+                item.quantity > 1 && <span className="ml-1 text-muted tabular-nums">×{item.quantity}</span>
+              )}
             </span>
             <StatusPill tone={item.kind === "INTERNAL" ? "brand" : "neutral"}>{planKindLabel(item.kind)}</StatusPill>
             {productByKey(item.productKey) && <StatusPill tone="brand">{productByKey(item.productKey)!.name}</StatusPill>}
