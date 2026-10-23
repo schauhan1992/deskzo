@@ -540,7 +540,9 @@ async function main() {
       ok("the signup form: every field labelled, with room for its own error", ["company", "slug", "owner", "email", "password", "country", "invite"].every((id) => form.includes(`for="${id}"`) && form.includes(`id="${id}"`)) && /novalidate=""/i.test(form));
       saveRender("signup-form.html", form);
       const loading = render(React.createElement(SignupLoader, { brandName: "Deskzo One", status: "Preparing your database…", large: true }, React.createElement("p", null, "Setting up your workspace")));
-      ok("the loading stage: the brand's mark floating, its shadow breathing, a polite status line", loading.includes("animate-float") && loading.includes("animate-float-shadow") && />D<\/span>/.test(loading) && /role="status" aria-live="polite"[^>]*>Preparing your database…/.test(loading));
+      // The mark is Deskzo's official logo since the branding of 23 Oct 2026 (src/components/brand/deskzo-logo.tsx), named
+      // by the brand, where it was a letter "D" before.
+      ok("the loading stage: the brand's mark floating, its shadow breathing, a polite status line", loading.includes("animate-float") && loading.includes("animate-float-shadow") && /<svg[^>]*role="img"[^>]*aria-label="Deskzo One"/.test(loading) && /role="status" aria-live="polite"[^>]*>Preparing your database…/.test(loading), loading.slice(0, 400));
       saveRender("signup-loading.html", loading);
       const css = readFileSync(path.join(process.cwd(), "src", "app", "globals.css"), "utf8");
       ok("  @keyframes float: ~7px over 2.4s, ease-in-out, forever — and still with reduced motion", /@keyframes float \{[\s\S]*?translateY\(-7px\)/.test(css) && /\.animate-float \{\s*animation: float 2\.4s ease-in-out infinite;/.test(css) && /prefers-reduced-motion: reduce\)[\s\S]*?\.animate-float,\s*\.animate-float-shadow \{\s*animation: none !important;/.test(css));
