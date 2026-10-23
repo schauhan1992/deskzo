@@ -35,7 +35,7 @@ const updatesOverHttp = updatesUrl.startsWith("http://");
 const config: ExpoConfig = {
   name: "Deskzo",
   slug: "deskzo",
-  version: "0.3.1",
+  version: "0.4.0",
   orientation: "portrait",
   icon: "./assets/icon.png",
   scheme: "deskzo",
@@ -53,7 +53,7 @@ const config: ExpoConfig = {
   userInterfaceStyle: "light",
   android: {
     package: "com.deskzo.app",
-    versionCode: 5,
+    versionCode: 6,
     adaptiveIcon: {
       backgroundColor: "#4F46E5",
       foregroundImage: "./assets/android-icon-foreground.png",
