@@ -10,7 +10,7 @@ import { CATEGORY_SELECT } from "@/lib/customers/categories";
 // Leads are a module of their own (owner, 14 Oct 2026): sold with Deskzo Pipeline, CRM and One.
 import { requireModuleUser } from "@/lib/modules-access";
 import { canSeeCompany } from "@/lib/authz/company-scope";
-import { leadAccess, mayAccess, timelineAccess, type AccessAction } from "@/lib/authz/access";
+import { documentAccess, leadAccess, mayAccess, timelineAccess, type AccessAction } from "@/lib/authz/access";
 import { toPlain } from "@/lib/serialize";
 import { isModuleEnabled } from "@/actions/module";
 import { hasEffectivePermission } from "@/actions/permission";
@@ -42,6 +42,8 @@ import type { ActionResult } from "@/actions/company";
 import { chooseOwner } from "@/lib/leads/assign";
 import { mayChangeLeadOwner, mayLeaveUnassigned, reassignRights } from "@/lib/authz/reassign";
 import { refreshLeadScore } from "@/lib/leads/score-store";
+import { leadQuoteWhere, type QuoteFilter } from "@/lib/leads/quotes";
+import { seesLeadQuotes } from "@/lib/leads/quote-status";
 import { leadPath } from "@/lib/record-links";
 import { addressLine, detailLeadMasker, leadRedactor, leadSecrets, listLeadMasker, maskLead, maskLeads, maskLeadTitle } from "@/lib/leads/masking";
 import { customFieldKey } from "@/lib/authz/field-policy";
@@ -319,6 +321,8 @@ type LeadListParams = {
   stage?: string;
   /** The team pipeline shown, by its key — the main one when not given. "all" shows every pipeline's leads. */
   pipeline?: string;
+  /** Has had a quotation sent, hasn't, or hasn't though it is at "Proposal sent" or past it (src/lib/leads/quotes.ts). */
+  quote?: QuoteFilter;
 };
 
 const GRADE_RANGES = {
@@ -380,8 +384,12 @@ async function leadListWhere(userId: string, params?: LeadListParams): Promise<P
   const pipeline = params?.stage || params?.pipeline ? await leadStages() : null;
   const shown = pipeline && params?.pipeline && params.pipeline !== "all" ? (pipeline.pipelines.find((p) => p.key === params.pipeline) ?? null) : undefined;
   const stage = pipeline?.stages.find((s) => s.key === params?.stage && s.pipelineId === (shown?.id ?? MAIN_PIPELINE_ID));
+  // The Quotation filter (owner, 19 Oct 2026): by the quotations this person may see, as the column shows
+  // them — and only for somebody who sees quotations at all, as the column is.
+  const quoteWhere = params?.quote && (await seesLeadQuotes(userId)) ? leadQuoteWhere(params.quote, await documentAccess(userId, "view")) : null;
   const narrowing = [
     ...fieldFilters,
+    ...(quoteWhere ? [quoteWhere] : []),
     ...(shown === null ? [{ id: { in: [] } }] : pipeline && shown ? [inPipelineWhere(pipeline, shown.id)] : []),
     ...(pipeline && stage ? [inStageWhere(pipeline, stage)] : []),
   ];

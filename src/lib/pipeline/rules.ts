@@ -261,7 +261,13 @@ export const RULE_FIELDS = [
   { key: "contactId", label: "Contact" },
   { key: "ownerUserId", label: "Owner" },
   { key: "description", label: "Description" },
+  // A proposal, proforma or invoice issued for the lead (owner, 19 Oct 2026; src/lib/leads/quotes.ts) —
+  // offered only where the workspace can raise one, and off until a stage asks for it.
+  { key: "quotation", label: "An issued quotation" },
 ] as const;
+
+/** The rule that asks for a quotation rather than a field: it is met by issuing one, not by filling anything in. */
+export const QUOTE_RULE = "quotation";
 
 export const RULE_LIMIT = 12;
 
@@ -278,6 +284,8 @@ export type RuleLead = {
   ownerUserId: string | null;
   description: string | null;
   customFields: unknown;
+  /** Has had a quotation sent (`hasQuoteSent`) — read only when a stage asks for one. */
+  quoted?: boolean;
 };
 
 const filled = (value: unknown) => value !== null && value !== undefined && !(typeof value === "string" && !value.trim()) && !(Array.isArray(value) && value.length === 0);
@@ -287,6 +295,7 @@ export function missingForStage(stage: Pick<LeadStageDef, "requiredFields">, lea
   const custom = lead.customFields && typeof lead.customFields === "object" ? (lead.customFields as Record<string, unknown>) : {};
   return stage.requiredFields.filter((key) => {
     if (key.startsWith("cf:")) return !filled(custom[key.slice(3)]);
+    if (key === QUOTE_RULE) return !lead.quoted;
     if (key === "estimatedValue") return !filled(lead.estimatedValue) || Number(String(lead.estimatedValue)) <= 0;
     return !filled((lead as Record<string, unknown>)[key]);
   });
@@ -298,9 +307,13 @@ export function ruleFieldLabel(key: string, custom: Map<string, string> = new Ma
   return RULE_FIELDS.find((f) => f.key === key)?.label ?? key;
 }
 
-/** Why a lead can't move into the stage: "Before Proposal sent, fill in Value and Expected close date." */
-export function ruleRefusal(stageLabel: string, missing: string[]): string {
+/**
+ * Why a lead can't move into the stage: "Before Proposal sent, fill in Value and Expected close date." —
+ * or, `quote` when it still needs a quotation, "Before Proposal sent, issue a quotation for it" first.
+ */
+export function ruleRefusal(stageLabel: string, missing: string[], quote = false): string {
   const list = missing.length <= 1 ? (missing[0] ?? "") : `${missing.slice(0, -1).join(", ")} and ${missing.at(-1)}`;
+  if (quote) return missing.length ? `Before ${stageLabel}, issue a quotation for it and fill in ${list}.` : `Before ${stageLabel}, issue a quotation for it.`;
   return `Before ${stageLabel}, fill in ${list}.`;
 }
 

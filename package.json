@@ -133,6 +133,7 @@
     "check:address": "tsx scripts/check-address.ts",
     "check:leads": "tsx scripts/check-leads.ts",
     "check:lead-capture": "tsx scripts/check-lead-capture.ts",
+    "check:lead-quotes": "tsx scripts/check-lead-quotes.ts",
     "check:public-api": "tsx scripts/check-public-api.ts",
     "check:phone-app": "tsx scripts/check-phone-app.ts",
     "check:app-daily": "tsx scripts/check-app-daily.ts",
