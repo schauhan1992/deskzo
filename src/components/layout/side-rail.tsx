@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import { BadgeCheck, CalendarDays, CalendarRange, Calculator, CheckSquare, CircleHelp, Coins, Headset, Megaphone, MessageCircle, MonitorPlay, ShieldCheck, Sparkles, StickyNote, X } from "lucide-react";
+import { BadgeCheck, CalendarDays, Calculator, CheckSquare, CircleHelp, Coins, Divide, Headset, Megaphone, MessageCircle, MonitorPlay, ShieldCheck, Sparkles, StickyNote, X } from "lucide-react";
 import { COPILOT_OPEN_EVENT, SIDE_RAIL_STORAGE_KEY, UPDATES_SEEN_EVENT, parseTool, type SideRailTool } from "@/lib/side-rail";
 import { RailTasks } from "@/components/layout/rail-tasks";
 import { RailCalendar } from "@/components/layout/rail-calendar";
@@ -22,7 +22,7 @@ const TOOLS: { key: SideRailTool; label: string; icon: typeof Calculator; group:
   { key: "calendar", label: "My calendar", icon: CalendarDays, group: "work" },
   { key: "notes", label: "Sticky notes", icon: StickyNote, group: "work" },
   { key: "calculator", label: "GST & margin", icon: Calculator, group: "work" },
-  { key: "prorata", label: "Pro-rata", icon: CalendarRange, group: "work" },
+  { key: "prorata", label: "Pro-rata", icon: Divide, group: "work" },
   { key: "currency", label: "Currency", icon: Coins, group: "work" },
   { key: "lookup", label: "GSTIN check", icon: BadgeCheck, group: "work" },
   { key: "updates", label: "What's new", icon: Megaphone, group: "help" },
