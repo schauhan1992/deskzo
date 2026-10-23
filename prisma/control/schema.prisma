@@ -1461,6 +1461,53 @@ model SiteLead {
   @@map("site_leads")
 }
 
+/// What a privacy request asks for (owner, 23 Oct 2026 — src/lib/platform/privacy-requests.ts): the rights the
+/// DPDP Act and the GDPR give a person over their personal data.
+enum PrivacyRequestKind {
+  ACCESS
+  CORRECTION
+  ERASURE
+  WITHDRAW_CONSENT
+  NOMINATE
+  GRIEVANCE
+  OTHER
+}
+
+enum PrivacyRequestStatus {
+  NEW
+  IN_PROGRESS
+  DONE
+  REFUSED
+}
+
+/// A request about personal data, from the public site's form (deskzo.com/privacy/request) — handled in the
+/// console's Privacy requests by OWNER, ADMIN and SUPPORT, never the CMS's editors. Due 30 days after it came in.
+model PrivacyRequest {
+  id        String               @id @default(cuid())
+  /// "PRQ-000123" (privacyRef): what the person is told and quotes back.
+  seq       Int                  @unique @default(autoincrement())
+  kind      PrivacyRequestKind
+  name      String
+  email     String
+  /// Who they are to Deskzo — PRIVACY_RELATIONS: workspace, user, customer, visitor, other.
+  relation  String
+  company   String?
+  message   String
+  status    PrivacyRequestStatus @default(NEW)
+  notes     String?
+  /// Only when the caller's address is known.
+  ip        String?
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  dueAt     DateTime
+  closedAt  DateTime?
+  /// Who last changed its status or notes: "staff:<id>".
+  handledBy String?
+
+  @@index([status, createdAt])
+  @@map("privacy_requests")
+}
+
 /// What was done in the CMS, by whom. Ids, slugs, titles and counts — never a document's body.
 model CmsAuditLog {
   id         String   @id @default(cuid())

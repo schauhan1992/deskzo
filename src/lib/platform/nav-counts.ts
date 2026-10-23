@@ -1,12 +1,13 @@
 import { Prisma } from "@deskzo/control-client";
 import { plural } from "@/lib/console-shared/format";
 import { redactSecrets } from "@/lib/console-shared/redact";
-import { MANAGERS, SELLERS, SIGNUP_VIEWERS, SUPPORT_VIEWERS, hasRole } from "@/lib/console-shared/roles";
+import { ENTER, MANAGERS, SELLERS, SIGNUP_VIEWERS, SUPPORT_VIEWERS, hasRole } from "@/lib/console-shared/roles";
 import type { ConsoleRole, NavBadge, NavBadgeKey, NavCounts } from "@/lib/console-shared/types";
 import { alertCounts } from "@/lib/platform/alerts";
 import { controlDb } from "@/lib/platform/control-db";
 import { LIVE_STATUSES } from "@/lib/platform/entitlements";
 import { forHowLong, platformTick, referenceSyncIssues, schemaDrift } from "@/lib/platform/health";
+import { privacyRequestCounts } from "@/lib/platform/privacy-requests";
 import { stuckSignups } from "@/lib/platform/signups";
 
 /**
@@ -22,6 +23,7 @@ import { stuckSignups } from "@/lib/platform/signups";
  *
  *   alerts          open critical + warning alerts (src/lib/platform/alerts.ts), danger with any critical
  *   support         support requests open or in progress, danger with any urgent — for those who may open the inbox
+ *   privacy         privacy requests not yet answered, danger with any past its 30 days — for those who may open them
  *   trials          workspaces whose trial ends within 3 days or has ended (the Trials board's rule)
  *   signups         stuck signups (src/lib/platform/signups.ts) — only for those who may open that page
  *   partners        partner applications, deals and requests awaiting a decision, and flagged attributions
@@ -111,6 +113,13 @@ async function trialsBadge(now: Date): Promise<NavBadge | null> {
 async function signupsBadge(now: Date): Promise<NavBadge | null> {
   const { total } = await stuckSignups({ withIp: false }, now);
   return total > 0 ? { count: total, tone: "muted", label: plural(total, "stuck signup") } : null;
+}
+
+/** Privacy requests new or in progress; one past its due date makes it red and is named in the label. */
+async function privacyBadge(now: Date): Promise<NavBadge | null> {
+  const { open, overdue } = await privacyRequestCounts(now);
+  if (open === 0) return null;
+  return { count: open, tone: overdue > 0 ? "danger" : "warning", label: `${plural(open, "open privacy request")}${overdue > 0 ? `, ${overdue} overdue` : ""}` };
 }
 
 /** The Support inbox's Open tab (OPEN and IN_PROGRESS); the urgent ones make it red and are named in the label. */
@@ -217,9 +226,10 @@ async function referenceBadge(now: Date): Promise<NavBadge | null> {
  */
 export async function navCounts(role: ConsoleRole, now = new Date()): Promise<NavCounts> {
   const none = Promise.resolve(null);
-  const [alerts, support, trials, signups, partners, announcements, billing, commissions, health, provisioning, migrations, reference] = await Promise.all([
+  const [alerts, support, privacy, trials, signups, partners, announcements, billing, commissions, health, provisioning, migrations, reference] = await Promise.all([
     guarded("alerts", () => alertCounts(role, now)),
     hasRole(role, SUPPORT_VIEWERS) ? guarded("support", () => supportBadge()) : none,
+    hasRole(role, ENTER) ? guarded("privacy", () => privacyBadge(now)) : none,
     guarded("trials", () => trialsBadge(now)),
     hasRole(role, SIGNUP_VIEWERS) ? guarded("signups", () => signupsBadge(now)) : none,
     hasRole(role, MANAGERS) || hasRole(role, SELLERS) ? guarded("partners", () => partnersBadge(now)) : none,
@@ -235,6 +245,7 @@ export async function navCounts(role: ConsoleRole, now = new Date()): Promise<Na
   const found: [NavBadgeKey, NavBadge | null][] = [
     ["alerts", alerts ? alertsBadge(alerts) : null],
     ["support", support],
+    ["privacy", privacy],
     ["trials", trials],
     ["signups", signups],
     ["partners", partners],

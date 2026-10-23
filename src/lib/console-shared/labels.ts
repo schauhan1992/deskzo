@@ -632,6 +632,7 @@ export const ACTION_LABELS: Record<string, string> = {
   "support.assign": "Support request assigned",
   "support.file.open": "Support attachment opened",
   "support.settings": "Support settings changed",
+  "privacy.update": "Privacy request updated",
 
   "tenant.note.add": "Note added",
   "tenant.note.edit": "Note edited",
@@ -688,7 +689,7 @@ export const AUDIT_CATEGORIES: readonly { key: AuditCategoryKey; label: string; 
     prefixes: ["tenant.plans", "tenant.module-override", "tenant.limit-override", "tenant.trial", "tenant.billing-details", "plan.", "billing.", "bulk.apply-standing", "bulk.trial-extend", "export.invoices"],
   },
   { key: "staff", label: "Staff", prefixes: ["staff."] },
-  { key: "support", label: "Support", prefixes: ["support.", "tenant.admin-reset"] },
+  { key: "support", label: "Support", prefixes: ["support.", "tenant.admin-reset", "privacy."] },
   { key: "setup", label: "Setup and migrations", prefixes: ["provision.", "warm-pool.", "migrate.", "tenant.migration", "tenant.role-limits", "tenant.adopt"] },
   { key: "reference", label: "Reference data", prefixes: ["reference."] },
   { key: "invites", label: "Invitations", prefixes: ["invite.", "signup.code"] },

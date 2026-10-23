@@ -1,6 +1,6 @@
 "use server";
 
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { CONTACT_LIMITS, CONTACT_TOPICS, type ContactInput, type ContactResult, type ContactTopic } from "@/components/site/contact-fields";
 import { productByKey } from "@/lib/products";
 import { recordLead } from "@/lib/cms/leads";
@@ -8,9 +8,15 @@ import { clientIpFrom } from "@/lib/client-ip";
 import { parseEmailAddress } from "@/lib/email-verification";
 import { addressKey, findLookupsPerHour, siteAllowance, startWorkspaceLookup } from "@/lib/platform/find-workspaces";
 import { sendPlatformMail } from "@/lib/platform/mailer";
+import { getSiteSettings } from "@/lib/platform/site-content";
+import { referralCookieDays } from "@/lib/partners/settings";
+import { CONSENT_COOKIE, CONSENT_MAX_AGE, REFERRAL_COOKIE, isReferralCode } from "@/lib/partners/referral-cookie";
+import { protocolFor } from "@/lib/tenancy/host";
+import { recordPrivacyRequest } from "@/lib/platform/privacy-requests";
+import { PRIVACY_LIMITS, isPrivacyKind, isPrivacyRelation, privacyKindLabel, privacyRelationLabel } from "@/components/site/privacy-fields";
 
 /**
- * The public site's two forms (src/app/platform-site) — for people without an account anywhere, so
+ * The public site's forms (src/app/platform-site) — for people without an account anywhere, so
  * nothing here needs one, and nothing here reads or writes a workspace's data except the one lookup
  * `findMyWorkspaces` starts.
  *
@@ -136,6 +142,144 @@ export async function sendContactRequest(input: ContactInput): Promise<ContactRe
     console.error(`[site] a contact request could not be mailed: ${(err as { code?: string } | null)?.code ?? (err instanceof Error ? err.name : "error")}`);
     if (stored) return answer;
     return { ok: false, error: "Your message couldn't be sent just now. Please try again in a few minutes." };
+  }
+  return answer;
+}
+
+export type PrivacyRequestInput = { kind: string; name: string; email: string; relation: string; company?: string; message: string; website?: string };
+export type PrivacyRequestResult = { ok: true; ref: string | null } | { ok: false; field?: "kind" | "name" | "email" | "relation" | "company" | "message"; error: string };
+
+const longDate = (d: Date) => d.toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata" });
+
+/**
+ * A privacy request (owner, 23 Oct 2026; src/lib/platform/privacy-requests.ts): checked, limited as the
+ * contact form is, kept for the console's Privacy requests, acknowledged to the person with its reference
+ * and the day it is due, and copied to the privacy contact (Settings › General) — else PLATFORM_SALES_EMAIL.
+ * Once it is kept, a mail that fails is logged and the person still gets their reference on the page.
+ */
+export async function sendPrivacyRequest(input: PrivacyRequestInput): Promise<PrivacyRequestResult> {
+  if (text(input?.website).trim()) return { ok: true, ref: null };
+
+  const kind = text(input?.kind);
+  const relation = text(input?.relation);
+  const name = oneLine(text(input?.name));
+  const company = oneLine(text(input?.company));
+  const message = text(input?.message).replace(/\r\n?/g, "\n").trim();
+  const parsed = parseEmailAddress(text(input?.email));
+  const email = parsed ? `${parsed.local}@${parsed.domain}` : null;
+
+  if (!isPrivacyKind(kind)) return { ok: false, field: "kind", error: "Choose what you'd like us to do." };
+  if (name.length < 2 || name.length > PRIVACY_LIMITS.name) return { ok: false, field: "name", error: "Tell us your name." };
+  if (!email) return { ok: false, field: "email", error: "Enter a valid email address — we reply there." };
+  if (!isPrivacyRelation(relation)) return { ok: false, field: "relation", error: "Tell us how you know Deskzo." };
+  if ((relation === "user" || relation === "customer") && company.length < 2) {
+    return { ok: false, field: "company", error: "Name the company whose Deskzo holds your data." };
+  }
+  if (company.length > PRIVACY_LIMITS.company) return { ok: false, field: "company", error: "Keep the company's name shorter." };
+  if (message.length < PRIVACY_LIMITS.messageMin) return { ok: false, field: "message", error: "Tell us a little about your request." };
+  if (message.length > PRIVACY_LIMITS.message) return { ok: false, field: "message", error: `Keep it under ${PRIVACY_LIMITS.message.toLocaleString("en-IN")} characters.` };
+
+  const ip = await caller();
+  const allowed = siteAllowance([
+    { key: `platform|privacy:${addressKey(email)}`, max: 3 },
+    ...(ip ? [{ key: `platform|privacy-caller:${ip}`, max: 5 }] : []),
+    { key: "platform|privacy:all", max: 60 },
+  ]);
+  if (!allowed) return { ok: false, error: "Several requests have been sent from here in the last hour. Please try again later." };
+
+  let kept: Awaited<ReturnType<typeof recordPrivacyRequest>> = null;
+  try {
+    kept = await recordPrivacyRequest({ kind, name, email, relation, company: company || null, message, ip });
+  } catch (err) {
+    console.error(`[site] a privacy request could not be kept: ${(err as { code?: string } | null)?.code ?? (err instanceof Error ? err.name : "error")}`);
+  }
+
+  const settings = await getSiteSettings();
+  const contact = settings.privacy.email.trim() || process.env.PLATFORM_SALES_EMAIL?.trim() || "";
+  const ref = kept?.ref ?? null;
+  const due = kept ? longDate(kept.dueAt) : null;
+
+  if (!kept && !contact) {
+    console.warn("[site] a privacy request arrived, but it could not be kept and no privacy contact or PLATFORM_SALES_EMAIL is set — it went nowhere.");
+    return { ok: false, error: "Your request couldn't be sent just now. Please try again in a few minutes, or write to us." };
+  }
+
+  try {
+    await sendPlatformMail({
+      type: "ACCOUNT",
+      to: email,
+      subject: oneLine(`We've received your privacy request${ref ? ` ${ref}` : ""}`),
+      text: [
+        `Dear ${name},`,
+        "",
+        `We've received your request: ${privacyKindLabel(kind)}.${ref ? ` Its reference is ${ref} — please quote it if you write to us about it.` : ""}`,
+        due ? `We will reply by ${due} at the latest.` : "We will reply within 30 days.",
+        relation === "user" || relation === "customer"
+          ? `If the data is kept by ${company || "a company"} in its own Deskzo workspace, that company decides what happens to it; we'll tell you how to reach them, or pass your request on.`
+          : "",
+        "",
+        "We may need to confirm it's you before we act on a request about your data.",
+        contact ? `Questions: ${contact}` : "",
+        "",
+        `— ${settings.siteName}`,
+      ]
+        .filter((line, i, all) => line !== "" || all[i - 1] !== "")
+        .join("\n"),
+    });
+  } catch (err) {
+    console.error(`[site] a privacy request's acknowledgement could not be mailed: ${(err as { code?: string } | null)?.code ?? (err instanceof Error ? err.name : "error")}`);
+  }
+
+  if (contact) {
+    try {
+      await sendPlatformMail({
+        type: "ALERTS",
+        to: contact,
+        subject: oneLine(`Privacy request${ref ? ` ${ref}` : ""}: ${privacyKindLabel(kind)} — ${name}`),
+        text: [
+          `Reply to: ${email}`,
+          "(Sent by the website's privacy request form. Replying to this email does not reach them — write to the address above.)",
+          kept ? "It is in the console's Privacy requests." : "It could not be kept in the console — this email is the only copy.",
+          "",
+          `Reference: ${ref ?? "—"}`,
+          `Due:       ${due ?? "within 30 days"}`,
+          `Request:   ${privacyKindLabel(kind)}`,
+          `Name:      ${name}`,
+          `Email:     ${email}`,
+          `Who:       ${privacyRelationLabel(relation)}`,
+          `Company:   ${company || "—"}`,
+          "",
+          message,
+        ].join("\n"),
+      });
+    } catch (err) {
+      console.error(`[site] a privacy request could not be mailed to the privacy contact: ${(err as { code?: string } | null)?.code ?? (err instanceof Error ? err.name : "error")}`);
+      if (!kept) return { ok: false, error: "Your request couldn't be sent just now. Please try again in a few minutes." };
+    }
+  }
+  return { ok: true, ref };
+}
+
+/**
+ * The cookie notice's answer (owner, 23 Oct 2026; src/components/site/cookie-notice.tsx): remembered for a
+ * year in a cookie the page can read. Agreeing sets the partner referral cookie — when the programme has it
+ * switched on and a partner's link brought the visitor (`ref`) — as the proxy would have, had it been
+ * allowed to; declining takes back one set before. Nothing else on the site waits for consent.
+ */
+export async function setCookieConsent(input: { choice: string; ref?: string }): Promise<{ ok: true }> {
+  const choice = input?.choice === "accepted" ? "accepted" : "declined";
+  const jar = await cookies();
+  const host = (await headers()).get("host") ?? "";
+  const secure = protocolFor(host) === "https";
+  jar.set(CONSENT_COOKIE, choice, { httpOnly: false, sameSite: "lax", secure, path: "/", maxAge: CONSENT_MAX_AGE });
+  if (choice === "declined") {
+    if (jar.has(REFERRAL_COOKIE)) jar.delete(REFERRAL_COOKIE);
+    return answer;
+  }
+  const ref = text(input?.ref).trim();
+  if (ref && isReferralCode(ref) && !jar.has(REFERRAL_COOKIE)) {
+    const days = await referralCookieDays();
+    if (days > 0) jar.set(REFERRAL_COOKIE, ref, { httpOnly: true, sameSite: "lax", secure, path: "/", maxAge: days * 86_400 });
   }
   return answer;
 }

@@ -128,6 +128,7 @@ export function mergeSiteSettings(stored: unknown): SiteSettings {
     signupCta: { ...d.signupCta, ...(isObj(s.signupCta) ? s.signupCta : {}) },
     footer: { ...d.footer, ...(isObj(s.footer) ? s.footer : {}) },
     seo: { ...d.seo, ...(isObj(s.seo) ? s.seo : {}) },
+    privacy: { ...d.privacy, ...(isObj(s.privacy) ? s.privacy : {}) },
     notFound: { ...d.notFound, ...(isObj(s.notFound) ? s.notFound : {}) },
   };
 }

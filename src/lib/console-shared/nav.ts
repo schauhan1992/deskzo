@@ -15,6 +15,7 @@ export type ConsolePageKey =
   | "alerts"
   | "workspaces"
   | "support"
+  | "privacy"
   | "trials"
   | "signups"
   | "invites"
@@ -45,6 +46,7 @@ export type NavIconName =
   | "BellRing"
   | "Building2"
   | "LifeBuoy"
+  | "ShieldCheck"
   | "Hourglass"
   | "UserPlus"
   | "Ticket"
@@ -95,6 +97,8 @@ export const PAGE_ROLES: Record<ConsolePageKey, readonly ConsoleRole[] | undefin
   alerts: undefined,
   workspaces: undefined,
   support: SUPPORT_VIEWERS,
+  // Privacy requests from deskzo.com/privacy/request (owner, 23 Oct 2026): the people's details in full, so those who answer customers.
+  privacy: ENTER,
   trials: undefined,
   signups: SIGNUP_VIEWERS,
   invites: undefined,
@@ -127,6 +131,7 @@ export const CONSOLE_PAGES: readonly ConsolePage[] = [
   { key: "workspaces", href: "/workspaces", label: "Workspaces", group: "customers", icon: "Building2", keywords: ["tenants", "customers", "accounts", "companies"], shortcut: "w", inNav: true },
   // No `g` shortcut: "s" is Staff's.
   { key: "support", href: "/support", label: "Support", group: "customers", icon: "LifeBuoy", roles: PAGE_ROLES.support, badge: "support", keywords: ["help", "tickets", "requests", "customer"], inNav: true },
+  { key: "privacy", href: "/privacy-requests", label: "Privacy requests", group: "customers", icon: "ShieldCheck", roles: PAGE_ROLES.privacy, badge: "privacy", keywords: ["dpdp", "gdpr", "data", "erasure", "delete", "access", "grievance", "consent"], inNav: true },
   { key: "trials", href: "/trials", label: "Trials", group: "customers", icon: "Hourglass", badge: "trials", keywords: ["trial", "ending", "conversion"], shortcut: "t", inNav: true },
   { key: "signups", href: "/signups", label: "Signups", group: "customers", icon: "UserPlus", roles: PAGE_ROLES.signups, badge: "signups", keywords: ["sign up", "funnel", "pending", "stuck"], inNav: true },
   { key: "invites", href: "/invites", label: "Invitations", group: "customers", icon: "Ticket", keywords: ["invite", "codes", "invitation"], inNav: true },

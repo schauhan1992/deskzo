@@ -65,7 +65,7 @@ export type PlatformEnv = {
   titlePrefix: string;
 };
 
-export type NavBadgeKey = "alerts" | "support" | "trials" | "signups" | "partners" | "announcements" | "billing" | "commissions" | "health" | "provisioning" | "migrations" | "reference";
+export type NavBadgeKey = "alerts" | "support" | "privacy" | "trials" | "signups" | "partners" | "announcements" | "billing" | "commissions" | "health" | "provisioning" | "migrations" | "reference";
 export type NavBadge = {
   /** null draws a dot instead of a number. */
   count: number | null;

@@ -28,6 +28,7 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   tagline: "Your tagline goes here",
   displayDomain: "yourdomain.com",
   salesEmail: "sales@yourdomain.com",
+  privacy: { officer: "", email: "", phone: "", address: "" },
   nav: [
     { label: "Product", href: "/#modules" },
     { label: "Pricing", href: "/pricing" },
@@ -813,9 +814,10 @@ const PRIVACY: SitePage = {
           {
             type: "list",
             items: [
-              [{ text: "No analytics or advertising cookies. ", strong: true }, { text: "Your choice of light or dark theme is kept in your own browser." }],
+              [{ text: "No analytics or advertising cookies. ", strong: true }, { text: "Only the cookies the site needs to work — see " }, { text: "Cookies", href: "/privacy#cookies" }, { text: " below." }],
               [{ text: "Setting up a workspace: ", strong: true }, { text: "your company's name and address on the platform, your name, work email and country, your password (kept only as a one-way hash), and the network address you signed up from when it is known. One cookie links the emailed code to the browser that asked for it." }],
               [{ text: "The contact form: ", strong: true }, { text: "what you type, sent to our inbox." }],
+              [{ text: "A privacy request: ", strong: true }, { text: "what you type, kept so we can answer it and show we did." }],
               [{ text: "Find my workspaces: ", strong: true }, { text: "your email address, used once to look up your workspaces and email you the list." }],
             ],
           },
@@ -828,15 +830,17 @@ const PRIVACY: SitePage = {
               ["Correction", "Ask the company", "Ask us"],
               ["Erasure", "Ask the company; marketing consent is withdrawn by unsubscribing, which always works", "A signup that never became a workspace is deleted on request; a closed workspace is erased after 90 days"],
               ["Stop marketing", "Every email carries a one-click unsubscribe and a preference centre", "—"],
-              ["A grievance (DPDP Act)", "The company's own grievance officer", "Our grievance officer — name and contact to be published"],
+              ["Withdraw consent", "Ask the company; it is as easy as giving it", "A privacy request; cookie consent is changed from Cookie settings at the foot of every page"],
+              ["Nominate someone to act for you (DPDP Act)", "Ask the company", "A privacy request, naming them"],
+              ["A grievance (DPDP Act)", "The company's own grievance officer", "Our grievance officer, {privacyOfficer} — {privacyEmail}"],
             ],
           },
           {
             type: "paragraph",
             text: [
               { text: "To ask us, use the " },
-              { text: "contact form", href: "/contact?topic=other" },
-              { text: " or write to {salesEmail}." },
+              { text: "privacy request form", href: "/privacy/request" },
+              { text: " or write to {privacyEmail}. Every request gets a reference, and an answer within 30 days. We may need to confirm it's you first." },
             ],
           },
           { type: "heading", level: 2, text: "How long we keep things" },
@@ -859,6 +863,31 @@ const PRIVACY: SitePage = {
           {
             type: "paragraph",
             text: [{ text: "Only the sub-processors listed on the " }, { text: "security page", href: "/security#subprocessors" }, { text: ", each bound to protect it as we do." }],
+          },
+          { type: "heading", level: 2, text: "Cookies", anchor: "cookies" },
+          {
+            type: "table",
+            columns: ["Cookie", "What it does", "Kept"],
+            rows: [
+              ["Signup code", "Links the code we email you to the browser that asked for it", "Until you finish signing up"],
+              ["Sign-in", "Keeps you signed in to your workspace, and recognises the device for its security rules", "While you're signed in; the device's for a year"],
+              ["Security", "Protects the site's forms against forgery, and remembers where to come back to after signing in", "Until you close the browser"],
+              ["Cookie choice", "Remembers whether you agreed to the referral cookie, so we don't ask again", "A year"],
+              ["Partner referral (only if you agree)", "When a partner's link brought you here, credits that partner if you sign up", "Up to 90 days"],
+            ],
+          },
+          {
+            type: "paragraph",
+            text: "No analytics or advertising cookies, and nothing that follows you to other sites. Your light or dark theme is kept in your own browser, not in a cookie. Change your choice at any time from Cookie settings at the foot of every page.",
+          },
+          { type: "heading", level: 2, text: "This notice in another language" },
+          {
+            type: "paragraph",
+            text: [
+              { text: "This notice is in English. To have it in any language listed in the Eighth Schedule to the Constitution of India, ask through the " },
+              { text: "privacy request form", href: "/privacy/request" },
+              { text: "." },
+            ],
           },
         ],
       },

@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useRef } from "react";
-import { ArrowDown, ArrowUp, AtSign, Globe, Plus, Search, Share2, SignpostBig, X } from "lucide-react";
+import { ArrowDown, ArrowUp, AtSign, Globe, Plus, Search, Share2, ShieldCheck, SignpostBig, X } from "lucide-react";
 import { Banner } from "@/components/console/kit/banner";
 import { Panel } from "@/components/console/kit/panel";
 import { StatusPill } from "@/components/console/kit/status";
@@ -19,7 +19,7 @@ import { useSettingsDraft } from "./use-settings-draft";
 
 /**
  * Settings › General: who the site says it is (name, tagline, the domain it writes in text), the
- * sales address it shows, its social links, what search engines and link previews get by default,
+ * sales address it shows, who answers for personal data (the grievance officer), its social links, what search engines and link previews get by default,
  * and the page for an address it does not have. Editors and admins edit; everybody else reads the
  * same form with nothing to press.
  *
@@ -34,6 +34,7 @@ type GeneralForm = {
   tagline: string;
   displayDomain: string;
   salesEmail: string;
+  privacy: { officer: string; email: string; phone: string; address: string };
   social: KeyedSocial[];
   seo: { titleTemplate: string; defaultTitle: string; description: string; ogImage: string };
   notFound: { heading: string; body: string; links: KeyedLink[] };
@@ -56,6 +57,7 @@ function toForm(s: SiteSettings): GeneralForm {
     tagline: s.tagline ?? "",
     displayDomain: s.displayDomain ?? "",
     salesEmail: s.salesEmail ?? "",
+    privacy: { officer: s.privacy?.officer ?? "", email: s.privacy?.email ?? "", phone: s.privacy?.phone ?? "", address: s.privacy?.address ?? "" },
     social: (s.social ?? []).map((x, i) => ({ key: `social-${i}`, network: x.network, href: x.href ?? "", label: x.label ?? "" })),
     seo: { titleTemplate: s.seo?.titleTemplate ?? "", defaultTitle: s.seo?.defaultTitle ?? "", description: s.seo?.description ?? "", ogImage: s.seo?.ogImage ?? "" },
     notFound: { heading: s.notFound?.heading ?? "", body: s.notFound?.body ?? "", links: keyLinks(s.notFound?.links ?? [], "nf") },
@@ -68,6 +70,7 @@ function toPartial(f: GeneralForm): Partial<SiteSettings> {
     tagline: f.tagline,
     displayDomain: f.displayDomain,
     salesEmail: f.salesEmail,
+    privacy: { officer: f.privacy.officer, email: f.privacy.email, phone: f.privacy.phone, address: f.privacy.address },
     social: f.social.map(({ network, href, label }) => ({ network, href, ...(label.trim() ? { label } : {}) })),
     seo: { titleTemplate: f.seo.titleTemplate, defaultTitle: f.seo.defaultTitle, description: f.seo.description, ...(f.seo.ogImage ? { ogImage: f.seo.ogImage } : {}) },
     notFound: { heading: f.notFound.heading, body: f.notFound.body, links: unkeyLinks(f.notFound.links) },
@@ -80,7 +83,9 @@ function filled(text: string, f: GeneralForm): string {
     .replace(/\{siteName\}/g, f.siteName.trim() || "…")
     .replace(/\{tagline\}/g, f.tagline.trim())
     .replace(/\{displayDomain\}/g, f.displayDomain.trim())
-    .replace(/\{salesEmail\}/g, f.salesEmail.trim());
+    .replace(/\{salesEmail\}/g, f.salesEmail.trim())
+    .replace(/\{privacyOfficer\}/g, f.privacy.officer.trim() || "to be named")
+    .replace(/\{privacyEmail\}/g, f.privacy.email.trim() || f.salesEmail.trim());
 }
 
 function Placeholder({ is }: { is: boolean }) {
@@ -96,6 +101,7 @@ function Placeholder({ is }: { is: boolean }) {
 const SECTIONS = [
   { id: "identity", label: "Identity", icon: Globe },
   { id: "contact", label: "Contact email", icon: AtSign },
+  { id: "privacy", label: "Privacy contact", icon: ShieldCheck },
   { id: "social", label: "Social links", icon: Share2 },
   { id: "seo", label: "Search & sharing", icon: Search },
   { id: "not-found", label: "Page not found", icon: SignpostBig },
@@ -119,6 +125,7 @@ export function GeneralSettingsForm({
   const set = <K extends keyof GeneralForm>(key: K, value: GeneralForm[K]) => setForm((f) => ({ ...f, [key]: value }));
   const setSeo = (change: Partial<GeneralForm["seo"]>) => setForm((f) => ({ ...f, seo: { ...f.seo, ...change } }));
   const setNotFound = (change: Partial<GeneralForm["notFound"]>) => setForm((f) => ({ ...f, notFound: { ...f.notFound, ...change } }));
+  const setPrivacy = (change: Partial<GeneralForm["privacy"]>) => setForm((f) => ({ ...f, privacy: { ...f.privacy, ...change } }));
 
   const exampleTitle = filled(form.seo.titleTemplate.includes("%s") ? form.seo.titleTemplate.replace("%s", "Pricing") : form.seo.titleTemplate, form);
   const homeTitle = filled(form.seo.defaultTitle, form);
@@ -187,6 +194,51 @@ export function GeneralSettingsForm({
               )
             }
           />
+        </Panel>
+
+        <Panel
+          id="privacy"
+          title="Privacy contact"
+          description="Who answers questions and complaints about personal data — the grievance officer India's DPDP Act asks us to publish. Shown in the privacy notice ({privacyOfficer}, {privacyEmail}) and in the footer; every privacy request is copied to this email."
+        >
+          {!form.privacy.officer.trim() && (
+            <Banner tone="warning" title="Not published yet">
+              Until a name and an email are set, the privacy notice says the grievance officer is “to be named” and gives the sales address instead.
+            </Banner>
+          )}
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <TextField
+              label="Grievance officer"
+              value={form.privacy.officer}
+              onChange={(v) => setPrivacy({ officer: v })}
+              max={80}
+              readOnly={readOnly}
+              error={issues["privacy.officer"]}
+              hint="A person's name, or a role such as “Data Protection Officer”."
+            />
+            <TextField
+              label="Privacy email"
+              type="email"
+              inputMode="email"
+              value={form.privacy.email}
+              onChange={(v) => setPrivacy({ email: v })}
+              max={254}
+              readOnly={readOnly}
+              mono
+              error={issues["privacy.email"]}
+              hint="A mailbox someone reads — privacy@ is usual."
+            />
+            <TextField label="Phone (optional)" value={form.privacy.phone} onChange={(v) => setPrivacy({ phone: v })} max={32} readOnly={readOnly} error={issues["privacy.phone"]} />
+            <TextAreaField
+              label="Postal address (optional)"
+              value={form.privacy.address}
+              onChange={(v) => setPrivacy({ address: v })}
+              max={300}
+              readOnly={readOnly}
+              error={issues["privacy.address"]}
+              className="sm:col-span-2"
+            />
+          </div>
         </Panel>
 
         <Panel id="social" title="Social links" description="Along the bottom of every page. Full https:// addresses only.">

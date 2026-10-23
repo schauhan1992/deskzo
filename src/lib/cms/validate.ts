@@ -242,6 +242,7 @@ const SETTINGS_SPEC: Fields = {
   tagline: keep(160),
   displayDomain: keep(100),
   salesEmail: { k: "text", max: 254, keep: true, email: true },
+  privacy: { k: "object", req: true, of: { officer: keep(LABEL), email: { k: "text", max: 254, keep: true, email: true }, phone: keep(32), address: keep(300) } },
   nav: list(navItemSpec, NAV_LIMITS.items, true, 0, "items in the header"),
   signinLink: { k: "link", req: true },
   signupCta: { k: "object", req: true, of: { open: { k: "link", req: true }, inviteOnly: { k: "link", req: true } } },

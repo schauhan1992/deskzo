@@ -1,4 +1,5 @@
 import type { SiteRenderContext } from "@/components/site/blocks/types";
+import { CookieSettingsButton } from "@/components/site/cookie-notice";
 import { fill, linkShown, safeHref } from "@/components/site/links";
 import { SiteLogo } from "@/components/site/logo";
 import { Container, SiteAnchor } from "@/components/site/ui";
@@ -13,12 +14,16 @@ const COLUMN_GRID: Record<number, string> = { 1: "lg:grid-cols-3", 2: "lg:grid-c
 
 /**
  * The public site's footer: the columns of links (up to six), the sales address, the theme switch and
- * the year — worked out on the server (India's calendar), so no client clock is ever asked.
+ * the year — worked out on the server (India's calendar), so no client clock is ever asked. Privacy
+ * requests, Cookie settings and the grievance officer (owner, 23 Oct 2026) are on every page whatever the
+ * columns hold: the privacy notice promises them there.
  */
 export function SiteFooter({ ctx, year }: { ctx: Pick<SiteRenderContext, "settings" | "trialDays" | "hiddenPaths">; year: number }) {
   const { settings } = ctx;
   const t = (s?: string) => fill(s, ctx);
   const sales = parseEmailAddress(settings.salesEmail);
+  const officer = settings.privacy?.officer?.trim();
+  const privacyEmail = parseEmailAddress(settings.privacy?.email ?? "");
   const social = settings.social.filter((s) => safeHref(s.href));
   // A link to a page switched off for now is left out, and a column left empty with it.
   const columns = (Array.isArray(settings.footer.columns) ? settings.footer.columns : [])
@@ -62,9 +67,15 @@ export function SiteFooter({ ctx, year }: { ctx: Pick<SiteRenderContext, "settin
           )}
         </div>
         <div className="mt-12 flex flex-col gap-4 border-t border-line pt-6 text-sm text-subtle sm:flex-row sm:items-center sm:justify-between">
-          <p>
-            © {year} {settings.siteName}
-          </p>
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <p>
+              © {year} {settings.siteName}
+            </p>
+            <SiteAnchor href="/privacy/request" className="hover:text-text">
+              Privacy requests
+            </SiteAnchor>
+            <CookieSettingsButton className="hover:text-text" />
+          </div>
           {!!social.length && (
             <ul className="flex flex-wrap gap-x-5 gap-y-2">
               {social.map((s, i) => (
@@ -77,6 +88,19 @@ export function SiteFooter({ ctx, year }: { ctx: Pick<SiteRenderContext, "settin
             </ul>
           )}
         </div>
+        {officer && (
+          <p className="mt-3 text-xs text-subtle">
+            Grievance officer: {officer}
+            {privacyEmail && (
+              <>
+                {" — "}
+                <a href={`mailto:${privacyEmail.local}@${privacyEmail.domain}`} className="hover:text-text">
+                  {privacyEmail.local}@{privacyEmail.domain}
+                </a>
+              </>
+            )}
+          </p>
+        )}
       </Container>
     </footer>
   );

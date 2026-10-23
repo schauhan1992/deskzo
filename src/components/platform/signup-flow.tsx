@@ -669,6 +669,18 @@ export function SignupFlow({
           {formError}
         </p>
       )}
+      {/* The notice at the point of collection (owner, 23 Oct 2026; DPDP Act s.5): what these details are for, and where to read more. */}
+      <p className="text-xs leading-5 text-subtle">
+        We use these details to set up your workspace, sign you in and write to you about your account — the{" "}
+        <a href="/privacy" target="_blank" rel="noopener" className="font-medium text-muted underline underline-offset-2 hover:text-text">
+          privacy notice
+        </a>{" "}
+        says how, and how to ask for a copy, a correction or erasure. By continuing you accept the{" "}
+        <a href="/terms" target="_blank" rel="noopener" className="font-medium text-muted underline underline-offset-2 hover:text-text">
+          terms
+        </a>
+        .
+      </p>
       {pending ? (
         <SignupLoader brandName={brandName} status="Checking your details and sending your code…" />
       ) : (

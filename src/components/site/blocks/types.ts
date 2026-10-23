@@ -444,6 +444,12 @@ export type SiteSettings = {
   displayDomain: string;
   /** Shown on the site. Contact requests are mailed to PLATFORM_SALES_EMAIL, not here. */
   salesEmail: string;
+  /**
+   * Who answers for personal data (owner, 23 Oct 2026): the grievance officer the DPDP Act asks a Data
+   * Fiduciary to publish — in the privacy notice ({privacyOfficer}, {privacyEmail}) and the footer. A
+   * privacy request (src/lib/platform/privacy-requests.ts) is copied to this address. Empty until set.
+   */
+  privacy: { officer: string; email: string; phone: string; address: string };
   nav: NavItem[];
   signinLink: SiteLink;
   signupCta: { open: SiteLink; inviteOnly: SiteLink };

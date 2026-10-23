@@ -300,6 +300,7 @@ export const ACTION_MODULES: Record<string, ActionScope> = {
   "platform/console-linked.ts": "platform",
   "platform/console-names.ts": "platform",
   "platform/console-partners.ts": "platform",
+  "platform/console-privacy.ts": "platform",
   "platform/console-shell.ts": "platform",
   "platform/console-support.ts": "platform",
   "platform/console-website.ts": "platform",

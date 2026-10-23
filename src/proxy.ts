@@ -13,6 +13,7 @@ import { DEVICE_COOKIE, DEVICE_COOKIE_MAX_AGE, newDeviceToken, validDeviceToken 
 import { browseRedirect } from "@/lib/tenancy/browse-host";
 import { HOST_MISMATCH, classifyHost, protocolFor, requestHost } from "@/lib/tenancy/host";
 import { referralCookieDays } from "@/lib/partners/settings";
+import { CONSENT_COOKIE, REFERRAL_COOKIE, isReferralCode } from "@/lib/partners/referral-cookie";
 import { redirectablePath } from "@/lib/cms/redirect-rules";
 import { matchRedirect, recordHit } from "@/lib/cms/redirects";
 import { searchPolicy } from "@/lib/cms/search-policy";
@@ -101,10 +102,6 @@ const OFFICE_ADDINS_ALLOWED = "/.well-known/microsoft-officeaddins-allowed.json"
 
 /** A signature's click address, /s/<token> — see the rewrite in the proxy. */
 const SIGNATURE_CLICK = /^\/s\/[A-Za-z0-9._-]{20,120}$/;
-
-/** The partner programme's first-touch referral cookie on the public site, and a referral code's shape (6–40 characters). */
-const REFERRAL_COOKIE = "deskzo_ref";
-const REFERRAL_CODE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 /**
  * Reached with nobody signed in. Matched by whole segment: "/c" is a digital card (/c/<name>), never "/cards".
@@ -291,10 +288,14 @@ const withSession = edgeAuth(async (req: NextRequest & { auth: unknown }) => {
      * overwritten while present. Without a `ref` nothing is read, so every other request costs
      * nothing; the setting is cached for a minute. Only the code's shape is checked here — the signup
      * page validates it, and prefers the address's own `ref` over the cookie.
+     *
+     * Only for a visitor who has agreed to it (owner, 23 Oct 2026 — the cookie notice,
+     * src/components/site/cookie-notice.tsx): it is not strictly needed, so it waits for consent. A visitor
+     * who agrees on the page they landed on gets it from the notice's own action instead.
      */
     if (platformFolder === "/platform-site" && req.method === "GET" && kind) {
       const ref = req.nextUrl.searchParams.get("ref");
-      if (ref && ref.length >= 6 && ref.length <= 40 && REFERRAL_CODE.test(ref) && !req.cookies.has(REFERRAL_COOKIE)) {
+      if (ref && isReferralCode(ref) && !req.cookies.has(REFERRAL_COOKIE) && req.cookies.get(CONSENT_COOKIE)?.value === "accepted") {
         const days = await referralCookieDays();
         if (days > 0) {
           response.cookies.set(REFERRAL_COOKIE, ref, { httpOnly: true, sameSite: "lax", secure: protocolFor(kind.host) === "https", path: "/", maxAge: days * 86_400 });

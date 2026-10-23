@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { REFERRAL_COOKIE } from "@/lib/partners/referral-cookie";
 import { cookies } from "next/headers";
 import { heldAddress } from "@/actions/platform/signup";
 import { SitePageView, sitePageMetadata } from "@/components/site/page-view";
@@ -23,8 +24,6 @@ import { productByKey } from "@/lib/products";
  * src/lib/products.ts knows, which then says which product the trial is of; anything else is dropped,
  * and so is the product beside an invitation in the link, which names its own plan.
  */
-
-const REFERRAL_COOKIE = "deskzo_ref";
 
 type Query = Record<string, string | string[] | undefined>;
 

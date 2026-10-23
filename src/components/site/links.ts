@@ -64,6 +64,10 @@ export function fill(text: string | null | undefined, ctx: Pick<SiteRenderContex
     displayDomain: ctx.settings.displayDomain,
     salesEmail: ctx.settings.salesEmail,
     trialDays: String(ctx.trialDays),
+    // The grievance officer (Settings › General › Privacy contact): "to be named" until set, and the
+    // sales address standing in for theirs, so the notice never reads as a blank.
+    privacyOfficer: ctx.settings.privacy?.officer?.trim() || "to be named",
+    privacyEmail: ctx.settings.privacy?.email?.trim() || ctx.settings.salesEmail,
   };
   return String(text ?? "").replace(/\{(\w+)\}/g, (whole, name: string) => values[name] ?? whole);
 }

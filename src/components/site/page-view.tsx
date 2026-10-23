@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import type { SiteRenderContext } from "@/components/site/blocks/types";
 import { SiteBlocks } from "@/components/site/blocks/render";
+import { CookieNotice } from "@/components/site/cookie-notice";
 import { SiteFooter } from "@/components/site/footer";
 import { SiteHeader } from "@/components/site/header";
 import { fill, resolveAction } from "@/components/site/links";
@@ -11,6 +12,7 @@ import { fillNav } from "@/components/site/nav";
 import { applicationsShown, directoryShown } from "@/components/site/partners/programme";
 import { Breadcrumbs, ButtonLink, Container } from "@/components/site/ui";
 import { searchPolicy } from "@/lib/cms/search-policy";
+import { referralCookieDays } from "@/lib/partners/settings";
 import { getSitePage, getSiteSettings, sitePath, siteStatus, workspaceSuffix } from "@/lib/platform/site-content";
 import { aiSearchCrawlersAllowed } from "@/lib/seo/crawlers";
 import { inputFromPage, siteContextFrom } from "@/lib/seo/extract";
@@ -48,9 +50,9 @@ function thisYear(): number {
   return indiaClock.parts(new Date()).year;
 }
 
-/** The site's frame: header, main, footer. */
+/** The site's frame: header, main, footer, and the cookie notice — which asks only while the referral cookie is on. */
 export async function SiteShell({ children }: { children: ReactNode }) {
-  const ctx = await renderContext();
+  const [ctx, referralDays] = await Promise.all([renderContext(), referralCookieDays()]);
   const { settings } = ctx;
   const cta = resolveAction({ kind: "signup" }, ctx);
   return (
@@ -68,6 +70,7 @@ export async function SiteShell({ children }: { children: ReactNode }) {
         {children}
       </main>
       <SiteFooter ctx={ctx} year={thisYear()} />
+      <CookieNotice referralDays={referralDays} />
     </div>
   );
 }
