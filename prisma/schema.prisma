@@ -59,10 +59,10 @@ model Role {
   accessLevels  RoleAccessLevel[]
   fieldPolicies RoleFieldPolicy[]
   unmaskLimit   RoleUnmaskLimit?
-  signInRule   SignInRule?      @relation("RoleSignInRule")
-  candidates   Candidate[]
-  formGrants   FormAccessGrant[]
-  accessPolicy RoleAccessPolicy?
+  signInRule    SignInRule?       @relation("RoleSignInRule")
+  candidates    Candidate[]
+  formGrants    FormAccessGrant[]
+  accessPolicy  RoleAccessPolicy?
 
   @@map("roles")
 }
@@ -383,7 +383,9 @@ enum NotificationType {
   LETTER_ISSUED
   FEEDBACK_RECEIVED
   NOTE_REMINDER
-  /** A meeting in the person's calendar starts within ten minutes (src/lib/notify.ts, once per start time). */
+  /**
+   * A meeting in the person's calendar starts within ten minutes (src/lib/notify.ts, once per start time).
+   */
   MEETING_SOON
   /**
    * Raised by the DLP layer: a screenshot, a refused attempt past the cap, or read volume that
@@ -501,6 +503,10 @@ enum NotificationType {
   AUTOMATE_STEPS
   /// Four fifths of this month's Deskzo AI credits are used, or none are left (src/lib/ai/credits.ts).
   AI_CREDITS
+  /// A report was shared with you, or your access to it changed (Reporting & Analytics, owner 23 Oct 2026).
+  REPORT_SHARED
+  /// Somebody asked for access to a report you own.
+  REPORT_ACCESS_REQUESTED
 }
 
 model User {
@@ -606,25 +612,27 @@ model User {
   /**
    * Set once two-factor setup is confirmed with a valid code; null means 2FA is off for this account.
    */
-  twoFactorEnabledAt  DateTime?
+  twoFactorEnabledAt    DateTime?
   /**
    * Which dashboard widget keys (see src/lib/dashboard-widgets.ts) this user has chosen to show —
    * only meaningful when `dashboardCustomized` is true; ignored (defaults to every widget this
    * user currently has module access to) otherwise, so an un-customized dashboard tracks module
    * changes automatically instead of freezing at whatever was available when the user last saved.
    */
-  dashboardWidgets    String[]  @default([])
-  dashboardCustomized Boolean   @default(false)
+  dashboardWidgets      String[]  @default([])
+  dashboardCustomized   Boolean   @default(false)
   /**
    * Onboarding (src/lib/help/getting-started.ts): when this person finished their Getting started steps.
    * Until then the wizard opens at sign-in and Getting started is the dashboard's first tab; after,
    * it is gone for good, whatever later changes. People already here when it arrived were marked done.
    */
   onboardingCompletedAt DateTime?
-  /** Their own optional steps they chose to skip (e.g. "photo"); a skipped step counts as finished. */
+  /**
+   * Their own optional steps they chose to skip (e.g. "photo"); a skipped step counts as finished.
+   */
   onboardingSkipped     String[]  @default([])
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   departmentId  String?
   department    Department? @relation(fields: [departmentId], references: [id])
@@ -820,84 +828,84 @@ model User {
   incentivesCreated        IncentiveEarning[]         @relation("IncentiveCreatedBy")
   incentiveSchemesCreated  IncentiveScheme[]          @relation("IncentiveSchemeCreatedBy")
 
-  activity               ActivityLog[]            @relation("UserActivity")
-  permissionGrants       UserPermission[]         @relation("UserPermissionSubject")
-  permissionGrantsMade   UserPermission[]         @relation("UserPermissionGrantedBy")
-  accessLevels           UserAccessLevel[]        @relation("UserAccessLevelSubject")
-  accessLevelsGranted    UserAccessLevel[]        @relation("UserAccessLevelGrantedBy")
-  fieldPolicies          UserFieldPolicy[]        @relation("UserFieldPolicySubject")
-  fieldPoliciesGranted   UserFieldPolicy[]        @relation("UserFieldPolicyGrantedBy")
-  unmaskLimit            UserUnmaskLimit?         @relation("UserUnmaskLimitSubject")
-  unmaskLimitsGranted    UserUnmaskLimit[]        @relation("UserUnmaskLimitGrantedBy")
+  activity               ActivityLog[]             @relation("UserActivity")
+  permissionGrants       UserPermission[]          @relation("UserPermissionSubject")
+  permissionGrantsMade   UserPermission[]          @relation("UserPermissionGrantedBy")
+  accessLevels           UserAccessLevel[]         @relation("UserAccessLevelSubject")
+  accessLevelsGranted    UserAccessLevel[]         @relation("UserAccessLevelGrantedBy")
+  fieldPolicies          UserFieldPolicy[]         @relation("UserFieldPolicySubject")
+  fieldPoliciesGranted   UserFieldPolicy[]         @relation("UserFieldPolicyGrantedBy")
+  unmaskLimit            UserUnmaskLimit?          @relation("UserUnmaskLimitSubject")
+  unmaskLimitsGranted    UserUnmaskLimit[]         @relation("UserUnmaskLimitGrantedBy")
   unmaskUsage            UnmaskUsage[]
-  permissionChangesMade  PermissionChange[]       @relation("PermissionChangeActor")
-  permissionChangesAbout PermissionChange[]       @relation("PermissionChangeSubject")
-  activityAsImpersonator ActivityLog[]            @relation("ActivityImpersonatedBy")
-  screenshotAllowances   ScreenshotAllowance[]    @relation("UserScreenshotAllowance")
-  tablePreferences       TablePreference[]        @relation("UserTablePreferences")
-  pageLayouts            PageLayout[]             @relation("UserPageLayouts")
-  handoversGiven         Handover[]               @relation("HandoverFrom")
-  handoversPerformed     Handover[]               @relation("HandoverBy")
-  handoversReceived      HandoverLine[]           @relation("HandoverTo")
-  projectsManaged        Project[]                @relation("ProjectManager")
-  projectsCreated        Project[]                @relation("ProjectCreatedBy")
-  projectStakes          ProjectStakeholder[]     @relation("ProjectStakeholderUser")
-  projectStakesAdded     ProjectStakeholder[]     @relation("ProjectStakeholderAddedBy")
-  projectDocsUploaded    ProjectDocument[]        @relation("ProjectDocumentUploadedBy")
-  projectCredsCreated    ProjectCredential[]      @relation("ProjectCredentialCreatedBy")
-  credentialReveals      CredentialReveal[]       @relation("CredentialRevealedBy")
-  milestonesCompleted    ProjectMilestone[]       @relation("MilestoneCompletedBy")
-  projectRisksOwned      ProjectRisk[]            @relation("ProjectRiskOwner")
-  projectRisksRaised     ProjectRisk[]            @relation("ProjectRiskRaisedBy")
-  projectUpdates         ProjectUpdate[]          @relation("ProjectUpdateAuthor")
-  vaultOwned             VaultCredential[]        @relation("VaultOwner")
-  vaultCreated           VaultCredential[]        @relation("VaultCreatedBy")
-  vaultSharedWithMe      VaultShare[]             @relation("VaultSharedWith")
-  vaultSharedByMe        VaultShare[]             @relation("VaultSharedBy")
-  vaultReveals           VaultReveal[]            @relation("VaultRevealedBy")
-  vaultPins              VaultPin[]               @relation("VaultPinnedBy")
-  vaultArchived          VaultCredential[]        @relation("VaultArchivedBy")
-  backupsTriggered       Backup[]                 @relation("BackupTriggeredBy")
-  backupScheduleChanges  BackupSchedule[]         @relation("BackupScheduleUpdatedBy")
-  vendorStatements       VendorStatement[]        @relation("VendorStatementUploadedBy")
-  ordersLossApproved     CompanyProduct[]         @relation("OrderLossApprovedBy")
-  rebateProgrammesEdited RebateProgramme[]        @relation("RebateProgrammeUpdatedBy")
-  orderRebatesWrittenOff OrderRebate[]            @relation("OrderRebateWrittenOffBy")
-  orderRebatesCreated    OrderRebate[]            @relation("OrderRebateCreatedBy")
-  vendorCreditsCreated   VendorCredit[]           @relation("VendorCreditCreatedBy")
-  vendorCreditsCancelled VendorCredit[]           @relation("VendorCreditCancelledBy")
-  rebateAllocations      RebateAllocation[]       @relation("RebateAllocationCreatedBy")
+  permissionChangesMade  PermissionChange[]        @relation("PermissionChangeActor")
+  permissionChangesAbout PermissionChange[]        @relation("PermissionChangeSubject")
+  activityAsImpersonator ActivityLog[]             @relation("ActivityImpersonatedBy")
+  screenshotAllowances   ScreenshotAllowance[]     @relation("UserScreenshotAllowance")
+  tablePreferences       TablePreference[]         @relation("UserTablePreferences")
+  pageLayouts            PageLayout[]              @relation("UserPageLayouts")
+  handoversGiven         Handover[]                @relation("HandoverFrom")
+  handoversPerformed     Handover[]                @relation("HandoverBy")
+  handoversReceived      HandoverLine[]            @relation("HandoverTo")
+  projectsManaged        Project[]                 @relation("ProjectManager")
+  projectsCreated        Project[]                 @relation("ProjectCreatedBy")
+  projectStakes          ProjectStakeholder[]      @relation("ProjectStakeholderUser")
+  projectStakesAdded     ProjectStakeholder[]      @relation("ProjectStakeholderAddedBy")
+  projectDocsUploaded    ProjectDocument[]         @relation("ProjectDocumentUploadedBy")
+  projectCredsCreated    ProjectCredential[]       @relation("ProjectCredentialCreatedBy")
+  credentialReveals      CredentialReveal[]        @relation("CredentialRevealedBy")
+  milestonesCompleted    ProjectMilestone[]        @relation("MilestoneCompletedBy")
+  projectRisksOwned      ProjectRisk[]             @relation("ProjectRiskOwner")
+  projectRisksRaised     ProjectRisk[]             @relation("ProjectRiskRaisedBy")
+  projectUpdates         ProjectUpdate[]           @relation("ProjectUpdateAuthor")
+  vaultOwned             VaultCredential[]         @relation("VaultOwner")
+  vaultCreated           VaultCredential[]         @relation("VaultCreatedBy")
+  vaultSharedWithMe      VaultShare[]              @relation("VaultSharedWith")
+  vaultSharedByMe        VaultShare[]              @relation("VaultSharedBy")
+  vaultReveals           VaultReveal[]             @relation("VaultRevealedBy")
+  vaultPins              VaultPin[]                @relation("VaultPinnedBy")
+  vaultArchived          VaultCredential[]         @relation("VaultArchivedBy")
+  backupsTriggered       Backup[]                  @relation("BackupTriggeredBy")
+  backupScheduleChanges  BackupSchedule[]          @relation("BackupScheduleUpdatedBy")
+  vendorStatements       VendorStatement[]         @relation("VendorStatementUploadedBy")
+  ordersLossApproved     CompanyProduct[]          @relation("OrderLossApprovedBy")
+  rebateProgrammesEdited RebateProgramme[]         @relation("RebateProgrammeUpdatedBy")
+  orderRebatesWrittenOff OrderRebate[]             @relation("OrderRebateWrittenOffBy")
+  orderRebatesCreated    OrderRebate[]             @relation("OrderRebateCreatedBy")
+  vendorCreditsCreated   VendorCredit[]            @relation("VendorCreditCreatedBy")
+  vendorCreditsCancelled VendorCredit[]            @relation("VendorCreditCancelledBy")
+  rebateAllocations      RebateAllocation[]        @relation("RebateAllocationCreatedBy")
   vendorCreditsApplied   VendorCreditApplication[] @relation("VendorCreditAppliedBy")
-  reconcileResolutions   VendorStatementLine[]    @relation("VendorStatementLineResolvedBy")
-  reconcileMappings      VendorStatementMapping[] @relation("VendorStatementMappingUpdatedBy")
-  portalSettingsChanges  PortalSettings[]         @relation("PortalSettingsUpdatedBy")
-  portalLoginsCreated    PortalLogin[]            @relation("PortalLoginCreatedBy")
-  portalLoginsRevoked    PortalLogin[]            @relation("PortalLoginRevokedBy")
-  portalRequestsHandled  PortalRequest[]          @relation("PortalRequestHandledBy")
-  transportersCreated    Transporter[]            @relation("TransporterCreatedBy")
-  ewayBillsCreated       EwayBill[]               @relation("EwayBillCreatedBy")
-  feedbackAboutThem      InternalFeedback[]       @relation("FeedbackAboutSubject")
-  feedbackReviewed       InternalFeedback[]       @relation("FeedbackReviewedBy")
-  feedbackQuotas         FeedbackQuota[]          @relation("FeedbackQuotaUser")
-  surveysCreated         Survey[]                 @relation("SurveyCreatedBy")
-  surveyTargets          SurveyTarget[]           @relation("SurveyTargetUser")
-  surveyParticipations   SurveyParticipation[]    @relation("SurveyParticipant")
-  kiosksCreated          VisitorKiosk[]           @relation("KioskCreatedBy")
-  visitorsHosted         VisitorEntry[]           @relation("VisitorHost")
-  visitorsClosed         VisitorEntry[]           @relation("VisitorClosedBy")
-  invitesHosted          VisitorInvite[]          @relation("InviteHost")
-  invitesCreated         VisitorInvite[]          @relation("InviteCreatedBy")
-  photo                  UserPhoto?               @relation("UserPhoto")
-  tasksXpEarned          Task[]                   @relation("TaskXpEarner")
-  taskComments           TaskComment[]            @relation("TaskCommentAuthor")
-  taskAttachments        TaskAttachment[]         @relation("TaskAttachmentUploader")
-  taskTimeLogs           TaskTimeLog[]            @relation("TaskTimeLogger")
-  taskStars              TaskStar[]               @relation("TaskStarrer")
-  taskReminders          TaskReminder[]           @relation("TaskReminderOwner")
-  tvScreensPaired        TvScreen[]               @relation("TvScreenPairedBy")
-  taskChallengesMade     TaskChallenge[]          @relation("TaskChallengeCreator")
-  creditDecisions        CreditDecision[]         @relation("CreditDecidedBy")
-  messagesSent           MarketingMessage[]       @relation("MarketingMessageSentBy")
+  reconcileResolutions   VendorStatementLine[]     @relation("VendorStatementLineResolvedBy")
+  reconcileMappings      VendorStatementMapping[]  @relation("VendorStatementMappingUpdatedBy")
+  portalSettingsChanges  PortalSettings[]          @relation("PortalSettingsUpdatedBy")
+  portalLoginsCreated    PortalLogin[]             @relation("PortalLoginCreatedBy")
+  portalLoginsRevoked    PortalLogin[]             @relation("PortalLoginRevokedBy")
+  portalRequestsHandled  PortalRequest[]           @relation("PortalRequestHandledBy")
+  transportersCreated    Transporter[]             @relation("TransporterCreatedBy")
+  ewayBillsCreated       EwayBill[]                @relation("EwayBillCreatedBy")
+  feedbackAboutThem      InternalFeedback[]        @relation("FeedbackAboutSubject")
+  feedbackReviewed       InternalFeedback[]        @relation("FeedbackReviewedBy")
+  feedbackQuotas         FeedbackQuota[]           @relation("FeedbackQuotaUser")
+  surveysCreated         Survey[]                  @relation("SurveyCreatedBy")
+  surveyTargets          SurveyTarget[]            @relation("SurveyTargetUser")
+  surveyParticipations   SurveyParticipation[]     @relation("SurveyParticipant")
+  kiosksCreated          VisitorKiosk[]            @relation("KioskCreatedBy")
+  visitorsHosted         VisitorEntry[]            @relation("VisitorHost")
+  visitorsClosed         VisitorEntry[]            @relation("VisitorClosedBy")
+  invitesHosted          VisitorInvite[]           @relation("InviteHost")
+  invitesCreated         VisitorInvite[]           @relation("InviteCreatedBy")
+  photo                  UserPhoto?                @relation("UserPhoto")
+  tasksXpEarned          Task[]                    @relation("TaskXpEarner")
+  taskComments           TaskComment[]             @relation("TaskCommentAuthor")
+  taskAttachments        TaskAttachment[]          @relation("TaskAttachmentUploader")
+  taskTimeLogs           TaskTimeLog[]             @relation("TaskTimeLogger")
+  taskStars              TaskStar[]                @relation("TaskStarrer")
+  taskReminders          TaskReminder[]            @relation("TaskReminderOwner")
+  tvScreensPaired        TvScreen[]                @relation("TvScreenPairedBy")
+  taskChallengesMade     TaskChallenge[]           @relation("TaskChallengeCreator")
+  creditDecisions        CreditDecision[]          @relation("CreditDecidedBy")
+  messagesSent           MarketingMessage[]        @relation("MarketingMessageSentBy")
 
   branchesCreated         Branch[]          @relation("BranchCreatedBy")
   gstRegistrationsCreated GstRegistration[] @relation("GstRegistrationCreatedBy")
@@ -916,26 +924,33 @@ model User {
   customFieldDefinitionsCreated CustomFieldDefinition[] @relation("CustomFieldDefinitionCreatedBy")
   customFieldDefinitionsUpdated CustomFieldDefinition[] @relation("CustomFieldDefinitionUpdatedBy")
   orderStepChanges              OrderStepChange[]
-  calendarAccount               CalendarAccount?         @relation("UserCalendarAccount")
-  calendarEvents                CalendarEvent[]          @relation("UserCalendarEvents")
-  calendarFeed                  CalendarFeed?            @relation("UserCalendarFeed")
-  bookingsHosted                Booking[]                @relation("BookingHost")
-  recurringBillingsSet RecurringBilling[] @relation("RecurringBillingSetBy")
-  chatsCreated         Chat[]             @relation("ChatCreatedBy")
-  chatMemberships      ChatMember[]       @relation("ChatMemberships")
-  chatMessagesSent     ChatMessage[]      @relation("ChatMessagesSent")
-  chatPresence         ChatPresence?      @relation("ChatPresence")
-  chatReactions        ChatReaction[]     @relation("ChatReactions")
-  chatPinsMade         ChatPin[]          @relation("ChatPinsMade")
-  apiKeys              ApiKey[]           @relation("ApiKeyUser")
-  appDevices           AppDevice[]        @relation("AppDevices")
-  appPairings          AppPairing[]       @relation("AppPairings")
-  appCallRequests      AppCallRequest[]   @relation("AppCallRequests")
-  attendanceLocations  AttendanceLocation[] @relation("AttendanceLocations")
-  attendanceExceptions          AttendanceException[] @relation("AttendanceExceptions")
-  attendanceExceptionsRequested AttendanceException[] @relation("AttendanceExceptionsRequested")
-  attendanceExceptionsDecided   AttendanceException[] @relation("AttendanceExceptionsDecided")
-  attendanceExceptionsRevoked   AttendanceException[] @relation("AttendanceExceptionsRevoked")
+  calendarAccount               CalendarAccount?        @relation("UserCalendarAccount")
+  calendarEvents                CalendarEvent[]         @relation("UserCalendarEvents")
+  calendarFeed                  CalendarFeed?           @relation("UserCalendarFeed")
+  bookingsHosted                Booking[]               @relation("BookingHost")
+  recurringBillingsSet          RecurringBilling[]      @relation("RecurringBillingSetBy")
+  chatsCreated                  Chat[]                  @relation("ChatCreatedBy")
+  chatMemberships               ChatMember[]            @relation("ChatMemberships")
+  chatMessagesSent              ChatMessage[]           @relation("ChatMessagesSent")
+  chatPresence                  ChatPresence?           @relation("ChatPresence")
+  chatReactions                 ChatReaction[]          @relation("ChatReactions")
+  chatPinsMade                  ChatPin[]               @relation("ChatPinsMade")
+  apiKeys                       ApiKey[]                @relation("ApiKeyUser")
+  appDevices                    AppDevice[]             @relation("AppDevices")
+  appPairings                   AppPairing[]            @relation("AppPairings")
+  appCallRequests               AppCallRequest[]        @relation("AppCallRequests")
+  attendanceLocations           AttendanceLocation[]    @relation("AttendanceLocations")
+  attendanceExceptions          AttendanceException[]   @relation("AttendanceExceptions")
+  attendanceExceptionsRequested AttendanceException[]   @relation("AttendanceExceptionsRequested")
+  attendanceExceptionsDecided   AttendanceException[]   @relation("AttendanceExceptionsDecided")
+  attendanceExceptionsRevoked   AttendanceException[]   @relation("AttendanceExceptionsRevoked")
+
+  // Reporting & Analytics (owner, 23 Oct 2026): reports somebody built, what was shared with them, and theirs.
+  savedReports          SavedReport[]          @relation("SavedReportOwner")
+  savedReportShares     SavedReportShare[]     @relation("SavedReportShareUser")
+  savedReportSharesMade SavedReportShare[]     @relation("SavedReportShareBy")
+  savedReportFavourites SavedReportFavourite[]
+  savedReportViews      SavedReportView[]
 
   @@index([departmentId])
   @@index([managerId])
@@ -958,19 +973,21 @@ model Department {
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
-  members       User[]
+  members        User[]
   tasks          Task[]          @relation("TaskTeam")
   taskChallenges TaskChallenge[] @relation("TaskChallengeTeam")
-  candidates    Candidate[]
-  celebrations  Celebration[]
-  journalLines  JournalLine[]  @relation("JournalLineCostCentre")
-  fixedAssets   FixedAsset[]   @relation("AssetCostCentre")
-  targets       Target[]
-  vaultShares   VaultShare[]   @relation("VaultSharedWithDepartment")
-  surveyTargets SurveyTarget[] @relation("SurveyTargetDepartment")
-  visitors      VisitorEntry[] @relation("VisitorDepartment")
+  candidates     Candidate[]
+  celebrations   Celebration[]
+  journalLines   JournalLine[]   @relation("JournalLineCostCentre")
+  fixedAssets    FixedAsset[]    @relation("AssetCostCentre")
+  targets        Target[]
+  vaultShares    VaultShare[]    @relation("VaultSharedWithDepartment")
+  surveyTargets  SurveyTarget[]  @relation("SurveyTargetDepartment")
+  visitors       VisitorEntry[]  @relation("VisitorDepartment")
 
   accountingSchedules AccountingSchedule[] @relation("AccountingScheduleCostCentre")
+
+  savedReportShares SavedReportShare[] @relation("SavedReportShareDepartment")
 
   @@map("departments")
 }
@@ -1079,7 +1096,7 @@ model Company {
    * The workspace's own fields (src/lib/custom-fields), keyed by CustomFieldDefinition.key. Left out of
    * select-less reads until every workspace has the column (NOT_YET_EVERYWHERE, src/lib/tenancy/clients.ts).
    */
-  customFields Json @default("{}")
+  customFields        Json                    @default("{}")
 
   contacts               Contact[]
   leads                  Lead[]
@@ -1171,8 +1188,8 @@ model Company {
   revenueSchedules    RevenueSchedule[]    @relation("RevenueScheduleCustomer")
   accountingSchedules AccountingSchedule[] @relation("AccountingScheduleVendor")
   paymentFollowUps    PaymentFollowUp[]
-  calendarEvents          CalendarEvent[]
-  bookings                Booking[]
+  calendarEvents      CalendarEvent[]
+  bookings            Booking[]
 
   @@index([stage])
   @@index([assignedToUserId])
@@ -1390,10 +1407,10 @@ model CompanyLocation {
 }
 
 model Contact {
-  id          String             @id @default(cuid())
-  companyId   String
-  company     Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  name        String
+  id                String             @id @default(cuid())
+  companyId         String
+  company           Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name              String
   /**
    * Stable identity for exports and migrations.
    * `email` is nullable and unconstrained here, `phone` likewise, so a contact with neither falls
@@ -1401,17 +1418,17 @@ model Contact {
    * where it matters. Moving somebody between companies also re-keys them, so the same person
    * arrives in a target system twice.
    */
-  contactSeq  Int                @unique @default(autoincrement())
-  designation ContactDesignation @default(OTHER)
-  email       String?
-  phone       String?
-  linkedinUrl String?
-  isPrimary   Boolean            @default(false)
+  contactSeq        Int                @unique @default(autoincrement())
+  designation       ContactDesignation @default(OTHER)
+  email             String?
+  phone             String?
+  linkedinUrl       String?
+  isPrimary         Boolean            @default(false)
   /**
    * Gets the invoices, proposals and credit notes — pre-selected when somebody presses Mail on a
    * document for this company. See src/actions/document-mail.ts.
    */
-  receivesDocuments Boolean      @default(false)
+  receivesDocuments Boolean            @default(false)
   /// When they left the company (owner, 8 Oct 2026). Kept with all their history, but no longer primary,
   /// sent documents, mailed, invited, offered in pickers or let into the portal. Null: still there.
   leftAt            DateTime?
@@ -1421,15 +1438,15 @@ model Contact {
    * the designation's type whenever this is set. Null: none chosen, or a record made before the list.
    */
   designationId     String?
-  designationRef    Designation? @relation(fields: [designationId], references: [id], onDelete: SetNull)
+  designationRef    Designation?       @relation(fields: [designationId], references: [id], onDelete: SetNull)
   /**
    * The same person's record at the company they were at before (owner, 8 Oct 2026): set when
    * somebody marked as having left is recorded as joining another company. Their history stays with
    * the old record and the old company; the two are linked both ways.
    */
-  previousContactId String?  @unique
-  previousContact   Contact? @relation("ContactMoves", fields: [previousContactId], references: [id], onDelete: SetNull)
-  nextContact       Contact? @relation("ContactMoves")
+  previousContactId String?            @unique
+  previousContact   Contact?           @relation("ContactMoves", fields: [previousContactId], references: [id], onDelete: SetNull)
+  nextContact       Contact?           @relation("ContactMoves")
 
   /**
    * The last verdict on this email address — see src/lib/email-verification.ts.
@@ -1437,35 +1454,35 @@ model Contact {
    * `email` before showing anything. Without it, editing an address would inherit the previous
    * green tick, and every write path in the app would have to remember to clear these fields.
    */
-  emailStatus          EmailCheckStatus  @default(UNCHECKED)
-  emailCheckedValue    String?
-  emailCheckedAt       DateTime?
-  emailCheckMethod     EmailCheckMethod?
-  emailCheckDetail     String?
-  emailCheckedByUserId String?
-  emailCheckedBy       User?             @relation("ContactEmailCheckedBy", fields: [emailCheckedByUserId], references: [id])
-  supportEmails        SupportEmail[]
+  emailStatus            EmailCheckStatus  @default(UNCHECKED)
+  emailCheckedValue      String?
+  emailCheckedAt         DateTime?
+  emailCheckMethod       EmailCheckMethod?
+  emailCheckDetail       String?
+  emailCheckedByUserId   String?
+  emailCheckedBy         User?             @relation("ContactEmailCheckedBy", fields: [emailCheckedByUserId], references: [id])
+  supportEmails          SupportEmail[]
   /**
    * The preference-centre link. Long-lived rather than one-time — somebody has to be able to come
    * back and change their mind — and generated lazily, so a contact nobody has ever mailed has none.
    * Null, too, for contacts added before this was tracked.
    */
-  preferenceToken      String?           @unique
+  preferenceToken        String?           @unique
   /**
    * Preference links of contacts combined into this one when two companies were merged — mail
    * already sent carries them, and an unsubscribe link has to keep working after the person it was
    * sent to became somebody else's record. See src/lib/companies/merge.ts.
    */
-  formerPreferenceTokens String[]        @default([])
-  createdByUserId      String?
-  createdBy            User?             @relation("ContactCreatedBy", fields: [createdByUserId], references: [id])
-  createdAt            DateTime          @default(now())
-  updatedAt            DateTime          @updatedAt
+  formerPreferenceTokens String[]          @default([])
+  createdByUserId        String?
+  createdBy              User?             @relation("ContactCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
   /**
    * The workspace's own fields (src/lib/custom-fields), keyed by CustomFieldDefinition.key. Left out of
    * select-less reads until every workspace has the column (NOT_YET_EVERYWHERE, src/lib/tenancy/clients.ts).
    */
-  customFields Json @default("{}")
+  customFields           Json              @default("{}")
 
   leads             Lead[]
   tickets           Ticket[]
@@ -1514,42 +1531,42 @@ model Designation {
 }
 
 model Lead {
-  id                String     @id @default(cuid())
+  id                String        @id @default(cuid())
   companyId         String
-  company           Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company           Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
   contactId         String?
-  contact           Contact?   @relation(fields: [contactId], references: [id])
+  contact           Contact?      @relation(fields: [contactId], references: [id])
   /**
    * Stable identity. `title` is mutable free text that salespeople rewrite as a deal evolves, and
    * this model has no unique constraint at all — so a key built from it is not merely
    * collision-prone but *unstable*, which is worse: a collision can be found by counting, while a
    * renamed record simply imports a second time and nothing notices.
    */
-  leadSeq           Int        @unique @default(autoincrement())
+  leadSeq           Int           @unique @default(autoincrement())
   title             String
   description       String?
-  status            LeadStatus @default(NEW)
+  status            LeadStatus    @default(NEW)
   lostReason        String?
   sourcedByUserId   String?
-  sourcedBy         User?      @relation("LeadSourcedBy", fields: [sourcedByUserId], references: [id])
+  sourcedBy         User?         @relation("LeadSourcedBy", fields: [sourcedByUserId], references: [id])
   qualifiedByUserId String?
-  qualifiedBy       User?      @relation("LeadQualifiedBy", fields: [qualifiedByUserId], references: [id])
+  qualifiedBy       User?         @relation("LeadQualifiedBy", fields: [qualifiedByUserId], references: [id])
   ownerUserId       String?
-  owner             User?      @relation("LeadOwner", fields: [ownerUserId], references: [id])
-  estimatedValue    Decimal?   @db.Decimal(12, 2)
+  owner             User?         @relation("LeadOwner", fields: [ownerUserId], references: [id])
+  estimatedValue    Decimal?      @db.Decimal(12, 2)
   expectedCloseDate DateTime?
   /**
    * Who actually created this lead record — null for leads created before this was tracked; distinct from `sourcedByUserId`, which is inherited from the company and means something different.
    */
   createdByUserId   String?
-  createdBy         User?      @relation("LeadCreatedBy", fields: [createdByUserId], references: [id])
-  createdAt         DateTime   @default(now())
-  updatedAt         DateTime   @updatedAt
+  createdBy         User?         @relation("LeadCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
   /**
    * The workspace's own fields (src/lib/custom-fields), keyed by CustomFieldDefinition.key. Left out of
    * select-less reads until every workspace has the column (NOT_YET_EVERYWHERE, src/lib/tenancy/clients.ts).
    */
-  customFields Json @default("{}")
+  customFields      Json          @default("{}")
   /**
    * The workspace's own stage the lead is at (Settings → Pipeline, src/lib/pipeline) — what it shows and
    * moves through. `status` is that stage's meaning, written with it, and is what the rest of the app acts
@@ -1557,28 +1574,28 @@ model Lead {
    * with its status's meaning. Left out of select-less reads until every workspace has the column
    * (NOT_YET_EVERYWHERE, src/lib/tenancy/clients.ts).
    */
-  stageId        String?
-  stage          LeadStage? @relation(fields: [stageId], references: [id], onDelete: SetNull)
+  stageId           String?
+  stage             LeadStage?    @relation(fields: [stageId], references: [id], onDelete: SetNull)
   /**
    * When the lead last moved stage. `updatedAt` is not that: the score is rewritten on every view and by
    * the periodic tick, which moves it. Backfilled from the stage-change history.
    */
-  stageChangedAt DateTime?
+  stageChangedAt    DateTime?
   /**
    * The team pipeline the lead is in (src/lib/pipeline) — written with its stage, whose pipeline it is.
    * Null for a lead written before the workspace had several pipelines, or by a path that knows only the
    * main one: it is in the main pipeline (`MAIN_PIPELINE_ID`). Left out of select-less reads until every
    * workspace has the column (NOT_YET_EVERYWHERE, src/lib/tenancy/clients.ts).
    */
-  pipelineId     String?
-  pipeline       LeadPipeline? @relation(fields: [pipelineId], references: [id], onDelete: SetNull)
+  pipelineId        String?
+  pipeline          LeadPipeline? @relation(fields: [pipelineId], references: [id], onDelete: SetNull)
   /**
    * Connected pipelines: the lead this one carried on from — won in one pipeline, it started here at the
    * next one's first stage. Same NOT_YET_EVERYWHERE note.
    */
-  fromLeadId     String?
-  fromLead       Lead?         @relation("LeadCarriedOn", fields: [fromLeadId], references: [id], onDelete: SetNull)
-  carriedOnAs    Lead[]        @relation("LeadCarriedOn")
+  fromLeadId        String?
+  fromLead          Lead?         @relation("LeadCarriedOn", fields: [fromLeadId], references: [id], onDelete: SetNull)
+  carriedOnAs       Lead[]        @relation("LeadCarriedOn")
 
   /// Where the enquiry came from. Distinct from Company.source, which is how the *account* was found.
   source         LeadSource      @default(OTHER)
@@ -1614,8 +1631,8 @@ model Lead {
   formSubmissions FormSubmission[] @relation("FormSubmissionLead")
   cardContacts    CardContact[]    @relation("CardContactLead")
   stickyNotes     StickyNote[]     @relation("StickyNoteLead")
-  calendarEvents     CalendarEvent[]
-  bookings           Booking[]
+  calendarEvents  CalendarEvent[]
+  bookings        Booking[]
 
   @@unique([captureKeyId, externalId])
   @@index([companyId])
@@ -1832,22 +1849,22 @@ model OrganisationSettings {
    * image, but an employer who white-labels the app would be quietly signing letters with the
    * wrong mark. Null falls back to the app logo.
    */
-  letterheadLogoDataUrl String?
+  letterheadLogoDataUrl  String?
   /**
    * The fine print along the bottom of company paper — registered office, CIN, website.
    */
-  letterheadFooter      String?
+  letterheadFooter       String?
   /**
    * Prefix for every letter reference number, e.g. WRF in WRF/APPT/2026/001.
    */
-  letterNumberPrefix    String  @default("WRF")
+  letterNumberPrefix     String  @default("WRF")
   /// Vendors are numbered <prefix><0001…> as they are created (owner, 8 Oct 2026; src/lib/companies/vendor-code.ts).
-  vendorCodePrefix      String  @default("VEN-")
+  vendorCodePrefix       String  @default("VEN-")
   /**
    * Who letters are signed by. Left blank, a letter is signed by whoever drafted it.
    */
-  letterSignatoryName   String?
-  letterSignatoryTitle  String?
+  letterSignatoryName    String?
+  letterSignatoryTitle   String?
   /**
    * The signatory's signature, as an image, for HR letters (owner, 21 Oct 2026) — apart from the invoice
    * stamp above, which a letter falls back to when this isn't set. Copied onto a letter when it is issued.
@@ -1994,19 +2011,19 @@ model Branch {
   /// Superseded (owner, 8 Oct 2026) by `defaultBankAccount`: migration 20261028110000 made a branch's own
   /// bank block one of the organisation's accounts. No longer written; read only by a print in a workspace
   /// not yet migrated (src/lib/banking/organisation-accounts.ts). A later release drops them.
-  bankName          String?
-  bankAccountNumber String?
-  bankIfsc          String?
-  bankBranch        String?
-  upiId             String?
+  bankName             String?
+  bankAccountNumber    String?
+  bankIfsc             String?
+  bankBranch           String?
+  upiId                String?
   /// The organisation account this branch's sales documents print unless one names another. Null: the
   /// organisation's primary.
   defaultBankAccountId String?
   defaultBankAccount   OrganisationBankAccount? @relation("BranchDefaultBankAccount", fields: [defaultBankAccountId], references: [id], onDelete: SetNull)
-  logoDataUrl       String?
-  signatureDataUrl  String?
-  invoiceTerms      String?
-  invoiceNotes      String?
+  logoDataUrl          String?
+  signatureDataUrl     String?
+  invoiceTerms         String?
+  invoiceNotes         String?
 
   /// Exactly one: at most one by a partial unique index (branches_one_head_office), at least one because
   /// the flag can only be moved.
@@ -2217,9 +2234,9 @@ model TradeDocument {
    * the next release makes `branchId` NOT NULL with the head office as its database default.
    */
   branchId          String?
-  branch            Branch?          @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  branch            Branch?                  @relation(fields: [branchId], references: [id], onDelete: Restrict)
   gstRegistrationId String?
-  gstRegistration   GstRegistration? @relation(fields: [gstRegistrationId], references: [id], onDelete: Restrict)
+  gstRegistration   GstRegistration?         @relation(fields: [gstRegistrationId], references: [id], onDelete: Restrict)
   /// The organisation bank account a sales document prints (owner, 8 Oct 2026). Null: its branch's default,
   /// else the organisation's primary. Read live, as every other part of the letterhead is.
   bankAccountId     String?
@@ -2370,8 +2387,8 @@ model TradeDocument {
   adjustmentLabel        String?
   adjustment             Decimal         @default(0) @db.Decimal(12, 2)
 
-  roundOff Decimal @default(0) @db.Decimal(6, 2)
-  total    Decimal @default(0) @db.Decimal(14, 2)
+  roundOff   Decimal @default(0) @db.Decimal(6, 2)
+  total      Decimal @default(0) @db.Decimal(14, 2)
   /**
    * What was settled before the document came to Deskzo (owner, 18 Oct 2026): on one brought from the
    * old system (origin IMPORTED), the payments and credits it had there, so its balance due is what was
@@ -2397,10 +2414,10 @@ model TradeDocument {
    * proposal was cancelled"). Required whenever a document is marked cancelled, by hand or with its
    * e-invoice. Read by name — in NOT_YET_EVERYWHERE until every workspace has it.
    */
-  cancelReason    String?
-  cancelledAt     DateTime?
-  cancelledById   String?
-  cancelledBy     User?     @relation("TradeDocumentCancelledBy", fields: [cancelledById], references: [id], onDelete: SetNull)
+  cancelReason         String?
+  cancelledAt          DateTime?
+  cancelledById        String?
+  cancelledBy          User?          @relation("TradeDocumentCancelledBy", fields: [cancelledById], references: [id], onDelete: SetNull)
 
   createdById   String
   createdBy     User      @relation("TradeDocumentCreatedBy", fields: [createdById], references: [id])
@@ -2409,42 +2426,48 @@ model TradeDocument {
   salespersonId String?
   salesperson   User?     @relation("TradeDocumentSalesperson", fields: [salespersonId], references: [id])
   issuedAt      DateTime?
-  /** The last time it was emailed to the customer from here. Who to, and from whom, is in `emails`. */
+  /**
+   * The last time it was emailed to the customer from here. Who to, and from whom, is in `emails`.
+   */
   lastEmailedAt DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  emails          MarketingMessage[]      @relation("MarketingMessageDocument")
+  emails          MarketingMessage[]        @relation("MarketingMessageDocument")
   renderGrants    DocumentRenderGrant[]
   lines           TradeDocumentLine[]
   /**
    * Payments settling this invoice.
    */
-  payments        PaymentAllocation[]     @relation("InvoicePayment")
-  /** Pay-now links made for it (src/lib/collect). */
-  paymentLinks    PaymentLink[]           @relation("InvoicePaymentLinks")
+  payments        PaymentAllocation[]       @relation("InvoicePayment")
+  /**
+   * Pay-now links made for it (src/lib/collect).
+   */
+  paymentLinks    PaymentLink[]             @relation("InvoicePaymentLinks")
   /**
    * Credit notes reducing this invoice.
    */
-  creditsReceived CreditNoteApplication[] @relation("InvoiceCredited")
+  creditsReceived CreditNoteApplication[]   @relation("InvoiceCredited")
   /**
    * Where this credit note has been applied.
    */
-  creditsApplied  CreditNoteApplication[] @relation("CreditNoteApplied")
-  /** A bill's share of vendor credit notes set against it — what we owe on it goes down. */
+  creditsApplied  CreditNoteApplication[]   @relation("CreditNoteApplied")
+  /**
+   * A bill's share of vendor credit notes set against it — what we owe on it goes down.
+   */
   vendorCredits   VendorCreditApplication[] @relation("BillVendorCredits")
 
-  journalEntries JournalEntry[] @relation("DocumentJournal")
+  journalEntries            JournalEntry[]  @relation("DocumentJournal")
   /**
    * Finance → Accounts (owner, 22 Oct 2026): the warehouse an invoice's goods leave from, or a bill's or
    * credit note's arrive in — the default warehouse when not set. Read by name (NOT_YET_EVERYWHERE).
    */
-  warehouseId              String?
-  warehouse                Warehouse?      @relation("DocumentWarehouse", fields: [warehouseId], references: [id])
-  stockMovements           StockMovement[] @relation("DocumentStockMovements")
-  stockReceipts            StockDocument[] @relation("StockDocumentPurchaseOrder")
+  warehouseId               String?
+  warehouse                 Warehouse?      @relation("DocumentWarehouse", fields: [warehouseId], references: [id])
+  stockMovements            StockMovement[] @relation("DocumentStockMovements")
+  stockReceipts             StockDocument[] @relation("StockDocumentPurchaseOrder")
   stockDocumentsAgainstBill StockDocument[] @relation("StockDocumentBill")
-  consignments   Consignment[]  @relation("ConsignmentDocument")
+  consignments              Consignment[]   @relation("ConsignmentDocument")
 
   /**
    * Revenue & Close: the schedules this invoice's deferring lines made; on a credit note, what it took
@@ -2725,7 +2748,6 @@ model RolePermission {
  * How far a role reaches, per record type and action (docs/permission-redesign.md §4): which records
  * of a kind its people may see, edit, delete or hand to somebody else — none, their own, their
  * team's, their branch's, all of them, or "as the account they belong to".
- *
  * No row is the normal state, not a gap. A role with no row reaches exactly as far as its permissions
  * took it before levels existed (src/lib/authz/access.ts `derivedLevel`): "See all companies" is All,
  * a view permission is "follow the account". A row appears only when an admin sets a level, and from
@@ -2748,7 +2770,6 @@ model RoleAccessLevel {
 /**
  * The workspace's list of item categories — Laptops, Software licences, AMC, Perpetual licence — kept
  * on Items › Categories and picked on the item form, so one thing isn't filed three ways.
- *
  * Linked to items by name (`Item.category` holds the name, as the list spells it) rather than by a
  * key: the column was already there and read by the reports, the export and the import, and a rename
  * here rewrites it on every item. Names are unique ignoring case and spacing — the actions' rule, as
@@ -2772,8 +2793,8 @@ model Brand {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  items    Item[]
-  families ProductFamily[]
+  items            Item[]
+  families         ProductFamily[]
   rebateProgrammes RebateProgramme[]
 
   @@map("brands")
@@ -2855,7 +2876,7 @@ model Item {
    * The workspace's own fields (src/lib/custom-fields), keyed by CustomFieldDefinition.key. Left out of
    * select-less reads until every workspace has the column (NOT_YET_EVERYWHERE, src/lib/tenancy/clients.ts).
    */
-  customFields Json @default("{}")
+  customFields    Json           @default("{}")
 
   /**
    * How revenue from this item is earned (Ind AS 115). Null means derived rather than chosen: a
@@ -2997,18 +3018,20 @@ model CompanyProduct {
    * The workspace's own fields (src/lib/custom-fields), keyed by CustomFieldDefinition.key. Left out of
    * select-less reads until every workspace has the column (NOT_YET_EVERYWHERE, src/lib/tenancy/clients.ts).
    */
-  customFields Json @default("{}")
+  customFields   Json                  @default("{}")
   /**
    * The workspace's own step the order is at within its status (Settings → Pipeline, src/lib/pipeline/
    * order-steps.ts) — "Material ordered", "Installed". A step of another status, or none, reads as the
    * first step of the status it is in now, so approving or fulfilling an order needn't touch it. Left out
    * of select-less reads until every workspace has the column (NOT_YET_EVERYWHERE).
    */
-  stepId        String?
-  step          OrderStep?        @relation(fields: [stepId], references: [id], onDelete: SetNull)
-  /** When somebody last moved it to a step. */
-  stepChangedAt DateTime?
-  stepChanges   OrderStepChange[]
+  stepId         String?
+  step           OrderStep?            @relation(fields: [stepId], references: [id], onDelete: SetNull)
+  /**
+   * When somebody last moved it to a step.
+   */
+  stepChangedAt  DateTime?
+  stepChanges    OrderStepChange[]
 
   /**
    * The order-punching workflow stage. See the `OrderStatus` doc-comment for the full lifecycle.
@@ -3055,6 +3078,7 @@ model CompanyProduct {
 
   // ── Hand-off to purchase, the salesperson's distributor price, price reviews, cancellation ──────
   /**
+   * /**
    * Whether purchase may process this order yet: RELEASED unless the salesperson punched it as an
    * in-hand order (HELD) or scheduled the go-ahead (SCHEDULED, released on `releaseOn`).
    */
@@ -3071,20 +3095,28 @@ model CompanyProduct {
    */
   bookedAt        DateTime?       @default(now())
 
-  /** The purchase price per unit a salesperson got from a distributor, and where it came from. */
+  /**
+   * The purchase price per unit a salesperson got from a distributor, and where it came from.
+   */
   quotedPurchasePrice Decimal?  @db.Decimal(12, 2)
   quoteVendorId       String?
   quoteVendor         Company?  @relation("OrderQuoteVendor", fields: [quoteVendorId], references: [id], onDelete: SetNull)
-  /** The distributor's name when it isn't a company in the CRM. */
+  /**
+   * The distributor's name when it isn't a company in the CRM.
+   */
   quoteVendorName     String?
-  /** The person at the distributor who gave the price. */
+  /**
+   * The person at the distributor who gave the price.
+   */
   quoteContact        String?
   quotedOn            DateTime? @db.Date
   quoteRemarks        String?
   quotedById          String?
   quotedBy            User?     @relation("OrderQuotedBy", fields: [quotedById], references: [id], onDelete: SetNull)
 
-  /** A purchase price above the salesperson's quote, waiting for them to accept it. */
+  /**
+   * A purchase price above the salesperson's quote, waiting for them to accept it.
+   */
   pendingPurchasePrice     Decimal?  @db.Decimal(12, 2)
   pendingVendorId          String?
   pendingVendor            Company?  @relation("OrderPendingVendor", fields: [pendingVendorId], references: [id], onDelete: SetNull)
@@ -3093,7 +3125,9 @@ model CompanyProduct {
   priceReviewRequestedById String?
   priceReviewRequestedBy   User?     @relation("OrderPriceReviewRequestedBy", fields: [priceReviewRequestedById], references: [id], onDelete: SetNull)
 
-  /** Cancellation: who, when, why — and, for an order purchase had processed, what became of our vendor PO. */
+  /**
+   * Cancellation: who, when, why — and, for an order purchase had processed, what became of our vendor PO.
+   */
   cancelledAt         DateTime?
   cancelledById       String?
   cancelledBy         User?           @relation("OrderCancelledBy", fields: [cancelledById], references: [id], onDelete: SetNull)
@@ -3108,36 +3142,38 @@ model CompanyProduct {
    * number, how long it holds. Recorded for information — nothing waits on it, not even buying at a
    * deal price. It carries no rebate figures, so whoever punches the order records it.
    */
-  dealRegStatus  DealRegStatus?
-  dealRegNumber  String?
-  dealRegValidTo DateTime?      @db.Date
+  dealRegStatus     DealRegStatus?
+  dealRegNumber     String?
+  dealRegValidTo    DateTime?      @db.Date
   /**
    * The upfront price per unit the distributor is to bill at — under the registration, or a special
    * price — below its usual one. Reconciliation flags a statement line billed above it.
    */
-  dealPrice      Decimal?       @db.Decimal(12, 2)
+  dealPrice         Decimal?       @db.Decimal(12, 2)
   /**
    * Selling below cost — a "negative call" — needs a manager holding `orders.approveLoss`, whatever
    * the rebate (owner, 1 Oct 2026). The unit cost it was approved at: buying it later at a higher cost
    * needs approving again.
    */
-  lossApprovedAt   DateTime?
-  lossApprovedById String?
-  lossApprovedBy   User?     @relation("OrderLossApprovedBy", fields: [lossApprovedById], references: [id], onDelete: SetNull)
-  lossApprovedCost Decimal?  @db.Decimal(12, 2)
-  lossApprovalNote String?
+  lossApprovedAt    DateTime?
+  lossApprovedById  String?
+  lossApprovedBy    User?          @relation("OrderLossApprovedBy", fields: [lossApprovedById], references: [id], onDelete: SetNull)
+  lossApprovedCost  Decimal?       @db.Decimal(12, 2)
+  lossApprovalNote  String?
   /**
    * The unit cost somebody tried to buy (or accept) it at and was stopped for, because it put the order
    * below cost — so a manager can see what to approve. Cleared once approved at that cost or more.
    */
-  lossRequestedCost Decimal?  @db.Decimal(12, 2)
+  lossRequestedCost Decimal?       @db.Decimal(12, 2)
   lossRequestedAt   DateTime?
-  /** What the distributor or the OEM is to pay back after the sale. Seen only with `rebates.view`. */
-  rebates          OrderRebate[]
+  /**
+   * What the distributor or the OEM is to pay back after the sale. Seen only with `rebates.view`.
+   */
+  rebates           OrderRebate[]
 
-  priceChanges   OrderPriceChange[]
-  purchaseSaving PurchaseSaving?
-  paymentFollowUps PaymentFollowUp[]
+  priceChanges            OrderPriceChange[]
+  purchaseSaving          PurchaseSaving?
+  paymentFollowUps        PaymentFollowUp[]
   recurringBilling        RecurringBilling?
   recurringBillingPeriods RecurringBillingPeriod[]
 
@@ -3216,7 +3252,9 @@ model OrderPriceChange {
   event            OrderPriceEvent
   fromPrice        Decimal?        @db.Decimal(12, 2)
   toPrice          Decimal?        @db.Decimal(12, 2)
-  /** The vendor at that step, kept as history (no relation: a vendor deleted later mustn't erase it). */
+  /**
+   * The vendor at that step, kept as history (no relation: a vendor deleted later mustn't erase it).
+   */
   vendorId         String?
   reason           String?
   byUserId         String?
@@ -3241,12 +3279,18 @@ model PurchaseSaving {
   quotedPrice      Decimal        @db.Decimal(12, 2)
   actualPrice      Decimal        @db.Decimal(12, 2)
   quantity         Int
-  /** (quoted − actual) × quantity, in rupees: negative when an increase was accepted. */
+  /**
+   * (quoted − actual) × quantity, in rupees: negative when an increase was accepted.
+   */
   amount           Decimal        @db.Decimal(14, 2)
   recordedAt       DateTime       @default(now())
-  /** The day in India it was recorded — what a target's period counts by. */
+  /**
+   * The day in India it was recorded — what a target's period counts by.
+   */
   recordedOn       DateTime       @db.Date
-  /** Set when the order is cancelled: the saving never materialised, and no longer counts. */
+  /**
+   * Set when the order is cancelled: the saving never materialised, and no longer counts.
+   */
   cancelledAt      DateTime?
 
   @@index([purchaserId, recordedOn])
@@ -3300,17 +3344,27 @@ enum VendorCreditKind {
 model RebateProgramme {
   id                    String           @id @default(cuid())
   name                  String
-  /** The OEM: orders for this brand's items. Null: any brand. */
+  /**
+   * The OEM: orders for this brand's items. Null: any brand.
+   */
   brandId               String?
   brand                 Brand?           @relation(fields: [brandId], references: [id], onDelete: SetNull)
-  /** Bought through this distributor only. Null: any. */
+  /**
+   * Bought through this distributor only. Null: any.
+   */
   vendorId              String?
   vendor                Company?         @relation("RebateProgrammeVendor", fields: [vendorId], references: [id], onDelete: SetNull)
-  /** A percentage of the purchase value or of the sale value — never a fixed amount here. */
+  /**
+   * A percentage of the purchase value or of the sale value — never a fixed amount here.
+   */
   basis                 RebateBasis      @default(PURCHASE_VALUE)
-  /** Percent. */
+  /**
+   * Percent.
+   */
   rate                  Decimal          @db.Decimal(7, 3)
-  /** Only on an order whose deal registration is approved. */
+  /**
+   * Only on an order whose deal registration is approved.
+   */
   needsDealRegistration Boolean          @default(false)
   payer                 RebatePayer      @default(DISTRIBUTOR)
   settlement            RebateSettlement @default(CREDIT_NOTE)
@@ -3340,21 +3394,31 @@ model OrderRebate {
   id               String           @id @default(cuid())
   companyProductId String
   companyProduct   CompanyProduct   @relation(fields: [companyProductId], references: [id], onDelete: Cascade)
-  /** The programme it came from, if any — kept as a pointer; its rate here is what counts. */
+  /**
+   * The programme it came from, if any — kept as a pointer; its rate here is what counts.
+   */
   programmeId      String?
   programme        RebateProgramme? @relation(fields: [programmeId], references: [id], onDelete: SetNull)
   basis            RebateBasis
-  /** Percent, for the two percentage bases. */
+  /**
+   * Percent, for the two percentage bases.
+   */
   rate             Decimal?         @db.Decimal(7, 3)
-  /** Rupees, for AMOUNT. */
+  /**
+   * Rupees, for AMOUNT.
+   */
   amount           Decimal?         @db.Decimal(14, 2)
   payer            RebatePayer
-  /** Which company pays it — the distributor, or the OEM as a company record. Null: not known yet. */
+  /**
+   * Which company pays it — the distributor, or the OEM as a company record. Null: not known yet.
+   */
   payerCompanyId   String?
   payerCompany     Company?         @relation("OrderRebatePayer", fields: [payerCompanyId], references: [id], onDelete: SetNull)
   settlement       RebateSettlement
   note             String?
-  /** Given up on: what is still outstanding stops counting as due. */
+  /**
+   * Given up on: what is still outstanding stops counting as due.
+   */
   writtenOffAt     DateTime?
   writtenOffById   String?
   writtenOffBy     User?            @relation("OrderRebateWrittenOffBy", fields: [writtenOffById], references: [id], onDelete: SetNull)
@@ -3380,22 +3444,32 @@ model OrderRebate {
  */
 model VendorCredit {
   id            String           @id @default(cuid())
-  /** Who gave it: a distributor, or the OEM itself — a company record either way. */
+  /**
+   * Who gave it: a distributor, or the OEM itself — a company record either way.
+   */
   vendorId      String
   vendor        Company          @relation("VendorCreditIssuer", fields: [vendorId], references: [id], onDelete: Restrict)
   form          RebateSettlement
   kind          VendorCreditKind @default(REBATE)
-  /** Their credit note's number, or the payout's bank reference. */
+  /**
+   * Their credit note's number, or the payout's bank reference.
+   */
   reference     String
   date          DateTime         @db.Date
-  /** Before GST — what is set against the orders' rebates. */
+  /**
+   * Before GST — what is set against the orders' rebates.
+   */
   taxableAmount Decimal          @db.Decimal(14, 2)
-  /** GST on a credit note that carries it; a financial credit note has none. */
+  /**
+   * GST on a credit note that carries it; a financial credit note has none.
+   */
   cgstAmount    Decimal          @default(0) @db.Decimal(14, 2)
   sgstAmount    Decimal          @default(0) @db.Decimal(14, 2)
   igstAmount    Decimal          @default(0) @db.Decimal(14, 2)
   total         Decimal          @db.Decimal(14, 2)
-  /** A payout: the bank it came into. Null: the default bank. */
+  /**
+   * A payout: the bank it came into. Null: the default bank.
+   */
   bankAccountId String?
   bankAccount   BankAccount?     @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
   notes         String?
@@ -3416,7 +3490,9 @@ model VendorCredit {
   @@map("vendor_credits")
 }
 
-/** Part of a vendor credit set against one order's expected rebate. */
+/**
+ * Part of a vendor credit set against one order's expected rebate.
+ */
 model RebateAllocation {
   id             String       @id @default(cuid())
   vendorCreditId String
@@ -3433,7 +3509,9 @@ model RebateAllocation {
   @@map("rebate_allocations")
 }
 
-/** Part of a vendor credit note set against one of its issuer's open bills — what we owe on it goes down. */
+/**
+ * Part of a vendor credit note set against one of its issuer's open bills — what we owe on it goes down.
+ */
 model VendorCreditApplication {
   id             String        @id @default(cuid())
   vendorCreditId String
@@ -3474,31 +3552,43 @@ enum PromiseStatus {
  * said, and any promise to pay by a date. The invoice or order chased, when one was.
  */
 model PaymentFollowUp {
-  id                String           @id @default(cuid())
+  id                String          @id @default(cuid())
   companyId         String
-  company           Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  /** The invoice chased, if one. */
+  company           Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /**
+   * The invoice chased, if one.
+   */
   documentId        String?
-  document          TradeDocument?   @relation(fields: [documentId], references: [id], onDelete: SetNull)
-  /** The order chased, if one. */
+  document          TradeDocument?  @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  /**
+   * The order chased, if one.
+   */
   companyProductId  String?
-  companyProduct    CompanyProduct?  @relation(fields: [companyProductId], references: [id], onDelete: SetNull)
+  companyProduct    CompanyProduct? @relation(fields: [companyProductId], references: [id], onDelete: SetNull)
   byUserId          String?
-  byUser            User?            @relation("PaymentFollowUpBy", fields: [byUserId], references: [id], onDelete: SetNull)
+  byUser            User?           @relation("PaymentFollowUpBy", fields: [byUserId], references: [id], onDelete: SetNull)
   channel           FollowUpChannel
-  /** What the client said. At most 1,000 characters. */
+  /**
+   * What the client said. At most 1,000 characters.
+   */
   remarks           String
-  promisedOn        DateTime?        @db.Date
-  /** In the invoice's currency when an invoice is chased; otherwise rupees. */
-  promisedAmount    Decimal?         @db.Decimal(14, 2)
-  nextFollowUpOn    DateTime?        @db.Date
-  /** Set exactly when promisedOn is. */
+  promisedOn        DateTime?       @db.Date
+  /**
+   * In the invoice's currency when an invoice is chased; otherwise rupees.
+   */
+  promisedAmount    Decimal?        @db.Decimal(14, 2)
+  nextFollowUpOn    DateTime?       @db.Date
+  /**
+   * Set exactly when promisedOn is.
+   */
   promiseStatus     PromiseStatus?
   promiseResolvedAt DateTime?
   brokenNotifiedAt  DateTime?
-  /** The reminder task for nextFollowUpOn, when the tasks module is on. */
+  /**
+   * The reminder task for nextFollowUpOn, when the tasks module is on.
+   */
   taskId            String?
-  createdAt         DateTime         @default(now())
+  createdAt         DateTime        @default(now())
 
   @@index([companyId, createdAt])
   @@index([promiseStatus, promisedOn])
@@ -3519,32 +3609,46 @@ enum PaymentGatewayProvider {
 }
 
 enum PaymentGatewayMode {
-  /** The gateway's test keys: links that take no real money. */
+  /**
+   * The gateway's test keys: links that take no real money.
+   */
   TEST
   LIVE
 }
 
 model PaymentGateway {
-  id       String                 @id @default(cuid())
-  provider PaymentGatewayProvider @unique
-  mode     PaymentGatewayMode     @default(TEST)
-  /** Razorpay's key id or Cashfree's client id — not a secret; shown so the keys can be told apart. */
-  keyId     String
-  /** The key secret or client secret, encrypted with the workspace's own key (src/lib/crypto.ts). */
-  secretEnc String
-  /** Razorpay's webhook secret, encrypted. Cashfree signs its notices with the client secret. */
-  webhookSecretEnc String?
-  /** The account a payment through it is recorded in — often one named for the gateway, settled out of. */
-  bankAccountId String?
-  bankAccount   BankAccount? @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
-  /** Which one new links are made in, where both are connected. */
-  isDefault Boolean @default(false)
-  active    Boolean @default(true)
+  id                String                 @id @default(cuid())
+  provider          PaymentGatewayProvider @unique
+  mode              PaymentGatewayMode     @default(TEST)
+  /**
+   * Razorpay's key id or Cashfree's client id — not a secret; shown so the keys can be told apart.
+   */
+  keyId             String
+  /**
+   * The key secret or client secret, encrypted with the workspace's own key (src/lib/crypto.ts).
+   */
+  secretEnc         String
+  /**
+   * Razorpay's webhook secret, encrypted. Cashfree signs its notices with the client secret.
+   */
+  webhookSecretEnc  String?
+  /**
+   * The account a payment through it is recorded in — often one named for the gateway, settled out of.
+   */
+  bankAccountId     String?
+  bankAccount       BankAccount?           @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+  /**
+   * Which one new links are made in, where both are connected.
+   */
+  isDefault         Boolean                @default(false)
+  active            Boolean                @default(true)
   connectedByUserId String?
-  connectedAt       DateTime  @default(now())
-  /** When the keys were last tried against the gateway, and what it said if they failed. */
-  checkedAt DateTime?
-  lastError String?
+  connectedAt       DateTime               @default(now())
+  /**
+   * When the keys were last tried against the gateway, and what it said if they failed.
+   */
+  checkedAt         DateTime?
+  lastError         String?
 
   links PaymentLink[]
 
@@ -3563,28 +3667,34 @@ enum PaymentLinkStatus {
  * when the balance changes (a payment recorded by hand), the old one is cancelled and a new one made.
  */
 model PaymentLink {
-  id        String         @id @default(cuid())
-  gatewayId String
-  gateway   PaymentGateway @relation(fields: [gatewayId], references: [id], onDelete: Restrict)
-  documentId String
-  document   TradeDocument @relation("InvoicePaymentLinks", fields: [documentId], references: [id], onDelete: Cascade)
-  companyId  String
-  /** The gateway's id for it: Razorpay's plink_…, or the link_id we give Cashfree. */
-  providerLinkId String
-  url            String
-  amount         Decimal           @db.Decimal(12, 2)
-  currency       String            @default("INR")
-  status         PaymentLinkStatus @default(ACTIVE)
-  expiresAt      DateTime?
-  paidAt         DateTime?
-  /** The gateway's payment id, and ours once it's recorded — one payment a link, however often it's told. */
+  id                String            @id @default(cuid())
+  gatewayId         String
+  gateway           PaymentGateway    @relation(fields: [gatewayId], references: [id], onDelete: Restrict)
+  documentId        String
+  document          TradeDocument     @relation("InvoicePaymentLinks", fields: [documentId], references: [id], onDelete: Cascade)
+  companyId         String
+  /**
+   * The gateway's id for it: Razorpay's plink_…, or the link_id we give Cashfree.
+   */
+  providerLinkId    String
+  url               String
+  amount            Decimal           @db.Decimal(12, 2)
+  currency          String            @default("INR")
+  status            PaymentLinkStatus @default(ACTIVE)
+  expiresAt         DateTime?
+  paidAt            DateTime?
+  /**
+   * The gateway's payment id, and ours once it's recorded — one payment a link, however often it's told.
+   */
   providerPaymentId String?
-  paymentId         String?  @unique
-  payment           Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  paymentId         String?           @unique
+  payment           Payment?          @relation(fields: [paymentId], references: [id], onDelete: SetNull)
   createdByUserId   String?
-  createdAt         DateTime  @default(now())
-  /** When its status was last asked of the gateway — the sweep that catches a notice that never came. */
-  checkedAt DateTime?
+  createdAt         DateTime          @default(now())
+  /**
+   * When its status was last asked of the gateway — the sweep that catches a notice that never came.
+   */
+  checkedAt         DateTime?
 
   @@unique([gatewayId, providerLinkId])
   @@index([documentId, status])
@@ -3604,34 +3714,54 @@ enum MsmeCategory {
  * late-payment interest is worked out from. One row; missing means every default.
  */
 model CollectionSettings {
-  id String @id @default("default")
-  /** Off until an admin switches them on. */
-  remindersOn Boolean @default(false)
-  /** When they were switched on: a step whose day came before it is never sent, so switching on sends no backlog. */
-  remindersFrom DateTime?
-  /** Who they go as — whose mailbox, or the company's, as Settings › Document emails says, and whose signature. */
-  senderUserId String?
-  /** The steps, as edited; null is the standard schedule (src/lib/collect/reminders.ts). */
-  steps Json?
-  /** A statement of account on the 1st of the month to each customer who owes something. */
-  statementOn Boolean @default(true)
-  /** An approved WhatsApp template sent with each reminder, once the workspace has WhatsApp. */
+  id               String        @id @default("default")
+  /**
+   * Off until an admin switches them on.
+   */
+  remindersOn      Boolean       @default(false)
+  /**
+   * When they were switched on: a step whose day came before it is never sent, so switching on sends no backlog.
+   */
+  remindersFrom    DateTime?
+  /**
+   * Who they go as — whose mailbox, or the company's, as Settings › Document emails says, and whose signature.
+   */
+  senderUserId     String?
+  /**
+   * The steps, as edited; null is the standard schedule (src/lib/collect/reminders.ts).
+   */
+  steps            Json?
+  /**
+   * A statement of account on the 1st of the month to each customer who owes something.
+   */
+  statementOn      Boolean       @default(true)
+  /**
+   * An approved WhatsApp template sent with each reminder, once the workspace has WhatsApp.
+   */
   whatsappTemplate String?
-  /** New orders for a customer this many days overdue need a credit override. */
-  creditHoldOn   Boolean @default(true)
-  creditHoldDays Int     @default(60)
-  /** The business's Udyam registration: MSMED Act interest is a micro or small supplier's to claim. */
-  udyamNumber  String?
-  msmeCategory MsmeCategory?
-  /** The RBI's bank rate, %, which the Act's interest is three times. */
-  bankRate        Decimal?  @db.Decimal(5, 2)
-  updatedByUserId String?
-  updatedAt       DateTime  @updatedAt
+  /**
+   * New orders for a customer this many days overdue need a credit override.
+   */
+  creditHoldOn     Boolean       @default(true)
+  creditHoldDays   Int           @default(60)
+  /**
+   * The business's Udyam registration: MSMED Act interest is a micro or small supplier's to claim.
+   */
+  udyamNumber      String?
+  msmeCategory     MsmeCategory?
+  /**
+   * The RBI's bank rate, %, which the Act's interest is three times.
+   */
+  bankRate         Decimal?      @db.Decimal(5, 2)
+  updatedByUserId  String?
+  updatedAt        DateTime      @updatedAt
 
   @@map("collection_settings")
 }
 
-/** A customer no reminders or statements go to, until it's lifted — a dispute, an arrangement. */
+/**
+ * A customer no reminders or statements go to, until it's lifted — a dispute, an arrangement.
+ */
 model PaymentReminderPause {
   companyId      String   @id
   pausedByUserId String?
@@ -3653,8 +3783,10 @@ enum PaymentReminderStatus {
  * so each goes once however often the day's run is knocked.
  */
 model PaymentReminder {
-  id String @id @default(cuid())
-  /** "<invoice id>:<step>", or "statement:<company id>:<yyyy-mm>". */
+  id         String                @id @default(cuid())
+  /**
+   * "<invoice id>:<step>", or "statement:<company id>:<yyyy-mm>".
+   */
   key        String                @unique
   companyId  String
   documentId String?
@@ -3765,7 +3897,9 @@ model Payment {
 
   journalEntries JournalEntry[] @relation("PaymentJournal")
 
-  /** The pay-now link it came through, when it did. */
+  /**
+   * The pay-now link it came through, when it did.
+   */
   paymentLink PaymentLink?
 
   @@index([companyId])
@@ -3838,13 +3972,11 @@ model CreditNoteApplication {
 
 /**
  * The stock ledger: every change to what is on hand, one row each, never edited (owner, 22 Oct 2026).
- *
  * A movement says where (the warehouse, and the batch when the item keeps batches), how much (signed, in
  * the item's base unit), at what cost, and why — the document, voucher or count it came from. A posting
  * is made once: `idempotencyKey` is unique, so a retried invoice or a double-clicked receipt finds the
  * movement already there instead of moving the stock twice. A correction is another movement that
  * `reverses` this one. Written only by src/lib/inventory/engine.ts.
- *
  * Rows from before then carry no warehouse in the old workspace; the migration put them in the main
  * warehouse and valued them at the item's cost price.
  */
@@ -3860,19 +3992,19 @@ model StockMovement {
   createdAt       DateTime          @default(now())
 
   warehouseId     String?
-  warehouse       Warehouse?        @relation(fields: [warehouseId], references: [id])
+  warehouse       Warehouse?       @relation(fields: [warehouseId], references: [id])
   batchId         String?
-  batch           ItemBatch?        @relation(fields: [batchId], references: [id])
-  serialNumbers   String[]          @default([])
+  batch           ItemBatch?       @relation(fields: [batchId], references: [id])
+  serialNumbers   String[]         @default([])
   /**
    * The day the stock moved, which reports cut off on — not when the row was written.
    */
-  movementDate    DateTime          @default(now())
+  movementDate    DateTime         @default(now())
   /**
    * The cost of one unit as it moved, and the movement's value at cost, signed like the quantity.
    */
-  unitCost        Decimal?          @db.Decimal(14, 4)
-  value           Decimal?          @db.Decimal(16, 2)
+  unitCost        Decimal?         @db.Decimal(14, 4)
+  value           Decimal?         @db.Decimal(16, 2)
   /**
    * What moved it: a trade document (an invoice issued, a bill, a credit note), one of the stock
    * vouchers, an item's opening stock, or a hand-recorded movement.
@@ -3881,13 +4013,13 @@ model StockMovement {
   sourceId        String?
   sourceLineId    String?
   tradeDocumentId String?
-  tradeDocument   TradeDocument?    @relation("DocumentStockMovements", fields: [tradeDocumentId], references: [id])
+  tradeDocument   TradeDocument?   @relation("DocumentStockMovements", fields: [tradeDocumentId], references: [id])
   stockDocumentId String?
-  stockDocument   StockDocument?    @relation(fields: [stockDocumentId], references: [id])
-  idempotencyKey  String?           @unique
-  reversesId      String?           @unique
-  reverses        StockMovement?    @relation("StockMovementReversal", fields: [reversesId], references: [id])
-  reversedBy      StockMovement?    @relation("StockMovementReversal")
+  stockDocument   StockDocument?   @relation(fields: [stockDocumentId], references: [id])
+  idempotencyKey  String?          @unique
+  reversesId      String?          @unique
+  reverses        StockMovement?   @relation("StockMovementReversal", fields: [reversesId], references: [id])
+  reversedBy      StockMovement?   @relation("StockMovementReversal")
   costLayers      StockCostLayer[]
 
   @@index([itemId])
@@ -3931,14 +4063,14 @@ model Warehouse {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  balances        StockBalance[]
-  movements       StockMovement[]
-  costLayers      StockCostLayer[]
-  reservations    StockReservation[]
-  serials         ItemSerial[]
-  documentsFrom   StockDocument[]    @relation("StockDocumentFrom")
-  documentsTo     StockDocument[]    @relation("StockDocumentTo")
-  tradeDocuments  TradeDocument[]    @relation("DocumentWarehouse")
+  balances       StockBalance[]
+  movements      StockMovement[]
+  costLayers     StockCostLayer[]
+  reservations   StockReservation[]
+  serials        ItemSerial[]
+  documentsFrom  StockDocument[]    @relation("StockDocumentFrom")
+  documentsTo    StockDocument[]    @relation("StockDocumentTo")
+  tradeDocuments TradeDocument[]    @relation("DocumentWarehouse")
 
   @@map("warehouses")
 }
@@ -3973,18 +4105,18 @@ model StockBalance {
  * One batch or lot of an item that keeps batches, with the dates that go with it.
  */
 model ItemBatch {
-  id          String          @id @default(cuid())
-  itemId      String
-  item        Item            @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  batchNo     String
-  mfgDate     DateTime?       @db.Date
-  expiryDate  DateTime?       @db.Date
-  createdAt   DateTime        @default(now())
+  id         String    @id @default(cuid())
+  itemId     String
+  item       Item      @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  batchNo    String
+  mfgDate    DateTime? @db.Date
+  expiryDate DateTime? @db.Date
+  createdAt  DateTime  @default(now())
 
-  balances    StockBalance[]
-  movements   StockMovement[]
-  serials     ItemSerial[]
-  lines       StockDocumentLine[]
+  balances  StockBalance[]
+  movements StockMovement[]
+  serials   ItemSerial[]
+  lines     StockDocumentLine[]
 
   @@unique([itemId, batchNo])
   @@index([expiryDate])
@@ -4003,19 +4135,19 @@ enum SerialStatus {
  * and out. A serial is in stock in one warehouse at a time, so it can't be sold twice.
  */
 model ItemSerial {
-  id             String       @id @default(cuid())
-  itemId         String
-  item           Item         @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  serialNo       String
-  status         SerialStatus @default(IN_STOCK)
-  warehouseId    String?
-  warehouse      Warehouse?   @relation(fields: [warehouseId], references: [id])
-  batchId        String?
-  batch          ItemBatch?   @relation(fields: [batchId], references: [id])
-  inMovementId   String?
-  outMovementId  String?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  id            String       @id @default(cuid())
+  itemId        String
+  item          Item         @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  serialNo      String
+  status        SerialStatus @default(IN_STOCK)
+  warehouseId   String?
+  warehouse     Warehouse?   @relation(fields: [warehouseId], references: [id])
+  batchId       String?
+  batch         ItemBatch?   @relation(fields: [batchId], references: [id])
+  inMovementId  String?
+  outMovementId String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
 
   @@unique([itemId, serialNo])
   @@index([warehouseId, status])
@@ -4027,19 +4159,19 @@ model ItemSerial {
  * aging reads under either costing method.
  */
 model StockCostLayer {
-  id          String        @id @default(cuid())
+  id          String         @id @default(cuid())
   itemId      String
-  item        Item          @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  item        Item           @relation(fields: [itemId], references: [id], onDelete: Cascade)
   warehouseId String
-  warehouse   Warehouse     @relation(fields: [warehouseId], references: [id])
-  batchKey    String        @default("")
+  warehouse   Warehouse      @relation(fields: [warehouseId], references: [id])
+  batchKey    String         @default("")
   movementId  String?
   movement    StockMovement? @relation(fields: [movementId], references: [id])
   receivedAt  DateTime
-  quantity    Decimal       @db.Decimal(14, 3)
-  remaining   Decimal       @db.Decimal(14, 3)
-  unitCost    Decimal       @db.Decimal(14, 4)
-  createdAt   DateTime      @default(now())
+  quantity    Decimal        @db.Decimal(14, 3)
+  remaining   Decimal        @db.Decimal(14, 3)
+  unitCost    Decimal        @db.Decimal(14, 4)
+  createdAt   DateTime       @default(now())
 
   @@index([itemId, warehouseId, batchKey, receivedAt])
   @@map("stock_cost_layers")
@@ -4126,28 +4258,28 @@ model StockDocument {
   reason          String?
   notes           String?
 
-  createdById     String
-  createdBy       User                @relation("StockDocumentCreatedBy", fields: [createdById], references: [id])
-  submittedById   String?
-  submittedAt     DateTime?
-  approvedById    String?
-  approvedAt      DateTime?
-  postedById      String?
-  postedAt        DateTime?
+  createdById   String
+  createdBy     User      @relation("StockDocumentCreatedBy", fields: [createdById], references: [id])
+  submittedById String?
+  submittedAt   DateTime?
+  approvedById  String?
+  approvedAt    DateTime?
+  postedById    String?
+  postedAt      DateTime?
   /**
    * A transfer leaves its source when dispatched and reaches its destination when received.
    */
-  dispatchedAt    DateTime?
-  receivedAt      DateTime?
-  cancelledById   String?
-  cancelledAt     DateTime?
-  cancelReason    String?
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
+  dispatchedAt  DateTime?
+  receivedAt    DateTime?
+  cancelledById String?
+  cancelledAt   DateTime?
+  cancelReason  String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  lines           StockDocumentLine[]
-  movements       StockMovement[]
-  journalEntries  JournalEntry[]      @relation("StockDocumentJournal")
+  lines          StockDocumentLine[]
+  movements      StockMovement[]
+  journalEntries JournalEntry[]      @relation("StockDocumentJournal")
 
   @@index([type, date])
   @@index([status])
@@ -4218,11 +4350,11 @@ model UnitOfMeasure {
  * Another unit an item is bought or sold in, and how many of its base unit one of it holds: a box of 12.
  */
 model ItemUnit {
-  id        String  @id @default(cuid())
-  itemId    String
-  item      Item    @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  unit      String
-  factor    Decimal @db.Decimal(14, 6)
+  id     String  @id @default(cuid())
+  itemId String
+  item   Item    @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  unit   String
+  factor Decimal @db.Decimal(14, 6)
 
   @@unique([itemId, unit])
   @@map("item_units")
@@ -4264,8 +4396,8 @@ model Ticket {
   assetMovements   AssetMovement[]   @relation("AssetMovementTicket")
   feedbackRequests FeedbackRequest[] @relation("FeedbackTicket")
   stickyNotes      StickyNote[]      @relation("StickyNoteTicket")
-  calendarEvents     CalendarEvent[]
-  emails             SupportEmail[]
+  calendarEvents   CalendarEvent[]
+  emails           SupportEmail[]
 
   @@index([companyId])
   @@index([status])
@@ -4330,17 +4462,29 @@ enum SupportEmailDirection {
 }
 
 enum SupportEmailState {
-  /** Received, and opened a new ticket. */
+  /**
+   * Received, and opened a new ticket.
+   */
   NEW_TICKET
-  /** Received, and added to a ticket's conversation. */
+  /**
+   * Received, and added to a ticket's conversation.
+   */
   REPLY
-  /** Received, and waiting in the Support inbox for somebody to decide where it belongs. */
+  /**
+   * Received, and waiting in the Support inbox for somebody to decide where it belongs.
+   */
   INBOX
-  /** Received and left out: an auto-reply, a bounce, a flood, or a repeat delivery. */
+  /**
+   * Received and left out: an auto-reply, a bounce, a flood, or a repeat delivery.
+   */
   IGNORED
-  /** Sent, and accepted by the mail server. */
+  /**
+   * Sent, and accepted by the mail server.
+   */
   SENT
-  /** Sent, and refused by the mail server. */
+  /**
+   * Sent, and refused by the mail server.
+   */
   FAILED
 }
 
@@ -4362,11 +4506,15 @@ model SupportEmail {
   ccAddresses  String[]
   subject      String
   body         String
-  /** The email's own Message-ID: how a reply finds the conversation, and how a repeat delivery is spotted. */
+  /**
+   * The email's own Message-ID: how a reply finds the conversation, and how a repeat delivery is spotted.
+   */
   messageId    String?               @unique
   inReplyTo    String?
   references   String[]
-  /** Why it waits, was left out, or failed. */
+  /**
+   * Why it waits, was left out, or failed.
+   */
   note         String?
   sentByUserId String?
   sentBy       User?                 @relation("SupportEmailSentBy", fields: [sentByUserId], references: [id], onDelete: SetNull)
@@ -4383,7 +4531,9 @@ model SupportEmail {
   @@map("support_emails")
 }
 
-/** A file that came with an email, kept as the workspace keeps its other files: in the database. */
+/**
+ * A file that came with an email, kept as the workspace keeps its other files: in the database.
+ */
 model SupportEmailAttachment {
   id        String       @id @default(cuid())
   emailId   String
@@ -4438,8 +4588,8 @@ model Task {
   // ── Advanced tasks (owner, 16 Oct 2026 — src/lib/tasks/rules.ts) ──────────────────────────────────
   /// Where it stands. `done` stays the one "closed" flag everything else reads: DONE and CANCELLED close
   /// a task, and a task closed through the old tick reads as DONE whatever this says (`effectiveStatus`).
-  status          TaskStatus   @default(TODO)
-  priority        TaskPriority @default(MEDIUM)
+  status          TaskStatus     @default(TODO)
+  priority        TaskPriority   @default(MEDIUM)
   /// A calendar day, held as `dueDate` is: before it, an open task is "Upcoming".
   startDate       DateTime?
   estimateMinutes Int?
@@ -4449,14 +4599,14 @@ model Task {
   challengeId     String?
   challenge       TaskChallenge? @relation(fields: [challengeId], references: [id], onDelete: SetNull)
   /// What finishing it on time is worth, and the badge that comes with it — never set by its own assignee.
-  xp              Int          @default(0)
+  xp              Int            @default(0)
   /// Who last set it — never its assignee: XP counts only when somebody else put it there.
   xpSetById       String?
   badge           String?
   /// Frozen when it's done on time: who earned what, and when. Cleared if it's opened again.
   xpEarned        Int?
   xpEarnedById    String?
-  xpEarnedBy      User?        @relation("TaskXpEarner", fields: [xpEarnedById], references: [id], onDelete: SetNull)
+  xpEarnedBy      User?          @relation("TaskXpEarner", fields: [xpEarnedById], references: [id], onDelete: SetNull)
   xpEarnedAt      DateTime?
   /// Done, it makes its next one (`nextOccurrence`) — until this day, when set.
   repeat          TaskRepeat?
@@ -4524,13 +4674,13 @@ model TaskChecklistItem {
 }
 
 model TaskComment {
-  id        String    @id @default(cuid())
+  id        String   @id @default(cuid())
   taskId    String
-  task      Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
   userId    String
-  user      User      @relation("TaskCommentAuthor", fields: [userId], references: [id], onDelete: Cascade)
+  user      User     @relation("TaskCommentAuthor", fields: [userId], references: [id], onDelete: Cascade)
   body      String
-  createdAt DateTime  @default(now())
+  createdAt DateTime @default(now())
 
   @@index([taskId, createdAt])
   @@map("task_comments")
@@ -4744,7 +4894,9 @@ model NotificationEmailClaim {
  */
 model CustomerEmailSettings {
   id            String   @id @default("global")
-  /** A booking page emails the guest a calendar invitation. Off: the time goes in the host's calendar, and the guest isn't emailed. */
+  /**
+   * A booking page emails the guest a calendar invitation. Off: the time goes in the host's calendar, and the guest isn't emailed.
+   */
   bookingInvite Boolean  @default(true)
   updatedById   String?
   updatedAt     DateTime @updatedAt
@@ -4816,7 +4968,9 @@ model AuditLog {
    */
   companyId            String?
   leadId               String?
-  /** What an edit changed, field by field: [{ field, label, from, to }] — the main forms only. */
+  /**
+   * What an edit changed, field by field: [{ field, label, from, to }] — the main forms only.
+   */
   changes              Json?
   createdAt            DateTime    @default(now())
 
@@ -4922,7 +5076,7 @@ model Visit {
   expenses         Expense[]
   assetMovements   AssetMovement[]
   feedbackRequests FeedbackRequest[] @relation("FeedbackVisit")
-  calendarEvent      CalendarEvent?
+  calendarEvent    CalendarEvent?
   /// Where the phone was at check-in and check-out, from the Deskzo app (owner, 22 Oct 2026).
   locations        VisitLocation[]
 
@@ -5036,13 +5190,13 @@ enum ExpenseApprovalStep {
  * The company's expense rules, one row (id "global"); no row is the defaults.
  */
 model ExpenseSettings {
-  id           String              @id @default("global")
-  approvalFlow ExpenseApprovalFlow @default(HR)
+  id                   String              @id @default("global")
+  approvalFlow         ExpenseApprovalFlow @default(HR)
   /// A claim over this many rupees needs a photo of its receipt before it is submitted — on the web and the app
   /// alike (owner, 22 Oct 2026). Null: a receipt is never required.
-  receiptRequiredAbove Decimal?  @db.Decimal(12, 2)
-  updatedById  String?
-  updatedAt    DateTime            @updatedAt
+  receiptRequiredAbove Decimal?            @db.Decimal(12, 2)
+  updatedById          String?
+  updatedAt            DateTime            @updatedAt
 
   @@map("expense_settings")
 }
@@ -5095,12 +5249,12 @@ model Expense {
   userId String
   user   User          @relation("ExpenseBy", fields: [userId], references: [id])
 
-  submittedAt      DateTime?
+  submittedAt       DateTime?
   /**
    * Snapshotted when submitted, so a later reporting-line change can't move a claim mid-review.
    */
-  approverUserId   String?
-  approver         User?     @relation("ExpenseApprover", fields: [approverUserId], references: [id])
+  approverUserId    String?
+  approver          User?                @relation("ExpenseApprover", fields: [approverUserId], references: [id])
   /**
    * Who signs it off, snapshotted when submitted — as the approver is — so changing the company's rule
    * can't move a claim mid-review. Null on claims from before 19 Oct 2026, which were the manager's.
@@ -5115,12 +5269,12 @@ model Expense {
    * The manager's yes, when the manager approves first and HR after.
    */
   managerApproverId String?
-  managerApprover   User?     @relation("ExpenseManagerApprover", fields: [managerApproverId], references: [id])
+  managerApprover   User?                @relation("ExpenseManagerApprover", fields: [managerApproverId], references: [id])
   managerApprovedAt DateTime?
-  decidedAt        DateTime?
-  decisionNote     String?
-  reimbursedAt     DateTime?
-  reimbursementRef String?
+  decidedAt         DateTime?
+  decisionNote      String?
+  reimbursedAt      DateTime?
+  reimbursementRef  String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -5183,8 +5337,8 @@ model LedgerAccount {
   bankAccount       BankAccount?
   voucherLines      AccountVoucherLine[]
   vouchersPaidFrom  AccountVoucher[]     @relation("VoucherMoneyAccount")
-  assetsHeld        FixedAsset[] @relation("AssetCostAccount")
-  assetsDepreciated FixedAsset[] @relation("AssetDepreciationAccount")
+  assetsHeld        FixedAsset[]         @relation("AssetCostAccount")
+  assetsDepreciated FixedAsset[]         @relation("AssetDepreciationAccount")
 
   schedulesExpensed AccountingSchedule[] @relation("AccountingScheduleExpense")
   schedulesHeld     AccountingSchedule[] @relation("AccountingScheduleBalance")
@@ -5267,21 +5421,21 @@ model JournalEntry {
   /**
    * What this was posted from, for the document that generated it and to stop double-posting.
    */
-  documentId   String?
-  document     TradeDocument? @relation("DocumentJournal", fields: [documentId], references: [id])
-  paymentId    String?
-  payment      Payment?       @relation("PaymentJournal", fields: [paymentId], references: [id])
-  expenseId    String?
-  expense      Expense?       @relation("ExpenseJournal", fields: [expenseId], references: [id])
-  payrollRunId String?
-  payrollRun   PayrollRun?    @relation("PayrollJournal", fields: [payrollRunId], references: [id])
+  documentId     String?
+  document       TradeDocument? @relation("DocumentJournal", fields: [documentId], references: [id])
+  paymentId      String?
+  payment        Payment?       @relation("PaymentJournal", fields: [paymentId], references: [id])
+  expenseId      String?
+  expense        Expense?       @relation("ExpenseJournal", fields: [expenseId], references: [id])
+  payrollRunId   String?
+  payrollRun     PayrollRun?    @relation("PayrollJournal", fields: [payrollRunId], references: [id])
   vendorCreditId String?
   vendorCredit   VendorCredit?  @relation("VendorCreditJournal", fields: [vendorCreditId], references: [id])
   /**
    * The party this entry concerns, for the subsidiary-ledger views.
    */
-  companyId    String?
-  company      Company?       @relation("CompanyJournal", fields: [companyId], references: [id])
+  companyId      String?
+  company        Company?       @relation("CompanyJournal", fields: [companyId], references: [id])
 
   /**
    * Set when this entry reverses another, and on the original once it has been reversed.
@@ -5355,52 +5509,51 @@ enum VoucherStatus {
  * money in, money between the company's own bank and cash accounts, or any balanced entry — written as a
  * draft, approved where the company asks for it, and posted to the ledger once (`JournalEntry.postingKey`
  * "voucher:<id>"). A posted voucher is corrected by reversing it, never by editing.
- *
  * Settling an invoice or a bill stays with Receivables and Payables, which apply the money to the
  * document; these are for everything else that moves through the books.
  */
 model AccountVoucher {
-  id              String        @id @default(cuid())
-  type            VoucherType
-  number          String        @unique
-  date            DateTime      @db.Date
-  status          VoucherStatus @default(DRAFT)
-  narration       String
-  reference       String?
+  id             String         @id @default(cuid())
+  type           VoucherType
+  number         String         @unique
+  date           DateTime       @db.Date
+  status         VoucherStatus  @default(DRAFT)
+  narration      String
+  reference      String?
   /**
    * The party, where there is one — a vendor paid an advance, a customer refunded.
    */
-  companyId       String?
-  company         Company?      @relation("VoucherParty", fields: [companyId], references: [id])
+  companyId      String?
+  company        Company?       @relation("VoucherParty", fields: [companyId], references: [id])
   /**
    * The bank or cash account a payment or receipt goes through.
    */
-  moneyAccountId  String?
-  moneyAccount    LedgerAccount? @relation("VoucherMoneyAccount", fields: [moneyAccountId], references: [id])
-  amount          Decimal       @db.Decimal(16, 2)
+  moneyAccountId String?
+  moneyAccount   LedgerAccount? @relation("VoucherMoneyAccount", fields: [moneyAccountId], references: [id])
+  amount         Decimal        @db.Decimal(16, 2)
   /**
    * The form's own token, so a double submit makes one voucher rather than two.
    */
-  idempotencyKey  String?       @unique
+  idempotencyKey String?        @unique
 
-  createdById     String
-  createdBy       User          @relation("VoucherCreatedBy", fields: [createdById], references: [id])
-  submittedById   String?
-  submittedAt     DateTime?
-  approvedById    String?
-  approvedAt      DateTime?
-  postedById      String?
-  postedAt        DateTime?
-  cancelledById   String?
-  cancelledAt     DateTime?
-  cancelReason    String?
-  reversedById    String?
-  reversedAt      DateTime?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  createdById   String
+  createdBy     User      @relation("VoucherCreatedBy", fields: [createdById], references: [id])
+  submittedById String?
+  submittedAt   DateTime?
+  approvedById  String?
+  approvedAt    DateTime?
+  postedById    String?
+  postedAt      DateTime?
+  cancelledById String?
+  cancelledAt   DateTime?
+  cancelReason  String?
+  reversedById  String?
+  reversedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  lines           AccountVoucherLine[]
-  journalEntries  JournalEntry[] @relation("VoucherJournal")
+  lines          AccountVoucherLine[]
+  journalEntries JournalEntry[]       @relation("VoucherJournal")
 
   @@index([type, date])
   @@index([status])
@@ -5623,19 +5776,19 @@ model CallLog {
   workbookRecord WorkbookRecord?
 
   /// Typed into a call dialog, or read from a phone by the Deskzo app (owner, 18 Oct 2026).
-  source       CallSource @default(TYPED)
+  source        CallSource @default(TYPED)
   /// The phone it came from, and the phone's own key for it (its call-log entry), so the same call sent
   /// twice is logged once.
-  appDeviceId  String?
-  appDevice    AppDevice? @relation(fields: [appDeviceId], references: [id], onDelete: SetNull)
-  phoneCallKey String?
+  appDeviceId   String?
+  appDevice     AppDevice? @relation(fields: [appDeviceId], references: [id], onDelete: SetNull)
+  phoneCallKey  String?
   /// When its caller said how it went. A call from a phone is logged with what its length implies —
   /// connected, or no answer — and waits for this.
-  reviewedAt   DateTime?
+  reviewedAt    DateTime?
   /// Its length isn't known (owner, 22 Oct 2026): logged by hand on an iPhone, which can't read its call log, with
   /// the outcome its caller gave. durationSeconds is 0 without meaning nobody answered — said so where a call's
   /// length is shown, and left out of the average call.
-  lengthUnknown Boolean @default(false)
+  lengthUnknown Boolean    @default(false)
 
   @@unique([appDeviceId, phoneCallKey])
   @@index([companyId, startedAt])
@@ -6367,7 +6520,7 @@ model AttendanceLocation {
   /// What the clocking was checked against and how it came out (owner, 22 Oct 2026) — null on rows from before.
   check       AttendanceGeoCheck?
   branchId    String?
-  branch      Branch?                @relation("AttendanceLocationBranch", fields: [branchId], references: [id], onDelete: SetNull)
+  branch      Branch?              @relation("AttendanceLocationBranch", fields: [branchId], references: [id], onDelete: SetNull)
   /// From the office's point, in metres, where both were known.
   distanceM   Int?
   /// The office's radius at the time, in metres.
@@ -6375,7 +6528,7 @@ model AttendanceLocation {
   /// The phone said the reading came from a mock-location provider (Android) or was simulated (iOS).
   mocked      Boolean?
   exceptionId String?
-  exception   AttendanceException?   @relation(fields: [exceptionId], references: [id], onDelete: SetNull)
+  exception   AttendanceException? @relation(fields: [exceptionId], references: [id], onDelete: SetNull)
 
   @@index([userId, date])
   @@index([exceptionId])
@@ -6505,12 +6658,12 @@ model SalaryStructure {
    * The annual CTC it was split from, when it was (src/lib/hr/salary-split.ts) — kept for the record;
    * the CTC shown is still worked out from the components.
    */
-  annualCtc     Decimal?             @db.Decimal(14, 2)
+  annualCtc      Decimal?             @db.Decimal(14, 2)
   /**
    * A revision: given as a percentage, an amount a year, or a new CTC, and the figure given.
    */
-  revisionBasis SalaryRevisionBasis?
-  revisionValue Decimal?             @db.Decimal(14, 2)
+  revisionBasis  SalaryRevisionBasis?
+  revisionValue  Decimal?             @db.Decimal(14, 2)
   /**
    * PF, ESI and TDS typed at the split over Deskzo's own figures (owner, 23 Oct 2026), as
    * { pfEmployee?, pfEmployer?, esiEmployee?, esiEmployer?, tds? } — whole rupees for a full month. A share
@@ -6667,16 +6820,16 @@ model Payslip {
   incentive        Decimal @default(0) @db.Decimal(12, 2)
   grossEarnings    Decimal @db.Decimal(12, 2)
 
-  pfEmployee         Decimal @default(0) @db.Decimal(12, 2)
-  pfEmployer         Decimal @default(0) @db.Decimal(12, 2)
-  esiEmployee        Decimal @default(0) @db.Decimal(12, 2)
-  esiEmployer        Decimal @default(0) @db.Decimal(12, 2)
-  professionalTax    Decimal @default(0) @db.Decimal(12, 2)
+  pfEmployee         Decimal         @default(0) @db.Decimal(12, 2)
+  pfEmployer         Decimal         @default(0) @db.Decimal(12, 2)
+  esiEmployee        Decimal         @default(0) @db.Decimal(12, 2)
+  esiEmployer        Decimal         @default(0) @db.Decimal(12, 2)
+  professionalTax    Decimal         @default(0) @db.Decimal(12, 2)
   /**
    * TDS on salary: worked out by Deskzo (src/lib/hr/income-tax.ts), or typed by whoever runs payroll —
    * `incomeTaxBasis` says which.
    */
-  incomeTax          Decimal @default(0) @db.Decimal(12, 2)
+  incomeTax          Decimal         @default(0) @db.Decimal(12, 2)
   /**
    * WORKED_OUT, or TYPED by hand — which a recalculation keeps. Null on payslips from before Deskzo worked
    * it out (owner, 17 Oct 2026): every one of those was typed, so a figure on one is kept as typed. FIXED: the
@@ -6688,7 +6841,7 @@ model Payslip {
    * worked out". Null when typed.
    */
   taxWorking         Json?
-  otherDeduction     Decimal @default(0) @db.Decimal(12, 2)
+  otherDeduction     Decimal         @default(0) @db.Decimal(12, 2)
   otherDeductionNote String?
   /**
    * The company's own components for the month, pro-rated like the six: [{ name, amount }]. In gross.
@@ -6756,7 +6909,9 @@ model TaxDeclaration {
   previousPt    Decimal @default(0) @db.Decimal(12, 2)
   previousPf    Decimal @default(0) @db.Decimal(12, 2)
 
-  /** Other income the employee asks to be taxed through salary (s.392(4)(a)), and tax already deducted on it. */
+  /**
+   * Other income the employee asks to be taxed through salary (s.392(4)(a)), and tax already deducted on it.
+   */
   otherIncome Decimal @default(0) @db.Decimal(12, 2)
   otherTds    Decimal @default(0) @db.Decimal(12, 2)
 
@@ -7166,6 +7321,7 @@ model EmployeeLetter {
 enum LetterType {
   // Joining
   /**
+   * /**
    * A letter of intent: the company means to employ them, the formal offer to follow (owner, 21 Oct 2026).
    */
   LETTER_OF_INTENT
@@ -9146,10 +9302,14 @@ model MarketingMessage {
   /// The form invitation this message carried — first send or a reminder, each its own message.
   formInviteId     String?
   formInvite       FormInvite?         @relation(fields: [formInviteId], references: [id], onDelete: SetNull)
-  /** The invoice, proposal or credit note this email carried. */
+  /**
+   * The invoice, proposal or credit note this email carried.
+   */
   tradeDocumentId  String?
   tradeDocument    TradeDocument?      @relation("MarketingMessageDocument", fields: [tradeDocumentId], references: [id], onDelete: SetNull)
-  /** The mailbox it went out from, when it was sent as a person rather than through a provider. */
+  /**
+   * The mailbox it went out from, when it was sent as a person rather than through a provider.
+   */
   fromEmail        String?
 
   createdAt DateTime @default(now())
@@ -9667,6 +9827,7 @@ enum ActivityKind {
    * /**
    * /**
    * /**
+   * /**
    * A browser this account has not used before. Waiting for approval when the role requires it.
    */
   NEW_DEVICE
@@ -9770,8 +9931,8 @@ model SecurityPolicy {
    * Prints the viewer's name, address and the time faintly across the page. The only measure here
    * that survives a photograph — it does not prevent the capture, it makes it traceable.
    */
-  watermarkEnabled Boolean @default(false)
-  watermarkOpacity Int     @default(7)
+  watermarkEnabled Boolean        @default(false)
+  watermarkOpacity Int            @default(7)
   /**
    * Where the watermark goes: only the pages that show customers' details (src/lib/security/
    * watermark-pages.ts) — the default, owner 2 Oct 2026: elsewhere it is only in the way — or every
@@ -9806,6 +9967,7 @@ model SecurityPolicy {
    * locked out of copying cannot administer the thing that locked them out.
    */
   /**
+   * /**
    * /**
    * /**
    * /**
@@ -10267,7 +10429,6 @@ model UserUnmaskLimit {
  * person, lead and day, so revealing a lead's email, phone and company together counts once, and
  * opening it again that day counts nothing. Written under a lock with the count it is checked against
  * (src/lib/authz/unmask.ts), so requests at the same moment can't pass the limit between them.
- *
  * The lead is a bare id: a lead deleted later still counted that day.
  */
 model UnmaskUsage {
@@ -10289,7 +10450,6 @@ model UnmaskUsage {
 /**
  * Every attempt to unmask a lead, allowed or not — the Unmasking logs a super admin reads
  * (src/lib/authz/unmask.ts, /settings/unmasking-logs).
- *
  * Append-only: a trigger refuses UPDATE and DELETE, so nobody edits or removes their own history from
  * inside the application. People and leads are bare ids with the name frozen at the time, as in
  * `PermissionChange`, so the log outlives both. It holds field names, never field values.
@@ -10375,6 +10535,7 @@ model PermissionChange {
    * Set for a role-level change.
    */
   /**
+   * /**
    * /**
    * /**
    * /**
@@ -12194,18 +12355,24 @@ model BackupSchedule {
 model WorkspaceReset {
   id              String               @id @default(cuid())
   status          WorkspaceResetStatus @default(SCHEDULED)
-  /** What goes: everything but the super admin, or the records with the setup kept (src/lib/reset-classes.ts). Read by name. */
+  /**
+   * What goes: everything but the super admin, or the records with the setup kept (src/lib/reset-classes.ts). Read by name.
+   */
   mode            WorkspaceResetMode   @default(EVERYTHING)
   requestedById   String
   requestedByName String
   requestedAt     DateTime             @default(now())
-  /** Not before then: a day after it was asked for. */
+  /**
+   * Not before then: a day after it was asked for.
+   */
   runAfter        DateTime
   cancelledByName String?
   cancelledAt     DateTime?
   startedAt       DateTime?
   finishedAt      DateTime?
-  /** The safety copy taken just before, kept 30 days — what "Undo" restores. */
+  /**
+   * The safety copy taken just before, kept 30 days — what "Undo" restores.
+   */
   backupFilename  String?
   error           String?
 
@@ -12858,42 +13025,41 @@ model ApiIdempotency {
   @@map("api_idempotency")
 }
 
-
 /// The Deskzo app on somebody's phone (owner, 18 Oct 2026) — theirs alone, paired with a code from their own
 /// Settings › Deskzo app page. Its sign-in is the device it hangs off (`UserDevice`): approved like any other
 /// device where the role asks for that, listed in Security › Devices and revoked there. This holds what only
 /// the app has. Its calls act as its person (src/lib/app/handler.ts), as an API key's do.
 model AppDevice {
-  id          String     @id @default(cuid())
+  id           String     @id @default(cuid())
   /// The device row: its approval, its revoking, where it was last seen. Its tokenHash is the digest of the
   /// app's secret.
-  deviceId    String     @unique
-  device      UserDevice @relation("AppDeviceSignIn", fields: [deviceId], references: [id], onDelete: Cascade)
+  deviceId     String     @unique
+  device       UserDevice @relation("AppDeviceSignIn", fields: [deviceId], references: [id], onDelete: Cascade)
   /// The digest of the phone's own secret, for /api/app (owner, 18 Oct 2026) — kept apart from the device row's
   /// tokenHash, which is now the in-app pages' device cookie (src/lib/app/web-session.ts). Null on a phone paired
   /// before: its secret is the device row's.
   secretDigest String?
-  userId      String
-  user        User       @relation("AppDevices", fields: [userId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User       @relation("AppDevices", fields: [userId], references: [id], onDelete: Cascade)
   /// "android" or "ios".
-  platform    String
+  platform     String
   /// The phone as it describes itself — "Samsung SM-S918B".
-  model       String?
-  appVersion  String?
+  model        String?
+  appVersion   String?
   /// Where a push reaches it — a Firebase Cloud Messaging token on Android, an APNs device token on an iPhone
   /// (src/lib/app/push.ts); null until the app sends one.
-  pushToken   String?
+  pushToken    String?
   /// Call sync, switched on on the phone: it reads its own call log and sends the calls with customers. An iPhone
   /// can't read its call log: on one it means this is the person's calling phone, and its calls are logged by hand.
-  callSync    Boolean    @default(false)
+  callSync     Boolean    @default(false)
   /// The rate limit's minute, as on an API key — counted in one statement.
-  windowStart DateTime?
-  windowCount Int        @default(0)
-  createdAt   DateTime   @default(now())
+  windowStart  DateTime?
+  windowCount  Int        @default(0)
+  createdAt    DateTime   @default(now())
 
-  calls        CallLog[]
-  callRequests AppCallRequest[]
-  locations    AttendanceLocation[]
+  calls          CallLog[]
+  callRequests   AppCallRequest[]
+  locations      AttendanceLocation[]
   visitLocations VisitLocation[]
 
   @@index([userId])
@@ -12902,15 +13068,15 @@ model AppDevice {
 
 /// A pairing code on somebody's screen, waiting for their phone: ten minutes, one use. Only its digest is kept.
 model AppPairing {
-  id          String    @id @default(cuid())
-  userId      String
-  user        User      @relation("AppPairings", fields: [userId], references: [id], onDelete: Cascade)
-  codeHash    String    @unique
-  expiresAt   DateTime
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation("AppPairings", fields: [userId], references: [id], onDelete: Cascade)
+  codeHash      String    @unique
+  expiresAt     DateTime
   /// The phone it paired, once it has.
-  appDeviceId String?   @unique
-  usedAt      DateTime?
-  createdAt   DateTime  @default(now())
+  appDeviceId   String?   @unique
+  usedAt        DateTime?
+  createdAt     DateTime  @default(now())
   /// Signing in through the phone's browser (owner, 18 Oct 2026): the code went back to the app by a link, so only
   /// the app that started the sign-in may spend it — it shows the secret this is the SHA-256 of (PKCE, base64url).
   /// None for a code typed or scanned from Settings › Deskzo app.
@@ -13388,9 +13554,13 @@ model CustomerCategory {
  * The record types a workspace can add its own fields to.
  */
 enum CustomFieldEntity {
-  /** Customers, resellers and commission parties — every company that isn't a vendor. */
+  /**
+   * Customers, resellers and commission parties — every company that isn't a vendor.
+   */
   COMPANY
-  /** Vendors, OEMs, distributors and partners (owner, 8 Oct 2026). */
+  /**
+   * Vendors, OEMs, distributors and partners (owner, 8 Oct 2026).
+   */
   VENDOR
   CONTACT
   LEAD
@@ -13504,26 +13674,26 @@ model LeadPipeline {
 }
 
 model LeadStage {
-  id         String     @id @default(cuid())
+  id             String       @id @default(cuid())
   /// The pipeline it is a stage of — the main one for every stage made before there were several.
-  pipelineId String     @default("lpip_sales")
-  pipeline   LeadPipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  pipelineId     String       @default("lpip_sales")
+  pipeline       LeadPipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
   /// Fixed once made: what a link or a saved filter names, unique within its pipeline. The label is free to change.
-  key        String
-  label      String
-  status     LeadStatus
+  key            String
+  label          String
+  status         LeadStatus
   /// A badge tone from STAGE_COLORS (src/lib/pipeline/rules.ts).
-  color      String     @default("default")
-  sortOrder  Int        @default(0)
+  color          String       @default("default")
+  sortOrder      Int          @default(0)
   /// Retired: no longer offered or shown as a column. Its leads were moved on when it was retired.
-  archivedAt DateTime?
+  archivedAt     DateTime?
   /**
    * The stage's rule: what a lead must have before it moves here — "estimatedValue", "expectedCloseDate",
    * "contactId", "ownerUserId", "description", or a custom field as "cf:<key>" (src/lib/pipeline/rules.ts).
    */
-  requiredFields String[] @default([])
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
+  requiredFields String[]     @default([])
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   leads       Lead[]
   automations PipelineAutomation[]
@@ -13744,7 +13914,6 @@ model CompanyDuplicateDismissal {
 
 /**
  * Planned downtime — src/lib/maintenance.ts. One row, `id = "global"`.
- *
  * While it is on, everybody who can't change organisation settings sees a maintenance page instead
  * of the app; those who can keep working, to check the change they took it down for. Before a
  * scheduled window, everybody sees a banner saying when.
@@ -13784,7 +13953,6 @@ enum AiProvider {
 /**
  * Deskzo AI in this workspace (src/lib/copilot/settings.ts): whether the copilot and Automate's drafting
  * are on, and how many credits one person may use in a day. One row, `id = "global"`.
- *
  * Since 17 Oct 2026 a workspace brings no AI key: the models and where they run are Deskzo's (console ›
  * Settings › AI), paid for in credits (src/lib/ai). The keys once saved here were erased with their columns.
  */
@@ -13933,12 +14101,18 @@ model CompanyLock {
  */
 model HelpDesk {
   id                String   @id @default("global")
-  /** "Acme Support" — what the number is labelled as. */
+  /**
+   * "Acme Support" — what the number is labelled as.
+   */
   helplineLabel     String?
   helplinePhone     String?
-  /** Free text, because hours are said differently everywhere: "Mon – Fri • 9:30 AM – 6:30 PM". */
+  /**
+   * Free text, because hours are said differently everywhere: "Mon – Fri • 9:30 AM – 6:30 PM".
+   */
   helplineHours     String?
-  /** "English, हिन्दी" — the languages somebody on the line speaks. */
+  /**
+   * "English, हिन्दी" — the languages somebody on the line speaks.
+   */
   helplineLanguages String?
   supportEmail      String?
   updatedById       String?
@@ -13962,7 +14136,9 @@ model HelpLink {
   id          String       @id @default(cuid())
   kind        HelpLinkKind
   title       String
-  /** https only, or an in-app path beginning with "/". Checked on save — see src/lib/help/links.ts. */
+  /**
+   * https only, or an in-app path beginning with "/". Checked on save — see src/lib/help/links.ts.
+   */
   url         String
   description String?
   sortOrder   Int          @default(0)
@@ -13979,7 +14155,6 @@ model HelpLink {
 /**
  * A "What's new" post: a change to the system, a new process, anything everybody should know. Shown
  * under Recent Updates on the dashboard and in the rail, with a dot until it has been read.
- *
  * `publishedAt` may be in the future — the post stays out of sight until then, so an update can be
  * written ahead of the release it describes.
  */
@@ -13987,7 +14162,9 @@ model Announcement {
   id          String   @id @default(cuid())
   title       String
   body        String
-  /** Optional "read more": https, or an in-app path beginning with "/". */
+  /**
+   * Optional "read more": https, or an in-app path beginning with "/".
+   */
   linkUrl     String?
   pinned      Boolean  @default(false)
   publishedAt DateTime @default(now())
@@ -14010,7 +14187,6 @@ enum MailConnectionProvider {
  * A person's own mailbox — Microsoft 365, Google Workspace or Zoho — connected so the ERP can send as
  * them: an invoice goes out from their address and lands in their Sent folder. See src/lib/mail
  * (mailbox.ts, and microsoft.ts, google.ts, zoho.ts for each provider).
- *
  * One per person, and only ever their own: the mailbox the provider reports has to be the address on
  * their account here, or the connection is refused. The refresh token is encrypted with
  * encryptSecret and never leaves the server.
@@ -14020,13 +14196,17 @@ model MailConnection {
   userId               String                 @unique
   user                 User                   @relation("UserMailConnection", fields: [userId], references: [id], onDelete: Cascade)
   provider             MailConnectionProvider @default(MICROSOFT)
-  /** The address mail goes out from. */
+  /**
+   * The address mail goes out from.
+   */
   mailbox              String
   displayName          String?
   refreshTokenCipher   String
   accessTokenCipher    String?
   accessTokenExpiresAt DateTime?
-  /** What the provider granted, as it said so. */
+  /**
+   * What the provider granted, as it said so.
+   */
   scopes               String
   /**
    * Zoho only: the accounts server of the person's data centre (https://accounts.zoho.in …), which
@@ -14047,13 +14227,11 @@ model MailConnection {
   @@map("mail_connections")
 }
 
-
 /**
  * A person's calendar, kept in step with Outlook, Google Calendar or Zoho Calendar (src/lib/calendar) —
  * through the same connection as their mailbox (MailConnection), with the calendar permission granted
  * on it as well. One per person, and only ever read for that person: colleagues see their busy times
  * and nothing else.
- *
  * It holds where the last sync got to — Outlook's delta link or Google's sync token, and the days it
  * covers — and when the next is due. Zoho has no such cursor and reads its window afresh each time.
  */
@@ -14062,18 +14240,26 @@ model CalendarAccount {
   userId       String                 @unique
   user         User                   @relation("UserCalendarAccount", fields: [userId], references: [id], onDelete: Cascade)
   provider     MailConnectionProvider
-  /** Zoho only: the uid of the person's default calendar. Outlook and Google use their primary one. */
+  /**
+   * Zoho only: the uid of the person's default calendar. Outlook and Google use their primary one.
+   */
   calendarId   String?
-  /** Outlook: the delta link. Google: the sync token. Null until the first full read, and after a reset. */
+  /**
+   * Outlook: the delta link. Google: the sync token. Null until the first full read, and after a reset.
+   */
   syncCursor   String?
   windowFrom   DateTime?
   windowTo     DateTime?
   lastSyncedAt DateTime?
   nextSyncAt   DateTime               @default(now())
-  /** Held by the sync running now, so that two never run for one person at once. */
+  /**
+   * Held by the sync running now, so that two never run for one person at once.
+   */
   claimedUntil DateTime?
   lastError    String?
-  /** The provider stopped allowing the calendar; the person connects again from My profile. */
+  /**
+   * The provider stopped allowing the calendar; the person connects again from My profile.
+   */
   brokenAt     DateTime?
   connectedAt  DateTime               @default(now())
   updatedAt    DateTime               @updatedAt
@@ -14165,14 +14351,11 @@ enum CalendarEventStatus {
 /**
  * An event in a person's own calendar, as the last sync found it — a meeting scheduled from a lead,
  * a customer, a contact, a ticket or a planned visit, or anything else they keep there.
- *
  * One scheduled from here carries the record it was for (`companyId` … `visitId`), so the record shows
  * it and a meeting moved in Outlook is moved here too. Everything else is the person's own, shown on
  * their Calendar page and nowhere else; to colleagues it is a busy time, without its title or who is in it.
- *
  * Times are instants; an all-day event runs from midnight UTC of its first day to midnight UTC of the
  * day after its last, as a typed day is kept (src/lib/time/zone.ts formatCalendarDay).
- *
  * Deskzo's own calendar (owner, 17 Oct 2026 — src/lib/calendar/native.ts): a meeting scheduled by somebody
  * with no working calendar connection is kept here alone, with no provider and no external id. Deskzo
  * sends its invitations as iCalendar emails (UID from the row's id, `sequence` counting each change), and
@@ -14182,11 +14365,17 @@ model CalendarEvent {
   id             String                  @id @default(cuid())
   userId         String
   user           User                    @relation("UserCalendarEvents", fields: [userId], references: [id], onDelete: Cascade)
-  /** Null: Deskzo's own meeting, in no provider's calendar. */
+  /**
+   * Null: Deskzo's own meeting, in no provider's calendar.
+   */
   provider       MailConnectionProvider?
-  /** The provider's id for the event — for a repeating one, for this occurrence. Null for Deskzo's own. */
+  /**
+   * The provider's id for the event — for a repeating one, for this occurrence. Null for Deskzo's own.
+   */
   externalId     String?
-  /** Outlook's changeKey, Google's etag, Zoho's etag: what an update has to name. */
+  /**
+   * Outlook's changeKey, Google's etag, Zoho's etag: what an update has to name.
+   */
   etag           String?
   title          String
   description    String?
@@ -14194,17 +14383,27 @@ model CalendarEvent {
   startsAt       DateTime
   endsAt         DateTime
   allDay         Boolean                 @default(false)
-  /** The Teams, Meet or Zoho Meeting link. */
+  /**
+   * The Teams, Meet or Zoho Meeting link.
+   */
   joinUrl        String?
   status         CalendarEventStatus     @default(CONFIRMED)
-  /** False when the calendar shows the time as free. */
+  /**
+   * False when the calendar shows the time as free.
+   */
   busy           Boolean                 @default(true)
-  /** Only the organiser may move or cancel it from here. */
+  /**
+   * Only the organiser may move or cancel it from here.
+   */
   isOrganizer    Boolean                 @default(false)
   organizerEmail String?
-  /** [{ email, name, response }] — for Deskzo's own meetings, each address in lower case. */
+  /**
+   * [{ email, name, response }] — for Deskzo's own meetings, each address in lower case.
+   */
   attendees      Json                    @default("[]")
-  /** Scheduled from a record here, rather than found in the calendar. */
+  /**
+   * Scheduled from a record here, rather than found in the calendar.
+   */
   fromDeskzo     Boolean                 @default(false)
   companyId      String?
   company        Company?                @relation(fields: [companyId], references: [id], onDelete: SetNull)
@@ -14216,9 +14415,13 @@ model CalendarEvent {
   ticket         Ticket?                 @relation(fields: [ticketId], references: [id], onDelete: SetNull)
   visitId        String?                 @unique
   visit          Visit?                  @relation(fields: [visitId], references: [id], onDelete: SetNull)
-  /** When the lead's timeline was told the meeting took place (src/lib/calendar/held.ts). */
+  /**
+   * When the lead's timeline was told the meeting took place (src/lib/calendar/held.ts).
+   */
   heldLoggedAt   DateTime?
-  /** Deskzo's own meeting: how many times its invitation has changed — iCalendar's SEQUENCE. */
+  /**
+   * Deskzo's own meeting: how many times its invitation has changed — iCalendar's SEQUENCE.
+   */
   sequence       Int                     @default(0)
   /**
    * Deskzo's own meeting copied into its organiser's calendar once they connected one: whose, the copy's
@@ -14270,17 +14473,20 @@ model CalendarFeed {
  * been, with its sign-in switch (`ssoEnabled`); Google's and Zoho's are the company's own, registered in
  * its own Google Cloud project and Zoho API console — an Internal Google app needs no review by Google.
  * Secrets encrypted, never shown back.
- *
  * Its own table, not columns on SecuritySettings: sign-in reads that row on every request, and a
  * workspace still waiting for this migration must go on signing in exactly as before.
  */
 model WorkplaceSettings {
   id                       String   @id @default("global")
-  /** Offer "Connect Outlook" on My profile — on while the Microsoft app is set up, as before. */
+  /**
+   * Offer "Connect Outlook" on My profile — on while the Microsoft app is set up, as before.
+   */
   microsoftMail            Boolean  @default(true)
   googleClientId           String?
   googleClientSecretCipher String?
-  /** "Sign in with Google" on the sign-in page. */
+  /**
+   * "Sign in with Google" on the sign-in page.
+   */
   googleSso                Boolean  @default(false)
   /**
    * Only Google accounts of this Google Workspace domain may sign in (the ID token's `hd`) — null for
@@ -14290,9 +14496,13 @@ model WorkplaceSettings {
   googleMail               Boolean  @default(true)
   zohoClientId             String?
   zohoClientSecretCipher   String?
-  /** The Zoho data centre the company's accounts are in: com, eu, in, com.au, jp, ca, sa, uk. */
+  /**
+   * The Zoho data centre the company's accounts are in: com, eu, in, com.au, jp, ca, sa, uk.
+   */
   zohoRegion               String   @default("in")
-  /** "Sign in with Zoho" on the sign-in page. */
+  /**
+   * "Sign in with Zoho" on the sign-in page.
+   */
   zohoSso                  Boolean  @default(false)
   zohoMail                 Boolean  @default(true)
   updatedById              String?
@@ -14302,12 +14512,16 @@ model WorkplaceSettings {
 }
 
 enum SignInMethod {
-  /** Any single sign-on the company offers. */
+  /**
+   * Any single sign-on the company offers.
+   */
   SSO
   MICROSOFT
   GOOGLE
   ZOHO
-  /** The password (and two-factor code) only. */
+  /**
+   * The password (and two-factor code) only.
+   */
   PASSWORD
 }
 
@@ -14316,7 +14530,6 @@ enum SignInMethod {
  * sign-on, password only. src/lib/workplace/sign-in-rules.ts decides what a rule means; sign-in reads
  * it wherever a way in is decided (src/lib/workplace/sign-in-rules-server.ts). The person's own rule
  * wins over their role's, the role's over the company's; the super admin is never bound by one.
- *
  * Exactly one of userId and roleKey. Goes with the person or the role it is about.
  */
 model SignInRule {
@@ -14351,13 +14564,11 @@ model DeskzoDocumentMail {
 
 /**
  * Where an emailed document goes out from (owner, 15 Oct 2026), one row (id "global"); no row is "OWN".
- *
  * - OWN: the sender's own Outlook, Gmail or Zoho Mail — as before.
  * - COMPANY: the company's mail server — Settings › Messaging's route for transactional mail (SMTP,
- *   Microsoft 365 SMTP, SES, Resend, Elastic Email), from its address, with the sender's name, replies
- *   to the sender and a copy to them.
+ * Microsoft 365 SMTP, SES, Resend, Elastic Email), from its address, with the sender's name, replies
+ * to the sender and a copy to them.
  * - OWN_THEN_COMPANY: their own mailbox when they have connected one, otherwise the company's.
- *
  * Whatever is chosen, when nothing it names is set up, the document goes through Deskzo's own mail
  * (the platform's "Workspace documents" mail) on the company's behalf (src/lib/documents/mail-route.ts).
  */
@@ -14388,7 +14599,6 @@ model DocumentEmailTemplate {
 /**
  * A one-time pass for the server's own headless browser to open one document's print page, so it
  * can be turned into the PDF that is attached. See src/lib/documents/render-grant.ts.
- *
  * Minted by the send action for the person sending, after it has checked they may see the document;
  * good for that document only, for two minutes, once.
  */
@@ -14406,7 +14616,9 @@ model DocumentRenderGrant {
   @@map("document_render_grants")
 }
 
-/** Towns and cities outside India with at least 1,000 people, from GeoNames' cities1000 — for suggestions. */
+/**
+ * Towns and cities outside India with at least 1,000 people, from GeoNames' cities1000 — for suggestions.
+ */
 /**
  * A link to set a new password, emailed by the platform when somebody asks from the sign-in page
  * (src/actions/password-reset.ts). Good for an hour, once. Only its SHA-256 is kept; the link itself
@@ -15030,7 +15242,9 @@ enum RecurringBillingMode {
   INSTALMENTS
 }
 
-/** One order's recurring billing — present only while it is switched on. */
+/**
+ * One order's recurring billing — present only while it is switched on.
+ */
 model RecurringBilling {
   companyProductId String               @id
   order            CompanyProduct       @relation(fields: [companyProductId], references: [id], onDelete: Cascade)
@@ -15077,7 +15291,6 @@ model RecurringBillingPeriod {
 
 /**
  * Deskzo Cards: a company's card design. Every card is drawn from one, so the brand stays the company's.
- *
  * What a card shows comes from three places: the holder's own record (name, photo, job title, work
  * phone, email, branch address — kept in step, never typed twice), the template's shared fields (one
  * value for everybody: the website, the head-office number), and the holder's own additions
@@ -15124,7 +15337,6 @@ enum DigitalCardStatus {
  * Somebody's digital card. HR, an admin or anybody holding `cards.manage` issues it — a card is a
  * thing the company gives, not a permission, because the super admin holds every permission and the
  * owner's rule is that nobody has a card until somebody switches it on (10 Oct 2026).
- *
  * The public page is /c/<handle> on the workspace's own address. A card whose holder has left — their
  * account switched off, or their exit date passed — answers as no longer with the company, whatever
  * its status.
@@ -15189,7 +15401,6 @@ model CardEvent {
  * stand, or had their own card scanned by one of the team. Always kept here, so a workspace without the
  * CRM still has them; with the CRM it is also a lead owned by whoever met them — source Digital card,
  * or Event when it came from one.
- *
  * `ownerUserId` starts as the holder and moves in the exit hand-over, like their accounts do. A card
  * with contacts is never deleted with its holder: they are the company's, whoever holds them now.
  */
@@ -15203,7 +15414,7 @@ model CardContact {
   campaignId  String?
   campaign    CardCampaign?  @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   ownerUserId String
-  owner       User        @relation("CardContactOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  owner       User           @relation("CardContactOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
   name        String
   email       String?
   phone       String?
@@ -15211,12 +15422,12 @@ model CardContact {
   jobTitle    String?
   message     String?
   /// The template's questions and what they answered: [{ label, answer }].
-  answers     Json        @default("[]")
+  answers     Json           @default("[]")
   /// The holder's own note on them.
   note        String?
   leadId      String?
-  lead        Lead?       @relation("CardContactLead", fields: [leadId], references: [id], onDelete: SetNull)
-  createdAt   DateTime    @default(now())
+  lead        Lead?          @relation("CardContactLead", fields: [leadId], references: [id], onDelete: SetNull)
+  createdAt   DateTime       @default(now())
 
   @@index([ownerUserId, createdAt])
   @@index([cardId, createdAt])
@@ -15237,7 +15448,6 @@ enum CardContactVia {
 /**
  * Deskzo Cards: an event the team works — a trade show, a conference — and the people met there. Not
  * an event the company hosts (that is Forms & Events): this one is somewhere else, with a stand.
- *
  * Anybody met while it runs is counted against it: a share-back from a team member's card on the
  * event's days, a visitor at the stand on the booth form, a card a team member scans.
  */
@@ -15284,32 +15494,32 @@ model CardCampaignMember {
  * same renderer as the free generator (src/lib/signatures/render.ts), without its credit.
  */
 model SignatureTemplate {
-  id          String          @id @default(cuid())
-  name        String
+  id           String          @id @default(cuid())
+  name         String
   /// The one everybody gets unless a rule gives them another. Exactly one per workspace.
-  isDefault   Boolean         @default(false)
+  isDefault    Boolean         @default(false)
   /// CLASSIC, MODERN, STACKED or COMPACT — the renderer's layouts.
-  layout      String          @default("CLASSIC")
-  color       String          @default("#1d4ed8")
-  font        String          @default("arial")
+  layout       String          @default("CLASSIC")
+  color        String          @default("#1d4ed8")
+  font         String          @default("arial")
   /// Which of the person's record fields it shows: [{ key, show }] — photo, title, department, phone, mobile, email, address.
-  recordFields Json           @default("[]")
+  recordFields Json            @default("[]")
   /// One value for everybody: the website, a logo's address, the company's social profiles, a button, the sign-off and a disclaimer.
-  website     String?
-  logoUrl     String?
+  website      String?
+  logoUrl      String?
   /// Where the logo goes when clicked (https only); the website when empty.
-  logoLink    String?
+  logoLink     String?
   /// On replies and forwards, where the mail program can tell (Outlook's add-in): FULL, SHORT (name, title, company, phone) or NONE.
-  replyStyle  String          @default("FULL")
-  social      Json            @default("{}")
-  ctaLabel    String?
-  ctaUrl      String?
-  signOff     String?
-  disclaimer  String?
-  createdById String?
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
-  rules       SignatureRule[]
+  replyStyle   String          @default("FULL")
+  social       Json            @default("{}")
+  ctaLabel     String?
+  ctaUrl       String?
+  signOff      String?
+  disclaimer   String?
+  createdById  String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  rules        SignatureRule[]
 
   @@map("signature_templates")
 }
@@ -15395,37 +15605,36 @@ model SignatureRule {
 
 /**
  * Where the signatures go: one mail suite per workspace, connected by its administrator.
- *
  * Google Workspace: a service account the company made, given domain-wide delegation of
  * gmail.settings.basic in its Admin console — Deskzo signs a token for each person with it. Zoho Mail: a
  * Zoho administrator's grant of ZohoMail.organization.accounts, kept as its refresh token.
  */
 model SignatureSettings {
-  id                   String    @id @default("global")
+  id                 String    @id @default("global")
   /// GOOGLE or ZOHO; null until a suite is connected.
-  provider             String?
-  googleServiceEmail   String?
-  googleKeyCipher      String?
-  zohoRefreshCipher    String?
-  zohoOrgId            String?
-  zohoAdminEmail       String?
+  provider           String?
+  googleServiceEmail String?
+  googleKeyCipher    String?
+  zohoRefreshCipher  String?
+  zohoOrgId          String?
+  zohoAdminEmail     String?
   /// Keep every signature in step on its own — a changed title or phone goes out within minutes.
-  autoSync             Boolean   @default(true)
+  autoSync           Boolean   @default(true)
   /// The last run, and why it stopped when it did — a missing delegation, a withdrawn grant — shown on the settings.
-  lastRunAt            DateTime?
-  lastError            String?
-  connectedById        String?
-  connectedAt          DateTime?
+  lastRunAt          DateTime?
+  lastError          String?
+  connectedById      String?
+  connectedAt        DateTime?
   /// Microsoft 365: the Outlook add-in answers for this workspace. Off until a manager turns it on.
-  outlookOn            Boolean   @default(false)
+  outlookOn          Boolean   @default(false)
   /// The add-in's id in its manifest — made the first time it is turned on and kept, so turning it off and on needs no new upload.
-  outlookAddinId       String?
+  outlookAddinId     String?
   /// The add-in turns off a person's own Outlook signature, so a message never carries two.
-  outlookReplaceOwn    Boolean   @default(true)
+  outlookReplaceOwn  Boolean   @default(true)
   /// Banners' and buttons' links go through the workspace's /s/ address, which counts the click and sends
   /// the reader on. Off: they link straight to where they go.
-  trackClicks          Boolean   @default(true)
-  updatedAt            DateTime  @updatedAt
+  trackClicks        Boolean   @default(true)
+  updatedAt          DateTime  @updatedAt
 
   @@map("signature_settings")
 }
@@ -15439,22 +15648,24 @@ enum SignatureSyncStatus {
   SKIPPED
 }
 
-/** One person's signature in their mailbox: what was put there, when, and what went wrong. */
+/**
+ * One person's signature in their mailbox: what was put there, when, and what went wrong.
+ */
 model SignatureSync {
-  userId           String              @id
-  user             User                @relation("SignatureSyncOf", fields: [userId], references: [id], onDelete: Cascade)
-  provider         String
-  status           SignatureSyncStatus @default(PENDING)
+  userId          String              @id
+  user            User                @relation("SignatureSyncOf", fields: [userId], references: [id], onDelete: Cascade)
+  provider        String
+  status          SignatureSyncStatus @default(PENDING)
   /// A digest of the signature last put into the mailbox — the same signature is never sent twice.
-  syncedHash       String?
-  syncedAt         DateTime?
-  lastError        String?
-  attempts         Int                 @default(0)
+  syncedHash      String?
+  syncedAt        DateTime?
+  lastError       String?
+  attempts        Int                 @default(0)
   /// Zoho's id for the signature it holds for this person, so the next change updates it in place.
-  zohoSignatureId  String?
-  zohoAccountId    String?
-  claimedUntil     DateTime?
-  updatedAt        DateTime            @updatedAt
+  zohoSignatureId String?
+  zohoAccountId   String?
+  claimedUntil    DateTime?
+  updatedAt       DateTime            @updatedAt
 
   @@index([status])
   @@map("signature_syncs")
@@ -15502,27 +15713,37 @@ model SignatureOutlook {
  * read it — no admin browses chats; the super admin may export one, which is audited.
  */
 enum ChatKind {
-  /** Two people. One per pair — see `directKey`. */
+  /**
+   * Two people. One per pair — see `directKey`.
+   */
   DIRECT
   GROUP
 }
 
 enum ChatMessageKind {
   TEXT
-  /** Written by the app, not by a person: "Asha added Ravi", "Group renamed to Sales". */
+  /**
+   * Written by the app, not by a person: "Asha added Ravi", "Group renamed to Sales".
+   */
   SYSTEM
 }
 
 model Chat {
   id            String    @id @default(cuid())
   kind          ChatKind
-  /** A group's name. Null for a direct chat, which is shown as the other person. */
+  /**
+   * A group's name. Null for a direct chat, which is shown as the other person.
+   */
   name          String?
-  /** A direct chat's two members' ids, sorted and joined by "|": the database keeps it to one chat per pair. */
+  /**
+   * A direct chat's two members' ids, sorted and joined by "|": the database keeps it to one chat per pair.
+   */
   directKey     String?   @unique
   createdById   String?
   createdBy     User?     @relation("ChatCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  /** The newest message's time, so a person's list sorts without reading every chat's messages. */
+  /**
+   * The newest message's time, so a person's list sorts without reading every chat's messages.
+   */
   lastMessageAt DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -15546,14 +15767,20 @@ model ChatMember {
   chat            Chat      @relation(fields: [chatId], references: [id], onDelete: Cascade)
   userId          String
   user            User      @relation("ChatMemberships", fields: [userId], references: [id], onDelete: Cascade)
-  /** A group admin may rename it and add or remove people. Its creator is one. */
+  /**
+   * A group admin may rename it and add or remove people. Its creator is one.
+   */
   isAdmin         Boolean   @default(false)
   joinedAt        DateTime  @default(now())
-  /** Left, or removed: they keep what was said up to then and see nothing after. */
+  /**
+   * Left, or removed: they keep what was said up to then and see nothing after.
+   */
   leftAt          DateTime?
   lastDeliveredAt DateTime?
   lastReadAt      DateTime?
-  /** No sound or unread badge until then; an @mention still counts. */
+  /**
+   * No sound or unread badge until then; an @mention still counts.
+   */
   mutedUntil      DateTime?
 
   @@unique([chatId, userId])
@@ -15565,7 +15792,9 @@ model ChatMessage {
   id         String          @id @default(cuid())
   chatId     String
   chat       Chat            @relation(fields: [chatId], references: [id], onDelete: Cascade)
-  /** Null for a SYSTEM line, and for a sender whose account was later removed. */
+  /**
+   * Null for a SYSTEM line, and for a sender whose account was later removed.
+   */
   senderId   String?
   sender     User?           @relation("ChatMessagesSent", fields: [senderId], references: [id], onDelete: SetNull)
   kind       ChatMessageKind @default(TEXT)
@@ -15573,10 +15802,14 @@ model ChatMessage {
   replyToId  String?
   replyTo    ChatMessage?    @relation("ChatReplies", fields: [replyToId], references: [id], onDelete: SetNull)
   replies    ChatMessage[]   @relation("ChatReplies")
-  /** The people @mentioned, by id: they are told even when the chat is muted. */
+  /**
+   * The people @mentioned, by id: they are told even when the chat is muted.
+   */
   mentionIds String[]        @default([])
   editedAt   DateTime?
-  /** Deleted for everyone: the body and files are gone, the row stays so the conversation keeps its shape. */
+  /**
+   * Deleted for everyone: the body and files are gone, the row stays so the conversation keeps its shape.
+   */
   deletedAt  DateTime?
   createdAt  DateTime        @default(now())
 
@@ -15588,7 +15821,9 @@ model ChatMessage {
   @@map("chat_messages")
 }
 
-/** A file sent in a chat, kept in the database like every other file here. */
+/**
+ * A file sent in a chat, kept in the database like every other file here.
+ */
 model ChatAttachment {
   id        String      @id @default(cuid())
   messageId String
@@ -15622,7 +15857,9 @@ model ChatReaction {
   @@map("chat_reactions")
 }
 
-/** A message pinned to the top of its chat. Three at most per chat: a fourth unpins the oldest. */
+/**
+ * A message pinned to the top of its chat. Three at most per chat: a fourth unpins the oldest.
+ */
 model ChatPin {
   id         String      @id @default(cuid())
   chatId     String
@@ -15637,7 +15874,9 @@ model ChatPin {
   @@map("chat_pins")
 }
 
-/** When a person was last in the app with chat open, for "last seen" — kept apart from User so no sign-in query reads it. */
+/**
+ * When a person was last in the app with chat open, for "last seen" — kept apart from User so no sign-in query reads it.
+ */
 model ChatPresence {
   userId     String   @id
   user       User     @relation("ChatPresence", fields: [userId], references: [id], onDelete: Cascade)
@@ -15652,9 +15891,13 @@ model ChatPresence {
  */
 model ChatSettings {
   id                  String   @id @default("global")
-  /** Files open in the browser and can't be saved from the chat — a deterrent, like the DLP policy. */
+  /**
+   * Files open in the browser and can't be saved from the chat — a deterrent, like the DLP policy.
+   */
   attachmentsViewOnly Boolean  @default(false)
-  /** Messages older than this many days are deleted each night; null keeps them for good. */
+  /**
+   * Messages older than this many days are deleted each night; null keeps them for good.
+   */
   retentionDays       Int?
   updatedById         String?
   updatedAt           DateTime @updatedAt
@@ -15736,7 +15979,9 @@ enum AutomationErrorKind {
   UNKNOWN
 }
 
-/** A workflow: what people edit (`draft`) and which published version runs (`activeVersionId`). */
+/**
+ * A workflow: what people edit (`draft`) and which published version runs (`activeVersionId`).
+ */
 model AutomationWorkflow {
   id              String                   @id @default(cuid())
   /// WF-0042 — the readable address of the builder (src/lib/automate/refs.ts).
@@ -15770,7 +16015,9 @@ model AutomationWorkflow {
   @@map("automation_workflows")
 }
 
-/** A published version. Never changed once written: the database refuses an UPDATE. */
+/**
+ * A published version. Never changed once written: the database refuses an UPDATE.
+ */
 model AutomationVersion {
   id             String             @id @default(cuid())
   workflowId     String
@@ -15789,7 +16036,9 @@ model AutomationVersion {
   @@map("automation_versions")
 }
 
-/** What the matcher looks up: one row per active workflow, rewritten on publish. */
+/**
+ * What the matcher looks up: one row per active workflow, rewritten on publish.
+ */
 model AutomationTrigger {
   id         String             @id @default(cuid())
   workflowId String             @unique
@@ -15831,7 +16080,9 @@ model AutomationEvent {
   @@map("automation_events")
 }
 
-/** One run of one version. Saved after every step, so a worker that dies leaves it resumable. */
+/**
+ * One run of one version. Saved after every step, so a worker that dies leaves it resumable.
+ */
 model AutomationRun {
   id              String              @id @default(cuid())
   /// Shown as RUN-000123.
@@ -15953,7 +16204,9 @@ model ApprovalRequest {
   @@map("approval_requests")
 }
 
-/** One try of one step: what went in and came out, redacted for showing, and how it ended. */
+/**
+ * One try of one step: what went in and came out, redacted for showing, and how it ended.
+ */
 model AutomationRunStep {
   id            String               @id @default(cuid())
   runId         String
@@ -15992,7 +16245,9 @@ model AutomationEffect {
   @@map("automation_effects")
 }
 
-/** An outside app connected for workflows (Phase 4). The secret is encrypted; screens see only that one is set. */
+/**
+ * An outside app connected for workflows (Phase 4). The secret is encrypted; screens see only that one is set.
+ */
 model AutomationConnection {
   id                  String    @id @default(cuid())
   provider            String
@@ -16010,7 +16265,9 @@ model AutomationConnection {
   @@map("automation_connections")
 }
 
-/** An inbound webhook address for one workflow (Phase 4). Only the token's digest is kept. */
+/**
+ * An inbound webhook address for one workflow (Phase 4). Only the token's digest is kept.
+ */
 model AutomationWebhook {
   id                  String             @id @default(cuid())
   workflowId          String
@@ -16059,12 +16316,110 @@ model AutomationUsage {
   @@map("automation_usage")
 }
 
-/** The workspace's own switch: paused, no run starts or moves on until it is lifted. */
+/**
+ * The workspace's own switch: paused, no run starts or moves on until it is lifted.
+ */
 model AutomationSettings {
-  id          String    @id @default("global")
-  pausedAt    DateTime?
-  pausedById  String?
-  updatedAt   DateTime  @updatedAt
+  id         String    @id @default("global")
+  pausedAt   DateTime?
+  pausedById String?
+  updatedAt  DateTime  @updatedAt
 
   @@map("automation_settings")
+}
+
+// ─── Reporting & Analytics (owner, 23 Oct 2026) ───────────────────────────────────────────────────
+
+/**
+ * A report somebody built in the Report Builder: its pages, charts, filters and calculated fields, as a
+ * definition (src/lib/reporting/definition.ts) over one of the reporting sources (src/lib/reporting/sources.ts).
+ * The definition is the question, never the answer: no figure is stored. Every time it is opened it is run
+ * again as whoever opens it, through their own access to the source — so a report shared with somebody who
+ * may see fewer rows shows them fewer rows, and a shared report never widens what anybody can read.
+ */
+model SavedReport {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+  /**
+   * The reporting source it reads (src/lib/reporting/sources.ts) — also in the definition; kept here to list by.
+   */
+  sourceKey   String
+  /**
+   * Pages, charts, filters and calculated fields — checked by src/lib/reporting/definition.ts on every save.
+   */
+  definition  Json
+  /**
+   * The template it was started from, if any (src/lib/reporting/templates.ts).
+   */
+  templateKey String?
+
+  ownerId String
+  owner   User   @relation("SavedReportOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  shares     SavedReportShare[]
+  favourites SavedReportFavourite[]
+  views      SavedReportView[]
+
+  @@index([ownerId, updatedAt])
+  @@map("saved_reports")
+}
+
+/**
+ * Who else may open a report: a person, or everybody in a department. `canEdit` lets them change it in the
+ * builder; only the owner shares it on or deletes it. What it shows them is still their own rows.
+ */
+model SavedReportShare {
+  id       String      @id @default(cuid())
+  reportId String
+  report   SavedReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  userId       String?
+  user         User?       @relation("SavedReportShareUser", fields: [userId], references: [id], onDelete: Cascade)
+  departmentId String?
+  department   Department? @relation("SavedReportShareDepartment", fields: [departmentId], references: [id], onDelete: Cascade)
+
+  canEdit Boolean @default(false)
+
+  sharedById String
+  sharedBy   User     @relation("SavedReportShareBy", fields: [sharedById], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([reportId, userId])
+  @@unique([reportId, departmentId])
+  @@index([userId])
+  @@index([departmentId])
+  @@map("saved_report_shares")
+}
+
+/**
+ * A report somebody starred, for the overview's Favourites.
+ */
+model SavedReportFavourite {
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reportId  String
+  report    SavedReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  createdAt DateTime    @default(now())
+
+  @@id([userId, reportId])
+  @@map("saved_report_favourites")
+}
+
+/**
+ * When somebody last opened a report, for the overview's Recently viewed. One row a person a report.
+ */
+model SavedReportView {
+  userId   String
+  user     User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reportId String
+  report   SavedReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  viewedAt DateTime    @default(now())
+
+  @@id([userId, reportId])
+  @@index([userId, viewedAt])
+  @@map("saved_report_views")
 }

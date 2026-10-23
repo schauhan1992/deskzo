@@ -712,9 +712,15 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     requires: ["workspace"],
     label: "Reports",
     description:
-      "Any figure in the system broken down by anything else — month, salesperson, team, brand, product family, category, tag, lead source, industry, city. One screen rather than a list of fixed reports, because the useful question is always the one nobody wrote a page for.",
+      "Reporting & Analytics: saved reports built from charts over invoices, payments, expense claims, stock, orders, leads, tickets and visits — shared with colleagues, each of whom sees the rows their own role allows — plus the explorer for any figure broken down by anything else.",
     navGroup: "Performance",
-    navItems: [{ href: "/reports", label: "Reports", icon: BarChart4 }],
+    navItems: [
+      { href: "/reports", label: "Reports", icon: BarChart4 },
+      { href: "/reports/library", label: "My reports", icon: FolderOpen },
+      { href: "/reports/shared", label: "Shared with me", icon: Users },
+      { href: "/reports/templates", label: "Report templates", icon: LayoutTemplate },
+      { href: "/reports/explore", label: "Explorer", icon: ChartColumn },
+    ],
   },
 ];
 

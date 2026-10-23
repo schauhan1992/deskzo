@@ -419,8 +419,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
           // its Create proposal button needs "Raise and issue sales documents" (owner, 8 Oct 2026).
           proRata={(await isModuleEntitled("renewals")) && permissions.includes("orders.view")}
           proRataProposals={(await isModuleEntitled("sales_documents")) && permissions.includes("documents.issue")}
-          // The rail's tasks and notes are those modules' — not offered where their pages aren't.
+          // The rail's tasks, calendar and notes are those modules' — not offered where their pages aren't.
           tasks={openModules.includes("tasks")}
+          calendar={openModules.includes("calendar")}
           notes={openModules.includes("notes")}
           country={(await currentTenant()).country}
           support={!!supportLauncher}
