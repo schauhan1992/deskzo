@@ -99,7 +99,8 @@ export async function checkCustomDomain(id: string): Promise<ActionResult<Domain
           : check.outcome === "recovered"
             ? `${host} checks out again.`
             : check.passed
-              ? `${host} checks out.`
+              ? // Live, with its HTTPS certificate still on the way from Cloudflare: said too.
+                `${host} checks out${check.problems.length ? `; ${check.problems.join("; ")}` : ""}.`
               : `Not yet: ${check.problems.join("; ") || "the records could not be found"}.`;
     // A change in what is served is worth a line in the activity log; a check that changed nothing is not.
     if (check.domain && (check.outcome === "verified" || check.outcome === "recovered" || check.outcome === "stopped")) {

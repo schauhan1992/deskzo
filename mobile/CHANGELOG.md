@@ -3,14 +3,17 @@
 Each version as people see it (`version` in `app.config.ts`, shared by both phones), newest first. Android's
 `versionCode` goes up with every Play upload; the iPhone's build number is EAS's own (`eas.json`).
 
+## 0.4.1 (23 Oct 2026) · Android versionCode 7
+
+- **The official Deskzo logo and blue**: the icons and the app's colours, on both phones; on the iPhone, its dark and
+  tinted icons and dark mode in Deskzo blue too. A new native build — an icon doesn't travel over the air.
+
 ## 0.4.0 (23 Oct 2026) · Android versionCode 6
 
 - **Updates over the air**: the app's own screens come from deskzo.com when a newer version is published
   (`npm run app:update`, signed with Deskzo's key), on Android and on the iPhone (`--platform ios`); Settings › This
   app says which version runs and can take a newer one at once. The first build that takes them — phones on 0.3.x
   have no updater.
-- **The official Deskzo logo and blue**: the icons and the app's colours, on both phones; on the iPhone, its dark and
-  tinted icons and dark mode in Deskzo blue too.
 
 ## 0.3.1 (23 Oct 2026) · Android versionCode 5
 

@@ -8,7 +8,7 @@ import { StatusPill } from "@/components/console/kit/status";
 import type { Caps } from "@/lib/console-shared/roles";
 import type { Tone } from "@/lib/console-shared/types";
 import { consoleClock } from "@/lib/platform/console-clock";
-import { domainStatusText } from "@/lib/platform/domain-rules";
+import { CERTIFICATE_WORDS, domainStatusText, withCertificate } from "@/lib/platform/domain-rules";
 import type { DomainView, WorkspaceDomains } from "@/lib/platform/domains";
 import type { Clock } from "@/lib/time/zone";
 import { AddDomainButton, RemoveDomainButton } from "./domain-actions";
@@ -95,7 +95,7 @@ export async function DomainsPanel({
 function DomainItem({ d, tenantId, ownHost, manage, check, clock }: { d: DomainView; tenantId: string; ownHost: string; manage: boolean; check: boolean; clock: Clock }) {
   const txt = d.records.find((r) => r.type === "TXT") ?? null;
   // Its state in the console's days; the view's own words are for the workspace's page.
-  const statusText = d.kind === "CUSTOM" ? domainStatusText(d, clock).label : d.statusText;
+  const statusText = d.kind === "CUSTOM" ? withCertificate(domainStatusText(d, clock).label, d.status, d.certificate) : d.statusText;
   return (
     <li className="space-y-2 px-5 py-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -132,6 +132,14 @@ function DomainItem({ d, tenantId, ownHost, manage, check, clock }: { d: DomainV
           <dt className="shrink-0 text-muted">Last check</dt>
           <dd className="min-w-0 text-text">{d.lastCheckedAt ? <RelativeTime at={d.lastCheckedAt} /> : d.kind === "CUSTOM" ? "Never" : "Not checked — needs no records"}</dd>
         </div>
+        {d.certificate && (
+          <div className="flex min-w-0 gap-1.5">
+            <dt className="shrink-0 text-muted">HTTPS certificate</dt>
+            <dd className={d.certificate === "failed" ? "min-w-0 text-danger" : d.certificate === "issuing" ? "min-w-0 text-warning" : "min-w-0 text-text"}>
+              {CERTIFICATE_WORDS[d.certificate]} — by Cloudflare
+            </dd>
+          </div>
+        )}
         {d.failingSince && (
           <div className="flex min-w-0 gap-1.5">
             <dt className="shrink-0 text-muted">Failing since</dt>

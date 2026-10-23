@@ -22,7 +22,7 @@ site or the demo workspace, with a second phone to call from. Note the iPhone mo
 - [ ] Restart the iPhone, open the app before and after unlocking — signed in once unlocked.
 - [ ] Delete the app and install it again — it starts on the sign-in screen (the token isn't left in the Keychain).
 - [ ] An administrator revokes the phone in Security › Devices — the next screen says this iPhone was signed out.
-- [ ] **Settings › This app**: "Deskzo app 0.4.0", "Screens as installed"; Check for a newer version says it's the newest. After `npm run app:update -- publish --platform ios`, the app takes it at the next launch (or Restart with the new version) and says when the screens were updated.
+- [ ] **Settings › This app**: "Deskzo app 0.4.1", "Screens as installed"; Check for a newer version says it's the newest. After `npm run app:update -- publish --platform ios`, the app takes it at the next launch (or Restart with the new version) and says when the screens were updated.
 
 ## 2. Today, Tasks, Approvals, Leave
 

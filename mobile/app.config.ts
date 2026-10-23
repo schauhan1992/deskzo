@@ -42,7 +42,7 @@ const config: ExpoConfig = {
   slug: "deskzo",
   // The Expo account the builds are made under (owner, 23 Oct 2026): EAS, for the iPhone's builds (eas.json).
   owner: "digitrok",
-  version: "0.4.0",
+  version: "0.4.1",
   orientation: "portrait",
   icon: "./assets/icon.png",
   scheme: "deskzo",
@@ -60,7 +60,7 @@ const config: ExpoConfig = {
   userInterfaceStyle: "light",
   android: {
     package: "com.deskzo.app",
-    versionCode: 6,
+    versionCode: 7,
     // The official icon (owner, 23 Oct 2026): the blue D on white — scripts/brand-assets.js draws the images.
     adaptiveIcon: {
       backgroundColor: "#FFFFFF",

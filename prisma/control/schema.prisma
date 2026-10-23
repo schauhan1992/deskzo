@@ -197,6 +197,10 @@ model TenantDomain {
   failingSince   DateTime?
   /// Who added it: a workspace person's email, or "staff:<email>".
   addedBy        String?
+  /// The address on Cloudflare for SaaS, which issues its HTTPS certificate, as the last check found it:
+  /// { id, status, ssl, records }. Null until its records first check out, and while Cloudflare isn't
+  /// connected (src/lib/platform/cloudflare-hostnames.ts).
+  edge           Json?
   createdAt      DateTime     @default(now())
 
   @@unique([tenantId, host])

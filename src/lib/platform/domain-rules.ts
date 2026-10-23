@@ -269,6 +269,17 @@ export function domainStatusText(state: DomainState, clock: Clock): { label: str
   return { label: "Live", tone: "live" };
 }
 
+/** Where an address's HTTPS certificate is, while Cloudflare issues it (src/lib/platform/cloudflare-hostnames.ts); null otherwise. */
+export type DomainCertificate = "issuing" | "issued" | "failed" | null;
+
+export const CERTIFICATE_WORDS: Record<Exclude<DomainCertificate, null>, string> = { issuing: "Being issued", issued: "Issued", failed: "Couldn't be issued" };
+
+/** A state's words with its certificate on the way: "Records found — HTTPS certificate being issued", "Live — HTTPS certificate being issued". */
+export function withCertificate(label: string, status: DomainStatusKey, certificate: DomainCertificate): string {
+  if (certificate !== "issuing" || status === "BROKEN") return label;
+  return status === "PENDING" ? "Records found — HTTPS certificate being issued" : `${label} — HTTPS certificate being issued`;
+}
+
 /** Whether one more may be added. Null is no limit. */
 export const allowanceLeft = (limit: number | null, used: number) => limit === null || used < limit;
 

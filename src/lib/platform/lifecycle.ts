@@ -3,6 +3,7 @@ import { runBackup } from "@/lib/backup/run";
 import { backupRootFor } from "@/lib/backup/maintenance";
 import { consoleClock } from "@/lib/platform/console-clock";
 import { controlDb } from "@/lib/platform/control-db";
+import { releaseDomainEdges } from "@/lib/platform/domains";
 import { dropWorkspaceDatabase } from "@/lib/platform/provisioner";
 import { forgetRegistry, tenantById } from "@/lib/tenancy/registry";
 import { runAsTenant } from "@/lib/tenancy/resolve";
@@ -84,6 +85,7 @@ export async function deprovisionTenant(tenantId: string, actor: string, options
   }
 
   if (row.dbName && row.dbRole) await dropWorkspaceDatabase(row.dbName, row.dbRole);
+  const hosts = (await control.tenantDomain.findMany({ where: { tenantId, kind: "CUSTOM" }, select: { host: true } })).map((d) => d.host);
   await control.$transaction(async (tx) => {
     await tx.tenantDomain.deleteMany({ where: { tenantId } });
     await tx.biometricDeviceRoute.deleteMany({ where: { tenantId } });
@@ -91,6 +93,8 @@ export async function deprovisionTenant(tenantId: string, actor: string, options
   });
   await audit(tenantId, actor, "tenant.deprovision", { backup });
   forgetRegistry();
+  // Its own addresses off Cloudflare as well; one that can't be is left in the audit log for staff.
+  await releaseDomainEdges(hosts, tenantId, actor);
   return { backup };
 }
 
