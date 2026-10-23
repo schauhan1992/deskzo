@@ -23,14 +23,14 @@ const firebase = require("node:fs").existsSync(`${__dirname}/google-services.jso
 const config: ExpoConfig = {
   name: "Deskzo",
   slug: "deskzo",
-  version: "0.2.1",
+  version: "0.3.1",
   orientation: "portrait",
   icon: "./assets/icon.png",
   scheme: "deskzo",
   userInterfaceStyle: "light",
   android: {
     package: "com.deskzo.app",
-    versionCode: 3,
+    versionCode: 5,
     adaptiveIcon: {
       backgroundColor: "#4F46E5",
       foregroundImage: "./assets/android-icon-foreground.png",
