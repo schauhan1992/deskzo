@@ -2549,6 +2549,9 @@ async function main() {
         bankTransfer: false,
         proformas: [],
         usage: { seatsUsed: 3, seatsLimit: 5, copilotUsed: 1200, copilotLimit: 100000 },
+        // The page's Deskzo AI card since AI went on credits (358e3597): here a workspace with no limit, as the card's
+        // own words don't matter to this check.
+        aiCredits: { metered: false, allowance: null, allowanceUsed: 0, available: null, renewsAt: IST("2026-11-01T00:00:00").toISOString(), packs: [], offer: { open: false, reason: null, packs: [] } },
         offer: [],
         currency: "INR",
         gateway: "RAZORPAY",

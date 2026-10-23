@@ -184,12 +184,16 @@ async function main() {
       ok("its organisation and its sign-in page carry its name", org?.legalName === form.companyName && org.country === "India" && brand?.appName === form.companyName);
       // Order steps and order fields only where its plan has Orders.
       const ordersInPlan = moduleEntitled(parseEntitlements(A.entitlements), A.country, "orders");
+      // The pipeline and the lead's fields only where its plan has Leads (owner, 14 Oct 2026 — src/lib/industry-templates/
+      // plan.ts): the trial plan an invitation without one gets may be a product without them.
+      const leadsInPlan = moduleEntitled(parseEntitlements(A.entitlements), A.country, "leads");
       const stagesA = await inA.leadStage.findMany({ where: { archivedAt: null }, orderBy: { sortOrder: "asc" }, select: { label: true } });
       const wordsA = (await inA.terminologySettings.findUnique({ where: { id: "global" } }))?.overrides as { terms?: Record<string, { one: string }> } | undefined;
+      const pipelineAsChosen = leadsInPlan ? stagesA[0]?.label === "Enquiry" && stagesA[1]?.label === "Site survey" : !stagesA.some((st) => st.label === "Site survey");
       ok(
         "set up for system integrators, as chosen: its pipeline, words, steps and fields, applied by its owner",
-        stagesA[0]?.label === "Enquiry" && stagesA[1]?.label === "Site survey" && wordsA?.terms?.lead?.one === "Enquiry" && (await inA.orderStep.count()) === (ordersInPlan ? 5 : 0) && (await inA.customFieldDefinition.count({ where: { entity: "LEAD" } })) === 3 && (await inA.customFieldDefinition.count({ where: { entity: "ORDER" } })) === (ordersInPlan ? 4 : 0) && (await inA.auditLog.count({ where: { entityType: "IndustryTemplate", userId: owner?.id } })) === 1,
-        JSON.stringify({ stages: stagesA.map((st) => st.label), lead: wordsA?.terms?.lead?.one, steps: await inA.orderStep.count(), fields: await inA.customFieldDefinition.count(), audit: await inA.auditLog.count({ where: { entityType: "IndustryTemplate" } }) }),
+        pipelineAsChosen && wordsA?.terms?.lead?.one === "Enquiry" && (await inA.orderStep.count()) === (ordersInPlan ? 5 : 0) && (await inA.customFieldDefinition.count({ where: { entity: "LEAD" } })) === (leadsInPlan ? 3 : 0) && (await inA.customFieldDefinition.count({ where: { entity: "ORDER" } })) === (ordersInPlan ? 4 : 0) && (await inA.auditLog.count({ where: { entityType: "IndustryTemplate", userId: owner?.id } })) === 1,
+        JSON.stringify({ leadsInPlan, ordersInPlan, stages: stagesA.map((st) => st.label), lead: wordsA?.terms?.lead?.one, steps: await inA.orderStep.count(), fields: await inA.customFieldDefinition.count(), audit: await inA.auditLog.count({ where: { entityType: "IndustryTemplate" } }) }),
       );
     } finally {
       await inA.$disconnect();
