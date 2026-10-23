@@ -40,6 +40,8 @@ const updatesOverHttp = updatesUrl.startsWith("http://");
 const config: ExpoConfig = {
   name: "Deskzo",
   slug: "deskzo",
+  // The Expo account the builds are made under (owner, 23 Oct 2026): EAS, for the iPhone's builds (eas.json).
+  owner: "digitrok",
   version: "0.4.0",
   orientation: "portrait",
   icon: "./assets/icon.png",
@@ -227,7 +229,7 @@ const config: ExpoConfig = {
   ],
   experiments: { typedRoutes: false },
   // The app's project on EAS (eas.json), where its iOS builds are made.
-  extra: { dev, firebase, eas: { projectId: "41dff9e9-46dd-4253-99c9-b85e40e7122e" } },
+  extra: { dev, firebase, eas: { projectId: "5fd00c32-a8d5-453e-8b12-04669763db42" } },
 };
 
 export default config;
