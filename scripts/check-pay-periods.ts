@@ -39,7 +39,11 @@
  *     year carries from it, and what was taken before Deskzo is counted as used — typed through the
  *     opening balances sheet by HR only, for this year or last;
  *   · TDS is worked out from a person's declaration and pay outside Deskzo, warns when earlier months
- *     of the tax year are missing, and a figure typed on a payslip survives the run being recalculated.
+ *     of the tax year are missing, and a figure typed on a payslip survives the run being recalculated;
+ *   · PF, ESI and TDS fixed on a salary structure at the split (owner, 23 Oct 2026) are saved only for a
+ *     scheme that's on, refused when they'd take more than gross, and paid by the run as fixed — PF and
+ *     ESI pro-rated for loss of pay, ESI above its wage limit too, TDS whole and marked FIXED, changed
+ *     with the structure on a recalculation, and a figure typed on the payslip still kept over it.
  *
  *   npm run check:pay-periods
  */
@@ -488,6 +492,72 @@ async function main() {
     ok("...and kept when the month is recalculated", num(afterRerun.incomeTax) === 500 && afterRerun.incomeTaxBasis === "TYPED", num(afterRerun.incomeTax));
     const workOut = await adjustPayslip({ id: afterRerun.id, incomeTax: 500, otherDeduction: 0, workOutTax: true });
     ok("'work it out' in a year without rates is refused", !workOut.ok, workOut.ok ? "worked out" : workOut.error);
+
+    section("PF, ESI and TDS fixed at the split");
+    /* eslint-disable-next-line @typescript-eslint/no-require-imports */
+    const { saveSalaryStructure } = require("../src/actions/payroll") as typeof import("../src/actions/payroll");
+    // ₹30,000 a month — above ESI's ₹21,000 limit, so Deskzo's own ESI would be nothing.
+    const fixedAll = { pfEmployee: 1800, pfEmployer: 1800, esiEmployee: 225, esiEmployer: 975, tds: 2000 };
+    // Saved through the action from a day no locked month can be after (a workspace's own locked months
+    // refuse an earlier one); the run's own structures, from 2000, are written as the fixture's others are.
+    const structureFor = (userId: string, more: Record<string, unknown> = {}) => ({
+      userId, effectiveFrom: "2099-01-01", basic: 20000, hra: 10000, pfApplicable: true, esiApplicable: true, ptApplicable: false, statutoryFixed: fixedAll, ...more,
+    });
+    const fixedStructure = (userId: string, statutoryFixed: object, pfApplicable = true) =>
+      db.salaryStructure.create({ data: { userId, effectiveFrom: d("2000-01-10"), basic: 20000, hra: 10000, pfApplicable, esiApplicable: true, ptApplicable: false, statutoryFixed } });
+    // JSONB keeps its own key order: compared key by key.
+    const sameJson = (a: unknown, b: object) => !!a && typeof a === "object" && JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
+    const fixedPay = await person("FixedPay", { joinedOn: "2000-01-10" });
+    const fixedSaved = await saveSalaryStructure(structureFor(fixedPay.id));
+    const fixedRow = fixedSaved.ok ? await db.salaryStructure.findUnique({ where: { id: fixedSaved.data.id }, omit: { statutoryFixed: false } }) : null;
+    ok("a structure saves PF, ESI and TDS fixed at the split", fixedSaved.ok && sameJson(fixedRow?.statutoryFixed, fixedAll), fixedSaved.ok ? JSON.stringify(fixedRow?.statutoryFixed) : fixedSaved.error);
+    const fixedMay = await fixedStructure(fixedPay.id, fixedAll);
+    const fixedLop = await person("FixedLop", { joinedOn: "2000-01-10" });
+    await fixedStructure(fixedLop.id, fixedAll);
+    await db.attendanceDay.create({ data: { userId: fixedLop.id, date: d("2001-05-20"), status: "ABSENT" } });
+    const noPf = await person("FixedNoPf", { joinedOn: "2000-01-10" });
+    const noPfSaved = await saveSalaryStructure(structureFor(noPf.id, { pfApplicable: false, statutoryFixed: { pfEmployee: 1800, pfEmployer: 1800, tds: 100 } }));
+    const noPfRow = noPfSaved.ok ? await db.salaryStructure.findUnique({ where: { id: noPfSaved.data.id }, omit: { statutoryFixed: false } }) : null;
+    ok("...PF fixed with PF off isn't kept; TDS is", sameJson(noPfRow?.statutoryFixed, { tds: 100 }), noPfSaved.ok ? JSON.stringify(noPfRow?.statutoryFixed) : noPfSaved.error);
+    // As it would be read, had it been saved with PF fixed anyway: the run takes no PF while PF is off.
+    await fixedStructure(noPf.id, { pfEmployee: 1800, pfEmployer: 1800, tds: 100 }, false);
+    const overFixed = await person("OverFixed", { joinedOn: "2000-01-10" });
+    const tooMuch = await saveSalaryStructure(structureFor(overFixed.id, { basic: 3000, hra: 0, statutoryFixed: { pfEmployee: 1800, tds: 1500 } }));
+    ok("...refused when PF, ESI and TDS would take more than the month's gross", !tooMuch.ok && /more than the monthly gross/.test(tooMuch.error), tooMuch.ok ? "saved" : tooMuch.error);
+    const paise = await saveSalaryStructure(structureFor(overFixed.id, { statutoryFixed: { tds: 1500.5 } }));
+    ok("...and in whole rupees", !paise.ok && /whole rupees/.test(paise.error), paise.ok ? "saved" : paise.error);
+
+    await runPayroll({ month: 5, year: 2001 });
+    const fixedSlip = await db.payslip.findFirstOrThrow({ where: { userId: fixedPay.id, run: { month: 5, year: 2001 } } });
+    ok(
+      "the run pays the fixed PF and ESI as they are, ESI above its wage limit too",
+      num(fixedSlip.pfEmployee) === 1800 && num(fixedSlip.pfEmployer) === 1800 && num(fixedSlip.esiEmployee) === 225 && num(fixedSlip.esiEmployer) === 975,
+      [fixedSlip.pfEmployee, fixedSlip.pfEmployer, fixedSlip.esiEmployee, fixedSlip.esiEmployer].map(num).join(" / "),
+    );
+    ok("...TDS is the fixed ₹2,000, marked FIXED", num(fixedSlip.incomeTax) === 2000 && fixedSlip.incomeTaxBasis === "FIXED", `${num(fixedSlip.incomeTax)} ${fixedSlip.incomeTaxBasis}`);
+    ok(
+      "...deductions ₹4,025, net ₹25,975, cost ₹32,775",
+      num(fixedSlip.totalDeductions) === 4025 && num(fixedSlip.netPay) === 25975 && num(fixedSlip.employerCost) === 32775,
+      [fixedSlip.totalDeductions, fixedSlip.netPay, fixedSlip.employerCost].map(num).join(" / "),
+    );
+    ok("...with no word about ESI's limit or TDS to type", !/ESI limit|work out TDS/.test(fixedSlip.note ?? ""), fixedSlip.note);
+    const lopSlip = await db.payslip.findFirstOrThrow({ where: { userId: fixedLop.id, run: { month: 5, year: 2001 } } });
+    ok(
+      "a day's loss of pay takes 30/31 of the fixed PF and ESI (₹1,742, ₹218) — and TDS whole",
+      num(lopSlip.pfEmployee) === 1742 && num(lopSlip.esiEmployee) === 218 && num(lopSlip.incomeTax) === 2000,
+      [lopSlip.pfEmployee, lopSlip.esiEmployee, lopSlip.incomeTax].map(num).join(" / "),
+    );
+    const noPfSlip = await db.payslip.findFirstOrThrow({ where: { userId: noPf.id, run: { month: 5, year: 2001 } } });
+    ok("PF off: no PF on the payslip, the fixed TDS taken", num(noPfSlip.pfEmployee) === 0 && num(noPfSlip.incomeTax) === 100, [noPfSlip.pfEmployee, noPfSlip.incomeTax].map(num).join(" / "));
+
+    await db.salaryStructure.update({ where: { id: fixedMay.id }, data: { statutoryFixed: { ...fixedAll, tds: 2500 } } });
+    await runPayroll({ month: 5, year: 2001 });
+    const reSlip = await db.payslip.findFirstOrThrow({ where: { userId: fixedPay.id, run: { month: 5, year: 2001 } } });
+    ok("the structure's TDS corrected to ₹2,500: recalculating takes the new figure", num(reSlip.incomeTax) === 2500 && reSlip.incomeTaxBasis === "FIXED", `${num(reSlip.incomeTax)} ${reSlip.incomeTaxBasis}`);
+    await adjustPayslip({ id: reSlip.id, incomeTax: 3000, otherDeduction: 0 });
+    await runPayroll({ month: 5, year: 2001 });
+    const typedOver = await db.payslip.findFirstOrThrow({ where: { userId: fixedPay.id, run: { month: 5, year: 2001 } } });
+    ok("...and ₹3,000 typed on this month's payslip is kept over it", num(typedOver.incomeTax) === 3000 && typedOver.incomeTaxBasis === "TYPED", `${num(typedOver.incomeTax)} ${typedOver.incomeTaxBasis}`);
   } finally {
     await cleanup();
     const left =

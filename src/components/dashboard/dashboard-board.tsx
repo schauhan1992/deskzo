@@ -9,6 +9,7 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpRight,
+  Building2,
   Calendar,
   CalendarCheck,
   ChartArea,
@@ -22,21 +23,31 @@ import {
   ClipboardCheck,
   Clock,
   Copy,
+  Crosshair,
   EllipsisVertical,
+  FileText,
+  FolderKanban,
   GripVertical,
   Hash,
+  IndianRupee,
   LayoutGrid,
+  LifeBuoy,
   List,
   Lock,
   Pencil,
   Plus,
+  Receipt,
+  RefreshCw,
+  ShoppingCart,
   SquareCheckBig,
   Table,
   Target,
   Trash2,
+  Truck,
   UserRoundCheck,
   Users,
   UsersRound,
+  Wallet,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -48,12 +59,12 @@ import { toggleTaskDone } from "@/actions/task";
 import {
   CHART_TYPES,
   CHART_TYPE_ORDER,
+  DEFAULT_CHARTS,
   LAYOUT_MARKER,
   RANGES,
   SOURCES,
   decodeChart,
   encodeChart,
-  isChartEntry,
   rangeLabel,
   rangeStart,
   resultKey,
@@ -69,29 +80,37 @@ import {
 import { CHART_HEIGHT, ChartView, Sparkline, TONE_CLASS, ToneIcon } from "@/components/dashboard/dashboard-charts";
 
 /**
- * The dashboard: headline figures, then the widgets in the order this person put them — charts they
- * built, and the older cards (finance, notes, renewals…) beside them.
+ * The dashboard: headline figures, then the widgets in the order this person put them — charts and
+ * numbers only (owner, 23 Oct 2026: the older cards are gone; what they showed are widgets of their own).
  *
  * Everything is read on the server; this owns the arrangement, the builder, and drawing a chart in
  * another type. A chart's figures are keyed by what they depend on (`resultKey`), so changing its type
  * or width redraws what is already here, and only a new source, metric, filter or range asks again.
  */
 
-export type CardOption = { key: string; label: string; description: string; size: 1 | 2 };
-
-type Item = { uid: string; spec: ChartSpec | null; card: string | null };
-type Draft = { kind: "chart"; spec: ChartSpec } | { kind: "card"; key: string | null; size: WidgetSize };
+type Item = { uid: string; spec: ChartSpec };
+type Draft = { kind: "chart"; spec: ChartSpec };
 type Modal = { mode: "add" | "edit"; uid?: string; draft: Draft };
 type Toast = { msg: string; undo?: () => void; failed?: boolean };
 
-const SOURCE_ICONS: Record<SourceKey | "cards", LucideIcon> = {
+const SOURCE_ICONS: Record<SourceKey, LucideIcon> = {
   tasks: SquareCheckBig,
   leads: Target,
   attendance: CalendarCheck,
   team: Users,
   approvals: ClipboardCheck,
   activity: Activity,
-  cards: LayoutGrid,
+  customers: Building2,
+  quotations: FileText,
+  orders: ShoppingCart,
+  targets: Crosshair,
+  payments: IndianRupee,
+  finance: Wallet,
+  renewals: RefreshCw,
+  support: LifeBuoy,
+  projects: FolderKanban,
+  expenses: Receipt,
+  vendors: Truck,
 };
 const TYPE_ICONS: Record<ChartType, LucideIcon> = { bar: ChartColumn, line: ChartLine, area: ChartArea, hbar: ChartBar, donut: ChartPie, pie: Circle, number: Hash, table: Table, list: List };
 const KPI_ICONS: Record<KpiCard["icon"], LucideIcon> = { tasks: SquareCheckBig, leads: UsersRound, attendance: UserRoundCheck, approvals: Clock };
@@ -104,21 +123,18 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 const shortDay = (key: string) => `${MONTHS[Number(key.slice(5, 7)) - 1]} ${Number(key.slice(8, 10))}`;
 const newId = () => `w${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
 
-function itemsOf(entries: string[], catalog: ChartCatalog, cards: Set<string>): Item[] {
+function itemsOf(entries: string[], catalog: ChartCatalog): Item[] {
   const out: Item[] = [];
   for (const entry of entries) {
     if (entry === LAYOUT_MARKER) continue;
-    if (isChartEntry(entry)) {
-      const spec = decodeChart(entry);
-      // A chart whose source this person can no longer open stays out of sight (and out of the next save).
-      if (spec && catalog.sources.includes(spec.source)) out.push({ uid: spec.id, spec, card: null });
-    } else if (cards.has(entry)) {
-      out.push({ uid: `card:${entry}`, spec: null, card: entry });
-    }
+    const spec = decodeChart(entry);
+    // A chart whose source this person can no longer open stays out of sight (and out of the next save);
+    // one already on the board (a department's layout naming a design chart) is there once.
+    if (spec && catalog.sources.includes(spec.source) && !out.some((i) => i.uid === spec.id)) out.push({ uid: spec.id, spec });
   }
   return out;
 }
-const entryOf = (item: Item) => (item.spec ? encodeChart(item.spec) : item.card!);
+const entryOf = (item: Item) => encodeChart(item.spec);
 
 export function DashboardBoard({
   today,
@@ -128,8 +144,6 @@ export function DashboardBoard({
   defaults,
   results: initialResults,
   catalog,
-  cards,
-  cardNodes,
   presets,
 }: {
   /** The workspace's today, `yyyy-mm-dd`, for the range menu's dates. */
@@ -140,18 +154,12 @@ export function DashboardBoard({
   defaults: string[];
   results: Record<string, WidgetResult>;
   catalog: ChartCatalog;
-  /** The older cards offered to this person. */
-  cards: CardOption[];
-  /** Those of them on the dashboard, rendered on the server. */
-  cardNodes: Record<string, ReactNode>;
   presets: DashboardPresetOption[];
 }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
-  const cardKeys = useMemo(() => new Set(cards.map((c) => c.key)), [cards]);
-  const cardBy = useMemo(() => new Map(cards.map((c) => [c.key, c])), [cards]);
 
-  const [saved, setSaved] = useState<Item[]>(() => itemsOf(entries, catalog, cardKeys));
+  const [saved, setSaved] = useState<Item[]>(() => itemsOf(entries, catalog));
   const [draft, setDraft] = useState<Item[] | null>(null);
   const [results, setResults] = useState<Record<string, WidgetResult | "loading">>(initialResults);
   const [done, setDone] = useState<Record<string, boolean>>({});
@@ -172,7 +180,7 @@ export function DashboardBoard({
   const [syncedTo, setSyncedTo] = useState(incoming);
   if (incoming !== syncedTo) {
     setSyncedTo(incoming);
-    setSaved(itemsOf(entries, catalog, cardKeys));
+    setSaved(itemsOf(entries, catalog));
   }
   const [syncedResults, setSyncedResults] = useState(initialResults);
   if (initialResults !== syncedResults) {
@@ -217,8 +225,8 @@ export function DashboardBoard({
 
   /** Asks for the figures of every chart on screen — and the one in the builder — that has none yet. */
   const wanted = useMemo(() => {
-    const specs = list.flatMap((i) => (i.spec ? [i.spec] : []));
-    if (modal?.draft.kind === "chart") specs.push(modal.draft.spec);
+    const specs = list.map((i) => i.spec);
+    if (modal) specs.push(modal.draft.spec);
     return specs.filter((s) => !(resultKey(s, range) in results));
   }, [list, modal, range, results]);
   useEffect(() => {
@@ -246,8 +254,6 @@ export function DashboardBoard({
     startTransition(async () => {
       const res = await saveDashboardLayout(next.map(entryOf));
       if (!res.ok) showToast(res.error, undefined, true);
-      // A card added back needs rendering on the server before it can be shown.
-      else if (next.some((i) => i.card && !(i.card in cardNodes))) router.refresh();
     });
   }
   function update(fn: (l: Item[]) => Item[]) {
@@ -259,8 +265,8 @@ export function DashboardBoard({
     }
   }
 
-  const setType = (uid: string, type: ChartType) => update((l) => l.map((i) => (i.uid === uid && i.spec ? { ...i, spec: { ...i.spec, type } } : i)));
-  const resize = (uid: string, size: WidgetSize) => update((l) => l.map((i) => (i.uid === uid && i.spec ? { ...i, spec: { ...i.spec, size } } : i)));
+  const setType = (uid: string, type: ChartType) => update((l) => l.map((i) => (i.uid === uid ? { ...i, spec: { ...i.spec, type } } : i)));
+  const resize = (uid: string, size: WidgetSize) => update((l) => l.map((i) => (i.uid === uid ? { ...i, spec: { ...i.spec, size } } : i)));
   function remove(uid: string) {
     setMenuFor(null);
     if (editing) return setDraft((d) => d!.filter((i) => i.uid !== uid));
@@ -279,9 +285,9 @@ export function DashboardBoard({
     update((l) => {
       const at = l.findIndex((i) => i.uid === uid);
       const src = l[at];
-      if (!src?.spec) return l;
+      if (!src) return l;
       const id = newId();
-      const copy: Item = { uid: id, spec: { ...src.spec, id, filters: { ...src.spec.filters } }, card: null };
+      const copy: Item = { uid: id, spec: { ...src.spec, id, filters: { ...src.spec.filters } } };
       return [...l.slice(0, at + 1), copy, ...l.slice(at + 1)];
     });
     if (!editing) showToast("Widget duplicated");
@@ -329,11 +335,11 @@ export function DashboardBoard({
     persist(next);
     showToast("Layout saved");
   }
-  const resetDefault = () => setDraft(itemsOf(defaults, catalog, cardKeys));
+  const resetDefault = () => setDraft(itemsOf(defaults, catalog));
   function applyPreset(p: DashboardPresetOption) {
     setPresetOpen(false);
-    const charts = defaults.filter(isChartEntry);
-    setDraft(itemsOf([...charts, ...p.widgets], catalog, cardKeys));
+    // The design's charts, then what the department's layout names — as widgets (src/actions/dashboard.ts).
+    setDraft(itemsOf([...DEFAULT_CHARTS.map(encodeChart), ...p.widgets], catalog));
   }
 
   function toggleTask(id: string, current: boolean) {
@@ -349,9 +355,6 @@ export function DashboardBoard({
 
   // ─── The builder ───────────────────────────────────────────────────────────
 
-  const onBoard = new Set(list.flatMap((i) => (i.card ? [i.card] : [])));
-  const addableCards = cards.filter((c) => !onBoard.has(c.key));
-
   function chartDraft(source: SourceKey, keep?: { range: ChartSpec["range"]; size: WidgetSize }): Draft {
     const metric = Object.keys(SOURCES[source].metrics)[0]!;
     return {
@@ -361,26 +364,22 @@ export function DashboardBoard({
   }
   function openAdd() {
     setMenuFor(null);
-    setModal({ mode: "add", draft: catalog.sources.length ? chartDraft(catalog.sources[0]!) : { kind: "card", key: addableCards[0]?.key ?? null, size: 1 } });
+    if (catalog.sources.length) setModal({ mode: "add", draft: chartDraft(catalog.sources[0]!) });
   }
   function openEdit(uid: string) {
     setMenuFor(null);
     const item = list.find((i) => i.uid === uid);
-    if (item?.spec) setModal({ mode: "edit", uid, draft: { kind: "chart", spec: { ...item.spec, filters: { ...item.spec.filters } } } });
+    if (item) setModal({ mode: "edit", uid, draft: { kind: "chart", spec: { ...item.spec, filters: { ...item.spec.filters } } } });
   }
   function submitModal() {
     if (!modal) return;
     const d = modal.draft;
-    if (d.kind === "card") {
-      if (!d.key) return;
-      update((l) => [...l, { uid: `card:${d.key}`, spec: null, card: d.key }]);
-      if (!editing) showToast("Widget added to dashboard");
-    } else if (modal.mode === "add") {
+    if (modal.mode === "add") {
       const id = newId();
-      update((l) => [...l, { uid: id, spec: { ...d.spec, id }, card: null }]);
+      update((l) => [...l, { uid: id, spec: { ...d.spec, id } }]);
       if (!editing) showToast("Widget added to dashboard");
     } else {
-      update((l) => l.map((i) => (i.uid === modal.uid ? { ...i, spec: { ...d.spec, id: i.spec!.id } } : i)));
+      update((l) => l.map((i) => (i.uid === modal.uid ? { ...i, spec: { ...d.spec, id: i.spec.id } } : i)));
       if (!editing) showToast("Widget updated");
     }
     setModal(null);
@@ -531,7 +530,7 @@ export function DashboardBoard({
 
         <div className="grid grid-flow-row-dense grid-cols-1 gap-3 @min-[640px]:grid-cols-2 @min-[640px]:gap-4 @min-[1000px]:grid-cols-3">
           {list.map((item, index) => {
-            const size: WidgetSize = item.spec ? item.spec.size : (cardBy.get(item.card!)?.size ?? 1);
+            const size: WidgetSize = item.spec.size;
             const dragProps = editing && !isMobile
               ? {
                   draggable: true,
@@ -560,11 +559,11 @@ export function DashboardBoard({
               <EditControls
                 isMobile={isMobile}
                 cols={cols}
-                size={item.spec ? size : null}
+                size={size}
                 onSize={(n) => resize(item.uid, n)}
                 onUp={index > 0 ? () => move(item.uid, -1) : undefined}
                 onDown={index < list.length - 1 ? () => move(item.uid, 1) : undefined}
-                onEdit={item.spec ? () => openEdit(item.uid) : undefined}
+                onEdit={() => openEdit(item.uid)}
                 onRemove={() => remove(item.uid)}
               />
             ) : null;
@@ -577,29 +576,7 @@ export function DashboardBoard({
               menuFor === item.uid && "z-[5]",
             );
 
-            if (item.card) {
-              const card = cardBy.get(item.card);
-              return (
-                <section key={item.uid} className={frame} {...dragProps}>
-                  {editing ? (
-                    // The card's own links would navigate mid-arrangement; while customizing it is a tile.
-                    <div className="flex h-full min-h-[120px] flex-col rounded-xl border border-dashed border-line-strong bg-surface">
-                      <div className="flex min-h-8 items-center gap-2 pl-[18px] pr-3 pt-3.5">
-                        {!isMobile && <GripVertical className="-ml-2 -mr-0.5 h-4 w-4 text-subtle" aria-hidden="true" />}
-                        <LayoutGrid className="h-4 w-4 text-brand" />
-                        <h3 className="min-w-0 flex-1 truncate text-[14.5px] font-semibold text-text">{card?.label ?? item.card}</h3>
-                        {controls}
-                      </div>
-                      <p className="px-[18px] pb-4 pt-2 text-[13px] text-muted">{card?.description}</p>
-                    </div>
-                  ) : (
-                    cardNodes[item.card] ?? <div className="h-full min-h-[120px] animate-pulse rounded-xl border border-line bg-surface" />
-                  )}
-                </section>
-              );
-            }
-
-            const spec = item.spec!;
+            const spec = item.spec;
             const source = SOURCES[spec.source];
             const metric = source.metrics[spec.metric]!;
             const Icon = SOURCE_ICONS[spec.source];
@@ -710,8 +687,7 @@ export function DashboardBoard({
           cols={cols}
           range={range}
           catalog={catalog}
-          addableCards={addableCards}
-          result={modal.draft.kind === "chart" ? results[resultKey(modal.draft.spec, range)] : undefined}
+          result={results[resultKey(modal.draft.spec, range)]}
           chartDraft={chartDraft}
           onSubmit={submitModal}
           onRemove={() => {
@@ -764,18 +740,17 @@ function EditControls({
 }: {
   isMobile: boolean;
   cols: number;
-  /** Null for a card, whose width is its own. */
-  size: WidgetSize | null;
+  size: WidgetSize;
   onSize: (n: WidgetSize) => void;
   onUp?: () => void;
   onDown?: () => void;
   onEdit?: () => void;
   onRemove: () => void;
 }) {
-  const span = size === null ? null : Math.min(size, cols);
+  const span = Math.min(size, cols);
   return (
     <>
-      {!isMobile && span !== null && (
+      {!isMobile && (
         <div title="Widget width" className="flex gap-0.5 rounded-[7px] bg-surface-sunken p-0.5">
           {([1, 2, 3] as const).slice(0, cols).map((n) => (
             <button
@@ -860,7 +835,6 @@ function WidgetBuilder({
   cols,
   range,
   catalog,
-  addableCards,
   result,
   chartDraft,
   onSubmit,
@@ -873,7 +847,6 @@ function WidgetBuilder({
   cols: number;
   range: RangeKey;
   catalog: ChartCatalog;
-  addableCards: CardOption[];
   result: WidgetResult | "loading" | undefined;
   chartDraft: (source: SourceKey, keep?: { range: ChartSpec["range"]; size: WidgetSize }) => Draft;
   onSubmit: () => void;
@@ -883,19 +856,16 @@ function WidgetBuilder({
   const { titleId, containerRef } = useModalA11y(true, close);
   const d = modal.draft;
   const setDraft = (draft: Draft) => setModal((m) => (m ? { ...m, draft } : m));
-  const patch = (p: Partial<ChartSpec>) => setModal((m) => (m && m.draft.kind === "chart" ? { ...m, draft: { kind: "chart", spec: { ...m.draft.spec, ...p } } } : m));
+  const patch = (p: Partial<ChartSpec>) => setModal((m) => (m ? { ...m, draft: { kind: "chart", spec: { ...m.draft.spec, ...p } } } : m));
   const wide = !isMobile;
   const isEdit = modal.mode === "edit";
   const title = isEdit ? "Edit widget" : "Add widget";
-  const showCards = !isEdit && (addableCards.length > 0 || d.kind === "card");
-  const sources: (SourceKey | "cards")[] = [...catalog.sources, ...(showCards ? (["cards"] as const) : [])];
-  const selected: SourceKey | "cards" = d.kind === "card" ? "cards" : d.spec.source;
-  const keep = d.kind === "chart" ? { range: d.spec.range, size: d.spec.size } : { range: "inherit" as const, size: d.size };
+  const sources = catalog.sources;
+  const selected = d.spec.source;
+  const keep = { range: d.spec.range, size: d.spec.size };
 
-  const spec = d.kind === "chart" ? d.spec : null;
-  const metric = spec ? SOURCES[spec.source].metrics[spec.metric]! : null;
-  const card = d.kind === "card" ? addableCards.find((c) => c.key === d.key) : undefined;
-  const canSubmit = d.kind === "chart" || !!d.key;
+  const spec = d.spec;
+  const metric = SOURCES[spec.source].metrics[spec.metric]!;
 
   return createPortal(
     <div className={cn("fixed inset-0 flex items-center justify-center bg-black/35 animate-fade-in", LAYER_MODAL, isMobile ? "p-0" : "p-6")} onMouseDown={(e) => e.target === e.currentTarget && close()}>
@@ -939,8 +909,7 @@ function WidgetBuilder({
                     <button
                       key={s}
                       type="button"
-                      disabled={isEdit && s === "cards"}
-                      onClick={() => setDraft(s === "cards" ? { kind: "card", key: addableCards[0]?.key ?? null, size: 1 } : chartDraft(s, keep))}
+                      onClick={() => setDraft(chartDraft(s, keep))}
                       aria-pressed={on}
                       className={cn(
                         "flex h-[38px] items-center gap-2 rounded-lg border px-2.5 text-left text-[13px] font-medium",
@@ -948,7 +917,7 @@ function WidgetBuilder({
                       )}
                     >
                       <Icon className="h-[15px] w-[15px]" />
-                      {s === "cards" ? "Other cards" : SOURCES[s].label}
+                      {SOURCES[s].label}
                     </button>
                   );
                 })}
@@ -956,117 +925,112 @@ function WidgetBuilder({
             </div>
 
             <div className="flex flex-col gap-2">
-              <span className="text-[12.5px] font-medium text-text">{d.kind === "card" ? "Card" : "Metric"}</span>
+              <span className="text-[12.5px] font-medium text-text">Metric</span>
               <div className="flex flex-col gap-1.5">
-                {d.kind === "card"
-                  ? addableCards.map((c) => (
-                      <Choice key={c.key} on={d.key === c.key} label={c.label} description={c.description} onClick={() => setDraft({ ...d, key: c.key })} />
-                    ))
-                  : Object.entries(SOURCES[d.spec.source].metrics).map(([k, m]) => (
-                      <Choice
-                        key={k}
-                        on={d.spec.metric === k}
-                        label={m.label}
-                        description={m.description}
-                        onClick={() => patch({ metric: k, type: m.types.includes(d.spec.type) ? d.spec.type : m.types[0]! })}
-                      />
-                    ))}
+                {Object.entries(SOURCES[d.spec.source].metrics).map(([k, m]) => (
+                  <Choice
+                    key={k}
+                    on={d.spec.metric === k}
+                    label={m.label}
+                    description={m.description}
+                    onClick={() => patch({ metric: k, type: m.types.includes(d.spec.type) ? d.spec.type : m.types[0]!, ...(m.fixed ? { range: "inherit" as const } : {}) })}
+                  />
+                ))}
               </div>
             </div>
 
-            {spec && metric && (
-              <>
-                <div className="flex flex-col gap-2">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <span className="text-[12.5px] font-medium text-text">Chart type</span>
-                    <span className="text-[11.5px] text-subtle">Only types that suit this metric are enabled</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {CHART_TYPE_ORDER.map((t) => {
-                      const ok = metric.types.includes(t);
-                      const on = spec.type === t;
-                      const Icon = TYPE_ICONS[t];
-                      return (
-                        <button
-                          key={t}
-                          type="button"
-                          disabled={!ok}
-                          title={ok ? undefined : "Not available for this metric"}
-                          onClick={() => patch({ type: t })}
-                          aria-pressed={on}
-                          className={cn(
-                            "flex h-8 items-center gap-1.5 rounded-[7px] border px-2.5 text-[12.5px] font-medium disabled:cursor-not-allowed disabled:opacity-40",
-                            on ? "border-brand bg-brand-subtle text-brand" : "border-line bg-surface text-text",
-                          )}
-                        >
-                          <Icon className="h-3.5 w-3.5" />
-                          {CHART_TYPES[t].label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="text-[12.5px] font-medium text-text">Chart type</span>
+                <span className="text-[11.5px] text-subtle">Only types that suit this metric are enabled</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {CHART_TYPE_ORDER.map((t) => {
+                  const ok = metric.types.includes(t);
+                  const on = spec.type === t;
+                  const Icon = TYPE_ICONS[t];
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      disabled={!ok}
+                      title={ok ? undefined : "Not available for this metric"}
+                      onClick={() => patch({ type: t })}
+                      aria-pressed={on}
+                      className={cn(
+                        "flex h-8 items-center gap-1.5 rounded-[7px] border px-2.5 text-[12.5px] font-medium disabled:cursor-not-allowed disabled:opacity-40",
+                        on ? "border-brand bg-brand-subtle text-brand" : "border-line bg-surface text-text",
+                      )}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      {CHART_TYPES[t].label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
-                <div className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3.5">
-                  <Field label="Date range">
-                    <select value={spec.range} onChange={(e) => patch({ range: e.target.value as ChartSpec["range"] })} className={FIELD}>
-                      <option value="inherit">Match dashboard ({rangeLabel(range)})</option>
-                      {RANGES.map((r) => (
-                        <option key={r.key} value={r.key}>
-                          {r.label}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  {(catalog.filters[spec.source] ?? []).map((f) => (
-                    <Field key={f.key} label={f.label}>
-                      <select value={spec.filters[f.key] ?? "all"} onChange={(e) => patch({ filters: { ...spec.filters, [f.key]: e.target.value } })} className={FIELD}>
-                        {f.options.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                  ))}
-                </div>
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3.5">
+              {/* A figure the range doesn't move (open tickets, this fiscal year) offers no range to pick. */}
+              {!metric.fixed && (
+                <Field label="Date range">
+                  <select value={spec.range} onChange={(e) => patch({ range: e.target.value as ChartSpec["range"] })} className={FIELD}>
+                    <option value="inherit">Match dashboard ({rangeLabel(range)})</option>
+                    {RANGES.map((r) => (
+                      <option key={r.key} value={r.key}>
+                        {r.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+              {(catalog.filters[spec.source] ?? []).map((f) => (
+                <Field key={f.key} label={f.label}>
+                  <select value={spec.filters[f.key] ?? "all"} onChange={(e) => patch({ filters: { ...spec.filters, [f.key]: e.target.value } })} className={FIELD}>
+                    {f.options.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              ))}
+            </div>
 
-                <div className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3.5">
-                  <div className="flex min-w-0 flex-col gap-1.5">
-                    <label htmlFor="widget-title" className="text-[12.5px] font-medium text-text">
-                      Title
-                    </label>
-                    <input
-                      id="widget-title"
-                      value={spec.title}
-                      maxLength={80}
-                      onChange={(e) => patch({ title: e.target.value })}
-                      placeholder={metric.label}
-                      className="h-9 min-w-0 rounded-lg border border-line bg-surface px-2.5 text-[13px] text-text"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <span className="text-[12.5px] font-medium text-text">Width</span>
-                    <div className="flex h-9 gap-0.5 rounded-lg bg-surface-sunken p-[3px]">
-                      {(["Small", "Medium", "Large"] as const).map((label, i) => {
-                        const n = (i + 1) as WidgetSize;
-                        return (
-                          <button
-                            key={label}
-                            type="button"
-                            onClick={() => patch({ size: n })}
-                            aria-pressed={spec.size === n}
-                            className={cn("flex-1 rounded-md text-[12.5px] font-medium", spec.size === n ? "bg-surface text-text shadow-sm" : "text-muted")}
-                          >
-                            {label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3.5">
+              <div className="flex min-w-0 flex-col gap-1.5">
+                <label htmlFor="widget-title" className="text-[12.5px] font-medium text-text">
+                  Title
+                </label>
+                <input
+                  id="widget-title"
+                  value={spec.title}
+                  maxLength={80}
+                  onChange={(e) => patch({ title: e.target.value })}
+                  placeholder={metric.label}
+                  className="h-9 min-w-0 rounded-lg border border-line bg-surface px-2.5 text-[13px] text-text"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[12.5px] font-medium text-text">Width</span>
+                <div className="flex h-9 gap-0.5 rounded-lg bg-surface-sunken p-[3px]">
+                  {(["Small", "Medium", "Large"] as const).map((label, i) => {
+                    const n = (i + 1) as WidgetSize;
+                    return (
+                      <button
+                        key={label}
+                        type="button"
+                        onClick={() => patch({ size: n })}
+                        aria-pressed={spec.size === n}
+                        className={cn("flex-1 rounded-md text-[12.5px] font-medium", spec.size === n ? "bg-surface text-text shadow-sm" : "text-muted")}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
                 </div>
-              </>
-            )}
+              </div>
+            </div>
           </div>
 
           <div className={cn("flex min-w-0 flex-col gap-2.5 bg-bg px-5 pb-[22px] pt-[18px]", wide ? "border-l border-line" : "border-t border-line")}>
@@ -1078,23 +1042,21 @@ function WidgetBuilder({
                   return <Icon className="h-4 w-4 shrink-0 text-brand" />;
                 })()}
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[14.5px] font-semibold text-text">{spec ? spec.title || metric!.label : (card?.label ?? "Choose a card")}</div>
+                  <div className="truncate text-[14.5px] font-semibold text-text">{spec.title || metric.label}</div>
                   <div className="mt-px truncate text-xs text-subtle">
-                    {spec ? (result && result !== "loading" && result.ok ? result.subtitle || rangeLabel(spec.range === "inherit" ? range : spec.range) : rangeLabel(spec.range === "inherit" ? range : spec.range)) : "Shown as it is elsewhere"}
+                    {result && result !== "loading" && result.ok
+                      ? result.subtitle || (metric.fixed ? "" : rangeLabel(spec.range === "inherit" ? range : spec.range))
+                      : metric.fixed
+                        ? ""
+                        : rangeLabel(spec.range === "inherit" ? range : spec.range)}
                   </div>
                 </div>
               </div>
               <div className="px-[18px] pb-4 pt-3.5">
-                {spec ? (
-                  <WidgetBody result={result} type={spec.type} />
-                ) : (
-                  <div className="grid place-items-center px-4 text-center text-sm text-muted" style={{ height: 120 }}>
-                    {card?.description ?? "Every card you can add is already on your dashboard."}
-                  </div>
-                )}
+                <WidgetBody result={result} type={spec.type} />
               </div>
             </div>
-            {spec && <div className="text-xs text-muted">{`Spans ${Math.min(spec.size, cols)} of ${cols} column${cols === 1 ? "" : "s"} at this screen size.`}</div>}
+            <div className="text-xs text-muted">{`Spans ${Math.min(spec.size, cols)} of ${cols} column${cols === 1 ? "" : "s"} at this screen size.`}</div>
           </div>
         </div>
 
@@ -1114,7 +1076,6 @@ function WidgetBuilder({
             <button
               type="button"
               onClick={onSubmit}
-              disabled={!canSubmit}
               className="h-[34px] rounded-lg bg-brand px-3.5 text-[13px] font-medium text-brand-contrast hover:brightness-110 disabled:opacity-45"
             >
               {isEdit ? "Save changes" : "Add widget"}

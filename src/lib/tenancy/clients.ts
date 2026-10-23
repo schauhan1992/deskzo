@@ -331,7 +331,8 @@ const NOT_YET_EVERYWHERE = {
   // 20261121110000_salary_components_revisions. Read by name in src/actions/payroll.ts (STRUCTURE_EXTRAS),
   // src/actions/settlement.ts and src/actions/employee-docs.ts — the salary pages need the migration, as
   // the payroll pages do; and a payslip's custom earnings by the payslip screens.
-  salaryStructure: { customComponents: true, annualCtc: true, revisionBasis: true, revisionValue: true },
+  // and 20261123100000_salary_statutory_fixed: PF, ESI and TDS fixed at the split, read by name the same way.
+  salaryStructure: { customComponents: true, annualCtc: true, revisionBasis: true, revisionValue: true, statutoryFixed: true },
   // 20261121100000_letter_signatures_templates. Read by name in src/actions/employee-docs.ts and the letter
   // pages, which treat a workspace without them as letters with no signature choice or template.
   employeeLetter: { signed: true, signatureDataUrl: true, templateId: true, templateName: true },

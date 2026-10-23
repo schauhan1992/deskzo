@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { monthsBefore } from "@/lib/hr/payroll-month";
-import { computePayslip, type SalaryComponents, type StatutoryFlags } from "@/lib/hr/payroll";
+import { computePayslip, type SalaryComponents, type StatutoryFixed, type StatutoryFlags } from "@/lib/hr/payroll";
 import { ageBandIn, monthlyTds, monthsLeftInTaxYear, TAX_YEARS, taxYearOf, type TdsResult } from "@/lib/hr/income-tax";
 
 /**
@@ -19,8 +19,8 @@ export type TdsMonth = {
   month: number;
   /** This month's payslip as computed: what it pays and the PF and professional tax it takes. */
   thisMonth: { gross: number; pf: number; pt: number };
-  /** The structure in force at the month's end — the rate for the months still to come. */
-  rate: { components: SalaryComponents; flags: StatutoryFlags; state: string | null; gender: "FEMALE" | "MALE" | "OTHER" | "UNDISCLOSED" | null };
+  /** The structure in force at the month's end — the rate for the months still to come, PF and ESI fixed on it in. */
+  rate: { components: SalaryComponents; flags: StatutoryFlags; fixed?: StatutoryFixed; state: string | null; gender: "FEMALE" | "MALE" | "OTHER" | "UNDISCLOSED" | null };
   joinedOn: Date | null;
   exitedOn: Date | null;
   dateOfBirth: Date | null;
@@ -66,6 +66,7 @@ export async function workOutTds(m: TdsMonth): Promise<TdsWorking | null> {
   const typical = computePayslip({
     components: m.rate.components,
     flags: m.rate.flags,
+    fixed: m.rate.fixed,
     monthDays: 30,
     lopDays: 0,
     state: m.rate.state,

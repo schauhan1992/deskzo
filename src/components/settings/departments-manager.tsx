@@ -8,7 +8,10 @@ import {
   setDepartmentSupportTeam,
   setDepartmentDashboardWidgets,
 } from "@/actions/department";
-import { DASHBOARD_WIDGET_REGISTRY } from "@/lib/dashboard-widgets";
+import { CARD_WIDGETS, SOURCES } from "@/lib/dashboard/charts";
+
+/** The widgets a department's layout can name — each older card's stand-in, by the widget's own name. */
+const LAYOUT_WIDGETS = Object.entries(CARD_WIDGETS).map(([key, spec]) => ({ key, ...SOURCES[spec.source].metrics[spec.metric]! }));
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog } from "@/components/ui/dialog";
@@ -54,11 +57,11 @@ function DashboardWidgetsDialog({
   return (
     <Dialog open onClose={onClose} title={`Dashboard layout — ${department.name}`}>
       <p className="text-sm text-muted">
-        Choose the widgets offered to this department&apos;s members as a one-click predefined dashboard layout. Leave
-        everything unchecked to offer no predefined layout for this department.
+        Choose the widgets offered to this department&apos;s members as a one-click predefined dashboard layout, after the
+        dashboard&apos;s own charts. Leave everything unchecked to offer no predefined layout for this department.
       </p>
       <div className="mt-3 max-h-80 space-y-1 overflow-y-auto">
-        {DASHBOARD_WIDGET_REGISTRY.map((widget) => (
+        {LAYOUT_WIDGETS.map((widget) => (
           <label key={widget.key} className="flex items-start gap-2.5 rounded-md px-2 py-2 hover:bg-surface-sunken">
             <input
               type="checkbox"

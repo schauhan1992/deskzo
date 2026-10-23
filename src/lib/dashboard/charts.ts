@@ -14,12 +14,36 @@
  *
  * `layout:2` in the array says it was saved by this dashboard. A list saved before it had charts gets
  * the default charts put in front of what it held, once; after that, removing a chart keeps it removed.
+ *
+ * ## No older cards (owner, 23 Oct 2026)
+ *
+ * The dashboard is the design and nothing else: headline numbers and chart widgets. The older cards —
+ * finance, renewals, tickets, quotations and the rest — are widgets of their own now (the sources below
+ * from `customers` on), and a card key still found in a saved layout, a role's defaults or a department's
+ * layout is read as the widget that stands in for it (`CARD_WIDGETS`).
  */
 
 export type ChartType = "bar" | "line" | "area" | "hbar" | "donut" | "pie" | "number" | "table" | "list";
 export type RangeKey = "7d" | "30d" | "90d" | "qtd" | "ytd";
 export type WidgetSize = 1 | 2 | 3;
-export type SourceKey = "tasks" | "leads" | "attendance" | "team" | "approvals" | "activity";
+export type SourceKey =
+  | "tasks"
+  | "leads"
+  | "attendance"
+  | "team"
+  | "approvals"
+  | "activity"
+  | "customers"
+  | "quotations"
+  | "orders"
+  | "targets"
+  | "payments"
+  | "finance"
+  | "renewals"
+  | "support"
+  | "projects"
+  | "expenses"
+  | "vendors";
 
 export type ChartSpec = {
   id: string;
@@ -78,7 +102,16 @@ export type FilterDef = { key: string; label: string; options: { value: string; 
 /** Filters whose options come from the workspace — its departments — filled in by the server. */
 export const DEPARTMENT_FILTER = "dept";
 
-export type MetricDef = { label: string; description: string; types: ChartType[] };
+export type MetricDef = {
+  label: string;
+  description: string;
+  types: ChartType[];
+  /**
+   * A figure the dashboard's range doesn't move: a standing count ("open tickets"), or one with its own
+   * period ("this fiscal year"). The builder offers no date range for it.
+   */
+  fixed?: true;
+};
 export type SourceDef = {
   label: string;
   /** Where "Open …" in the widget's menu goes. */
@@ -162,6 +195,119 @@ export const SOURCES: Record<SourceKey, SourceDef> = {
       recent: { label: "Recent Activities", description: "Latest events from modules you can access", types: ["list"] },
     },
   },
+
+  // What the older cards showed, as widgets (owner, 23 Oct 2026). Each source is open exactly where its
+  // card was offered (src/lib/dashboard/data.ts SOURCE_CARD), and counts what that card counted.
+  customers: {
+    label: "Customers",
+    href: "/companies",
+    openLabel: "Open Companies",
+    filters: [],
+    metrics: {
+      funnel: { label: "Companies by Stage", description: "Prospects, leads, awaiting order and customers", types: ["hbar", "bar", "donut", "pie"], fixed: true },
+      companies: { label: "Companies", description: "Every company you can see, with how many are at each stage", types: ["number"], fixed: true },
+      customers: { label: "Customers", description: "Companies that have bought at least once", types: ["number"], fixed: true },
+    },
+  },
+  quotations: {
+    label: "Quotations",
+    href: "/sales/proposals",
+    openLabel: "Open Quotations",
+    filters: [],
+    metrics: {
+      pending: { label: "Pending Quotations", description: "Proposals issued and not yet answered", types: ["number"], fixed: true },
+    },
+  },
+  orders: {
+    label: "Orders",
+    href: "/orders",
+    openLabel: "Open Orders",
+    filters: [],
+    metrics: {
+      action: { label: "Orders Needing Action", description: "Orders waiting for approval", types: ["number"], fixed: true },
+      stages: { label: "Orders by Stage", description: "Awaiting approval and approved, awaiting sourcing", types: ["donut", "pie", "hbar", "bar"], fixed: true },
+    },
+  },
+  targets: {
+    label: "Targets",
+    href: "/targets/mine",
+    openLabel: "Open My target",
+    filters: [],
+    metrics: {
+      monthly: { label: "Monthly Sales Target", description: "What you've achieved against this month's target", types: ["number"], fixed: true },
+    },
+  },
+  payments: {
+    label: "Payments",
+    href: "/payments",
+    openLabel: "Open Payments",
+    filters: [],
+    metrics: {
+      outstanding: { label: "Outstanding Balance", description: "What customers still owe on their orders", types: ["number"], fixed: true },
+      status: { label: "Unpaid Orders", description: "Unpaid and partially paid", types: ["donut", "pie", "hbar", "bar"], fixed: true },
+    },
+  },
+  finance: {
+    label: "Finance",
+    href: "/accounting",
+    openLabel: "Open Accounts",
+    filters: [],
+    metrics: {
+      incomeExpense: { label: "Income and Expense", description: "Income against expenses, month by month, this fiscal year", types: ["bar", "line", "area"], fixed: true },
+      cashFlow: { label: "Cash Flow", description: "Cash and bank balance at each month's end, the last 12 months", types: ["area", "line"], fixed: true },
+      topExpenses: { label: "Top Expenses", description: "Where the money went this fiscal year", types: ["hbar", "bar", "donut", "pie"], fixed: true },
+      receivables: { label: "Total Receivables", description: "Unpaid invoices, and how much of it is overdue", types: ["number", "donut", "pie"], fixed: true },
+      payables: { label: "Total Payables", description: "Unpaid bills, and how much of it is overdue", types: ["number", "donut", "pie"], fixed: true },
+    },
+  },
+  renewals: {
+    label: "Renewals",
+    href: "/renewals",
+    openLabel: "Open Renewals",
+    filters: [],
+    metrics: {
+      due: { label: "Renewals Due", description: "Expiring in the next 30 days, and already expired", types: ["number", "donut", "pie"], fixed: true },
+      upcoming: { label: "Upcoming Renewals", description: "The next renewals to expire, in 30 days", types: ["table"], fixed: true },
+    },
+  },
+  support: {
+    label: "Support",
+    href: "/tickets",
+    openLabel: "Open Tickets",
+    filters: [],
+    metrics: {
+      open: { label: "Open Tickets", description: "Tickets still open, and how many are overdue", types: ["number", "donut", "pie"], fixed: true },
+    },
+  },
+  projects: {
+    label: "Projects",
+    href: "/projects",
+    openLabel: "Open Projects",
+    filters: [],
+    metrics: {
+      attention: { label: "Projects Needing Attention", description: "Your live projects at risk or off track", types: ["number", "donut", "pie"], fixed: true },
+      mine: { label: "My Projects", description: "Live projects you're on, with progress", types: ["table"], fixed: true },
+    },
+  },
+  expenses: {
+    label: "Expenses",
+    href: "/expenses",
+    openLabel: "Open Expenses",
+    filters: [],
+    metrics: {
+      awaiting: { label: "Expenses Awaiting You", description: "Claims waiting on your decision", types: ["number"], fixed: true },
+    },
+  },
+  vendors: {
+    label: "Vendors",
+    href: "/vendors",
+    openLabel: "Open Vendors",
+    filters: [],
+    metrics: {
+      status: { label: "Vendors by Status", description: "Onboarding, active and inactive", types: ["donut", "pie", "hbar", "bar"], fixed: true },
+      onboarding: { label: "Vendors Onboarding", description: "Vendors still being onboarded", types: ["number"], fixed: true },
+    },
+  },
 };
 export const SOURCE_ORDER = Object.keys(SOURCES) as SourceKey[];
 export const isSourceKey = (v: unknown): v is SourceKey => typeof v === "string" && v in SOURCES;
@@ -181,13 +327,62 @@ export const DEFAULT_CHARTS: ChartSpec[] = [
 ];
 
 /**
- * The older cards these charts stand in for. Left out of the default beside the charts — "My open tasks"
- * and "Latest activity" twice over is two of the same — but still there to add back.
+ * The older cards the design's own charts and headline figures already show — "My open tasks" and "Latest
+ * activity" twice over is two of the same — so a layout that still names them gets nothing more for them.
  */
 export const SUPERSEDED_CARDS = new Set(["tasks", "leads", "recentLeads", "activity"]);
 
 function chart(id: string, source: SourceKey, metric: string, type: ChartType, size: WidgetSize = 1): ChartSpec {
   return { id, source, metric, type, size, range: "inherit", filters: {}, title: "" };
+}
+
+/**
+ * The widget that stands in for each older card (owner, 23 Oct 2026: the dashboard all charts and numbers,
+ * the old cards gone). Sticky notes has none — a note isn't a figure — and stays on the Notes page.
+ */
+export const CARD_WIDGETS: Record<string, ChartSpec> = {
+  companies: chart("c-companies", "customers", "funnel", "hbar"),
+  customers: chart("c-customers", "customers", "customers", "number"),
+  quotations: chart("c-quotations", "quotations", "pending", "number"),
+  orders: chart("c-orders", "orders", "action", "number"),
+  salesTarget: chart("c-salesTarget", "targets", "monthly", "number"),
+  payments: chart("c-payments", "payments", "outstanding", "number"),
+  incomeExpense: chart("c-incomeExpense", "finance", "incomeExpense", "bar", 2),
+  topExpenses: chart("c-topExpenses", "finance", "topExpenses", "hbar"),
+  cashFlow: chart("c-cashFlow", "finance", "cashFlow", "area", 2),
+  receivables: chart("c-receivables", "finance", "receivables", "number"),
+  payables: chart("c-payables", "finance", "payables", "number"),
+  renewals: chart("c-renewals", "renewals", "due", "number"),
+  upcomingRenewals: chart("c-upcomingRenewals", "renewals", "upcoming", "table", 2),
+  tickets: chart("c-tickets", "support", "open", "number"),
+  projectsAtRisk: chart("c-projectsAtRisk", "projects", "attention", "number"),
+  myProjects: chart("c-myProjects", "projects", "mine", "table", 2),
+  expenses: chart("c-expenses", "expenses", "awaiting", "number"),
+  vendors: chart("c-vendors", "vendors", "status", "donut"),
+};
+
+/** Two widgets showing the same figures — whatever they're titled, however they're drawn. */
+const sameFigures = (a: ChartSpec, b: ChartSpec) => a.source === b.source && a.metric === b.metric && JSON.stringify(a.filters) === JSON.stringify(b.filters);
+
+/**
+ * A layout as widgets only: every card key read as the widget that stands in for it, in its place, and a
+ * card whose figures are already on it (or that has no widget) dropped. Charts are kept as they are.
+ */
+export function asWidgets(entries: readonly string[]): string[] {
+  const out: string[] = [];
+  const kept: ChartSpec[] = [];
+  for (const entry of entries) {
+    if (entry === LAYOUT_MARKER) {
+      if (!out.includes(entry)) out.unshift(entry);
+      continue;
+    }
+    const spec = isChartEntry(entry) ? decodeChart(entry) : SUPERSEDED_CARDS.has(entry) ? null : (CARD_WIDGETS[entry] ?? null);
+    if (!spec) continue;
+    if (!isChartEntry(entry) && kept.some((k) => sameFigures(k, spec))) continue;
+    kept.push(spec);
+    out.push(isChartEntry(entry) ? entry : encodeChart(spec));
+  }
+  return out;
 }
 
 // ─── Kept as strings ─────────────────────────────────────────────────────────
@@ -259,9 +454,34 @@ export type SeriesData = {
   /** Drawn stacked when shown as columns. */
   stacked: boolean;
   series: { name: string; values: number[] }[];
+  /** Rupees rather than a count — drawn short (₹2.6 Cr) on the chart. */
+  money?: boolean;
 };
-export type CategoryData = { kind: "category"; items: { label: string; value: number }[] };
-export type NumberData = { kind: "number"; value: string; delta: string | null; tone: Tone };
+export type CategoryData = {
+  kind: "category";
+  items: { label: string; value: number }[];
+  /** Rupees rather than a count — drawn short (₹2.6 Cr) on the chart. */
+  money?: boolean;
+  /** The figure as a Number widget shows it, for a metric that is both a number and a split of it. */
+  headline?: { value: string; delta: string | null; tone: Tone; exact?: string };
+};
+export type NumberData = {
+  kind: "number";
+  value: string;
+  delta: string | null;
+  tone: Tone;
+  /** The exact figure, where `value` is shortened (₹7.03 Cr) — shown on hover. */
+  exact?: string;
+};
+/** A short table — renewals coming up, projects — each row opening its record. */
+export type RowsData = {
+  kind: "rows";
+  columns: { label: string; align?: "right" }[];
+  rows: { id: string; href: string | null; cells: string[] }[];
+  /** Which column is a status, drawn as a pill. */
+  pill?: number;
+  empty: string;
+};
 export type TaskListData = {
   kind: "tasks";
   items: { id: string; title: string; priority: string | null; due: string | null; dueSoon: boolean; done: boolean }[];
@@ -276,7 +496,18 @@ export type LeadTableData = {
   rows: { id: string; href: string; name: string; company: string; status: string; owner: string; date: string }[];
 };
 export type TeamData = { kind: "team"; rows: { name: string; initials: string; done: number; onTime: number }[] };
-export type ChartData = SeriesData | CategoryData | NumberData | TaskListData | ActivityListData | LeadTableData | TeamData;
+export type ChartData = SeriesData | CategoryData | NumberData | TaskListData | ActivityListData | LeadTableData | TeamData | RowsData;
+
+/** Rupees, short: ₹2.61 Cr, ₹58.6 L, ₹97.1k, ₹640 — the way the older finance cards read big sums. */
+export function shortRupees(value: number, digits = 2): string {
+  const sign = value < 0 ? "−" : "";
+  const v = Math.abs(value);
+  const trim = (n: number, d: number) => n.toFixed(d).replace(/\.?0+$/, "");
+  if (v >= 1e7) return `${sign}₹${trim(v / 1e7, digits)} Cr`;
+  if (v >= 1e5) return `${sign}₹${trim(v / 1e5, digits)} L`;
+  if (v >= 1e3) return `${sign}₹${trim(v / 1e3, 1)}k`;
+  return `${sign}₹${Math.round(v).toLocaleString("en-IN")}`;
+}
 
 export type Tone = "up" | "down" | "warn" | "flat";
 export type ActivityIcon = "sign-in" | "read" | "security" | "device" | "other";
@@ -307,6 +538,8 @@ export type ChartCatalog = {
  */
 export function resultKey(spec: ChartSpec, dashboardRange: RangeKey): string {
   const filters = Object.entries(spec.filters).filter(([, v]) => v && v !== "all").sort();
+  // A figure the range doesn't move is the same whatever the range: kept, not asked for again.
+  if (SOURCES[spec.source].metrics[spec.metric]?.fixed) return JSON.stringify([spec.source, spec.metric, "fixed", filters]);
   return JSON.stringify([spec.source, spec.metric, spec.range === "inherit" ? dashboardRange : spec.range, filters, spec.range === "inherit"]);
 }
 

@@ -180,6 +180,7 @@
     "check:word-filter": "tsx scripts/check-word-filter.ts",
     "check:board-attendance": "tsx scripts/check-board-attendance.ts",
     "check:short-leave": "tsx scripts/check-short-leave.ts",
+    "check:dashboard-widgets": "tsx scripts/check-dashboard-widgets.ts",
     "check:salary-letters": "tsx scripts/check-salary-letters.ts",
     "check:file-manager": "tsx scripts/check-file-manager.ts",
     "check:accounts-nav": "tsx scripts/check-accounts-nav.ts",
