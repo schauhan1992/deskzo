@@ -162,7 +162,8 @@ const config: ExpoConfig = {
     ["./plugins/with-ios-splash", { backgroundColor: "#FFFFFF", image: "./assets/splash-icon.png", imageWidth: 120, dark: { backgroundColor: "#0F172A", image: "./assets/ios-icon-dark.png" } }],
   ],
   experiments: { typedRoutes: false },
-  extra: { dev },
+  // The app's project on EAS (eas.json), where its iOS builds are made.
+  extra: { dev, eas: { projectId: "41dff9e9-46dd-4253-99c9-b85e40e7122e" } },
 };
 
 export default config;
