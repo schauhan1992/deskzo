@@ -10,10 +10,15 @@
  * next row as "(412 more since the last entry)". That is cheaper *and* more readable than the
  * alternative.
  *
- * State is per process and does not survive a restart. A deploy loses a pending count, which costs
+ * State is in memory and does not survive a restart. A deploy loses a pending count, which costs
  * one slightly low number in one row — much cheaper than putting a shared store in the path of
- * every request this is meant to protect against.
+ * every request this is meant to protect against. The web processes of one container share the
+ * windows (src/lib/cluster/hub.ts): a write in one opens the window in all, so a key is still written
+ * once a window — and a once-a-window allowance still allows once. What each process swallowed is
+ * its own count.
  */
+
+import { broadcast, onBroadcast } from "@/lib/cluster/hub";
 
 type Entry = { count: number; writtenAt: number };
 
@@ -29,6 +34,18 @@ export type ThrottleOutcome = {
   suppressedSince: number;
 };
 
+// Another process wrote this key: its window is open here too.
+onBroadcast("throttle:written", (payload) => {
+  const { key, now } = payload as { key: string; now: number };
+  const entry = entries.get(key);
+  if (entry && entry.writtenAt >= now) return;
+  if (!entry && entries.size >= MAX_TRACKED) {
+    const oldest = entries.keys().next().value;
+    if (oldest !== undefined) entries.delete(oldest);
+  }
+  entries.set(key, { count: entry?.count ?? 0, writtenAt: now });
+});
+
 export function throttle(key: string, windowMs: number, now: number = Date.now()): ThrottleOutcome {
   const entry = entries.get(key);
 
@@ -41,6 +58,7 @@ export function throttle(key: string, windowMs: number, now: number = Date.now()
     }
     const suppressed = entry ? entry.count : 0;
     entries.set(key, { count: 0, writtenAt: now });
+    broadcast("throttle:written", { key, now });
     return { write: true, suppressedSince: suppressed };
   }
 

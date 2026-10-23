@@ -2,6 +2,7 @@ import { actorRef, cmsAudit, refLabels, type CmsActor } from "@/lib/cms/audit";
 import { CmsRefused, DEFAULT_SEARCH_POLICY, LLMS_SUMMARY_MAX, type EffectiveSearchPolicy, type SearchPolicy, type SearchPolicyDetail } from "@/lib/cms/types";
 import { controlConfigured, controlDb } from "@/lib/platform/control-db";
 import { PLATFORM_DOMAIN, protocolFor } from "@/lib/tenancy/host";
+import { shared } from "@/lib/cluster/hub";
 
 /**
  * What crawlers may do on the public website (owner, 5 Oct 2026) — CMS › Settings › Search & AI, for
@@ -28,9 +29,9 @@ const GENERATION = Symbol.for("deskzo.site-search-policy.generation");
 const generationNow = () => (globalThis as Record<symbol, number | undefined>)[GENERATION] ?? 0;
 
 /** Every process's copy is out of date: read it again on the next request. */
-export function invalidateSearchPolicy(): void {
+export const invalidateSearchPolicy = shared("invalidateSearchPolicy", (): void => {
   (globalThis as Record<symbol, number | undefined>)[GENERATION] = generationNow() + 1;
-}
+});
 
 type Held = { generation: number; at: number; policy: SearchPolicy; updatedAt: Date | null };
 let held: Held | null = null;
@@ -103,11 +104,11 @@ export async function searchPolicyChangedAt(): Promise<Date | null> {
 }
 
 /** For check scripts: forget this process's copy. */
-export function forgetSearchPolicy(): void {
+export const forgetSearchPolicy = shared("forgetSearchPolicy", (): void => {
   held = null;
   loading = null;
   invalidateSearchPolicy();
-}
+});
 
 // ─── The Search & AI page ────────────────────────────────────────────────────────────────────────
 

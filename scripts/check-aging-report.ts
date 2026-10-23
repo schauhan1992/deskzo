@@ -129,13 +129,13 @@ async function main() {
   const s = lib.readAgingParams({ asOf: "15/10/2026", from: "2026-02-30", to: "soon", by: "nonsense", iv: "9x9", show: "pie", party: "x", col: "-1" }, "2026-10-21");
   ok(
     "anything unreadable falls back: today, every date, due date, 4 × 30, amounts, no narrowing",
-    json(s) === json({ asOf: "2026-10-21", datedFrom: null, datedTo: null, basis: "due", interval: "4x30", show: "amount", search: null, party: null, column: null }),
+    json(s) === json({ asOf: "2026-10-21", datedFrom: null, datedTo: null, basis: "due", interval: "4x30", show: "amount", search: null, party: null, column: null, documents: false }),
     json(s),
   );
   const t = lib.readAgingParams({ asOf: "2026-09-30", from: "2026-04-01", to: "2026-04-30", by: "date", iv: "4x15", show: "count", q: "  acme ", party: "5187", col: "2" }, "2026-10-21");
   ok(
     "and what is readable is kept",
-    json(t) === json({ asOf: "2026-09-30", datedFrom: "2026-04-01", datedTo: "2026-04-30", basis: "date", interval: "4x15", show: "count", search: "acme", party: 5187, column: 2 }),
+    json(t) === json({ asOf: "2026-09-30", datedFrom: "2026-04-01", datedTo: "2026-04-30", basis: "date", interval: "4x15", show: "count", search: "acme", party: 5187, column: 2, documents: false }),
     json(t),
   );
   const swapped = lib.readAgingParams({ from: "2026-04-30", to: "2026-04-01" }, "2026-10-21");
@@ -202,10 +202,11 @@ async function main() {
     ok("22 Sep: the dollar bill not yet issued; the one with no due date aged from its date", json(sep22.rows[0]?.cells) === json([0, 6000, 0, 0, 0]) && sep22.totals.count === 2, json(sep22.rows[0]));
     const byDate = await ap({ asOf: "2026-10-20", by: "date" });
     ok("by bill date, 4 × 30: 49 days and 19 days old", json(byDate.columns.map((c) => c.label)) === json(["0–30 days", "31–60 days", "61–90 days", "> 90 days"]) && json(byDate.rows[0]?.cells) === json([8200, 3000, 0, 0]), json(byDate.rows[0]?.cells));
-    const docs = await ap({ asOf: "2026-10-20", iv: "4x15", party: String(vendorSeq), col: "3" });
+    ok("the summary leaves the documents behind it out — thousands of rows in a large workspace", oct20.documents.length === 0 && lib.readAgingParams({ docs: "1" }, "2026-10-21").documents, oct20.documents.length);
+    const docs = await ap({ asOf: "2026-10-20", iv: "4x15", party: String(vendorSeq), col: "3", docs: "1" });
     ok("the documents behind one figure: that party, that column", docs.documents.length === 1 && docs.documents[0]!.id === b1.id && docs.documents[0]!.balance === 3000 && docs.documents[0]!.age === 34, json(docs.documents));
     ok("  while the summary keeps every row", docs.rows.length === 1 && docs.totals.total === 11200, docs.totals.total);
-    const october = await ap({ asOf: "2026-10-20", iv: "4x15", from: "2026-09-15", to: "2026-10-31" });
+    const october = await ap({ asOf: "2026-10-20", iv: "4x15", from: "2026-09-15", to: "2026-10-31", docs: "1" });
     ok(
       "bills dated 15 Sep – 31 Oct, as of 20 Oct: only the dollar bill (the one paid on 25 Sep is gone, the 1 Sep one is before the range)",
       october.documents.length === 1 && october.documents[0]!.id === b2.id && json(october.rows[0]?.cells) === json([8200, 0, 0, 0, 0]) && october.totals.total === 8200,
@@ -213,19 +214,20 @@ async function main() {
     );
     const upToSep = await ap({ asOf: "2026-10-20", iv: "4x15", to: "2026-09-30" });
     ok("bills dated up to 30 Sep: the ₹3,000 left on 1 Sep's, 34 days past due", upToSep.totals.total === 3000 && json(upToSep.rows[0]?.cells) === json([0, 0, 0, 3000, 0]), json(upToSep.rows[0]?.cells));
-    const ranged = await ap({ asOf: "2026-10-20", iv: "4x15", from: "2026-09-15", to: "2026-10-31", party: String(vendorSeq) });
+    const ranged = await ap({ asOf: "2026-10-20", iv: "4x15", from: "2026-09-15", to: "2026-10-31", party: String(vendorSeq), docs: "1" });
     ok("  the documents behind it keep the range", ranged.documents.length === 1 && ranged.documents[0]!.id === b2.id);
     const line = screen.agingDescription(october);
     ok("  the report says which bills", line.includes(`bills dated ${formatCalendarDay("2026-09-15")} – ${formatCalendarDay("2026-10-31")}`), line);
     const kept = screen.agingQuery(october.settings, { docs: 1 });
     ok("  and every link on it keeps the range", kept.from === "2026-09-15" && kept.to === "2026-10-31" && kept.asOf === "2026-10-20", json(kept));
     ok("  while a report without one names no dates", !("from" in screen.agingQuery(oct20.settings)) && screen.agingDatedPhrase(oct20) === null);
-    const sheets = lib.agingSheets(oct20);
+    // As the export asks for it (src/lib/receivables/aging-export.ts): with every document.
+    const sheets = lib.agingSheets(await ap({ asOf: "2026-10-20", iv: "4x15", docs: "1" }));
     ok("the workbook: the summary with a total line, and every bill", sheets[0]!.rows.length === 2 && sheets[0]!.rows[1]!.Vendor === "Total" && sheets[1]!.rows.length === 2 && sheets[1]!.rows.some((r) => r["Balance (FCY)"] === "USD 100.00"), json(sheets));
 
     section("Receivables");
 
-    const ar = (await receivable.receivablesAgingReport({ q: TAG, asOf: "2026-10-20" }))!;
+    const ar = (await receivable.receivablesAgingReport({ q: TAG, asOf: "2026-10-20", docs: "1" }))!;
     const crow = ar.rows.find((r) => r.id === customer);
     ok("an invoice 50 days past due in 31–60, by the default 4 × 30", json(crow?.cells) === json([0, 0, 11800, 0, 0]) && ar.documents[0]?.id === i1.id, json(crow));
     ok("  and no vendor among the customers", ar.rows.length === 1);

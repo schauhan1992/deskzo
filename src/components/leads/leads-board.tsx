@@ -6,7 +6,8 @@ import { useRouter } from "next/navigation";
 import { CalendarDays, MessageSquare, ShoppingCart, SquareCheck } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { LeadStatusBadge } from "@/components/leads/lead-status-badge";
-import { updateLeadStatus } from "@/actions/lead";
+import { listLeadBoardColumn, updateLeadStatus, type LeadListParams } from "@/actions/lead";
+import { BOARD_COLUMN_SIZE } from "@/lib/leads/board";
 import type { LeadStatus } from "@prisma/client";
 import { LeadScoreBadge } from "@/components/leads/lead-score";
 import type { LeadStageDef, StageColor } from "@/lib/pipeline/rules";
@@ -66,21 +67,34 @@ const dayOf = (value: Date | string) => (typeof value === "string" ? value : val
  */
 export function LeadsBoard({
   leads,
+  counts,
   stages,
   extras = {},
   quotes = null,
+  filters,
 }: {
+  /** Each column's first cards (src/actions/lead.ts `listLeadBoard`). */
   leads: BoardLead[];
+  /** How many leads each column holds in all, by stage id — what its header says. */
+  counts: Record<string, number>;
   stages: LeadStageDef[];
   extras?: Record<string, LeadBoardExtras>;
   /** Each lead's quotation, or null where this person doesn't see them (src/lib/leads/quote-status.ts). */
   quotes?: Record<string, LeadQuote | null> | null;
+  /** The page's filters, for a column's next cards. */
+  filters: LeadListParams;
 }) {
   const router = useRouter();
   const clock = useClock();
   const w = useWording();
   const today = clock.today();
   const [items, setItems] = useState(leads);
+  const [totals, setTotals] = useState(counts);
+  const [cardExtras, setCardExtras] = useState(extras);
+  const [cardQuotes, setCardQuotes] = useState(quotes);
+  // Cards brought by "Show more", kept when the server hands back each column's first cards again.
+  const [more, setMore] = useState<BoardLead[]>([]);
+  const [loading, setLoading] = useState<string | null>(null);
   const [syncedLeads, setSyncedLeads] = useState(leads);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
@@ -89,10 +103,32 @@ export function LeadsBoard({
 
   // Re-sync local optimistic state when the server hands back fresh leads (e.g. after
   // router.refresh()) — adjusted during render rather than in an effect, per React's
-  // guidance, to avoid an extra render pass.
+  // guidance, to avoid an extra render pass. The server's own copy of a card wins.
   if (leads !== syncedLeads) {
+    const fresh = new Set(leads.map((l) => l.id));
     setSyncedLeads(leads);
-    setItems(leads);
+    setItems([...leads, ...more.filter((l) => !fresh.has(l.id))]);
+    setTotals(counts);
+    setCardExtras((prev) => ({ ...prev, ...extras }));
+    setCardQuotes((prev) => (quotes ? { ...(prev ?? {}), ...quotes } : prev));
+  }
+
+  async function showMore(stage: LeadStageDef, shown: number) {
+    setLoading(stage.id);
+    setError(null);
+    try {
+      const next = await listLeadBoardColumn(filters, stage.id, shown);
+      const known = new Set(items.map((l) => l.id));
+      const added = next.cards.filter((l) => !known.has(l.id));
+      setItems((prev) => [...prev, ...added]);
+      setMore((prev) => [...prev, ...added]);
+      setCardExtras((prev) => ({ ...prev, ...next.extras }));
+      if (next.quotes) setCardQuotes((prev) => ({ ...(prev ?? {}), ...next.quotes }));
+    } catch {
+      setError(slot(w, "Couldn't load more leads — try again.", "lead", "Couldn't load more {many:lower} — try again."));
+    } finally {
+      setLoading(null);
+    }
   }
 
   function handleDrop(target: LeadStageDef) {
@@ -113,12 +149,18 @@ export function LeadsBoard({
 
     setError(null);
     const previousItems = items;
-    setItems((prev) => prev.map((l) => (l.id === id ? { ...l, status: target.status, stage: target, lostReason: lostReason ?? null } : l)));
+    const previousTotals = totals;
+    const from = lead.stage.id;
+    const moved = (l: BoardLead) => (l.id === id ? { ...l, status: target.status, stage: target, lostReason: lostReason ?? null } : l);
+    setItems((prev) => prev.map(moved));
+    setMore((prev) => prev.map(moved));
+    setTotals((prev) => ({ ...prev, [from]: Math.max(0, (prev[from] ?? 1) - 1), [target.id]: (prev[target.id] ?? 0) + 1 }));
 
     startTransition(async () => {
       const result = await updateLeadStatus({ leadId: id, stageId: target.id, lostReason });
       if (!result.ok) {
         setItems(previousItems);
+        setTotals(previousTotals);
         setError(result.error);
         return;
       }
@@ -132,6 +174,8 @@ export function LeadsBoard({
       <div className="flex gap-4 overflow-x-auto pb-4">
         {stages.map((col) => {
           const columnLeads = items.filter((l) => l.stage.id === col.id);
+          const total = Math.max(totals[col.id] ?? 0, columnLeads.length);
+          const left = total - columnLeads.length;
           const isDragOver = dragOverStage === col.id;
           const tone = COLUMN[col.color] ?? COLUMN.default;
           return (
@@ -151,7 +195,7 @@ export function LeadsBoard({
             >
               <header className="flex items-center gap-2 px-3 pb-2 pt-3">
                 <h2 className={`text-sm font-medium ${tone.title}`}>{col.label}</h2>
-                <span className={`rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ${tone.pill}`}>{columnLeads.length}</span>
+                <span className={`rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ${tone.pill}`}>{total.toLocaleString("en-IN")}</span>
               </header>
               <div className="flex-1 space-y-2.5 px-2 pb-3">
                 {columnLeads.map((lead) => (
@@ -168,11 +212,21 @@ export function LeadsBoard({
                       setDragOverStage(null);
                     }}
                   >
-                    <LeadCard lead={lead} extra={extras[lead.id]} quote={quotes ? (quotes[lead.id] ?? null) : undefined} today={today} dragging={draggedId === lead.id} />
+                    <LeadCard lead={lead} extra={cardExtras[lead.id]} quote={cardQuotes ? (cardQuotes[lead.id] ?? null) : undefined} today={today} dragging={draggedId === lead.id} />
                   </div>
                 ))}
                 {columnLeads.length === 0 && (
                   <div className="rounded-lg border border-dashed border-line-strong/60 p-3 text-center text-xs text-subtle">{slot(w, "Drop a lead here", "lead", "Drop {a} here")}</div>
+                )}
+                {left > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => showMore(col, columnLeads.length)}
+                    disabled={loading !== null}
+                    className={`w-full rounded-lg bg-surface/70 px-3 py-2 text-xs font-medium ${tone.title} hover:bg-surface disabled:opacity-60`}
+                  >
+                    {loading === col.id ? "Loading…" : `Show ${Math.min(BOARD_COLUMN_SIZE, left).toLocaleString("en-IN")} more · ${left.toLocaleString("en-IN")} not shown`}
+                  </button>
                 )}
               </div>
             </section>

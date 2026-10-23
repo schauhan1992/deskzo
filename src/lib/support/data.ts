@@ -1,5 +1,7 @@
 import { cache } from "react";
+import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { calculateOrderAmount } from "@/lib/gst";
 import { customerSide } from "@/lib/companies/roles";
 import type { Clock } from "@/lib/time/zone";
 import { loadCreditSubjects } from "@/lib/credit/load";
@@ -115,16 +117,58 @@ export const supportPeers = cache(async (fromIso: string, toIso: string) => {
     where: { createdAt: { gte: window.from, lt: window.to }, ticketType: { not: "DEMO" } },
     _count: { _all: true },
   });
-  const subjects = await loadCreditSubjects(counts.map((c) => c.companyId));
+  const billed = await billedInWindow(window);
   const peerRatios: number[] = [];
   for (const c of counts) {
-    const billed = (subjects.get(c.companyId)?.bills ?? [])
-      .filter((b) => b.issuedOn.getTime() >= window.from.getTime() && b.issuedOn.getTime() < window.to.getTime())
-      .reduce((t, b) => t + b.amount, 0);
-    if (billed > 0) peerRatios.push(c._count._all / (billed / 100_000));
+    const amount = billed.get(c.companyId) ?? 0;
+    if (amount > 0) peerRatios.push(c._count._all / (amount / 100_000));
   }
   return { peerRatios, peerTicketCounts: counts.map((c) => c._count._all) };
 });
+
+const BILLED_INVOICE = ["ISSUED", "PARTIALLY_PAID", "PAID"] as const;
+
+/**
+ * What each customer with a ticket in the window was billed in it — the bills `loadCreditSubjects` counts
+ * (src/lib/credit/load.ts), issued in the window: invoices and debit notes in rupees at their rate, by
+ * what is new in these books, and approved orders not invoiced, from their approval. Added up by the
+ * database for the invoices, and read for those customers only through the tickets — never as a list of
+ * ids. Every customer's whole credit history was read for this on every customer page (the large-
+ * workspace load test, 23 Oct 2026).
+ */
+async function billedInWindow(window: { from: Date; to: Date }): Promise<Map<string, number>> {
+  const withTickets = { tickets: { some: { createdAt: { gte: window.from, lt: window.to }, ticketType: { not: "DEMO" as const } } } };
+  const [invoices, orders] = await Promise.all([
+    db.$queryRaw<{ companyId: string; amount: Prisma.Decimal | null }[]>`
+      SELECT d."companyId", SUM((d."total" - d."paidBefore") * COALESCE(NULLIF(d."exchangeRate", 0), 1)) AS amount
+      FROM "trade_documents" d
+      WHERE d."docType"::text IN ('INVOICE', 'DEBIT_NOTE') AND d."direction"::text = 'SALES'
+        AND d."status"::text IN (${Prisma.join([...BILLED_INVOICE])})
+        AND d."total" - d."paidBefore" > 0
+        AND d."issueDate" >= ${window.from} AND d."issueDate" < ${window.to}
+        AND EXISTS (SELECT 1 FROM "tickets" t WHERE t."companyId" = d."companyId" AND t."createdAt" >= ${window.from} AND t."createdAt" < ${window.to} AND t."ticketType"::text <> 'DEMO')
+      GROUP BY d."companyId"`,
+    db.companyProduct.findMany({
+      where: {
+        company: withTickets,
+        orderStatus: { in: ["APPROVED", "PROCESSING", "FULFILLED"] },
+        documentLines: { none: { document: { docType: "INVOICE", status: { in: [...BILLED_INVOICE] } } } },
+        OR: [{ accountsApprovedAt: { gte: window.from, lt: window.to } }, { accountsApprovedAt: null, createdAt: { gte: window.from, lt: window.to } }],
+      },
+      select: { companyId: true, quantity: true, unitPrice: true, item: { select: { sellingPrice: true, taxRatePercent: true } } },
+    }),
+  ]);
+  const billed = new Map(invoices.map((r) => [r.companyId, Number(r.amount ?? 0)]));
+  for (const o of orders) {
+    const { total } = calculateOrderAmount({
+      quantity: o.quantity,
+      unitPrice: Number(o.unitPrice ?? o.item.sellingPrice),
+      taxRatePercent: o.item.taxRatePercent ? Number(o.item.taxRatePercent) : null,
+    });
+    if (total > 0) billed.set(o.companyId, (billed.get(o.companyId) ?? 0) + total);
+  }
+  return billed;
+}
 
 /** Customers with any support in the window, among those given — for the Support load list. */
 export async function companiesWithSupport(scope: object, window: { from: Date; to: Date }): Promise<string[]> {

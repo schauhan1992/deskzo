@@ -11,6 +11,7 @@ import { STALE_DAYS, dayKey, inWeek, promiseState, type PromiseState } from "@/l
 import { workspaceClock } from "@/lib/time/workspace";
 import type { Clock } from "@/lib/time/zone";
 import { RECEIVABLE_DOC_TYPE } from "@/lib/trade-documents";
+import { inBatches } from "@/lib/batches";
 
 /**
  * What a person may chase, and what has been said about it — the database side of Collections.
@@ -394,11 +395,16 @@ async function attachFollowUps(rows: DueRow[], billed: { invoiceId: string; orde
   if (rows.length === 0) return;
   const invoiceIds = rows.filter((r) => r.kind === "invoice").map((r) => r.id);
   const orderIds = [...rows.filter((r) => r.kind === "order").map((r) => r.id), ...billed.map((b) => b.orderId)];
-  const followUps = await db.paymentFollowUp.findMany({
-    where: { OR: [{ documentId: { in: invoiceIds } }, { companyProductId: { in: orderIds } }] },
-    orderBy: { createdAt: "desc" },
-    select: followUpSelect,
-  });
+  // Asked by the invoice and by the order, in batches: every open invoice's id in one query fails past
+  // Postgres's 32,767 values (src/lib/batches.ts). One made on an order its invoice now bills can match both.
+  const [byInvoice, byOrder] = await Promise.all([
+    inBatches(invoiceIds, (batch) => db.paymentFollowUp.findMany({ where: { documentId: { in: batch } }, select: followUpSelect })),
+    inBatches(orderIds, (batch) => db.paymentFollowUp.findMany({ where: { companyProductId: { in: batch } }, select: followUpSelect })),
+  ]);
+  const seen = new Set<string>();
+  const followUps = [...byInvoice, ...byOrder]
+    .filter((f) => !seen.has(f.id) && !!seen.add(f.id))
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   const invoiceOfOrder = new Map(billed.map((b) => [b.orderId, b.invoiceId]));
   const clock = await workspaceClock();
   const byKey = new Map<string, FollowUpView[]>();

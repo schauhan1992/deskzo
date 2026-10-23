@@ -9,6 +9,7 @@ import { ADMIN_ROLE, SUPPORT_READONLY_ROLE } from "@/lib/roles";
 import { protocolFor } from "@/lib/tenancy/host";
 import { subdomainHost, tenantById } from "@/lib/tenancy/registry";
 import { runAsTenant } from "@/lib/tenancy/resolve";
+import { shared } from "@/lib/cluster/hub";
 
 /**
  * Platform support inside a workspace — only ever because its super admin said so.
@@ -34,9 +35,9 @@ export type ActiveGrant = { id: string; level: SupportAccessLevel; reason: strin
 /** Keyed by workspace id: one workspace's grant never answers for another's. */
 const grantCache = new Map<string, { grant: ActiveGrant | null; at: number }>();
 
-export function forgetSupportGrant(tenantId: string): void {
+export const forgetSupportGrant = shared("forgetSupportGrant", (tenantId: string): void => {
   grantCache.delete(tenantId);
-}
+});
 
 export async function activeSupportGrant(tenantId: string, fresh = false): Promise<ActiveGrant | null> {
   const hit = grantCache.get(tenantId);

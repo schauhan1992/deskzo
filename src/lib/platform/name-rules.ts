@@ -1,6 +1,7 @@
 import type { Prisma } from "@deskzo/control-client";
 import { controlConfigured, controlDb } from "@/lib/platform/control-db";
 import { nameVerdict, verdictInWords, type NameFacts, type NameHold, type NameRule, type NameVerdict } from "@/lib/workspace-names";
+import { shared } from "@/lib/cluster/hub";
 
 /**
  * The database's part of what a workspace may be called — the rules themselves are pure, in
@@ -47,10 +48,10 @@ export async function nameRules(): Promise<readonly NameRule[]> {
 }
 
 /** Called by every change to the rules: the next check reads them again. */
-export function forgetNameRules(): void {
+export const forgetNameRules = shared("forgetNameRules", (): void => {
   generation += 1;
   cache = null;
-}
+});
 
 /** An open invitation: not used up, and not past its end. */
 export function openInviteWhere(now = new Date()): Prisma.SignupInviteWhereInput {

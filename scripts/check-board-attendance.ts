@@ -206,6 +206,8 @@ async function main() {
       createElement(LeadsBoard, {
         stages: [stage],
         leads: [{ id: lead.id, leadSeq: 1, title: "Big deal", status: "OPEN" as never, stage, lostReason: null, estimatedValue: "120000", expectedCloseDate: "2026-01-10", company: { id: company.id, name: "Acme" }, owner: { id: hr.id, name: "Asha Rao" }, score: 70 }],
+        counts: { s1: 1 },
+        filters: {},
         extras: { [lead.id]: extras! },
       }),
     );

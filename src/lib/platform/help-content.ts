@@ -4,6 +4,7 @@ import { moduleEntitled } from "@/lib/entitlements";
 import { checkLink, LINK_MAX, youtubeId, type CheckedLink } from "@/lib/help/links";
 import { controlConfigured, controlDb } from "@/lib/platform/control-db";
 import type { Tenant } from "@/lib/tenancy/state";
+import { shared } from "@/lib/cluster/hub";
 
 /**
  * Help and What's new from Deskzo: the help articles, walkthrough videos and release notes Deskzo's
@@ -415,7 +416,7 @@ export async function deskzoContentFor(
 }
 
 /** Forget this process's copy — after every change in the console, so its own pages show it at once. */
-export function forgetHelpContent(): void {
+export const forgetHelpContent = shared("forgetHelpContent", (): void => {
   generation += 1;
   cache = null;
-}
+});

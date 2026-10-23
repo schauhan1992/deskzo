@@ -4,6 +4,7 @@ import { controlConfigured, controlDb } from "@/lib/platform/control-db";
 import { ConsoleRefused } from "@/lib/platform/refused";
 import { setSetting, type PlainKey } from "@/lib/platform/settings";
 import { HELPLINE_PATTERN, RETENTION_DAYS, SETTINGS_LIMITS, SUPPORT_EMAIL_PLACEHOLDER, type SupportSettingsView } from "@/lib/support/types";
+import { shared } from "@/lib/cluster/hub";
 
 /**
  * Contact Support's console settings, typed — platform settings (PLAIN_KEYS in
@@ -187,6 +188,6 @@ export async function cachedSupportConfig(now: number = Date.now(), load?: () =>
 }
 
 /** Forget this process's copy — after a save in the console, and between a check suite's cases. */
-export function forgetSupportSettings(): void {
+export const forgetSupportSettings = shared("forgetSupportSettings", (): void => {
   cache = null;
-}
+});

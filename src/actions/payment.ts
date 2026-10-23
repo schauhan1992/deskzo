@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { emitPaymentReceived } from "@/lib/automate/emit-records";
 import { syncInvoiceStatus } from "@/lib/receivables/sync";
@@ -417,6 +418,36 @@ export async function paymentsSnapshot() {
   return { outstandingBalance, unpaidCount, partialCount };
 }
 
+/** The orders on the payments page: the order rule's (src/lib/authz/access.ts), narrowed by the search. */
+async function ordersWithPaymentsWhere(userId: string, search?: string): Promise<Prisma.CompanyProductWhereInput> {
+  return {
+    /**
+     * The scope and the search both narrow through `company`, so they go in as two `AND` terms
+     * rather than two spreads into the same object — spreading would keep whichever `company`
+     * key was written last and silently drop the other, and the one dropped would be the scope.
+     */
+    AND: [
+      // Its rows are orders, so the order rule decides which (src/lib/authz/access.ts).
+      await orderAccess(userId, "view"),
+      ...(search ? [{ company: { name: { contains: search, mode: "insensitive" as const } } }] : []),
+    ],
+  };
+}
+
+const orderWithPaymentsInclude = {
+  company: { select: { id: true, companySeq: true, name: true } },
+  item: { select: orderItemSelect },
+  allocations: {
+    orderBy: { createdAt: "desc" },
+    include: {
+      allocatedBy: { select: { id: true, name: true } },
+      payment: {
+        select: { id: true, paidOn: true, method: true, reference: true },
+      },
+    },
+  },
+} as const satisfies Prisma.CompanyProductInclude;
+
 export async function listOrdersWithPayments(params?: {
   search?: string;
   status?: PaymentStatusFilter;
@@ -425,40 +456,9 @@ export async function listOrdersWithPayments(params?: {
   if (!(await viewerHas("payments.view"))) return [];
 
   const orders = await db.companyProduct.findMany({
-    where: {
-      /**
-       * The scope and the search both narrow through `company`, so they go in as two `AND` terms
-       * rather than two spreads into the same object — spreading would keep whichever `company`
-       * key was written last and silently drop the other, and the one dropped would be the scope.
-       */
-      AND: [
-        // Its rows are orders, so the order rule decides which (src/lib/authz/access.ts).
-        await orderAccess(user.id, "view"),
-        ...(params?.search
-          ? [
-              {
-                company: {
-                  name: { contains: params.search, mode: "insensitive" as const },
-                },
-              },
-            ]
-          : []),
-      ],
-    },
-    include: {
-      company: { select: { id: true, companySeq: true, name: true } },
-      item: { select: orderItemSelect },
-      allocations: {
-        orderBy: { createdAt: "desc" },
-        include: {
-          allocatedBy: { select: { id: true, name: true } },
-          payment: {
-            select: { id: true, paidOn: true, method: true, reference: true },
-          },
-        },
-      },
-    },
-    orderBy: { createdAt: "desc" },
+    where: await ordersWithPaymentsWhere(user.id, params?.search),
+    include: orderWithPaymentsInclude,
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
   });
 
   const withTotals = toPlain(
@@ -493,6 +493,46 @@ export async function listCompanyOrdersForPayment(companyId: string) {
 }
 
 /** Every payment received, with how much of it is still unallocated — for the "Payments received" list. */
+/**
+ * Received only.
+ *
+ * A vendor payment is money going the other way, and this listed and summed the two together —
+ * so what the company had *spent* was reported as part of what it had collected, on the screen
+ * whose whole job is to say how much has come in.
+ */
+async function receivedPaymentsWhere(userId: string, search?: string): Promise<Prisma.PaymentWhereInput> {
+  return {
+    direction: "RECEIVED",
+    /**
+     * The access engine's `paymentAccess` rather than a hand-written clause: with no level set a
+     * receipt reaches its account through its own `companyId` — which is set even on a lump sum
+     * that has not been allocated to any order yet, and those are precisely the rows an account
+     * manager is chasing.
+     *
+     * As an `AND` term because the search narrows through `company` too; two spreads into one
+     * object would leave only the last `company` key standing.
+     */
+    AND: [await paymentAccess(userId, "view"), ...(search ? [{ company: { name: { contains: search, mode: "insensitive" as const } } }] : [])],
+  };
+}
+
+const receivedPaymentInclude = {
+  company: { select: { id: true, companySeq: true, name: true } },
+  recordedBy: { select: { id: true, name: true } },
+  allocations: {
+    include: {
+      companyProduct: {
+        select: {
+          id: true,
+          orderSeq: true,
+          item: { select: { name: true } },
+        },
+      },
+      document: { select: { id: true, docNumber: true, currency: true } },
+    },
+  },
+} as const satisfies Prisma.PaymentInclude;
+
 export async function listPayments(params?: {
   search?: string;
   unallocatedOnly?: boolean;
@@ -501,46 +541,9 @@ export async function listPayments(params?: {
   if (!(await viewerHas("payments.view"))) return [];
 
   const payments = await db.payment.findMany({
-    /**
-     * Received only.
-     *
-     * A vendor payment is money going the other way, and this listed and summed the two together —
-     * so what the company had *spent* was reported as part of what it had collected, on the screen
-     * whose whole job is to say how much has come in.
-     */
-    where: {
-      direction: "RECEIVED",
-      /**
-       * The access engine's `paymentAccess` rather than a hand-written clause: with no level set a
-       * receipt reaches its account through its own `companyId` — which is set even on a lump sum
-       * that has not been allocated to any order yet, and those are precisely the rows an account
-       * manager is chasing.
-       *
-       * As an `AND` term because the search narrows through `company` too; two spreads into one
-       * object would leave only the last `company` key standing.
-       */
-      AND: [
-        await paymentAccess(user.id, "view"),
-        ...(params?.search ? [{ company: { name: { contains: params.search, mode: "insensitive" as const } } }] : []),
-      ],
-    },
-    include: {
-      company: { select: { id: true, companySeq: true, name: true } },
-      recordedBy: { select: { id: true, name: true } },
-      allocations: {
-        include: {
-          companyProduct: {
-            select: {
-              id: true,
-              orderSeq: true,
-              item: { select: { name: true } },
-            },
-          },
-          document: { select: { id: true, docNumber: true, currency: true } },
-        },
-      },
-    },
-    orderBy: { paidOn: "desc" },
+    where: await receivedPaymentsWhere(user.id, params?.search),
+    include: receivedPaymentInclude,
+    orderBy: [{ paidOn: "desc" }, { id: "desc" }],
   });
 
   const withRemaining = toPlain(payments).map((payment) => {
@@ -677,12 +680,34 @@ export async function listOrdersWithPaymentsPaged(params: {
   page: number;
   pageSize: number;
 }) {
-  const all = await listOrdersWithPayments({
-    search: params.search,
-    status: params.status,
-  });
-  const outstanding = all.reduce((sum, o) => sum + Math.max(o.balance, 0), 0);
-  return { ...pageOf(all, params.page, params.pageSize), outstanding };
+  const user = await requireModuleUser("payments");
+  if (!(await viewerHas("payments.view"))) return { rows: [], total: 0, outstanding: 0 };
+
+  /**
+   * Every order's money, read light — its price and what has been paid against it, added up by the
+   * database — for the status filter and the outstanding total; then the page's orders whole. It read
+   * every order with every allocation to show fifty (the large-workspace load test, 23 Oct 2026).
+   */
+  const where = await ordersWithPaymentsWhere(user.id, params.search);
+  const [light, paidRows] = await Promise.all([
+    db.companyProduct.findMany({
+      where,
+      select: { id: true, quantity: true, unitPrice: true, item: { select: { sellingPrice: true, taxRatePercent: true } } },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    }),
+    db.paymentAllocation.groupBy({ by: ["companyProductId"], where: { companyProduct: { is: where } }, _sum: { amount: true } }),
+  ]);
+  const paidOf = new Map(paidRows.map((r) => [r.companyProductId, Number(r._sum.amount ?? 0)]));
+  const money = light.map((o) => ({ id: o.id, ...computeOrderFinancials({ ...o, allocations: [{ amount: paidOf.get(o.id) ?? 0 }] }) }));
+  const matching = params.status ? money.filter((m) => m.status === params.status) : money;
+  const outstanding = matching.reduce((sum, o) => sum + Math.max(o.balance, 0), 0);
+
+  const page = pageOf(matching, params.page, params.pageSize);
+  const ids = page.rows.map((m) => m.id);
+  const orders = ids.length ? await db.companyProduct.findMany({ where: { id: { in: ids } }, include: orderWithPaymentsInclude }) : [];
+  const byId = new Map(orders.map((o) => [o.id, o]));
+  const rows = toPlain(ids.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : [])).map((order) => ({ ...order, ...computeOrderFinancials(order) })));
+  return { rows, total: page.total, outstanding };
 }
 
 export async function listPaymentsPaged(params: {
@@ -691,16 +716,41 @@ export async function listPaymentsPaged(params: {
   page: number;
   pageSize: number;
 }) {
-  const all = await listPayments({
-    search: params.search,
-    unallocatedOnly: params.unallocatedOnly,
-  });
+  const user = await requireModuleUser("payments");
+  if (!(await viewerHas("payments.view"))) return { rows: [], total: 0, unallocated: 0 };
+
+  /**
+   * Every receipt's money, read light — its amount and what its allocations took out of it, added up by
+   * the database — for the "unallocated" filter and total; then the page's receipts whole (the
+   * large-workspace load test, 23 Oct 2026). What an allocation takes is its `paymentAmount` where it
+   * crossed currencies, else its amount (`takenFromPayment`): summed as the two kinds.
+   */
+  const where = await receivedPaymentsWhere(user.id, params.search);
+  const [light, crossed, same] = await Promise.all([
+    db.payment.findMany({ where, select: { id: true, amount: true, currency: true, exchangeRate: true }, orderBy: [{ paidOn: "desc" }, { id: "desc" }] }),
+    db.paymentAllocation.groupBy({ by: ["paymentId"], where: { payment: where, paymentAmount: { not: null } }, _sum: { paymentAmount: true } }),
+    db.paymentAllocation.groupBy({ by: ["paymentId"], where: { payment: where, paymentAmount: null }, _sum: { amount: true } }),
+  ]);
+  const taken = new Map<string, number>();
+  for (const r of crossed) taken.set(r.paymentId, (taken.get(r.paymentId) ?? 0) + Number(r._sum.paymentAmount ?? 0));
+  for (const r of same) taken.set(r.paymentId, (taken.get(r.paymentId) ?? 0) + Number(r._sum.amount ?? 0));
+  const money = light.map((p) => ({ id: p.id, rate: bookingRate(p), unallocated: Math.round((Number(p.amount) - (taken.get(p.id) ?? 0)) * 100) / 100 }));
+  const matching = params.unallocatedOnly ? money.filter((p) => p.unallocated > 0) : money;
   // In rupees, the one currency a total can be in: a receipt in dollars counts at its own rate.
-  const unallocated = all.reduce(
-    (sum, p) => sum + Math.round(Math.max(p.unallocated, 0) * bookingRate(p) * 100) / 100,
-    0,
-  );
-  return { ...pageOf(all, params.page, params.pageSize), unallocated };
+  const unallocated = matching.reduce((sum, p) => sum + Math.round(Math.max(p.unallocated, 0) * p.rate * 100) / 100, 0);
+
+  const page = pageOf(matching, params.page, params.pageSize);
+  const ids = page.rows.map((p) => p.id);
+  const payments = ids.length ? await db.payment.findMany({ where: { id: { in: ids } }, include: receivedPaymentInclude }) : [];
+  const byId = new Map(toPlain(payments).map((p) => [p.id, p]));
+  const rows = ids.flatMap((id) => {
+    const payment = byId.get(id);
+    if (!payment) return [];
+    // In the payment's own currency: an allocation across currencies settles dollars but takes rupees.
+    const allocated = payment.allocations.reduce((sum, a) => sum + takenFromPayment(a), 0);
+    return [{ ...payment, allocated, unallocated: Math.round((Number(payment.amount) - allocated) * 100) / 100 }];
+  });
+  return { rows, total: page.total, unallocated };
 }
 
 /**

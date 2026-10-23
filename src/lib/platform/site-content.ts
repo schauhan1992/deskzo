@@ -6,6 +6,7 @@ import { controlConfigured, controlDb } from "@/lib/platform/control-db";
 import { forgetHelpGuides } from "@/lib/platform/help-guides";
 import { signupOpen, trialDays } from "@/lib/platform/settings";
 import { PLATFORM_DOMAIN, protocolFor } from "@/lib/tenancy/host";
+import { shared } from "@/lib/cluster/hub";
 
 /**
  * The public website's content — the one way every page, the header, the footer and the blog get
@@ -57,12 +58,12 @@ let generation = 0;
 let lastFailureLog = 0;
 
 /** Forgets every cached read — called by the CMS whenever something published changes. */
-export function invalidateSiteContent(): void {
+export const invalidateSiteContent = shared("invalidateSiteContent", (): void => {
   generation += 1;
   cache.clear();
   // The workspaces' copy of the Help Center's guides (their Help panel), in this process.
   forgetHelpGuides();
-}
+});
 
 function logFailure(err: unknown) {
   const now = Date.now();

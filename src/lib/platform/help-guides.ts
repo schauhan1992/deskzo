@@ -3,6 +3,7 @@ import { moduleEntitled } from "@/lib/entitlements";
 import { controlConfigured, controlDb } from "@/lib/platform/control-db";
 import { PLATFORM_DOMAIN, protocolFor } from "@/lib/tenancy/host";
 import type { Tenant } from "@/lib/tenancy/state";
+import { shared } from "@/lib/cluster/hub";
 
 /**
  * Deskzo's guides to its modules, as a workspace's Help panel shows them: the Help Center's published
@@ -143,6 +144,6 @@ export async function deskzoGuidesFor(tenant: Pick<Tenant, "country" | "entitlem
 }
 
 /** Forget this process's copy — after a guide is published or taken down in the CMS, so this process shows it at once. */
-export function forgetHelpGuides(): void {
+export const forgetHelpGuides = shared("forgetHelpGuides", (): void => {
   cache = null;
-}
+});

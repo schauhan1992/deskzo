@@ -2,7 +2,7 @@ import { getWording } from "@/lib/terms/server";
 import { slot } from "@/lib/terms/dictionary";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { listLeads, listLeadsPaged } from "@/actions/lead";
+import { listLeadBoard, listLeadsPaged } from "@/actions/lead";
 import { listAssignableUsers } from "@/actions/company";
 import { Button } from "@/components/ui/button";
 import { ViewToggle } from "@/components/leads/view-toggle";
@@ -30,7 +30,6 @@ import { customFilterParams, customFilterSetup, parseCustomFilters, type CustomF
 import { CustomFieldFilters } from "@/components/custom-fields/custom-field-filters";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
-import { leadBoardExtras } from "@/lib/leads/board-extras";
 import { isQuoteFilter, QUOTE_FILTERS } from "@/lib/leads/quotes";
 import { leadQuotes, seesLeadQuotes } from "@/lib/leads/quote-status";
 
@@ -89,31 +88,32 @@ export default async function LeadsPage({
     customFilters: parseCustomFilters(params),
   };
 
-  // The board shows the whole pipeline — a kanban with a hidden page 2 would misrepresent it — so
-  // only the list view is paginated.
-  const [viewMode, result, assignableUsers] = await Promise.all([
+  // The list is paged; the board shows each column's first cards with its whole count, and "Show more"
+  // (src/actions/lead.ts `listLeadBoard`) — every lead at once can't be drawn in a large workspace.
+  const [viewMode, listed, board, assignableUsers] = await Promise.all([
     getViewMode("leads"),
-    view === "list" ? listLeadsPaged({ ...filters, page, pageSize }) : listLeads(filters).then((rows) => ({ rows, total: rows.length, contactDetails: false })),
+    view === "list" ? listLeadsPaged({ ...filters, page, pageSize }) : null,
+    view === "board" ? listLeadBoard(filters) : null,
     listAssignableUsers(),
   ]);
+  const total = listed?.total ?? board?.total ?? 0;
 
   // Prisma's Decimal is a class instance, not plain data — it can't cross the
   // Server → Client Component boundary as a prop, so serialize it to a string here.
   // The workspace's own stages (Settings → Pipeline, src/lib/pipeline): the board's columns, the filter's
   // choices, and the one each lead shows.
-  const stageOf = await stagesOfLeads(result.rows);
+  const listRows = listed?.rows ?? [];
+  const stageOf = await stagesOfLeads(listRows);
   const activeStages = pipelineData.stages.filter((s) => !s.archived && s.pipelineId === shown.id);
-  const leads = result.rows.map((lead) => ({
+  const leads = listRows.map((lead) => ({
     ...lead,
     estimatedValue: lead.estimatedValue?.toString() ?? null,
     stage: stageOf.get(lead.id)!,
   }));
 
   const selected = view === "list" && viewMode === "split" ? resolveSelected(leads, params.sel) : null;
-  // The board's cards: tasks, products, calls and notes, and the people on each (src/lib/leads/board-extras.ts).
-  const boardExtras = view === "board" ? await leadBoardExtras(result.rows.map((l) => ({ id: l.id, ownerUserId: l.ownerUserId }))) : {};
   // The split list has no column for it.
-  const quotes = quotesShown && !(view === "list" && viewMode === "split") ? await leadQuotes(user.id, result.rows.map((l) => l.id)) : null;
+  const quotes = quotesShown && view === "list" && viewMode !== "split" ? await leadQuotes(user.id, listRows.map((l) => l.id)) : null;
 
   // The workspace's own fields (src/lib/custom-fields): the columns the table can show — only the table
   // shows them, so neither the board nor the split list asks for values, though the picker still offers
@@ -130,7 +130,7 @@ export default async function LeadsPage({
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-text">{slot(w, "Lead pipeline", "lead", "{one} pipeline")}</h1>
-          <p className="mt-1 text-sm text-muted">{inUse.length > 1 ? `${result.total} in ${shown.name}` : `${result.total} ${slot(w, "total leads", "lead", "total {many:lower}")}`}</p>
+          <p className="mt-1 text-sm text-muted">{inUse.length > 1 ? `${total} in ${shown.name}` : `${total} ${slot(w, "total leads", "lead", "total {many:lower}")}`}</p>
         </div>
         <div className="flex items-center gap-2">
           <ViewToggle
@@ -213,7 +213,7 @@ export default async function LeadsPage({
 
       {view === "list" && viewMode === "split" ? (
         <SplitListShell
-          countLabel={`${result.total} ${result.total === 1 ? slot(w, "lead", "lead", "{one:lower}") : slot(w, "leads", "lead", "{many:lower}")}`}
+          countLabel={`${total} ${total === 1 ? slot(w, "lead", "lead", "{one:lower}") : slot(w, "leads", "lead", "{many:lower}")}`}
           listPane={<LeadSplitList leads={leads} selectedId={selected} />}
         >
           {selected ? <LeadDetail id={selected} /> : <SplitListEmpty message={slot(w, "No leads match these filters.", "lead", "No {many:lower} match these filters.")} />}
@@ -228,19 +228,19 @@ export default async function LeadsPage({
                 assignableUsers={assignableUsers}
                 reassign={await viewerReassignControls()}
                 customColumns={customColumns}
-                contactDetails={result.contactDetails}
+                contactDetails={listed?.contactDetails ?? false}
                 quotes={quotes}
               />
               <Pagination
                 page={page}
                 pageSize={pageSize}
-                total={result.total}
-                totalPages={totalPages(result.total, pageSize)}
+                total={total}
+                totalPages={totalPages(total, pageSize)}
                 pageSizes={PAGE_SIZES}
               />
             </>
           ) : (
-            <LeadsBoard leads={leads} stages={activeStages} extras={boardExtras} quotes={quotes} />
+            board && <LeadsBoard leads={board.cards} counts={board.counts} stages={activeStages} extras={board.extras} quotes={board.quotes} filters={filters} />
           )}
         </div>
       )}

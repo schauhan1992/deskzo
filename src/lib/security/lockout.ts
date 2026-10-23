@@ -14,18 +14,22 @@
  *
  * ## The trade-off, stated
  *
- * State is per process and does not survive a restart, the same trade-off `throttle` in this
- * directory already makes. Across several instances behind a load balancer an attacker gets one
- * budget per instance, and a deploy resets the counters. That is a real weakening and it is worth
- * saying out loud — but a shared store in the path of every sign-in is its own availability risk,
- * and the alternative on offer was no limit at all. If this ever runs multi-instance, move the
- * counter to Postgres or Redis rather than raising the limit.
+ * State is in memory and does not survive a restart, the same trade-off `throttle` in this
+ * directory already makes. The web processes of one container share it — each failure is told to the
+ * others (src/lib/cluster/hub.ts) — so several processes still give an attacker one budget. Across
+ * several *containers* behind a load balancer an attacker would get one budget per container, and a
+ * deploy resets the counters. That is a real weakening and it is worth saying out loud — but a shared
+ * store in the path of every sign-in is its own availability risk, and the alternative on offer was no
+ * limit at all. If this ever runs as several containers, move the counter to Postgres or Redis rather
+ * than raising the limit.
  *
  * ## Why it counts two keys
  *
  * Per account, so one person's password cannot be ground down; and per caller, so a list of
  * thousands of accounts tried once each is also stopped. Either tripping is enough to refuse.
  */
+
+import { broadcast, onBroadcast } from "@/lib/cluster/hub";
 
 type Bucket = { failures: number; first: number; lockedUntil: number };
 
@@ -71,7 +75,23 @@ export function lockoutState(keys: string[], now: number = Date.now()): LockoutS
 }
 
 /** Records a failure against every key, and locks them once the budget is spent. */
+/**
+ * With several web processes (src/lib/cluster/hub.ts) each counts every failure: one recorded here is
+ * told to the rest, so eight wrong passwords lock the account whichever process each landed on — not
+ * eight in each.
+ */
+onBroadcast("lockout:failure", (payload) => {
+  const { keys, now } = payload as { keys: string[]; now: number };
+  countFailure(keys, now);
+});
+onBroadcast("lockout:clear", (payload) => clearFailuresHere(payload as string[]));
+
 export function recordFailure(keys: string[], now: number = Date.now()): LockoutState {
+  broadcast("lockout:failure", { keys, now });
+  return countFailure(keys, now);
+}
+
+function countFailure(keys: string[], now: number): LockoutState {
   let locked = false;
   let retryInSeconds = 0;
   let failures = 0;
@@ -97,6 +117,11 @@ export function recordFailure(keys: string[], now: number = Date.now()): Lockout
  * one mistake away from a lockout for the rest of the window.
  */
 export function clearFailures(keys: string[]) {
+  broadcast("lockout:clear", keys);
+  clearFailuresHere(keys);
+}
+
+function clearFailuresHere(keys: string[]) {
   for (const key of keys) buckets.delete(key);
 }
 

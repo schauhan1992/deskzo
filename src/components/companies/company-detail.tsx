@@ -305,21 +305,25 @@ export async function CompanyDetail({
   // The 360 view: everything raised for, received from, or paid out on this account. Loaded here
   // rather than per-tab because the header counts need them regardless of which tab is open.
   const documentsEnabled = isVendor ? purchaseDocsEnabled : bothSides ? salesDocsEnabled || purchaseDocsEnabled : salesDocsEnabled;
-  const [visits, visitExpenses] = visitsEnabled
-    ? await Promise.all([listCompanyVisits(company.id), expensesInPlan ? expenseSummary({ companyId: company.id }) : null])
-    : [[], null];
+  // What only one tab shows is read when that tab is open: the visits, the statement and the payments list.
+  // A large customer's statement is every invoice and payment they ever had, and it was worked out on
+  // every tab (the large-workspace load test, 23 Oct 2026).
+  const [visits, visitExpenses] =
+    visitsEnabled && tab === "visits"
+      ? await Promise.all([listCompanyVisits(company.id), expensesInPlan ? expenseSummary({ companyId: company.id }) : null])
+      : [[], null];
 
   // The statement is a customer-side view; a vendor has no receivable against us.
   const showStatement = receivablesEnabled && !isVendor;
-  const statement = showStatement ? await customerStatement(company.id) : null;
+  const statement = showStatement && tab === "statement" ? await customerStatement(company.id) : null;
   // Both sides: what we owe them as a vendor, beside what they owe us, and the net.
   // Payables' own statement, only where its module is on (src/lib/module-actions.ts).
-  const asVendor = showStatement && bothSides && (await isModuleEnabled("payables")) ? await vendorStatement(company.id) : null;
+  const asVendor = showStatement && tab === "statement" && bothSides && (await isModuleEnabled("payables")) ? await vendorStatement(company.id) : null;
 
   // Credit is money about the account, so it rides on the payments view like the billed figures do.
   const [documents, companyPayments, paymentSummary, creditProfile, supportLoad, mailSummary, companyForms] = await Promise.all([
     documentsEnabled ? listCompanyDocuments(company.id) : Promise.resolve([]),
-    paymentsEnabled ? listCompanyPayments(company.id) : Promise.resolve([]),
+    paymentsEnabled && tab === "payments" ? listCompanyPayments(company.id) : Promise.resolve([]),
     paymentsEnabled ? companyPaymentSummary(company.id) : Promise.resolve(null),
     // The credit engine is Receivables': a plan with payments and without it has no profile to show.
     paymentsEnabled && !isVendor && (await isModuleEntitled("receivables")) ? getCreditProfile(company.id) : Promise.resolve(null),

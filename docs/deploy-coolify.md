@@ -106,6 +106,8 @@ DNS_RESOLVERS=1.1.1.1,8.8.8.8
 DESKZO_WORKER=in-app
 ```
 
+`DESKZO_WEB_PROCESSES=2` (optional; one when unset) runs two copies of the web app in the container, so one slow page doesn't hold every other request — what they keep in memory is kept in step between them. See docs/runbook.md §7.1 before raising it.
+
 `DESKZO_WORKER=in-app` runs the platform worker inside the application's container, beside the web app, for as long as the container runs: it sets new workspaces up, keeps the warm pool full and carries out Automate's workflows every couple of seconds. If it stops it is started again five seconds later, without touching the web app (deploy/start.mjs). It is in the same container rather than a second Coolify application so that it shares `/data`, where a workspace's restore lock lives: the worker must see it to leave a workspace alone while it is restored.
 
 Then add the secrets. In the application's **Terminal** (the container is already running from the first deploy), run:

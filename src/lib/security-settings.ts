@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { tenantKey } from "@/lib/tenancy/cache";
+import { shared } from "@/lib/cluster/hub";
 
 export const SECURITY_SETTINGS_ID = "global";
 
@@ -28,6 +29,6 @@ export async function getCachedSecuritySettings() {
 }
 
 /** Everything, every workspace — dropping a cache only costs a re-read. */
-export function invalidateSecuritySettingsCache() {
+export const invalidateSecuritySettingsCache = shared("invalidateSecuritySettingsCache", (): void => {
   cache.clear();
-}
+});

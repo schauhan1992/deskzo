@@ -10,20 +10,23 @@ import { Amount, ReportHeader, accountTypeTone } from "@/components/accounting/r
 import { DateParamInput } from "@/components/accounting/date-param-input";
 import { OptionParamFilter } from "@/components/ui/option-param-filter";
 import { companyPath } from "@/lib/record-links";
+import { Pagination } from "@/components/ui/pagination";
+import { totalPages } from "@/lib/pagination";
 
 export default async function AccountLedgerPage({
   params,
   searchParams,
 }: {
   params: Promise<{ accountId: string }>;
-  searchParams: Promise<{ from?: string; to?: string; company?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; company?: string; page?: string; pageSize?: string }>;
 }) {
   const enabled = await isModuleEnabled("accounting");
   if (!enabled) return <ModuleDisabledNotice moduleKey="accounting" />;
 
   const [{ accountId }, query] = await Promise.all([params, searchParams]);
-  const report = await accountLedger({ accountId, from: query.from, to: query.to, companyId: query.company });
+  const report = await accountLedger({ accountId, from: query.from, to: query.to, companyId: query.company, page: Number(query.page) || 1, pageSize: Number(query.pageSize) || undefined });
   if (!report) notFound();
+  const firstPage = report.page === 1;
 
   return (
     <div className="animate-fade-rise">
@@ -87,10 +90,10 @@ export default async function AccountLedgerPage({
             </tr>
           </thead>
           <tbody>
-            {report.openingBalance !== 0 && (
+            {(firstPage ? report.openingBalance !== 0 : true) && (
               <tr className="border-b border-line bg-surface-sunken/60">
-                <td colSpan={6} className="px-4 py-1.5 text-muted">Opening balance</td>
-                <td className="px-4 py-1.5 text-right"><Amount value={report.openingBalance} bold /></td>
+                <td colSpan={6} className="px-4 py-1.5 text-muted">{firstPage ? "Opening balance" : "Brought forward"}</td>
+                <td className="px-4 py-1.5 text-right"><Amount value={report.broughtForward} bold /></td>
               </tr>
             )}
             {/* An entry's day is India's, as the From and To are: the books keep India's calendar. */}
@@ -146,6 +149,9 @@ export default async function AccountLedgerPage({
           </tfoot>
         </table>
       </Card>
+      {report.total > report.pageSize && (
+        <Pagination page={report.page} pageSize={report.pageSize} total={report.total} totalPages={totalPages(report.total, report.pageSize)} pageSizes={report.pageSizes} label="lines" />
+      )}
     </div>
   );
 }

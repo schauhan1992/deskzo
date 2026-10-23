@@ -210,6 +210,22 @@ The lookup only answers for provisioned workspace roles (`w_` and twelve hex cha
 
 Then set `TENANCY_POOLER_URL=postgresql://127.0.0.1:6432`. Only the app's queries go through it; migrations, backups and provisioning keep connecting directly. Without PgBouncer, keep `TENANCY_MAX_CLIENTS × TENANCY_CONNECTION_LIMIT × app processes` under about 70% of `max_connections`. Re-run `npm run load:test` after any of these change.
 
+### 7.1 Several web processes in one container
+
+The app answers on one thread, and a page that has to work something out holds every other request — of every workspace — until it is done (the large-workspace load test, docs/reports/load-test-large.md). `DESKZO_WEB_PROCESSES=N` (1–16; one when unset) runs N copies of the web app in the container, on the one port, taking requests in turn (deploy/start.mjs; Node's cluster). Start with 2, and no more than the server's cores.
+
+What one process keeps in memory, the copies keep in step — each tells the others (src/lib/cluster/hub.ts):
+
+- **Caches cleared on a save** — IP rules, security and workplace settings, maintenance, a company's lock, support access, linked sign-in, help, site content, redirects, search policy, name rules, announcements, partner and support settings: cleared in all at once. Every other cache already expires within a minute.
+- **Sign-in failures and once-a-window allowances** (src/lib/security/lockout.ts, throttle.ts): counted in all, so eight wrong passwords lock an account whichever copy each landed on.
+- **Team chat**: who has chat open, in every copy; a message published in one reaches a stream held by another.
+
+A copy that stops is started again five seconds later, and the others forget what it held. The database pools are shared out: unless `TENANCY_MAX_CLIENTS` is set, each copy keeps 35 ÷ N (at least 4), so the connections stay within the same budget. Memory is about 0.5–1 GB a copy.
+
+Not covered: several *containers*. Their memory isn't shared — sign-in counters would be one budget per container, and chat would need Postgres NOTIFY or Redis between them.
+
+Checked by `npm run check:cluster` (a real three-process cluster, with a probe in place of `next start`).
+
 ## 8. Before the first paying customer
 
 - [ ] `NODE_ENV=production`, TLS at the proxy, `TRUST_PROXY=1`.

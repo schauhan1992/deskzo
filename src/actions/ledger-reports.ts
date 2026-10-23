@@ -1,6 +1,6 @@
 "use server";
 
-import type { AccountType } from "@prisma/client";
+import { Prisma, type AccountType } from "@prisma/client";
 import { indiaClock } from "@/lib/time/zone";
 import { db } from "@/lib/db";
 import { can } from "@/lib/authz/resolve";
@@ -246,7 +246,17 @@ export async function balanceSheet(params?: { to?: string }) {
  * Accounts Payable — and the opening, totals and running balance are then that party's alone.
  * `parties` is everyone with a line on the account, for the picker.
  */
-export async function accountLedger(params: { accountId: string; from?: string; to?: string; companyId?: string }) {
+/** Lines on one page of an account's ledger: the pager's choices, and the one when none is asked for. */
+const LEDGER_PAGE_SIZES = [100, 200, 500];
+const LEDGER_PAGE_SIZE = 200;
+
+/**
+ * One account's ledger over a window, a page at a time — 200 lines, oldest first, with the balance brought
+ * forward from the lines before the page so the running balance is right on every page; the totals and
+ * the closing balance are the whole window's. It sent every line at once, which for a busy account in a
+ * large workspace was 51,600 (the load test, 23 Oct 2026).
+ */
+export async function accountLedger(params: { accountId: string; from?: string; to?: string; companyId?: string; page?: number; pageSize?: number }) {
   const gate = await mayReadBooks();
   if (!gate.ok) throw new Error(gate.error);
   await requireModuleUser("accounting");
@@ -269,13 +279,24 @@ export async function accountLedger(params: { accountId: string; from?: string; 
       })
     : null;
 
+  const inWindow = {
+    accountId: account.id,
+    ...party,
+    entry: { date: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } },
+  } satisfies Prisma.JournalLineWhereInput;
+  const window = await db.journalLine.aggregate({ where: inWindow, _sum: { debit: true, credit: true }, _count: { _all: true } });
+  const total = window._count._all;
+  const size = LEDGER_PAGE_SIZES.includes(params.pageSize ?? 0) ? params.pageSize! : LEDGER_PAGE_SIZE;
+  const pages = Math.max(1, Math.ceil(total / size));
+  const page = Math.min(Math.max(1, Math.floor(params.page ?? 1) || 1), pages);
+  const skip = (page - 1) * size;
+
+  // Oldest first; the line's id last, so a page always holds the same lines.
   const lines = await db.journalLine.findMany({
-    where: {
-      accountId: account.id,
-      ...party,
-      entry: { date: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } },
-    },
-    orderBy: [{ entry: { date: "asc" } }, { entry: { entryNumber: "asc" } }, { sortOrder: "asc" }],
+    where: inWindow,
+    orderBy: [{ entry: { date: "asc" } }, { entry: { entryNumber: "asc" } }, { sortOrder: "asc" }, { id: "asc" }],
+    skip,
+    take: size,
     select: {
       id: true, debit: true, credit: true, narration: true,
       company: { select: { id: true, companySeq: true, name: true } },
@@ -289,8 +310,25 @@ export async function accountLedger(params: { accountId: string; from?: string; 
   });
 
   const sign = isDebitNatured(account.type) ? 1 : -1;
-  let balance = opening ? round2((Number(opening._sum.debit ?? 0) - Number(opening._sum.credit ?? 0)) * sign) : 0;
-  const openingBalance = balance;
+  const openingBalance = opening ? round2((Number(opening._sum.debit ?? 0) - Number(opening._sum.credit ?? 0)) * sign) : 0;
+  // What the window's lines before this page moved — in the order the page is read in.
+  const before = skip
+    ? (
+        await db.$queryRaw<{ debit: Prisma.Decimal | null; credit: Prisma.Decimal | null }[]>`
+          SELECT SUM(t."debit") AS debit, SUM(t."credit") AS credit FROM (
+            SELECT l."debit", l."credit"
+            FROM "journal_lines" l JOIN "journal_entries" e ON e."id" = l."entryId"
+            WHERE l."accountId" = ${account.id}
+              ${params.companyId ? Prisma.sql`AND l."companyId" = ${params.companyId}` : Prisma.empty}
+              ${from ? Prisma.sql`AND e."date" >= ${from}` : Prisma.empty}
+              ${to ? Prisma.sql`AND e."date" <= ${to}` : Prisma.empty}
+            ORDER BY e."date" ASC, e."entryNumber" ASC, l."sortOrder" ASC, l."id" ASC
+            LIMIT ${skip}
+          ) t`
+      )[0]
+    : null;
+  let balance = before ? round2(openingBalance + (Number(before.debit ?? 0) - Number(before.credit ?? 0)) * sign) : openingBalance;
+  const broughtForward = balance;
 
   const rows = lines.map((l) => {
     const debit = Number(l.debit);
@@ -311,29 +349,29 @@ export async function accountLedger(params: { accountId: string; from?: string; 
     };
   });
 
-  const partyIds = await db.journalLine.groupBy({
-    by: ["companyId"],
-    where: { accountId: account.id, companyId: { not: null } },
+  // The companies with lines on it — asked as "has a line here", never as a list of ids, which a large
+  // workspace's receivables account would take past Postgres's 32,767 (src/lib/batches.ts).
+  const parties = await db.company.findMany({
+    where: { journalLines: { some: { accountId: account.id } } },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
   });
-  const parties = partyIds.length
-    ? await db.company.findMany({
-        where: { id: { in: partyIds.map((p) => p.companyId!) } },
-        select: { id: true, name: true },
-        orderBy: { name: "asc" },
-      })
-    : [];
 
+  const totals = { debit: round2(Number(window._sum.debit ?? 0)), credit: round2(Number(window._sum.credit ?? 0)) };
   return {
     account,
     parties,
     party: parties.find((p) => p.id === params.companyId) ?? null,
     openingBalance,
+    /** The balance before this page's first line: the opening one on the first page. */
+    broughtForward,
     rows,
-    closingBalance: balance,
-    totals: rows.reduce(
-      (t, r) => ({ debit: round2(t.debit + r.debit), credit: round2(t.credit + r.credit) }),
-      { debit: 0, credit: 0 },
-    ),
+    closingBalance: round2(openingBalance + (totals.debit - totals.credit) * sign),
+    totals,
+    page,
+    pageSize: size,
+    pageSizes: LEDGER_PAGE_SIZES,
+    total,
   };
 }
 

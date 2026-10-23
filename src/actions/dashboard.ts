@@ -49,6 +49,10 @@ import {
 } from "@/lib/dashboard/charts";
 import { dashboardContext, sourceOpen, widgetData } from "@/lib/dashboard/data";
 
+/** A part of the summary a widget reads; `getDashboardSummary(only)` works out the parts named alone. */
+export type SummaryPart = (typeof SUMMARY_PARTS)[number];
+const SUMMARY_PARTS = ["companies", "leads", "vendors", "renewals", "projects", "payments", "tickets", "tasks", "notes", "expenses", "orders", "quotations", "salesTarget", "finance", "activity"] as const;
+
 export type DashboardSummary = {
   /** The raw sourcing pool — everyone who hasn't bought anything from us yet (see `customers` for who has). */
   companies: { total: number; prospects: number; leads: number; awaitingOrder: number } | null;
@@ -140,9 +144,17 @@ export type DashboardSummary = {
   scopes: Record<string, WidgetScope>;
 };
 
-export async function getDashboardSummary(): Promise<DashboardSummary> {
+export async function getDashboardSummary(only?: unknown): Promise<DashboardSummary> {
   const user = await requireUser();
   const now = new Date();
+
+  /**
+   * The parts asked for — a widget names its own (src/lib/dashboard/data.ts), so a funnel no longer
+   * waits on the year's ledger, a payments snapshot and everybody's tickets (the large-workspace load
+   * test, 23 Oct 2026: six seconds for two counts). Nothing named is every part, as the copilot asks.
+   */
+  const parts = Array.isArray(only) ? new Set(only.filter((p): p is SummaryPart => (SUMMARY_PARTS as readonly unknown[]).includes(p))) : null;
+  const wants = (part: SummaryPart) => parts === null || parts.has(part);
 
   /**
    * Only the figures of widgets this person may be offered are read — permission first, then the
@@ -164,7 +176,7 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
    */
   const leadIds = await scopeUserIds(user.id, "targets.viewAll");
   // The lead widgets carry "View leads" (src/lib/dashboard-widgets.ts), so being offered one is holding it.
-  const canSeeLeads = offers("leads", "recentLeads");
+  const canSeeLeads = offers("leads", "recentLeads") && wants("leads");
   // Whose pipeline (the owner's line, or everybody's with `targets.viewAll`), and never past the leads
   // this person may open — the lead rule (src/lib/authz/access.ts) — so the card counts no lead the
   // list it links to would hide.
@@ -203,10 +215,10 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
     expensesOffered,
     ordersOffered,
   ] = await Promise.all([
-    offers("companies", "customers")
+    offers("companies", "customers") && wants("companies")
       ? db.company.groupBy({ by: ["stage"], where: { AND: [await clientSide(), accounts] }, _count: true })
       : Promise.resolve(null),
-    offers("companies", "customers")
+    offers("companies", "customers") && wants("companies")
       ? db.company.count({ where: { AND: [await clientSide(), { stage: "CUSTOMER", products: { some: {} } }, accounts] } })
       : Promise.resolve(0),
     canSeeLeads ? db.lead.groupBy({ by: ["status"], where: salesScope, _count: true }) : Promise.resolve([]),
@@ -224,18 +236,18 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
           include: { company: { select: { name: true } } },
         })
       : Promise.resolve([]),
-    offers("vendors"),
-    offers("renewals", "upcomingRenewals"),
-    offers("myProjects", "projectsAtRisk"),
-    offers("payments"),
-    offers("tickets"),
-    offers("tasks"),
-    offers("notes"),
-    offers("incomeExpense", "topExpenses", "cashFlow", "receivables", "payables"),
-    offers("quotations"),
-    offers("salesTarget"),
-    offers("expenses"),
-    offers("orders"),
+    offers("vendors") && wants("vendors"),
+    offers("renewals", "upcomingRenewals") && wants("renewals"),
+    offers("myProjects", "projectsAtRisk") && wants("projects"),
+    offers("payments") && wants("payments"),
+    offers("tickets") && wants("tickets"),
+    offers("tasks") && wants("tasks"),
+    offers("notes") && wants("notes"),
+    offers("incomeExpense", "topExpenses", "cashFlow", "receivables", "payables") && wants("finance"),
+    offers("quotations") && wants("quotations"),
+    offers("salesTarget") && wants("salesTarget"),
+    offers("expenses") && wants("expenses"),
+    offers("orders") && wants("orders"),
   ]);
 
   // A won deal only counts as a real customer once it has an order on file — the rest ("awaiting
@@ -545,7 +557,7 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
    * would be the copy that drifts. Five rows, because this is a glance and the log itself is a
    * click away.
    */
-  const recentActivity = await listActivity({ filters: {}, page: 1, pageSize: 5 });
+  const recentActivity = wants("activity") ? await listActivity({ filters: {}, page: 1, pageSize: 5 }) : { scoped: true, rows: [] };
   const activity: DashboardSummary["activity"] = {
     ownOnly: recentActivity.scoped,
     items: recentActivity.rows.map((r) => ({

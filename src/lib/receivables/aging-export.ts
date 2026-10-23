@@ -21,7 +21,7 @@ export async function exportAging(user: { id: string; name: string | null; email
     return { ok: false, error: "You can read this report but not download it. Downloading financial data needs the export permission." };
   }
   // The details view's narrowing is the screen's, not the file's: the file holds every document.
-  const report = await agingReportFor(user.id, side, { ...params, party: undefined, col: undefined });
+  const report = await agingReportFor(user.id, side, { ...params, party: undefined, col: undefined, docs: "1" });
   const policy = await getSecurityPolicy();
   const verdict = exportDecision(report.documents.length, policy);
   if (!verdict.allowed) {

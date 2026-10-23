@@ -5,6 +5,7 @@ import { sendPlatformMail } from "@/lib/platform/mailer";
 import { subdomainHost, tenantById } from "@/lib/tenancy/registry";
 import { clockOfTenant } from "@/lib/time/workspace";
 import { isSystemAddress } from "@/lib/people";
+import { shared } from "@/lib/cluster/hub";
 
 /**
  * Link groups: one person's accounts in several workspaces (spec §4.6, §4.7, §4.9).
@@ -153,9 +154,9 @@ export async function setLinkedSignInEnabled(on: boolean, by: string): Promise<v
 }
 
 /** Forgets this process's copy — for a check suite that writes the setting directly. */
-export function forgetLinkedSignInEnabled(): void {
+export const forgetLinkedSignInEnabled = shared("forgetLinkedSignInEnabled", (): void => {
   enabledCache = null;
-}
+});
 
 // ─── Each workspace's rule ───────────────────────────────────────────────────────────────────────
 

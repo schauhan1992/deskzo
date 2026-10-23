@@ -12,6 +12,7 @@ import { lookupIp, placeText } from "@/lib/access/geo";
 import { isPrivateIp, normaliseIp, parseIp } from "@/lib/access/ip";
 import { companyLock, companyLockActive, forgetCompanyLock, personalLockActive } from "@/lib/access/lock";
 import { isAutomationKind } from "@/lib/people";
+import { shared } from "@/lib/cluster/hub";
 
 /**
  * The access gate: may this signed-in request go on?
@@ -56,13 +57,13 @@ const policyCache = new Map<string, { policy: RolePolicy; expiresAt: number }>()
 const seenRecently = new Map<string, number>();
 
 /** After any change to devices, rules, policies or sessions. */
-export function clearAccessCache() {
+export const clearAccessCache = shared("clearAccessCache", (): void => {
   verdicts.clear();
   rulesCache.clear();
   policyCache.clear();
   seenRecently.clear();
   forgetCompanyLock();
-}
+});
 
 export async function activeIpRules(): Promise<IpRuleLike[]> {
   const key = await tenantKey();

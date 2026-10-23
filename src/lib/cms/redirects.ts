@@ -1,6 +1,7 @@
 import Papa from "papaparse";
 import type { SiteRedirect } from "@deskzo/control-client";
 import { actorRef, cmsAudit, refLabels, type CmsActor } from "@/lib/cms/audit";
+import { shared } from "@/lib/cluster/hub";
 import {
   chainProblems,
   checkRedirectShape,
@@ -584,9 +585,9 @@ const GENERATION = Symbol.for("deskzo.site-redirects.generation");
 const generationNow = () => (globalThis as Record<symbol, number | undefined>)[GENERATION] ?? 0;
 
 /** Every process-local copy of the map is out of date: read it again on the next lookup. Called by every save. */
-export function invalidateRedirects(): void {
+export const invalidateRedirects = shared("invalidateRedirects", (): void => {
   (globalThis as Record<symbol, number | undefined>)[GENERATION] = generationNow() + 1;
-}
+});
 
 /** For check scripts: the redirects the lookup sees, instead of the database's (null: the database again). */
 export function setTestRedirectLoader(loader: (() => Promise<{ id: string; fromPath: string; toUrl: string; match: "EXACT" | "PREFIX"; status: number }[]>) | null): void {

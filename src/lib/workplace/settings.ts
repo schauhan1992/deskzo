@@ -4,6 +4,7 @@ import { tenantKey } from "@/lib/tenancy/cache";
 import { getCachedSecuritySettings } from "@/lib/security-settings";
 import { notMigratedYet } from "@/lib/not-migrated";
 import { readGoogleDomain, readZohoRegion, type WorkplaceProvider, type ZohoRegion } from "@/lib/workplace/providers";
+import { shared } from "@/lib/cluster/hub";
 
 /**
  * What a workspace has set up of Microsoft 365, Google Workspace and Zoho (WorkplaceSettings, and
@@ -39,9 +40,9 @@ export async function getCachedWorkplaceSettings() {
 }
 
 /** Everything, every workspace — dropping a cache only costs a re-read. */
-export function invalidateWorkplaceSettingsCache() {
+export const invalidateWorkplaceSettingsCache = shared("invalidateWorkplaceSettingsCache", (): void => {
   cache.clear();
-}
+});
 
 export type GoogleApp = { clientId: string; clientSecret: string; domain: string | null };
 export type ZohoApp = { clientId: string; clientSecret: string; region: ZohoRegion };

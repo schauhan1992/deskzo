@@ -1,5 +1,6 @@
 import { tenantKey } from "@/lib/tenancy/cache";
 import { db } from "@/lib/db";
+import { shared } from "@/lib/cluster/hub";
 
 /**
  * Administrator locks: somebody can still sign in, and sees nothing but a notice until the lock is
@@ -64,9 +65,9 @@ export async function companyLock(): Promise<CompanyLockRow | null> {
   }
 }
 
-export function forgetCompanyLock() {
+export const forgetCompanyLock = shared("forgetCompanyLock", (): void => {
   cached.clear();
-}
+});
 
 // ─── What a locked person is shown ───────────────────────────────────────────
 

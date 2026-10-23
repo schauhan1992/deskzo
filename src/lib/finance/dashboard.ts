@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { SYSTEM_ACCOUNTS } from "@/lib/ledger/chart";
 import { settleInvoice } from "@/lib/receivables";
@@ -95,51 +96,52 @@ type Line = {
   at: Date;
 };
 
+/** An entry's month on India's clock, in SQL — what `bucketOf(…, "month", indiaClock)` keys it by. */
+const IST_MONTH = Prisma.sql`to_char((e."date" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata', 'YYYY-MM')`;
+/** The first instant of a "YYYY-MM" month on India's clock. */
+const monthStart = (ym: string) => indiaClock.midnight(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1, 1);
+
+/**
+ * Each account's movement in each month of the window — added up by the database. Reading every line
+ * of the year into the app to add them up here took seconds in a large workspace, with the server's one
+ * thread busy throughout (the large-workspace load test, 23 Oct 2026).
+ */
 async function incomeExpenseLines(from: Date, to: Date, basis: Basis): Promise<Line[]> {
   if (basis === "cash") {
-    const rows = await db.journalLine.findMany({
-      where: {
-        account: { systemKey: { in: CASH_ACCOUNTS } },
-        entry: { date: { gte: from, lte: to }, source: { in: [...CASH_SOURCES] } },
-      },
-      select: { debit: true, credit: true, account: { select: { name: true } }, entry: { select: { date: true } } },
-    });
-
-    // One journal line is either a receipt or a payment, never both, so each becomes a single
-    // row on the side it belongs to.
-    return rows.map((r) => {
-      const inAmt = money(r.debit);
-      const outAmt = money(r.credit);
-      return {
-        amount: inAmt > 0 ? inAmt : outAmt,
-        type: inAmt > 0 ? "INCOME" : "EXPENSE",
-        accountName: r.account.name,
-        at: r.entry.date,
-      };
-    });
+    // One journal line is either a receipt or a payment, never both, so each counts on the side it
+    // belongs to: its debit as money in, else its credit as money out.
+    const rows = await db.$queryRaw<{ name: string; ym: string; income: Prisma.Decimal | null; expense: Prisma.Decimal | null }[]>`
+      SELECT a."name", ${IST_MONTH} AS ym,
+             SUM(CASE WHEN l."debit" > 0 THEN l."debit" ELSE 0 END) AS income,
+             SUM(CASE WHEN l."debit" > 0 THEN 0 ELSE l."credit" END) AS expense
+      FROM "journal_lines" l
+      JOIN "journal_entries" e ON e."id" = l."entryId"
+      JOIN "ledger_accounts" a ON a."id" = l."accountId"
+      WHERE a."systemKey" IN (${Prisma.join(CASH_ACCOUNTS)})
+        AND e."source"::text IN (${Prisma.join([...CASH_SOURCES])})
+        AND e."date" >= ${from} AND e."date" <= ${to}
+      GROUP BY a."name", ym`;
+    return rows.flatMap((r) => [
+      { amount: money(r.income), type: "INCOME", accountName: r.name, at: monthStart(r.ym) },
+      { amount: money(r.expense), type: "EXPENSE", accountName: r.name, at: monthStart(r.ym) },
+    ]);
   }
 
-  const rows = await db.journalLine.findMany({
-    where: {
-      account: { type: { in: ["INCOME", "EXPENSE"] } },
-      entry: { date: { gte: from, lte: to } },
-    },
-    select: {
-      debit: true,
-      credit: true,
-      account: { select: { type: true, name: true } },
-      entry: { select: { date: true } },
-    },
-  });
+  const rows = await db.$queryRaw<{ type: string; name: string; ym: string; debit: Prisma.Decimal | null; credit: Prisma.Decimal | null }[]>`
+    SELECT a."type"::text AS type, a."name", ${IST_MONTH} AS ym, SUM(l."debit") AS debit, SUM(l."credit") AS credit
+    FROM "journal_lines" l
+    JOIN "journal_entries" e ON e."id" = l."entryId"
+    JOIN "ledger_accounts" a ON a."id" = l."accountId"
+    WHERE a."type"::text IN ('INCOME', 'EXPENSE') AND e."date" >= ${from} AND e."date" <= ${to}
+    GROUP BY a."type", a."name", ym`;
 
   return rows.map((r) => ({
     // Income is a credit balance and expense a debit one, so each is netted in its own
     // direction. Taking the absolute value instead would turn a credit note into extra revenue.
-    amount:
-      r.account.type === "INCOME" ? money(r.credit) - money(r.debit) : money(r.debit) - money(r.credit),
-    type: r.account.type,
-    accountName: r.account.name,
-    at: r.entry.date,
+    amount: r.type === "INCOME" ? money(r.credit) - money(r.debit) : money(r.debit) - money(r.credit),
+    type: r.type,
+    accountName: r.name,
+    at: monthStart(r.ym),
   }));
 }
 export type IncomeExpense = {
@@ -220,16 +222,19 @@ export async function cashFlow(from: Date, to: Date): Promise<CashFlow> {
     },
   };
 
+  // The window's movement month by month, added up by the database (as `incomeExpenseLines`).
   const [before, during] = await Promise.all([
     db.journalLine.aggregate({
       where: { ...cashAccounts, entry: { date: { lt: from } } },
       _sum: { debit: true, credit: true },
     }),
-    db.journalLine.findMany({
-      where: { ...cashAccounts, entry: { date: { gte: from, lte: to } } },
-      select: { debit: true, credit: true, entry: { select: { date: true } } },
-      orderBy: { entry: { date: "asc" } },
-    }),
+    db.$queryRaw<{ ym: string; debit: Prisma.Decimal | null; credit: Prisma.Decimal | null }[]>`
+      SELECT ${IST_MONTH} AS ym, SUM(l."debit") AS debit, SUM(l."credit") AS credit
+      FROM "journal_lines" l
+      JOIN "journal_entries" e ON e."id" = l."entryId"
+      JOIN "ledger_accounts" a ON a."id" = l."accountId"
+      WHERE a."systemKey" IN (${Prisma.join(CASH_ACCOUNTS)}) AND e."date" >= ${from} AND e."date" <= ${to}
+      GROUP BY ym`,
   ]);
 
   // Cash is an asset: debits increase it, credits reduce it.
@@ -243,12 +248,12 @@ export async function cashFlow(from: Date, to: Date): Promise<CashFlow> {
 
   let incoming = 0;
   let outgoing = 0;
-  for (const line of during) {
-    const inAmt = money(line.debit);
-    const outAmt = money(line.credit);
+  for (const month of during) {
+    const inAmt = money(month.debit);
+    const outAmt = money(month.credit);
     incoming += inAmt;
     outgoing += outAmt;
-    const slot = months.get(bucketOf(line.entry.date, "month", indiaClock).key);
+    const slot = months.get(bucketOf(monthStart(month.ym), "month", indiaClock).key);
     if (slot) slot.delta += inAmt - outAmt;
   }
 

@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { can } from "@/lib/authz/resolve";
 import { tenantKey } from "@/lib/tenancy/cache";
 import { maintenanceState, type MaintenanceRow, type MaintenanceState } from "@/lib/maintenance-state";
+import { shared } from "@/lib/cluster/hub";
 
 export * from "@/lib/maintenance-state";
 
@@ -75,10 +76,10 @@ export async function currentMaintenance(now = new Date()): Promise<MaintenanceS
   return maintenanceState(await maintenanceRow(), now);
 }
 
-export function forgetMaintenanceCache() {
+export const forgetMaintenanceCache = shared("forgetMaintenanceCache", (): void => {
   cached.clear();
   bypassCache.clear();
-}
+});
 
 /** Who keeps using the app while it is down: whoever may change organisation settings. */
 export async function mayBypassMaintenance(userId: string): Promise<boolean> {

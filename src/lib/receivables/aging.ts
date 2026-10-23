@@ -188,7 +188,8 @@ export function summariseAging(documents: AgedDocument[], columns: number): { ro
 }
 
 /** The report's settings, as the address carries them. */
-export type AgingParams = { asOf?: string; from?: string; to?: string; by?: string; iv?: string; show?: string; q?: string; party?: string; col?: string };
+/** `docs`: the documents behind a figure are wanted — the details view and the export; the summary leaves them out. */
+export type AgingParams = { asOf?: string; from?: string; to?: string; by?: string; iv?: string; show?: string; q?: string; party?: string; col?: string; docs?: string };
 
 export type AgingSettings = {
   asOf: string;
@@ -202,6 +203,11 @@ export type AgingSettings = {
   /** The details view's: one party (its companySeq), one column. */
   party: number | null;
   column: number | null;
+  /**
+   * Whether the documents behind the figures come with the report. The summary draws rows only, and in a
+   * large workspace every open invoice is thousands of rows to send for nothing (the load test, 23 Oct 2026).
+   */
+  documents: boolean;
 };
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -228,6 +234,7 @@ export function readAgingParams(params: AgingParams | undefined, today: string):
     search: params?.q?.trim() || null,
     party,
     column,
+    documents: !!params?.docs,
   };
 }
 
@@ -254,7 +261,7 @@ export async function loadAging(side: AgingSide, settings: AgingSettings, scope:
     aged = aged.filter((d) => d.party.toLowerCase().includes(s));
   }
   const { rows, totals } = summariseAging(aged, columns.length);
-  const listed = aged.filter((d) => (settings.party === null || d.companySeq === settings.party) && (settings.column === null || d.column === settings.column));
+  const listed = settings.documents ? aged.filter((d) => (settings.party === null || d.companySeq === settings.party) && (settings.column === null || d.column === settings.column)) : [];
   return { side, settings, columns, rows, totals, documents: listed };
 }
 

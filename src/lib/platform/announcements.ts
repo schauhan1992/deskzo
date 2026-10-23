@@ -5,6 +5,7 @@ import { controlConfigured, controlDb } from "@/lib/platform/control-db";
 import { LIVE_STATUSES } from "@/lib/platform/entitlements";
 import { ConsoleRefused } from "@/lib/platform/refused";
 import type { Tenant } from "@/lib/tenancy/state";
+import { shared } from "@/lib/cluster/hub";
 
 /**
  * Platform announcements: a banner the console puts across the top of workspaces' pages — to all of
@@ -515,6 +516,6 @@ export async function activeAnnouncementsFor(
 }
 
 /** Forget this process's copy — after every change in the console, so its own pages show it at once. */
-export function forgetAnnouncements(): void {
+export const forgetAnnouncements = shared("forgetAnnouncements", (): void => {
   cache = null;
-}
+});

@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { DEFAULT_SECURITY_POLICY, type SecurityPolicyShape } from "@/lib/security/policy";
 import { tenantKey } from "@/lib/tenancy/cache";
 import { notMigratedYet } from "@/lib/not-migrated";
+import { shared } from "@/lib/cluster/hub";
 
 export const SECURITY_POLICY_ID = "global";
 
@@ -58,6 +59,6 @@ export async function getSecurityPolicy(): Promise<SecurityPolicyShape> {
 }
 
 /** Everything, every workspace — dropping a cache only costs a re-read. */
-export function invalidateSecurityPolicyCache() {
+export const invalidateSecurityPolicyCache = shared("invalidateSecurityPolicyCache", (): void => {
   cache.clear();
-}
+});

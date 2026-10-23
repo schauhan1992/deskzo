@@ -22,6 +22,8 @@ import { officeHours } from "@/lib/hr/office-hours";
 import { dayTiming } from "@/lib/hr/office-hours-rules";
 import { notMigratedYet } from "@/lib/not-migrated";
 import { workspaceClock } from "@/lib/time/workspace";
+import { fiscalYearOf } from "@/lib/finance/dashboard";
+import type { SummaryPart } from "@/actions/dashboard";
 import type { Clock } from "@/lib/time/zone";
 import {
   DEPARTMENT_FILTER,
@@ -95,8 +97,8 @@ const SOURCE_CARD = {
 const dashboardActions = () => import("@/actions/dashboard");
 const offeredCards = (ctx: DashboardContext) =>
   once(ctx, "cards", async () => new Set((await (await dashboardActions()).getDashboardWidgetOptions()).map((w) => w.key)));
-/** The older cards' figures, read once a request whatever how many widgets show them. */
-const summaryOf = (ctx: DashboardContext) => once(ctx, "summary", async () => (await dashboardActions()).getDashboardSummary());
+/** One part of the older cards' figures, worked out once a request however many widgets show it — and only the parts shown. */
+const summaryOf = (ctx: DashboardContext, part: SummaryPart) => once(ctx, `summary:${part}`, async () => (await dashboardActions()).getDashboardSummary([part]));
 
 /** A figure the summary withheld: this person may not see it after all. */
 class NotOffered extends Error {}
@@ -275,7 +277,7 @@ async function periodOf(ctx: DashboardContext, spec: ChartSpec): Promise<string 
   switch (`${spec.source}.${spec.metric}`) {
     case "finance.incomeExpense":
     case "finance.topExpenses":
-      return (await summaryOf(ctx)).finance?.fiscalLabel ?? null;
+      return fiscalYearOf(new Date()).label;
     case "finance.cashFlow":
       return "Last 12 months";
     case "renewals.due":
@@ -458,7 +460,7 @@ async function read(ctx: DashboardContext, spec: ChartSpec, w: Window): Promise<
 
     // ─── What the older cards showed (getDashboardSummary), as widgets ───
     case "customers.funnel": {
-      const s = await summaryOf(ctx);
+      const s = await summaryOf(ctx, "companies");
       const c = offered(s.companies);
       return {
         kind: "category",
@@ -471,15 +473,15 @@ async function read(ctx: DashboardContext, spec: ChartSpec, w: Window): Promise<
       };
     }
     case "customers.companies": {
-      const c = offered((await summaryOf(ctx)).companies);
+      const c = offered((await summaryOf(ctx, "companies")).companies);
       return { kind: "number", value: c.total.toLocaleString("en-IN"), delta: `${c.prospects} prospects · ${c.leads} leads · ${c.awaitingOrder} awaiting order`, tone: "flat" };
     }
     case "customers.customers": {
-      const c = offered((await summaryOf(ctx)).customers);
+      const c = offered((await summaryOf(ctx, "companies")).customers);
       return { kind: "number", value: c.total.toLocaleString("en-IN"), delta: "Have bought at least once", tone: "flat" };
     }
     case "quotations.pending": {
-      const q = offered((await summaryOf(ctx)).quotations);
+      const q = offered((await summaryOf(ctx, "quotations")).quotations);
       return {
         kind: "number",
         value: q.pending.toLocaleString("en-IN"),
@@ -488,30 +490,30 @@ async function read(ctx: DashboardContext, spec: ChartSpec, w: Window): Promise<
       };
     }
     case "orders.action": {
-      const o = offered((await summaryOf(ctx)).orders);
+      const o = offered((await summaryOf(ctx, "orders")).orders);
       return { kind: "number", value: o.awaitingApproval.toLocaleString("en-IN"), delta: `${o.awaitingSourcing} approved, awaiting sourcing`, tone: o.awaitingApproval > 0 ? "warn" : "flat" };
     }
     case "orders.stages": {
-      const o = offered((await summaryOf(ctx)).orders);
+      const o = offered((await summaryOf(ctx, "orders")).orders);
       return { kind: "category", items: [{ label: "Awaiting approval", value: o.awaitingApproval }, { label: "Awaiting sourcing", value: o.awaitingSourcing }] };
     }
     case "targets.monthly": {
-      const t = (await summaryOf(ctx)).salesTarget;
+      const t = (await summaryOf(ctx, "salesTarget")).salesTarget;
       // No target this month is said, not left blank: a widget that shows nothing reads as broken.
       if (!t) return { kind: "number", value: "—", delta: "No target set for this month", tone: "flat" };
       const tone: Tone = t.tone === "green" ? "up" : t.tone === "amber" ? "warn" : t.tone === "red" ? "down" : "flat";
       return { kind: "number", value: shortRupees(t.achieved), exact: formatCurrency(t.achieved), delta: `${t.percent}% of ${shortRupees(t.target)} · ${t.status}`, tone };
     }
     case "payments.outstanding": {
-      const p = offered((await summaryOf(ctx)).payments);
+      const p = offered((await summaryOf(ctx, "payments")).payments);
       return { kind: "number", value: shortRupees(p.outstandingBalance), exact: formatCurrency(p.outstandingBalance), delta: `${p.unpaidCount} unpaid · ${p.partialCount} partially paid`, tone: "flat" };
     }
     case "payments.status": {
-      const p = offered((await summaryOf(ctx)).payments);
+      const p = offered((await summaryOf(ctx, "payments")).payments);
       return { kind: "category", items: [{ label: "Unpaid", value: p.unpaidCount }, { label: "Partially paid", value: p.partialCount }] };
     }
     case "finance.incomeExpense": {
-      const months = offered((await summaryOf(ctx)).finance).incomeExpense.months;
+      const months = offered((await summaryOf(ctx, "finance")).finance).incomeExpense.months;
       return {
         kind: "series",
         grain: "month",
@@ -526,16 +528,16 @@ async function read(ctx: DashboardContext, spec: ChartSpec, w: Window): Promise<
       };
     }
     case "finance.cashFlow": {
-      const points = offered((await summaryOf(ctx)).finance).cashFlow.points;
+      const points = offered((await summaryOf(ctx, "finance")).finance).cashFlow.points;
       return { kind: "series", grain: "month", keys: points.map((p) => p.key), combine: "avg", stacked: false, money: true, series: [{ name: "Cash and bank", values: points.map((p) => p.balance) }] };
     }
     case "finance.topExpenses": {
-      const top = offered((await summaryOf(ctx)).finance).topExpenses;
+      const top = offered((await summaryOf(ctx, "finance")).finance).topExpenses;
       return { kind: "category", money: true, items: top.map((e) => ({ label: e.name, value: e.amount })) };
     }
     case "finance.receivables":
     case "finance.payables": {
-      const f = offered((await summaryOf(ctx)).finance);
+      const f = offered((await summaryOf(ctx, "finance")).finance);
       const o = spec.metric === "receivables" ? f.receivables : f.payables;
       return {
         kind: "category",
@@ -553,7 +555,7 @@ async function read(ctx: DashboardContext, spec: ChartSpec, w: Window): Promise<
       };
     }
     case "renewals.due": {
-      const r = offered((await summaryOf(ctx)).renewals);
+      const r = offered((await summaryOf(ctx, "renewals")).renewals);
       return {
         kind: "category",
         headline: { value: r.next30.toLocaleString("en-IN"), delta: r.expired > 0 ? `${r.expired} already expired` : "None expired", tone: r.expired > 0 ? "warn" : "flat" },
@@ -564,7 +566,7 @@ async function read(ctx: DashboardContext, spec: ChartSpec, w: Window): Promise<
       };
     }
     case "renewals.upcoming": {
-      const r = offered((await summaryOf(ctx)).renewals);
+      const r = offered((await summaryOf(ctx, "renewals")).renewals);
       return {
         kind: "rows",
         columns: [{ label: "Company" }, { label: "Item" }, { label: "Order" }, { label: "Ends", align: "right" }],
@@ -574,7 +576,7 @@ async function read(ctx: DashboardContext, spec: ChartSpec, w: Window): Promise<
       };
     }
     case "support.open": {
-      const t = offered((await summaryOf(ctx)).tickets);
+      const t = offered((await summaryOf(ctx, "tickets")).tickets);
       return {
         kind: "category",
         headline: { value: t.open.toLocaleString("en-IN"), delta: t.overdue > 0 ? `${t.overdue} overdue` : "None overdue", tone: t.overdue > 0 ? "down" : "flat" },
@@ -585,7 +587,7 @@ async function read(ctx: DashboardContext, spec: ChartSpec, w: Window): Promise<
       };
     }
     case "projects.attention": {
-      const p = offered((await summaryOf(ctx)).projects);
+      const p = offered((await summaryOf(ctx, "projects")).projects);
       return {
         kind: "category",
         headline: { value: p.needingAttention.toLocaleString("en-IN"), delta: `of ${p.active} live · yours`, tone: p.needingAttention > 0 ? "warn" : "flat" },
@@ -596,7 +598,7 @@ async function read(ctx: DashboardContext, spec: ChartSpec, w: Window): Promise<
       };
     }
     case "projects.mine": {
-      const p = offered((await summaryOf(ctx)).projects);
+      const p = offered((await summaryOf(ctx, "projects")).projects);
       return {
         kind: "rows",
         columns: [{ label: "Project" }, { label: "Stage" }, { label: "Health" }, { label: "Tasks", align: "right" }],
@@ -615,7 +617,7 @@ async function read(ctx: DashboardContext, spec: ChartSpec, w: Window): Promise<
       };
     }
     case "expenses.awaiting": {
-      const e = offered((await summaryOf(ctx)).expenses);
+      const e = offered((await summaryOf(ctx, "expenses")).expenses);
       return {
         kind: "number",
         value: e.awaitingMe.toLocaleString("en-IN"),
@@ -624,11 +626,11 @@ async function read(ctx: DashboardContext, spec: ChartSpec, w: Window): Promise<
       };
     }
     case "vendors.status": {
-      const v = offered((await summaryOf(ctx)).vendors);
+      const v = offered((await summaryOf(ctx, "vendors")).vendors);
       return { kind: "category", items: [{ label: "Onboarding", value: v.onboarding }, { label: "Active", value: v.active }, { label: "Inactive", value: v.inactive }] };
     }
     case "vendors.onboarding": {
-      const v = offered((await summaryOf(ctx)).vendors);
+      const v = offered((await summaryOf(ctx, "vendors")).vendors);
       return { kind: "number", value: v.onboarding.toLocaleString("en-IN"), delta: `${v.active} active · ${v.inactive} inactive`, tone: "flat" };
     }
 

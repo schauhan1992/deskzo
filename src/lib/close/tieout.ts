@@ -1,9 +1,8 @@
-import type { JournalSource, Prisma } from "@prisma/client";
+import { Prisma, type JournalSource } from "@prisma/client";
 import { db } from "@/lib/db";
 import { SYSTEM_ACCOUNTS } from "@/lib/ledger/chart";
 import { bookingRate, takenFromPayment } from "@/lib/ledger/posting";
 import { DOCUMENT_SOURCES } from "@/lib/ledger/journal";
-import { sourceIn } from "@/lib/ledger/posting";
 import { docTypeIn } from "@/lib/trade-documents";
 import { indiaClock } from "@/lib/time/zone";
 import { dayKey, monthEnd, monthLabel, monthWindow } from "@/lib/close/months";
@@ -299,40 +298,52 @@ export async function subledgerAt(
       id: true, docNumber: true, docType: true, status: true, companyId: true, currency: true, exchangeRate: true, total: true,
       origin: true, paidBefore: true, issueDate: true, dueDate: true,
       company: { select: { name: true, companySeq: true } },
-      payments: { where: { payment: { paidOn: { lt: to } } }, select: { amount: true } },
-      creditsReceived: { where: { createdAt: { lt: to }, creditNote: { issueDate: { lt: to }, status: { not: "DRAFT" } } }, select: { amount: true } },
-      creditsApplied: { where: { createdAt: { lt: to }, invoice: { issueDate: { lt: to } } }, select: { amount: true } },
-      // A bill's: vendor credit notes set against it by the month end.
-      vendorCredits: { where: { createdAt: { lt: to } }, select: { amount: true } },
     },
   });
 
+  /**
+   * What was set against each document by `to`, and each one's own postings standing then — added up by
+   * the database, one grouped query a kind. They were read row by row under every document ever issued,
+   * which in a large workspace (79,000 documents) cost seconds of the server's one thread for every
+   * aging, balance summary and tie-out (the large-workspace load test, 23 Oct 2026). The same rules as
+   * they had, each said in its query: a payment by its date, a credit note issued and applied by then,
+   * a posting not reversed by then.
+   */
+  const sums = async (rows: Promise<{ id: string; amount: Prisma.Decimal | null }[]>) => new Map((await rows).map((r) => [r.id, Number(r.amount ?? 0)]));
+  const [allocated, creditsReceived, creditsApplied, vendorCredits, postingRows] = await Promise.all([
+    sums(db.$queryRaw`
+      SELECT pa."documentId" AS id, SUM(pa."amount") AS amount
+      FROM "payment_allocations" pa JOIN "payments" p ON p."id" = pa."paymentId"
+      WHERE pa."documentId" IS NOT NULL AND p."paidOn" < ${to}
+      GROUP BY pa."documentId"`),
+    sums(db.$queryRaw`
+      SELECT a."invoiceId" AS id, SUM(a."amount") AS amount
+      FROM "credit_note_applications" a JOIN "trade_documents" cn ON cn."id" = a."creditNoteId"
+      WHERE a."createdAt" < ${to} AND cn."issueDate" < ${to} AND cn."status"::text <> 'DRAFT'
+      GROUP BY a."invoiceId"`),
+    sums(db.$queryRaw`
+      SELECT a."creditNoteId" AS id, SUM(a."amount") AS amount
+      FROM "credit_note_applications" a JOIN "trade_documents" inv ON inv."id" = a."invoiceId"
+      WHERE a."createdAt" < ${to} AND inv."issueDate" < ${to}
+      GROUP BY a."creditNoteId"`),
+    // A bill's: vendor credit notes set against it by the month end.
+    sums(db.$queryRaw`
+      SELECT a."billId" AS id, SUM(a."amount") AS amount
+      FROM "vendor_credit_applications" a
+      WHERE a."createdAt" < ${to}
+      GROUP BY a."billId"`),
+    account
+      ? db.$queryRaw<{ id: string; debit: Prisma.Decimal | null; credit: Prisma.Decimal | null; numbers: string[] }[]>`
+          SELECT e."documentId" AS id, SUM(l."debit") AS debit, SUM(l."credit") AS credit, array_agg(DISTINCT e."entryNumber") AS numbers
+          FROM "journal_lines" l JOIN "journal_entries" e ON e."id" = l."entryId"
+          WHERE l."accountId" = ${account.id} AND e."documentId" IS NOT NULL AND e."reversesId" IS NULL AND e."date" < ${to}
+            AND e."source"::text IN (${Prisma.join([...DOCUMENT_SOURCES])})
+            AND NOT EXISTS (SELECT 1 FROM "journal_entries" r WHERE r."reversesId" = e."id" AND r."date" < ${to})
+          GROUP BY e."documentId"`
+      : Promise.resolve([]),
+  ]);
   // Every document's own postings dated by the month end, and whether each had been reversed by then.
-  const postings = new Map<string, { posted: number; entryNumbers: string[] }>();
-  if (account) {
-    const lines = await db.journalLine.findMany({
-      where: {
-        accountId: account.id,
-        entry: { source: sourceIn(DOCUMENT_SOURCES), documentId: { not: null }, reversesId: null, date: { lt: to } },
-      },
-      select: {
-        debit: true, credit: true,
-        entry: { select: { id: true, entryNumber: true, documentId: true, reversedBy: { select: { date: true } } } },
-      },
-    });
-    const counted = new Set<string>();
-    for (const l of lines) {
-      const reversedBy = l.entry.reversedBy;
-      if (reversedBy && reversedBy.date.getTime() < to.getTime()) continue;
-      const row = postings.get(l.entry.documentId!) ?? { posted: 0, entryNumbers: [] };
-      row.posted = round2(row.posted + owed(l));
-      if (!counted.has(l.entry.id)) {
-        counted.add(l.entry.id);
-        row.entryNumbers.push(l.entry.entryNumber);
-      }
-      postings.set(l.entry.documentId!, row);
-    }
-  }
+  const postings = new Map(postingRows.map((p) => [p.id, { posted: round2(owed({ debit: p.debit ?? new Prisma.Decimal(0), credit: p.credit ?? new Prisma.Decimal(0) })), entryNumbers: p.numbers }]));
 
   const sumOf = (rows: { amount: Prisma.Decimal }[]) => rows.reduce((t, r) => t + Number(r.amount), 0);
   const documents: TieOutDocument[] = [];
@@ -355,9 +366,9 @@ export async function subledgerAt(
       rate: bookingRate(d),
       // What came across: its opening entry posted what was left after what it had settled there.
       total: imported ? Number(d.total) - Number(d.paidBefore) : Number(d.total),
-      allocated: round2(sumOf(d.payments)),
-      credited: round2(sumOf(d.creditsReceived) + sumOf(d.vendorCredits)),
-      applied: round2(sumOf(d.creditsApplied)),
+      allocated: round2(allocated.get(d.id) ?? 0),
+      credited: round2((creditsReceived.get(d.id) ?? 0) + (vendorCredits.get(d.id) ?? 0)),
+      applied: round2(creditsApplied.get(d.id) ?? 0),
       posted: posting?.posted ?? 0,
       hasEntry: !!posting,
       entryNumbers: posting?.entryNumbers ?? [],
@@ -424,14 +435,21 @@ export async function subledgerAt(
   }
   const live = new Set(documents.map((d) => d.id));
 
-  const paymentRows = await db.payment.findMany({
-    where: { AND: [{ direction: side === "AR" ? "RECEIVED" : "PAID", paidOn: { lt: to } }, scope.payments ?? {}] },
-    select: {
-      id: true, paymentSeq: true, companyId: true, currency: true, exchangeRate: true, amount: true,
-      company: { select: { companySeq: true, name: true } },
-      allocations: { where: { documentId: { not: null } }, select: { documentId: true, amount: true, paymentAmount: true } },
-    },
-  });
+  // The payments, and what each set against documents — read flat, as two lists, rather than every
+  // payment's allocations nested under it (the large-workspace load test, 23 Oct 2026).
+  const paymentWhere: Prisma.PaymentWhereInput = { AND: [{ direction: side === "AR" ? "RECEIVED" : "PAID", paidOn: { lt: to } }, scope.payments ?? {}] };
+  const [paymentRows, allocationRows] = await Promise.all([
+    db.payment.findMany({
+      where: paymentWhere,
+      select: { id: true, paymentSeq: true, companyId: true, currency: true, exchangeRate: true, amount: true, company: { select: { companySeq: true, name: true } } },
+    }),
+    db.paymentAllocation.findMany({
+      where: { documentId: { not: null }, payment: paymentWhere },
+      select: { paymentId: true, documentId: true, amount: true, paymentAmount: true },
+    }),
+  ]);
+  const allocationsOf = new Map<string, typeof allocationRows>();
+  for (const a of allocationRows) allocationsOf.set(a.paymentId, [...(allocationsOf.get(a.paymentId) ?? []), a]);
   const payments: TieOutPayment[] = paymentRows.map((p) => ({
     id: p.id,
     label: `Payment #${p.paymentSeq}`,
@@ -444,7 +462,7 @@ export async function subledgerAt(
     amount: Number(p.amount),
     // What each allocation took out of the payment, in its currency: rupees on account set against a USD
     // invoice settle dollars but spend rupees (`takenFromPayment`).
-    applied: round2(p.allocations.filter((a) => a.documentId && live.has(a.documentId)).reduce((t, a) => t + takenFromPayment(a), 0)),
+    applied: round2((allocationsOf.get(p.id) ?? []).filter((a) => a.documentId && live.has(a.documentId)).reduce((t, a) => t + takenFromPayment(a), 0)),
   }));
   return { accountId: account?.id ?? null, documents, payments };
 }

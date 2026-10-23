@@ -2,6 +2,7 @@ import { redactSecrets } from "@/lib/console-shared/redact";
 import { controlConfigured, controlDb } from "@/lib/platform/control-db";
 import { getSetting, setSetting, type PlainKey } from "@/lib/platform/settings";
 import { PARTNER_SETTING_RANGES, PartnerRefused, type PartnerTwoFactorMode } from "@/lib/partners/types";
+import { shared } from "@/lib/cluster/hub";
 
 /**
  * The partner programme's settings, typed — platform settings (PLAIN_KEYS in
@@ -234,6 +235,6 @@ export async function referralCookieDays(now: number = Date.now()): Promise<numb
 }
 
 /** Forget this process's copy — after a save in the console, and between a check suite's cases. */
-export function forgetPartnerSettings(): void {
+export const forgetPartnerSettings = shared("forgetPartnerSettings", (): void => {
   referralCookieCache = null;
-}
+});

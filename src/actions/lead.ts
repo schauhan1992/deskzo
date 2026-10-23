@@ -43,7 +43,9 @@ import { chooseOwner } from "@/lib/leads/assign";
 import { mayChangeLeadOwner, mayLeaveUnassigned, reassignRights } from "@/lib/authz/reassign";
 import { refreshLeadScore } from "@/lib/leads/score-store";
 import { leadQuoteWhere, type QuoteFilter } from "@/lib/leads/quotes";
-import { seesLeadQuotes } from "@/lib/leads/quote-status";
+import { leadQuotes, seesLeadQuotes } from "@/lib/leads/quote-status";
+import { leadBoardExtras } from "@/lib/leads/board-extras";
+import { BOARD_COLUMN_SIZE } from "@/lib/leads/board";
 import { leadPath } from "@/lib/record-links";
 import { addressLine, detailLeadMasker, leadRedactor, leadSecrets, listLeadMasker, maskLead, maskLeads, maskLeadTitle } from "@/lib/leads/masking";
 import { customFieldKey } from "@/lib/authz/field-policy";
@@ -305,7 +307,7 @@ export async function removeLeadRequirement(id: string): Promise<ActionResult<nu
   return { ok: true, data: null };
 }
 
-type LeadListParams = {
+export type LeadListParams = {
   status?: LeadStatus;
   search?: string;
   ownerUserId?: string;
@@ -339,7 +341,7 @@ function leadListOrder(params?: LeadListParams): Prisma.LeadOrderByWithRelationI
 }
 
 /**
- * Shared by the board (which needs every lead), the paginated list view and the CSV export.
+ * Shared by the board (a page of cards a column), the paginated list view and the CSV export.
  *
  * ## Which key the account scope hangs off
  *
@@ -437,9 +439,71 @@ export async function listLeads(params?: LeadListParams) {
   return maskLeads(masker, rows);
 }
 
+/** The board's columns: the shown pipeline's stages in use — the first in use when none is named. */
+function boardColumns(pipeline: Awaited<ReturnType<typeof leadStages>>, key: string | undefined) {
+  const inUse = pipeline.pipelines.filter((p) => !p.archived);
+  const shown = inUse.find((p) => p.key === key) ?? inUse[0] ?? pipeline.pipelines[0]!;
+  return { shown, stages: pipeline.stages.filter((s) => !s.archived && s.pipelineId === shown.id) };
+}
+
+/** Board cards as the client takes them: the stage each sits in, the value as text, and each card's extras and quotation. */
+async function boardCards<T extends { id: string; status: LeadStatus; ownerUserId: string | null; estimatedValue: Prisma.Decimal | null }>(userId: string, rows: T[], sales: boolean) {
+  const [stageOf, extras, quotes] = await Promise.all([
+    stagesOfLeads(rows),
+    leadBoardExtras(rows.map((l) => ({ id: l.id, ownerUserId: l.ownerUserId }))),
+    sales && (await seesLeadQuotes(userId)) ? leadQuotes(userId, rows.map((l) => l.id)) : Promise.resolve(null),
+  ]);
+  const cards = rows.map((lead) => ({ ...lead, estimatedValue: lead.estimatedValue?.toString() ?? null, stage: stageOf.get(lead.id)! }));
+  return { cards, extras, quotes };
+}
+
 /**
- * The list view's page of leads. The board view still loads every lead — a kanban with a hidden
- * page 2 would misrepresent the pipeline, which is the one thing it exists to show.
+ * The board: each column's first cards, and how many it holds. It used to load every lead — a kanban with
+ * a hidden page 2 would misrepresent the pipeline — until a workspace of 53,000 leads couldn't be drawn,
+ * and naming them all in one query failed outright (the large-workspace load test, 23 Oct 2026). The
+ * counts still tell the whole pipeline; "Show more" brings a column's next cards (`listLeadBoardColumn`).
+ */
+export async function listLeadBoard(params: LeadListParams) {
+  const user = await requireModuleUser("leads");
+  const [where, pipeline, masker] = await Promise.all([leadListWhere(user.id, params), leadStages(), listLeadMasker(user.id)]);
+  const { shown, stages } = boardColumns(pipeline, params.pipeline);
+  const [total, columns] = await Promise.all([
+    db.lead.count({ where }),
+    Promise.all(
+      stages.map(async (stage) => {
+        const inColumn = { AND: [where, inStageWhere(pipeline, stage)] };
+        const [rows, count] = await Promise.all([
+          db.lead.findMany({ where: inColumn, orderBy: leadListOrder(params), include: leadListInclude, take: BOARD_COLUMN_SIZE }),
+          db.lead.count({ where: inColumn }),
+        ]);
+        return { stageId: stage.id, rows, count };
+      }),
+    ),
+  ]);
+  const rows = await maskLeads(masker, columns.flatMap((c) => c.rows));
+  return { ...(await boardCards(user.id, rows, shown.sales)), counts: Object.fromEntries(columns.map((c) => [c.stageId, c.count])), total };
+}
+
+/** A column's next cards on the board, after the `skip` it already shows — the same filters, the same order. */
+export async function listLeadBoardColumn(params: LeadListParams, stageId: string, skip: number) {
+  const user = await requireModuleUser("leads");
+  const [where, pipeline, masker] = await Promise.all([leadListWhere(user.id, params), leadStages(), listLeadMasker(user.id)]);
+  const { shown, stages } = boardColumns(pipeline, params.pipeline);
+  const stage = stages.find((s) => s.id === stageId);
+  const from = Number.isInteger(skip) && skip >= 0 ? skip : 0;
+  if (!stage) return { cards: [], extras: {}, quotes: null };
+  const rows = await db.lead.findMany({
+    where: { AND: [where, inStageWhere(pipeline, stage)] },
+    orderBy: leadListOrder(params),
+    include: leadListInclude,
+    skip: from,
+    take: BOARD_COLUMN_SIZE,
+  });
+  return boardCards(user.id, await maskLeads(masker, rows), shown.sales);
+}
+
+/**
+ * The list view's page of leads.
  *
  * Its Email and Phone columns are the lead contact's, as on the lead's own page: how to reach somebody
  * is `contacts.view`'s to give, so without it they aren't read at all (`contactDetails` is false and
