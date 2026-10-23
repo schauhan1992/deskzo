@@ -5,20 +5,25 @@ declare const require: (id: "node:fs") => { existsSync: (file: string) => boolea
 declare const __dirname: string;
 
 /**
- * The Deskzo app (owner, 18 Oct 2026) — Android first, calling first.
+ * The Deskzo app (owner, 18 Oct 2026) — Android first, calling first; and the iPhone (owner, 22 Oct 2026), from the
+ * same code, with what iOS allows instead of the call log (README.md, "On an iPhone").
  *
  * DESKZO_APP_DEV=1 makes a development build: it may talk plain HTTP, to a Deskzo running on this
- * computer (a `*.localhost` workspace, reached from the emulator at 10.0.2.2). A release build only ever
- * talks HTTPS to a real workspace.
+ * computer (a `*.localhost` workspace, reached from the emulator at 10.0.2.2, or from the iOS Simulator at
+ * 127.0.0.1). A release build only ever talks HTTPS to a real workspace.
  */
 const dev = process.env.DESKZO_APP_DEV === "1";
 
 /**
- * Notifications with the app closed (owner, 22 Oct 2026) come through Firebase Cloud Messaging: Deskzo's own Firebase
- * project's google-services.json, kept beside this file (it holds only public identifiers). Without it the app still
- * builds and works — it just asks nothing of Firebase, and gets no notifications while closed.
+ * Notifications with the app closed (owner, 22 Oct 2026) come through Firebase Cloud Messaging on Android: Deskzo's own
+ * Firebase project's google-services.json, kept beside this file (it holds only public identifiers). Without it the app
+ * still builds and works — it just asks nothing of Firebase, and gets no notifications while closed. An iPhone's come
+ * through Apple's own service (APNs), which needs no file here.
  */
 const firebase = require("node:fs").existsSync(`${__dirname}/google-services.json`);
+
+/** Shared with the caller ID extension (targets/call-directory), which reads the customers' numbers from it. */
+const APP_GROUP = "group.com.deskzo.app";
 
 /**
  * Over-the-air updates (owner, 23 Oct 2026): the app's own screens — its JavaScript — come from deskzo.com when a newer
@@ -35,6 +40,8 @@ const updatesOverHttp = updatesUrl.startsWith("http://");
 const config: ExpoConfig = {
   name: "Deskzo",
   slug: "deskzo",
+  // The Expo account the builds are made under (owner, 23 Oct 2026): EAS, for the iPhone's builds (eas.json).
+  owner: "digitrok",
   version: "0.4.1",
   orientation: "portrait",
   icon: "./assets/icon.png",
@@ -108,22 +115,88 @@ const config: ExpoConfig = {
     predictiveBackGestureEnabled: false,
     ...(firebase ? { googleServicesFile: "./google-services.json" } : {}),
   },
+  ios: {
+    bundleIdentifier: "com.deskzo.app",
+    buildNumber: "1",
+    // The minimum Expo SDK 58 supports; the caller ID extension follows it.
+    deploymentTarget: "16.4",
+    supportsTablet: true,
+    // The phone's light or dark appearance (src/components/ui.tsx). Android stays light.
+    userInterfaceStyle: "automatic",
+    // Opaque and edge to edge — the App Store refuses an icon with transparency (scripts/brand-assets.js).
+    icon: { light: "./assets/ios-icon.png", dark: "./assets/ios-icon-dark.png", tinted: "./assets/ios-icon-tinted.png" },
+    // Signing is EAS's (eas.json); a team is only needed to build with Xcode on a Mac.
+    appleTeamId: process.env.DESKZO_APPLE_TEAM_ID || undefined,
+    // HTTPS through the system's own TLS only: exempt from export compliance.
+    config: { usesNonExemptEncryption: false },
+    entitlements: {
+      // Pushes from Deskzo ("Ring my phone", chat, approvals) — Apple's sandbox for a development build.
+      "aps-environment": dev ? "development" : "production",
+      "com.apple.security.application-groups": [APP_GROUP],
+    },
+    infoPlist: {
+      // A release only ever talks HTTPS; a development build may reach this computer's Deskzo over plain HTTP.
+      NSAppTransportSecurity: { NSAllowsArbitraryLoads: false, NSAllowsLocalNetworking: dev },
+      // For the iPhone module (modules/deskzo-ios): where the caller ID list goes, and the extension iOS reloads.
+      DeskzoAppGroup: APP_GROUP,
+      DeskzoCallDirectory: "com.deskzo.app.CallDirectory",
+    },
+    // What the app's own code reads from the phone, and what leaves it (store/ios-privacy.md). The libraries' own
+    // manifests are merged in at pod install. Nothing is used for tracking.
+    privacyManifests: {
+      NSPrivacyTracking: false,
+      NSPrivacyAccessedAPITypes: [
+        // The app's own defaults: whether it has run since it was installed (modules/deskzo-ios).
+        { NSPrivacyAccessedAPIType: "NSPrivacyAccessedAPICategoryUserDefaults", NSPrivacyAccessedAPITypeReasons: ["CA92.1"] },
+        // React Native's own, as Expo's guide lists them.
+        { NSPrivacyAccessedAPIType: "NSPrivacyAccessedAPICategoryFileTimestamp", NSPrivacyAccessedAPITypeReasons: ["C617.1"] },
+        { NSPrivacyAccessedAPIType: "NSPrivacyAccessedAPICategorySystemBootTime", NSPrivacyAccessedAPITypeReasons: ["35F9.1"] },
+        { NSPrivacyAccessedAPIType: "NSPrivacyAccessedAPICategoryDiskSpace", NSPrivacyAccessedAPITypeReasons: ["E174.1", "85F4.1"] },
+      ],
+      NSPrivacyCollectedDataTypes: [
+        // Where the phone is when somebody clocks in or out, checks in or out of a visit, or signs in where their company requires it.
+        { NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypePreciseLocation", NSPrivacyCollectedDataTypeLinked: true, NSPrivacyCollectedDataTypeTracking: false, NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"] },
+        { NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeCoarseLocation", NSPrivacyCollectedDataTypeLinked: true, NSPrivacyCollectedDataTypeTracking: false, NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"] },
+        // Team chat's messages.
+        { NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeEmailsOrTextMessages", NSPrivacyCollectedDataTypeLinked: true, NSPrivacyCollectedDataTypeTracking: false, NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"] },
+        // The photos somebody picks or takes to send in chat, and a receipt's for an expense claim.
+        { NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypePhotosorVideos", NSPrivacyCollectedDataTypeLinked: true, NSPrivacyCollectedDataTypeTracking: false, NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"] },
+        // Expense claims made in the app: the amount and what it was for — never a card or bank details.
+        { NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeOtherFinancialInfo", NSPrivacyCollectedDataTypeLinked: true, NSPrivacyCollectedDataTypeTracking: false, NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"] },
+        // A call logged from the after-call sheet, its notes; leads, visits, meetings, tasks, leave, decisions; documents sent in chat.
+        { NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeOtherUserContent", NSPrivacyCollectedDataTypeLinked: true, NSPrivacyCollectedDataTypeTracking: false, NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"] },
+        // The phone's own sign-in, its model and the app's version — administrators see it in Security › Devices.
+        { NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeDeviceID", NSPrivacyCollectedDataTypeLinked: true, NSPrivacyCollectedDataTypeTracking: false, NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"] },
+        // That a screenshot was taken, where the company limits them — never what is in it.
+        { NSPrivacyCollectedDataType: "NSPrivacyCollectedDataTypeOtherUsageData", NSPrivacyCollectedDataTypeLinked: true, NSPrivacyCollectedDataTypeTracking: false, NSPrivacyCollectedDataTypePurposes: ["NSPrivacyCollectedDataTypePurposeAppFunctionality"] },
+      ],
+    },
+  },
   plugins: [
     "expo-router",
-    ["expo-camera", { recordAudioAndroid: false, barcodeScannerEnabled: true, cameraPermission: "Deskzo uses the camera to scan the code that pairs this phone, and to take photos you send in chat." }],
+    // iOS: the camera only — never the microphone (its default asks for both, and is applied after expo-image-picker's).
+    [
+      "expo-camera",
+      {
+        recordAudioAndroid: false,
+        barcodeScannerEnabled: true,
+        cameraPermission: "Deskzo uses the camera to scan the code that pairs this phone, and to take photos you send in chat, add to an expense claim or add on a Deskzo page.",
+        microphonePermission: false,
+      },
+    ],
     // Photos for chat: Android's own photo picker (no permission), or the camera; never the microphone.
     [
       "expo-image-picker",
       {
-        photosPermission: "Deskzo opens your photos only to send the ones you pick in chat.",
-        cameraPermission: "Deskzo uses the camera to scan the code that pairs this phone, and to take photos you send in chat.",
+        photosPermission: "Deskzo opens your photos only to send the ones you pick — in chat, with an expense claim, or on a Deskzo page.",
+        cameraPermission: "Deskzo uses the camera to scan the code that pairs this phone, and to take photos you send in chat, add to an expense claim or add on a Deskzo page.",
         microphonePermission: false,
       },
     ],
     [
       "expo-location",
       {
-        locationWhenInUsePermission: "Deskzo checks you are at your office, and saves where you are with your attendance, when you clock in or out. Only then — never in the background.",
+        locationWhenInUsePermission: "Deskzo reads where you are only when you clock in or out (to check you are at your office, and save it with your attendance), check in or out of a customer visit, or sign in if your company asks. Never in the background.",
         locationAlwaysAndWhenInUsePermission: false,
         locationAlwaysPermission: false,
         motionUsagePermission: false,
@@ -150,9 +223,13 @@ const config: ExpoConfig = {
     ["expo-notifications", { icon: "./assets/android-icon-monochrome.png", color: "#0249FE", defaultChannel: "deskzo" }],
     "./plugins/with-short-native-paths",
     "./plugins/with-release-signing",
+    // iOS: the caller ID extension (targets/call-directory), and the launch screen — light, and dark for a dark phone.
+    "@bacons/apple-targets",
+    ["./plugins/with-ios-splash", { backgroundColor: "#FFFFFF", image: "./assets/splash-icon.png", imageWidth: 120, dark: { backgroundColor: "#0F172A", image: "./assets/ios-icon-dark.png" } }],
   ],
   experiments: { typedRoutes: false },
-  extra: { dev, firebase },
+  // The app's project on EAS (eas.json), where its iOS builds are made.
+  extra: { dev, firebase, eas: { projectId: "5fd00c32-a8d5-453e-8b12-04669763db42" } },
 };
 
 export default config;

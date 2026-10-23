@@ -8,6 +8,9 @@
  *   · Sending, editing and deleting for everyone, with their windows; files kept and refused.
  *   · Unread counts, muting, @mentions told without their text, delivery and read ticks, the live bus.
  *   · Groups: admins, adding, removing, leaving, and never left without an admin.
+ *   · On their phones (owner, 22 Oct 2026): a push saying who and where, never what — an iPhone's through Apple, an
+ *     Android phone's through Firebase; not to the sender, nobody who muted the chat, a signed-out phone; somebody
+ *     @mentioned told by their bell's notice instead; an iPhone Apple no longer knows forgotten.
  *   · Search, the files route, the export refused to anybody but the super admin, nightly retention.
  *
  * Everything is named ZZPROBE_CHAT and removed in a finally.
@@ -16,6 +19,9 @@
  */
 import "dotenv/config";
 import Module from "node:module";
+
+// Never Apple's real service from a check: iPhones' pushes go to the stand-in.
+delete process.env.DESKZO_APP_APNS_KEY;
 import { chatChimes } from "../src/lib/reminder-sounds";
 import { directClient } from "../src/lib/tenancy/direct-client";
 import {
@@ -141,6 +147,7 @@ async function main() {
   const filesRoute = require("../src/app/api/chat/files/[id]/route") as typeof import("../src/app/api/chat/files/[id]/route");
   const exportRoute = require("../src/app/api/chat/export/[id]/route") as typeof import("../src/app/api/chat/export/[id]/route");
   const { workspaceClock } = require("../src/lib/time/workspace") as typeof import("../src/lib/time/workspace");
+  const push = require("../src/lib/app/push") as typeof import("../src/lib/app/push");
 
   const settingsBefore = await db.chatSettings.findUnique({ where: { id: "global" } });
   const today = (await workspaceClock()).calendarDate(new Date());
@@ -394,6 +401,84 @@ async function main() {
     await chat.leaveGroupChat(groupId);
     const admins = (await server.membersView(groupId)).filter((m) => !m.leftAt && m.isAdmin);
     ok("the last admin leaving hands the group to the longest-standing member", admins.length === 1 && admins[0]!.userId === bob.id, admins.map((a) => a.name).join());
+
+    section("On their phones — an iPhone through Apple, an Android phone through Firebase");
+
+    const erin = await make("erin", "Erin Chat");
+    // A paired phone of theirs, as /api/app/pair leaves one: its device row, and the app's.
+    const phoneOf = async (u: { id: string }, platform: "ios" | "android", pushToken: string, status: "APPROVED" | "REVOKED" = "APPROVED") => {
+      const device = await db.userDevice.create({ data: { userId: u.id, tokenHash: `${TAG}-${pushToken}`, kind: "MOBILE", label: `${TAG} ${platform}`, status } });
+      return db.appDevice.create({ data: { deviceId: device.id, userId: u.id, platform, pushToken } });
+    };
+    await phoneOf(alice, "ios", "apns-zzprobe-alice");
+    const bobIphone = await phoneOf(bob, "ios", "apns-zzprobe-bob");
+    await phoneOf(carol, "ios", "apns-zzprobe-carol");
+    await phoneOf(carol, "ios", "apns-zzprobe-carol-old", "REVOKED");
+    await phoneOf(erin, "android", "fcm-zzprobe-erin");
+    type Apns = { token: string; headers: Record<string, string>; payload: { aps: { alert: { title: string; body?: string } }; body: Record<string, string> } };
+    type Pushed = { apns?: Apns; message?: { token: string; data: Record<string, string>; notification?: { title: string }; android?: { notification?: { tag?: string } } } };
+    const pushed: Pushed[] = [];
+    let status = 200;
+    push.setTestPush(async (m) => {
+      pushed.push(m as Pushed);
+      return status;
+    });
+    const tokens = () => pushed.map((p) => p.apns?.token ?? p.message?.token ?? "?").sort().join();
+    try {
+      as(alice);
+      const team = await chat.createGroupChat({ name: `${TAG} Pushes`, memberIds: [bob.id, carol.id, erin.id] });
+      const teamId = team.ok ? team.data.chatId : "";
+      as(bob);
+      await chat.muteChat(teamId, 8);
+      as(alice);
+      pushed.length = 0;
+      await send(teamId, "The price is 4242 — keep it quiet");
+      ok(
+        "a group message: Carol's iPhone through Apple, Erin's Android phone through Firebase — not the sender, not Bob who muted it, not an iPhone signed out",
+        tokens() === "apns-zzprobe-carol,fcm-zzprobe-erin",
+        tokens(),
+      );
+      const title = `Zzprobe Alice Chat in ${TAG} Pushes`;
+      const toCarol = pushed.find((p) => p.apns)?.apns;
+      ok(
+        "  on the iPhone: who and where, never what — opening that chat, its messages together, the latest replacing the last",
+        JSON.stringify(toCarol?.payload) === JSON.stringify({ aps: { alert: { title }, sound: "default", "thread-id": teamId }, body: { type: "chat", chat: teamId, title, link: `/chat?c=${teamId}` } }) &&
+          toCarol?.headers["apns-collapse-id"] === `chat-${teamId}` &&
+          !JSON.stringify(pushed).includes("4242"),
+        JSON.stringify(toCarol),
+      );
+      const toErin = pushed.find((p) => p.message)?.message;
+      ok("  on Android: the same, as Android's own message", toErin?.data.type === "chat" && toErin.data.chat === teamId && toErin.notification?.title === title && toErin.android?.notification?.tag === `chat-${teamId}`, JSON.stringify(toErin));
+      pushed.length = 0;
+      await send(teamId, "@Zzprobe Bob Chat — one for you");
+      const toBob = pushed.filter((p) => p.apns?.token === "apns-zzprobe-bob");
+      ok(
+        "  Bob @mentioned in the chat he muted: no chat push — his bell's mention instead, on his iPhone",
+        toBob.length === 1 &&
+          toBob[0]!.apns!.payload.body.type === "notice" &&
+          toBob[0]!.apns!.payload.body.kind === "CHAT_MENTION" &&
+          toBob[0]!.apns!.payload.body.link === `/chat?c=${teamId}` &&
+          (await db.notification.count({ where: { userId: bob.id, type: "CHAT_MENTION", title: { contains: "Pushes" } } })) === 1,
+        JSON.stringify(toBob),
+      );
+      pushed.length = 0;
+      await send(directId, "Bob, the 4242 again");
+      ok(
+        "a direct message: to the other one's iPhone, saying from whom",
+        pushed.length === 1 && pushed[0]!.apns?.token === "apns-zzprobe-bob" && pushed[0]!.apns.payload.aps.alert.title === "New message from Zzprobe Alice Chat" && pushed[0]!.apns.payload.body.chat === directId && !JSON.stringify(pushed).includes("4242"),
+        JSON.stringify(pushed[0]),
+      );
+      status = 410;
+      await send(directId, "Still there?");
+      ok("an iPhone Apple says is gone: forgotten", (await db.appDevice.findUnique({ where: { id: bobIphone.id } }))?.pushToken === null);
+      await db.appDevice.update({ where: { id: bobIphone.id }, data: { pushToken: "apns-zzprobe-bob" } });
+      status = 500;
+      pushed.length = 0;
+      const sentAnyway = await send(directId, "Apple is having a bad day");
+      ok("Apple failing: the message is sent all the same, and the iPhone kept", sentAnyway.ok && pushed.length === 1 && (await db.appDevice.findUnique({ where: { id: bobIphone.id } }))?.pushToken === "apns-zzprobe-bob");
+    } finally {
+      push.setTestPush(null);
+    }
 
     section("Drawn");
 

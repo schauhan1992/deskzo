@@ -118,7 +118,7 @@ export default function VisitScreen() {
               <Text style={[styles.body, { fontWeight: "600" }]}>{visit.contact.name}</Text>
               {visit.contact.phone ? <Text style={styles.small}>{visit.contact.phone}</Text> : null}
             </View>
-            <ContactButtons phone={visit.contact.phone} email={visit.contact.email} />
+            <ContactButtons phone={visit.contact.phone} email={visit.contact.email} name={visit.contact.name} />
           </View>
         </Card>
       )}

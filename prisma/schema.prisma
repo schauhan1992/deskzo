@@ -5776,15 +5776,19 @@ model CallLog {
   workbookRecord WorkbookRecord?
 
   /// Typed into a call dialog, or read from a phone by the Deskzo app (owner, 18 Oct 2026).
-  source       CallSource @default(TYPED)
+  source        CallSource @default(TYPED)
   /// The phone it came from, and the phone's own key for it (its call-log entry), so the same call sent
   /// twice is logged once.
-  appDeviceId  String?
-  appDevice    AppDevice? @relation(fields: [appDeviceId], references: [id], onDelete: SetNull)
-  phoneCallKey String?
+  appDeviceId   String?
+  appDevice     AppDevice? @relation(fields: [appDeviceId], references: [id], onDelete: SetNull)
+  phoneCallKey  String?
   /// When its caller said how it went. A call from a phone is logged with what its length implies —
   /// connected, or no answer — and waits for this.
-  reviewedAt   DateTime?
+  reviewedAt    DateTime?
+  /// Its length isn't known (owner, 22 Oct 2026): logged by hand on an iPhone, which can't read its call log, with
+  /// the outcome its caller gave. durationSeconds is 0 without meaning nobody answered — said so where a call's
+  /// length is shown, and left out of the average call.
+  lengthUnknown Boolean    @default(false)
 
   @@unique([appDeviceId, phoneCallKey])
   @@index([companyId, startedAt])
@@ -13042,9 +13046,11 @@ model AppDevice {
   /// The phone as it describes itself — "Samsung SM-S918B".
   model        String?
   appVersion   String?
-  /// Where a push reaches it (Firebase Cloud Messaging); null until the app sends one.
+  /// Where a push reaches it — a Firebase Cloud Messaging token on Android, an APNs device token on an iPhone
+  /// (src/lib/app/push.ts); null until the app sends one.
   pushToken    String?
-  /// Call sync, switched on on the phone: it reads its own call log and sends the calls with customers.
+  /// Call sync, switched on on the phone: it reads its own call log and sends the calls with customers. An iPhone
+  /// can't read its call log: on one it means this is the person's calling phone, and its calls are logged by hand.
   callSync     Boolean    @default(false)
   /// The rate limit's minute, as on an API key — counted in one statement.
   windowStart  DateTime?

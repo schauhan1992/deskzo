@@ -108,7 +108,7 @@ export default function Pair() {
         {signedOut && <Notice tone="warning">This {device} was signed out of Deskzo. Sign in again to carry on.</Notice>}
 
         <Card>
-          <Text style={styles.small}>Your company's Deskzo</Text>
+          <Text style={styles.small}>Your company&apos;s Deskzo</Text>
           <TextInput
             style={styles.input}
             value={host}
@@ -124,10 +124,10 @@ export default function Pair() {
           />
           <Button title="Sign in" busy={busy === "browser"} disabled={!!busy} onPress={() => void signIn()} />
           <Pressable accessibilityRole="link" onPress={() => void WebBrowser.openBrowserAsync(FIND_WORKSPACE_URL)} hitSlop={8}>
-            <Text style={{ color: colors.brand, fontSize: 14 }}>Don't know it? Find my workspace</Text>
+            <Text style={{ color: colors.brand, fontSize: 14 }}>Don&apos;t know it? Find my workspace</Text>
           </Pressable>
         </Card>
-        <Notice>You sign in on your company's own Deskzo page, as you do on a computer — with its password, two-factor or single sign-on.</Notice>
+        <Notice>You sign in on your company&apos;s own Deskzo page, as you do on a computer — with its password, two-factor or single sign-on.</Notice>
 
         {withCode ? (
           <Card>

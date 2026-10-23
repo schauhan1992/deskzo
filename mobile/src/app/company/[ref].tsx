@@ -89,7 +89,7 @@ export default function CompanyScreen() {
             <Notice>Nobody here yet.</Notice>
           </View>
         ) : (
-          company.contacts.map((c) => <ListRow key={c.id} title={c.name + (c.is_primary ? " · primary" : "")} subtitle={[c.designation_name, c.phone, c.email].filter(Boolean).join(" · ")} right={<ContactButtons phone={c.phone} email={c.email} />} />)
+          company.contacts.map((c) => <ListRow key={c.id} title={c.name + (c.is_primary ? " · primary" : "")} subtitle={[c.designation_name, c.phone, c.email].filter(Boolean).join(" · ")} right={<ContactButtons phone={c.phone} email={c.email} name={`${c.name}, ${company.name}`} />} />)
         )}
       </Card>
 

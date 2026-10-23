@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Tabs, useRouter } from "expo-router";
-import { Pressable, View } from "react-native";
-import { colors } from "@/components/ui";
+import { Pressable, View, useColorScheme } from "react-native";
+import { colors, paletteFor } from "@/components/ui";
 import { useWaiting } from "@/lib/badges";
 import { useChat } from "@/lib/chat";
 import { useSession } from "@/lib/session";
@@ -19,6 +19,7 @@ export default function TabsLayout() {
   const chat = useChat();
   const waiting = useWaiting();
   const can = me?.can;
+  const tint = paletteFor(useColorScheme());
   const sales = !!(can?.leads || can?.companies || can?.contacts);
   const button = (name: keyof typeof Ionicons.glyphMap, label: string, to: string) => (
     <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={() => router.push(to)} hitSlop={12} style={{ marginRight: 16 }}>
@@ -26,12 +27,13 @@ export default function TabsLayout() {
     </Pressable>
   );
   const gear = () => button("settings-outline", "Settings", "/settings");
-  const icon =
-    (name: keyof typeof Ionicons.glyphMap) =>
-    ({ color, size }: { color: unknown; size: number }) => <Ionicons name={name} color={String(color)} size={size} />;
+  const icon = (name: keyof typeof Ionicons.glyphMap) =>
+    function TabIcon({ color, size }: { color: unknown; size: number }) {
+      return <Ionicons name={name} color={String(color)} size={size} />;
+    };
 
   return (
-    <Tabs screenOptions={{ tabBarActiveTintColor: colors.brand, headerTitleStyle: { fontWeight: "600", color: colors.text }, headerRight: gear }}>
+    <Tabs screenOptions={{ tabBarActiveTintColor: tint.brand, headerTitleStyle: { fontWeight: "600", color: tint.text }, headerRight: gear }}>
       <Tabs.Screen name="index" options={{ title: "Today", tabBarBadge: waiting > 0 ? waiting : undefined, tabBarIcon: icon("today-outline") }} />
       <Tabs.Screen
         name="sales"

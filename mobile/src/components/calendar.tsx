@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { colors } from "@/components/ui";
+import { BOXED_TEXT_SCALE, colors } from "@/components/ui";
 import { dayOf, keyOf } from "@/lib/format";
 
 /**
@@ -40,7 +40,7 @@ export function RangeCalendar({ from, to, onChange }: { from: string | null; to:
       </View>
       <View style={s.week}>
         {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
-          <Text key={i} style={s.weekday}>
+          <Text key={i} style={s.weekday} maxFontSizeMultiplier={BOXED_TEXT_SCALE}>
             {d}
           </Text>
         ))}
@@ -61,7 +61,9 @@ export function RangeCalendar({ from, to, onChange }: { from: string | null; to:
               style={[s.cell, inside && s.inside]}
             >
               <View style={[s.dot, picked && s.picked, key === today && !picked && s.today]}>
-                <Text style={[s.num, picked && s.numPicked]}>{Number(key.slice(8))}</Text>
+                <Text style={[s.num, picked && s.numPicked]} maxFontSizeMultiplier={BOXED_TEXT_SCALE}>
+                  {Number(key.slice(8))}
+                </Text>
               </View>
             </Pressable>
           );
@@ -81,7 +83,7 @@ const s = StyleSheet.create({
   cell: { width: `${100 / 7}%`, height: 40, alignItems: "center", justifyContent: "center" },
   inside: { backgroundColor: colors.brandSoft },
   dot: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center" },
-  picked: { backgroundColor: colors.brand },
+  picked: { backgroundColor: colors.brandFill },
   today: { borderWidth: 1, borderColor: colors.brand },
   num: { fontSize: 15, color: colors.text },
   numPicked: { color: "#fff", fontWeight: "600" },

@@ -3,7 +3,7 @@ import { FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View 
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { Avatar } from "@/components/chat/avatar";
-import { Notice, colors } from "@/components/ui";
+import { BOXED_TEXT_SCALE, Notice, colors } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useChat } from "@/lib/chat";
 import { listTime } from "@/lib/chat-format";
@@ -106,7 +106,7 @@ export default function ChatList() {
                 <Text style={s.empty}>No messages with that.</Text>
               ) : (
                 hits.map((h) => (
-                  <Pressable key={h.messageId} style={s.hit} onPress={() => router.push({ pathname: "/conversation/[id]", params: { id: h.chatId, around: h.messageId } })}>
+                  <Pressable key={h.messageId} accessibilityRole="button" style={s.hit} onPress={() => router.push({ pathname: "/conversation/[id]", params: { id: h.chatId, around: h.messageId } })}>
                     <Text style={s.title} numberOfLines={1}>
                       {h.chatTitle}
                     </Text>
@@ -153,7 +153,9 @@ function Row({ chat, online, onPress }: { chat: ChatSummary; online: boolean; on
             {chat.mentioned && unread && <Text style={s.at}>@</Text>}
             {unread && (
               <View style={[s.badge, muted && { backgroundColor: colors.muted }]}>
-                <Text style={s.badgeText}>{chat.unread > 99 ? "99+" : chat.unread}</Text>
+                <Text style={s.badgeText} maxFontSizeMultiplier={BOXED_TEXT_SCALE}>
+                  {chat.unread > 99 ? "99+" : chat.unread}
+                </Text>
               </View>
             )}
           </View>
@@ -190,7 +192,7 @@ const s = StyleSheet.create({
     width: 58,
     height: 58,
     borderRadius: 18,
-    backgroundColor: colors.brand,
+    backgroundColor: colors.brandFill,
     alignItems: "center",
     justifyContent: "center",
     elevation: 6,

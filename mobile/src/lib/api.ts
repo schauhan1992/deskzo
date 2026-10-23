@@ -22,7 +22,10 @@ export function onSignedOut(listener: Listener): () => void {
   return () => void signedOutListeners.delete(listener);
 }
 
-/** A page Deskzo itself answers 404 to, not in its own words: a company whose Deskzo is older than this app. */
+/**
+ * A page Deskzo answers 404 to, not in its own words — or 405, where an older Deskzo has a page of that shape for
+ * something else (/api/app/calls/[id] before the caller ID list): a company whose Deskzo is older than this app.
+ */
 export const NOT_ON_SERVER = "Your company's Deskzo hasn't been updated for this part of the app yet — ask your administrator. Everything else is under More.";
 
 /** Where a list is: Deskzo sends it beside a list's rows (src/lib/app/handler.ts). */
@@ -61,7 +64,7 @@ async function requestWithPage<T>(
     // Not Deskzo answering — a captive portal, a proxy.
   }
   if (!res.ok) {
-    const err = json.error ?? (res.status === 404 ? { code: "not_on_server", message: NOT_ON_SERVER } : { code: `http_${res.status}`, message: "Deskzo didn't answer as expected. Try again in a moment." });
+    const err = json.error ?? (res.status === 404 || res.status === 405 ? { code: "not_on_server", message: NOT_ON_SERVER } : { code: `http_${res.status}`, message: "Deskzo didn't answer as expected. Try again in a moment." });
     if (res.status === 401 && err.code === "signed_out") signedOutListeners.forEach((l) => l());
     throw new ApiError(res.status, err.code, err.message, err.fields);
   }

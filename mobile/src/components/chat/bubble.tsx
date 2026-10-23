@@ -1,7 +1,7 @@
 import { memo, useRef } from "react";
 import { Animated, Image, PanResponder, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { colors } from "@/components/ui";
+import { colors, dynamic } from "@/components/ui";
 import { bubbleTime, fileSize } from "@/lib/chat-format";
 import type { ChatAttachmentView, ChatMessageView } from "@/lib/chat-types";
 
@@ -13,12 +13,19 @@ import type { ChatAttachmentView, ChatMessageView } from "@/lib/chat-types";
 
 export type Ticks = "sending" | "failed" | "sent" | "delivered" | "read";
 
+/** WhatsApp's colours, light — and on iOS dark too, from WhatsApp's own dark theme. */
 export const CHAT = {
-  wallpaper: "#EFEAE2",
-  mine: "#E3E6FF",
-  theirs: "#FFFFFF",
+  wallpaper: dynamic("#EFEAE2", "#0B141A"),
+  mine: dynamic("#E3E6FF", "#1E40AF"),
+  theirs: dynamic("#FFFFFF", "#1F2C34"),
   read: "#53BDEB",
-  system: "#FFF5C4",
+  system: dynamic("#FFF5C4", "#3A3520"),
+  /** The grey of a day line and a system line. */
+  note: dynamic("#54656F", "#CBD5E1"),
+  /** A quote or a file inside a bubble: a little darker than the bubble, or lighter in the dark. */
+  inset: dynamic("rgba(0,0,0,0.05)", "rgba(255,255,255,0.08)"),
+  /** The time in a bubble — the muted grey, lighter in the dark where it sits on my blue. */
+  meta: dynamic("#64748B", "#CBD5E1"),
 };
 
 type Props = {
@@ -80,6 +87,9 @@ function BubbleView({ message, mine, showName, first, ticks, meId, image, onLong
       <Animated.View {...(canSwipe ? pan.panHandlers : {})} style={{ transform: [{ translateX: dx }], maxWidth: "82%" }}>
         <Pressable
           onLongPress={() => !deleted && ticks !== "sending" && onLongPress(message)}
+          // For VoiceOver and TalkBack, what a long-press and a swipe do, as actions on the message.
+          accessibilityActions={deleted || ticks === "sending" ? undefined : [{ name: "longpress", label: "Message options" }, ...(canSwipe ? [{ name: "reply", label: "Reply" }] : [])]}
+          onAccessibilityAction={(e) => (e.nativeEvent.actionName === "longpress" ? onLongPress(message) : e.nativeEvent.actionName === "reply" ? onReply(message) : undefined)}
           onPress={ticks === "failed" ? onRetry : undefined}
           delayLongPress={300}
           style={[s.bubble, mine ? s.mine : s.theirs, first && (mine ? s.tailMine : s.tailTheirs)]}
@@ -96,12 +106,12 @@ function BubbleView({ message, mine, showName, first, ticks, meId, image, onLong
             </View>
           )}
           {pictures.map((a) => (
-            <Pressable key={a.id} onPress={() => onImage(a)} accessibilityLabel={`Picture: ${a.fileName}`}>
+            <Pressable key={a.id} onPress={() => onImage(a)} accessibilityRole="button" accessibilityLabel={`Picture: ${a.fileName}`}>
               <Image source={image(a)} style={s.picture} resizeMode="cover" />
             </Pressable>
           ))}
           {files.map((a) => (
-            <Pressable key={a.id} onPress={() => onFile(a)} style={s.file} accessibilityLabel={`File: ${a.fileName}`}>
+            <Pressable key={a.id} onPress={() => onFile(a)} style={s.file} accessibilityRole="button" accessibilityLabel={`File: ${a.fileName}`}>
               <Ionicons name="document-text" size={28} color={colors.brand} />
               <View style={{ flex: 1 }}>
                 <Text style={s.fileName} numberOfLines={1}>
@@ -178,7 +188,7 @@ const s = StyleSheet.create({
   tailMine: { borderTopRightRadius: 2 },
   tailTheirs: { borderTopLeftRadius: 2 },
   sender: { fontSize: 13, fontWeight: "700", marginBottom: 2 },
-  quote: { borderLeftWidth: 4, backgroundColor: "rgba(0,0,0,0.05)", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, marginBottom: 4 },
+  quote: { borderLeftWidth: 4, backgroundColor: CHAT.inset, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, marginBottom: 4 },
   quoteName: { fontSize: 13, fontWeight: "700" },
   quoteBody: { fontSize: 13, color: colors.muted },
   body: { fontSize: 16, lineHeight: 21, color: colors.text },
@@ -186,12 +196,12 @@ const s = StyleSheet.create({
   // Drawn in the bubble's own colour: Android shows a nested span's "transparent".
   spacer: { fontSize: 11 },
   stamp: { position: "absolute", right: 8, bottom: 4, flexDirection: "row", alignItems: "center", gap: 3 },
-  meta: { fontSize: 11, color: colors.muted },
+  meta: { fontSize: 11, color: CHAT.meta },
   picture: { width: 230, height: 230, borderRadius: 8, marginBottom: 4, backgroundColor: "#ddd" },
-  file: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(0,0,0,0.05)", borderRadius: 8, padding: 8, marginBottom: 4, minWidth: 200 },
+  file: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: CHAT.inset, borderRadius: 8, padding: 8, marginBottom: 4, minWidth: 200 },
   fileName: { fontSize: 14, fontWeight: "600", color: colors.text },
   reactions: { flexDirection: "row", gap: 4, marginTop: -4, paddingHorizontal: 6 },
-  reaction: { fontSize: 14, backgroundColor: "#fff", borderRadius: 12, borderWidth: 1, borderColor: colors.line, paddingHorizontal: 6, paddingVertical: 1, overflow: "hidden" },
+  reaction: { fontSize: 14, backgroundColor: colors.surface, borderRadius: 12, borderWidth: 1, borderColor: colors.line, paddingHorizontal: 6, paddingVertical: 1, overflow: "hidden" },
   systemRow: { alignItems: "center", marginVertical: 6 },
-  system: { fontSize: 12.5, color: "#54656F", backgroundColor: CHAT.system, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, overflow: "hidden", textAlign: "center", maxWidth: "85%" },
+  system: { fontSize: 12.5, color: CHAT.note, backgroundColor: CHAT.system, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, overflow: "hidden", textAlign: "center", maxWidth: "85%" },
 });

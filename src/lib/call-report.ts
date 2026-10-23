@@ -7,7 +7,8 @@ import type { Clock } from "@/lib/time/zone";
  * here from the rows src/actions/call-report.ts reads within the viewer's reach. Pure, so a suite can feed
  * it rows and check the sums.
  *
- *   · Calls, connected, connect rate, talk time and the average connected call.
+ *   · Calls, connected, connect rate, talk time and the average connected call — a call logged by hand on an
+ *     iPhone, whose length isn't known, counts as a call but not towards the average (owner, 22 Oct 2026).
  *   · When the day's calling starts and stops: the first and last call of each day they called, in the
  *     workspace's time — the middle value across the period's days, so one early morning doesn't move it.
  *   · How much the Deskzo app logged, and how much of that is still waiting for a word.
@@ -22,6 +23,8 @@ export type ReportCall = {
   direction: CallDirection;
   outcome: CallOutcome;
   durationSeconds: number;
+  /** Logged by hand on an iPhone: its 0 seconds aren't a length. */
+  lengthUnknown?: boolean;
   startedAt: Date;
   source: CallSource;
   reviewedAt: Date | null;
@@ -58,6 +61,12 @@ export type CallReport = {
   totals: Omit<CallReportRow, "userId" | "name" | "firstCallMinute" | "lastCallMinute" | "daysCalling">;
   days: { day: string; calls: number; connected: number }[];
 };
+
+/** The average connected call, over the calls whose length is known. */
+function averageOf(connected: ReportCall[]): number {
+  const timed = connected.filter((c) => !c.lengthUnknown);
+  return timed.length ? Math.round(timed.reduce((t, c) => t + c.durationSeconds, 0) / timed.length) : 0;
+}
 
 export function median(values: number[]): number | null {
   if (values.length === 0) return null;
@@ -100,7 +109,6 @@ export function buildCallReport(input: {
     const calls = byPerson.get(userId) ?? [];
     const connected = calls.filter((c) => isConnected(c.outcome));
     const talk = calls.reduce((t, c) => t + c.durationSeconds, 0);
-    const connectedTalk = connected.reduce((t, c) => t + c.durationSeconds, 0);
 
     // Each day's first and last call, in minutes after midnight here.
     const days = new Map<string, number[]>();
@@ -122,7 +130,7 @@ export function buildCallReport(input: {
       connected: connected.length,
       connectRate: calls.length ? Math.round((connected.length / calls.length) * 100) : 0,
       talkSeconds: talk,
-      averageSeconds: connected.length ? Math.round(connectedTalk / connected.length) : 0,
+      averageSeconds: averageOf(connected),
       firstCallMinute: median(firsts),
       lastCallMinute: median(lasts),
       daysCalling: days.size,
@@ -145,7 +153,7 @@ export function buildCallReport(input: {
     connected: connectedAll.length,
     connectRate: all.length ? Math.round((connectedAll.length / all.length) * 100) : 0,
     talkSeconds: all.reduce((t, c) => t + c.durationSeconds, 0),
-    averageSeconds: connectedAll.length ? Math.round(connectedAll.reduce((t, c) => t + c.durationSeconds, 0) / connectedAll.length) : 0,
+    averageSeconds: averageOf(connectedAll),
     fromApp: appAll.length,
     waitingForWord: appAll.filter((c) => !c.reviewedAt).length,
     callbacksPromised: all.filter((c) => c.followUpAt).length,

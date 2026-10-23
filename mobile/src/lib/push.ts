@@ -2,6 +2,7 @@ import { Platform } from "react-native";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { api } from "@/lib/api";
+import { linkRoute, type LinkRoute } from "@/lib/push-routing";
 
 /**
  * Deskzo's notifications on the phone (owner, 22 Oct 2026 — push in the native app's first phase): what the bell says
@@ -69,25 +70,16 @@ export function onPushAddressChange(): () => void {
   return () => sub.remove();
 }
 
-type Route = string | { pathname: string; params: Record<string, string> };
-
 /**
  * Where a tapped notification leads in the app: a lead or company to its own screen, tasks and chat to theirs, a ring
- * to Calls, anything else to its web page in the app — only ever a page of this workspace.
+ * to Calls, anything else to its web page in the app — only ever a page of this workspace (src/lib/push-routing.ts,
+ * where an iPhone's go too).
  */
-export function routeFor(data: Record<string, unknown> | null | undefined): Route | null {
+export function routeFor(data: Record<string, unknown> | null | undefined): LinkRoute | null {
   if (!data) return null;
   if (data.type === "call") return "/calls";
   if (data.type === "chat" && typeof data.chat === "string" && data.chat) return { pathname: "/conversation/[id]", params: { id: data.chat } };
-  const link = typeof data.link === "string" ? data.link : "";
-  if (!link.startsWith("/") || link.startsWith("//")) return "/";
-  const lead = /^\/leads\/(LEAD-\d+)/.exec(link);
-  if (lead) return { pathname: "/lead/[ref]", params: { ref: lead[1]! } };
-  const company = /^\/companies\/(COM-\d+)(?:$|[/?#])/.exec(link);
-  if (company) return { pathname: "/company/[ref]", params: { ref: company[1]! } };
-  if (/^\/tasks(?:$|[/?#])/.test(link)) return "/tasks";
-  if (/^\/chat(?:$|[/?#])/.test(link)) return "/chat";
-  return { pathname: "/web", params: { path: link } };
+  return linkRoute(typeof data.link === "string" ? data.link : "");
 }
 
 /** The data a tapped notification came with. */

@@ -6,7 +6,7 @@ import { isModuleEnabled } from "@/actions/module";
 import { viewAsContext } from "@/lib/session";
 import { canSeeCompany } from "@/lib/authz/company-scope";
 import { hasDialableNumber } from "@/lib/calls";
-import { pushToPhone } from "@/lib/app/push";
+import { pushToDevice } from "@/lib/app/push";
 import type { ActionResult } from "@/actions/company";
 
 /**
@@ -93,8 +93,12 @@ export async function ringMyPhone(input: {
 
   let pushed = false;
   if (phone.pushToken) {
-    // Shown by the phone even with the app closed (owner, 22 Oct 2026); a tap opens Calls, where the ring waits.
-    const sent = await pushToPhone(phone.pushToken, { type: "call", request: request.id, number: phoneNumber, label }, { shown: { title: `Call ${label}`, body: phoneNumber }, tag: "deskzo-ring" });
+    // Shown by the phone even with the app closed (owner, 22 Oct 2026); a tap opens Calls, where the ring waits — and on an
+    // iPhone its Call button dials. A new ring replaces one still showing; it is gone when the ring runs out.
+    const sent = await pushToDevice(
+      { platform: phone.platform, pushToken: phone.pushToken },
+      { data: { type: "call", request: request.id, number: phoneNumber, label }, title: `Call ${label}`, body: phoneNumber, group: "deskzo-ring", category: "deskzo-call", ttlSeconds: REQUEST_SECONDS },
+    );
     pushed = sent === "sent";
     if (sent === "gone") await db.appDevice.update({ where: { id: phone.id }, data: { pushToken: null } });
   }

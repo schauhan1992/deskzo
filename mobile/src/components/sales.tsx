@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
-import { Linking, Modal, Pressable, ScrollView, Text, TextInput, View, type TextInputProps } from "react-native";
+import { Linking, Modal, Platform, Pressable, ScrollView, Text, TextInput, View, type TextInputProps } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { colors, styles } from "@/components/ui";
+import { colors, dynamic, styles, type Colour } from "@/components/ui";
+import { calling } from "@/lib/calling";
 import { when } from "@/lib/format";
 import type { Activity } from "@/lib/sales-types";
 
@@ -37,13 +38,17 @@ export function StagePill({ name, status }: { name: string; status?: string | nu
   const won = status === "WON";
   const lost = status === "LOST" || status === "DISQUALIFIED";
   return (
-    <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: won ? "#DCFCE7" : lost ? "#FEE2E2" : colors.brandSoft }}>
+    <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: won ? WON_SOFT : lost ? LOST_SOFT : colors.brandSoft }}>
       <Text style={{ fontSize: 12, fontWeight: "600", color: won ? colors.success : lost ? colors.danger : colors.brand }} numberOfLines={1}>
         {name}
       </Text>
     </View>
   );
 }
+
+/** The won and lost pills' grounds — and on iOS their dark-mode ones, under the lighter green and red. */
+const WON_SOFT = dynamic("#DCFCE7", "#14532D");
+const LOST_SOFT = dynamic("#FEE2E2", "#7F1D1D");
 
 /** Digits a phone can dial; a ten-digit number is taken as India's. */
 export function dialable(phone: string): string {
@@ -57,7 +62,7 @@ export function whatsappLink(phone: string): string {
   return `https://wa.me/${digits.length === 10 ? `91${digits}` : digits.replace(/^0+/, "")}`;
 }
 
-function RoundButton({ icon, label, onPress, tone = colors.brand }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; tone?: string }) {
+function RoundButton({ icon, label, onPress, tone = colors.brand }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void; tone?: Colour }) {
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} hitSlop={6} style={({ pressed }) => [{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: colors.brandSoft }, pressed && { opacity: 0.7 }]}>
       <Ionicons name={icon} size={20} color={tone} />
@@ -67,15 +72,22 @@ function RoundButton({ icon, label, onPress, tone = colors.brand }: { icon: keyo
 
 /**
  * Ring, WhatsApp or email somebody — the phone's own apps. A call placed here is logged by call sync (Calls) as any
- * other; a number or address the workspace hides from the person comes masked, and isn't offered.
+ * other — or on an iPhone, which has no call sync, asked about when the person is back from it (src/lib/calling.ios.ts);
+ * a number or address the workspace hides from the person comes masked, and isn't offered.
  */
-export function ContactButtons({ phone, email }: { phone?: string | null; email?: string | null }) {
+export function ContactButtons({ phone, email, name }: { phone?: string | null; email?: string | null; name?: string | null }) {
   const canRing = !!phone && /\d{6,}/.test(phone.replace(/\D/g, "")) && !/[*•]/.test(phone);
   const canMail = !!email && email.includes("@") && !/[*•]/.test(email);
   if (!canRing && !canMail) return null;
   return (
     <View style={{ flexDirection: "row", gap: 8 }}>
-      {canRing && <RoundButton icon="call" label={`Call ${phone}`} onPress={() => void Linking.openURL(`tel:${dialable(phone!)}`)} />}
+      {canRing && (
+        <RoundButton
+          icon="call"
+          label={`Call ${phone}`}
+          onPress={() => (Platform.OS === "ios" ? calling.dial(dialable(phone!), { label: name, via: "list" }) : void Linking.openURL(`tel:${dialable(phone!)}`))}
+        />
+      )}
       {canRing && <RoundButton icon="logo-whatsapp" label={`WhatsApp ${phone}`} tone="#16A34A" onPress={() => void Linking.openURL(whatsappLink(phone!)).catch(() => {})} />}
       {canMail && <RoundButton icon="mail" label={`Email ${email}`} onPress={() => void Linking.openURL(`mailto:${email}`)} />}
     </View>
@@ -181,7 +193,7 @@ export function Fab({ icon = "add", label, onPress }: { icon?: keyof typeof Ioni
       accessibilityLabel={label}
       onPress={onPress}
       style={({ pressed }) => [
-        { position: "absolute", right: 18, bottom: 18, width: 58, height: 58, borderRadius: 18, backgroundColor: colors.brand, alignItems: "center", justifyContent: "center", elevation: 6, shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 6, shadowOffset: { width: 0, height: 3 } },
+        { position: "absolute", right: 18, bottom: 18, width: 58, height: 58, borderRadius: 18, backgroundColor: colors.brandFill, alignItems: "center", justifyContent: "center", elevation: 6, shadowColor: "#000", shadowOpacity: 0.2, shadowRadius: 6, shadowOffset: { width: 0, height: 3 } },
         pressed && { opacity: 0.85 },
       ]}
     >

@@ -20,6 +20,8 @@ type Call = {
   outcome: CallOutcome;
   startedAt: Date | string;
   durationSeconds: number;
+  /** Logged by hand on an iPhone, without a length — not a call nobody answered. */
+  lengthUnknown?: boolean;
   notes: string | null;
   followUpAt: Date | string | null;
   followUpDone: boolean;
@@ -95,8 +97,12 @@ function CallRow({ call, showCompany }: { call: Call; showCompany: boolean }) {
               <span className="text-sm font-medium text-text">{call.contact?.name ?? call.phoneNumber}</span>
             )}
             <Badge tone={callOutcomeTones[call.outcome]}>{callOutcomeLabels[call.outcome]}</Badge>
-            {call.durationSeconds > 0 && (
-              <span className="font-mono text-xs text-subtle">{formatDuration(call.durationSeconds)}</span>
+            {call.lengthUnknown ? (
+              <span className="text-xs text-subtle" title="Logged by hand on an iPhone, which can't tell how long a call was">
+                length not known
+              </span>
+            ) : (
+              call.durationSeconds > 0 && <span className="font-mono text-xs text-subtle">{formatDuration(call.durationSeconds)}</span>
             )}
           </div>
 

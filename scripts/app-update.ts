@@ -8,6 +8,7 @@
  *   npm run app:update -- rollback --embedded     back to the screens that came inside the installed app
  *   npm run app:update -- list                    what's been published
  *
+ *   --platform ios                   the iPhone's screens (default: android) — each phone takes only its own
  *   --server http://localhost:3000   a Deskzo on this computer instead of https://deskzo.com
  *   --key <file>                     the update key (default ~/.deskzo/app-updates/private-key.pem, or
  *                                    DESKZO_APP_UPDATE_KEY)
@@ -31,7 +32,6 @@ import path from "node:path";
 
 const ROOT = path.join(__dirname, "..");
 const MOBILE = path.join(ROOT, "mobile");
-const PLATFORM = "android";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -41,6 +41,8 @@ const option = (name: string): string | null => {
 };
 const flag = (name: string) => args.includes(name);
 const server = (option("--server") ?? "https://deskzo.com").replace(/\/+$/, "");
+const PLATFORM = option("--platform") ?? "android";
+if (PLATFORM !== "android" && PLATFORM !== "ios") fail(`--platform is android or ios, not "${PLATFORM}".`);
 
 function fail(message: string): never {
   console.error(`\n${message}`);
@@ -144,7 +146,7 @@ async function publish() {
   const dir = path.join(MOBILE, out);
   const meta = JSON.parse(readFileSync(path.join(dir, "metadata.json"), "utf8")) as { fileMetadata: Record<string, { bundle: string; assets: { path: string; ext: string }[] }> };
   const built = meta.fileMetadata[PLATFORM];
-  if (!built) fail("expo export made nothing for Android.");
+  if (!built) fail(`expo export made nothing for ${PLATFORM === "ios" ? "the iPhone" : "Android"}.`);
   const launch = fileAt(built.bundle, "bundle", "application/javascript", dir);
   const assets = built.assets.map((a) => fileAt(a.path, a.ext, TYPES[a.ext.toLowerCase()] ?? "application/octet-stream", dir));
   // What the app reads as its own config (expo-constants) while it runs an update.

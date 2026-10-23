@@ -98,6 +98,7 @@ function Decision({ item, onDecided }: { item: Approval; onDecided: () => void }
           value={note}
           onChangeText={setNote}
           placeholder={item.reason_to_reject ? "Why (they'll see this)" : "Why — optional, they'll see it"}
+          accessibilityLabel="Why you're rejecting it"
           placeholderTextColor={colors.muted}
           maxLength={300}
           multiline

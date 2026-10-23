@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Alert, RefreshControl, ScrollView, Switch, Text, TextInput, View } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { RangeCalendar } from "@/components/calendar";
-import { Button, Card, Chip, Heading, Notice, colors, styles } from "@/components/ui";
+import { Button, Card, Chip, Heading, Notice, colors, styles, type Colour } from "@/components/ui";
 import { api, type Leave, type LeaveRequest } from "@/lib/api";
 import { days, keyOf, span } from "@/lib/format";
 
@@ -12,7 +12,7 @@ import { days, keyOf, span } from "@/lib/format";
  * haven't started. The web's own leave actions and rules (src/app/api/app/leave).
  */
 
-const STATUS: Record<string, { label: string; color: string }> = {
+const STATUS: Record<string, { label: string; color: Colour }> = {
   PENDING: { label: "Waiting for approval", color: colors.warning },
   APPROVED: { label: "Approved", color: colors.success },
   REJECTED: { label: "Rejected", color: colors.danger },
@@ -50,7 +50,7 @@ export default function LeaveScreen() {
           <Heading>Apply for leave</Heading>
           <Apply leave={leave} onApplied={() => void load()} />
           <Heading count={leave.requests.length}>Your requests</Heading>
-          {leave.requests.length === 0 ? <Notice>You haven't asked for leave yet.</Notice> : leave.requests.map((r) => <Request key={r.id} request={r} onCancelled={() => void load()} />)}
+          {leave.requests.length === 0 ? <Notice>You haven&apos;t asked for leave yet.</Notice> : leave.requests.map((r) => <Request key={r.id} request={r} onCancelled={() => void load()} />)}
         </>
       )}
     </ScrollView>
@@ -108,7 +108,7 @@ function Apply({ leave, onApplied }: { leave: Leave; onApplied: () => void }) {
     }
   }
 
-  if (leave.types.length === 0) return <Notice>Your workspace hasn't set up any kinds of leave yet.</Notice>;
+  if (leave.types.length === 0) return <Notice>Your workspace hasn&apos;t set up any kinds of leave yet.</Notice>;
 
   return (
     <Card>
@@ -131,13 +131,13 @@ function Apply({ leave, onApplied }: { leave: Leave; onApplied: () => void }) {
       {from && (
         <View style={styles.row}>
           <Text style={[styles.body, { flex: 1 }]}>{oneDay ? "Half a day" : "Half day on the first day"}</Text>
-          <Switch value={fromHalf} onValueChange={setFromHalf} trackColor={{ true: colors.brand }} />
+          <Switch value={fromHalf} onValueChange={setFromHalf} trackColor={{ true: colors.brand }} accessibilityLabel={oneDay ? "Half a day" : "Half day on the first day"} />
         </View>
       )}
       {from && !oneDay && (
         <View style={styles.row}>
           <Text style={[styles.body, { flex: 1 }]}>Half day on the last day</Text>
-          <Switch value={toHalf} onValueChange={setToHalf} trackColor={{ true: colors.brand }} />
+          <Switch value={toHalf} onValueChange={setToHalf} trackColor={{ true: colors.brand }} accessibilityLabel="Half day on the last day" />
         </View>
       )}
       {preview && (
@@ -146,7 +146,7 @@ function Apply({ leave, onApplied }: { leave: Leave; onApplied: () => void }) {
           {preview.skipped.length ? ` — ${preview.skipped.length} day${preview.skipped.length === 1 ? "" : "s"} off or holiday left out` : ""}
         </Text>
       )}
-      <TextInput style={styles.input} value={reason} onChangeText={setReason} placeholder="What it's for" placeholderTextColor={colors.muted} maxLength={500} multiline />
+      <TextInput style={styles.input} value={reason} onChangeText={setReason} placeholder="What it's for" placeholderTextColor={colors.muted} maxLength={500} multiline accessibilityLabel="What it's for" />
       {message && <Notice tone={message.tone}>{message.text}</Notice>}
       <Button title="Ask for leave" busy={busy} disabled={!typeId || !from || preview?.days === 0} onPress={() => void apply()} />
     </Card>

@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { RefreshControl, ScrollView, Text, View } from "react-native";
+import { Platform, RefreshControl, ScrollView, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import { Heading, Notice, colors, styles } from "@/components/ui";
@@ -51,7 +51,7 @@ export default function MoreScreen() {
       {can?.tasks ? <ListRow title="Tasks" onPress={() => router.push("/tasks")} /> : null}
       <ListRow title="Approvals" onPress={() => router.push("/approvals")} />
       {can?.attendance ? <ListRow title="Leave" onPress={() => router.push("/leave")} /> : null}
-      <ListRow title="Settings" subtitle="This phone, call sync, signing out" onPress={() => router.push("/settings")} />
+      <ListRow title="Settings" subtitle={Platform.OS === "ios" ? "This phone, calls, signing out" : "This phone, call sync, signing out"} onPress={() => router.push("/settings")} />
 
       {(me?.modules ?? []).map((section) => (
         <View key={section.group}>

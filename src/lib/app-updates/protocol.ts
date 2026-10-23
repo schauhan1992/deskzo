@@ -11,7 +11,8 @@ import { APP_UPDATE_CERTIFICATE } from "@/lib/app-updates/certificate";
  * before it keeps anything, and serves the body byte for byte as it was signed. The private key never reaches here.
  */
 
-export const APP_UPDATE_PLATFORMS = ["android"] as const;
+/** The phones that take updates: Android, and the iPhone (owner, 23 Oct 2026) — each only what was made for it. */
+export const APP_UPDATE_PLATFORMS = ["android", "ios"] as const;
 export type AppUpdatePlatform = (typeof APP_UPDATE_PLATFORMS)[number];
 
 /** Where a file of an update is served; a manifest names each of its files there, by hash. */

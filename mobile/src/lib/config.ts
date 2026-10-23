@@ -1,3 +1,4 @@
+import { Platform } from "react-native";
 import Constants from "expo-constants";
 
 /** A development build (DESKZO_APP_DEV=1, app.config.ts): may reach a Deskzo on this computer. */
@@ -13,7 +14,8 @@ export const FIND_WORKSPACE_URL = `https://${PLATFORM_DOMAIN}/signin`;
  * Where a workspace is, from its address as the pairing code carries it ("acme.deskzo.com") or as somebody types
  * it — the name alone ("acme") is a workspace on deskzo.com. A release build only ever talks HTTPS. A development
  * build reaches a `*.localhost` workspace on this computer from the Android emulator, at 10.0.2.2, naming the
- * workspace in the Host header.
+ * workspace in the Host header — or from the iOS Simulator at 127.0.0.1, the Mac itself, as Apple's networking finds
+ * no `*.localhost` name on its own.
  */
 export function workspaceAddress(value: string): { baseUrl: string; host: string | null } | null {
   let host = value
@@ -25,7 +27,7 @@ export function workspaceAddress(value: string): { baseUrl: string; host: string
   if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{2,5})?$/.test(host)) return null;
   if (/\.localhost(:\d+)?$/.test(host)) {
     if (!DEV) return null;
-    return { baseUrl: `http://10.0.2.2:${host.split(":")[1] ?? "80"}`, host };
+    return { baseUrl: `http://${Platform.OS === "ios" ? "127.0.0.1" : "10.0.2.2"}:${host.split(":")[1] ?? "80"}`, host };
   }
   return { baseUrl: `https://${host}`, host: null };
 }
@@ -33,9 +35,11 @@ export function workspaceAddress(value: string): { baseUrl: string; host: string
 /**
  * Where the workspace's own pages are, for the app's page view. A development build's `*.localhost` workspace is
  * opened by its own name — the emulator's browser engine takes *.localhost to be the phone itself, reached on this
- * computer through `adb reverse tcp:3000 tcp:3000`.
+ * computer through `adb reverse tcp:3000 tcp:3000`. iOS's can't name it at all, so the Simulator opens this Mac's
+ * Deskzo at localhost — its first workspace (TENANCY_LEGACY_HOSTS), the one to pair a development build with.
  */
 export function webOrigin(session: { baseUrl: string; host: string | null }): string {
+  if (session.host && Platform.OS === "ios") return `http://localhost:${session.host.split(":")[1] ?? "80"}`;
   return session.host ? `http://${session.host}` : session.baseUrl;
 }
 

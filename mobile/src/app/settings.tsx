@@ -3,17 +3,24 @@ import { Alert, Linking, ScrollView, Text } from "react-native";
 import * as Notifications from "expo-notifications";
 import { useFocusEffect, useRouter } from "expo-router";
 import { AppVersion } from "@/components/app-version";
+import { CallerIdCard, NotificationsCard } from "@/components/iphone-calls";
 import { Button, Card, Heading, Notice, styles } from "@/components/ui";
 import { when } from "@/lib/format";
-import { calls } from "@/lib/native";
+import { calls, phone } from "@/lib/native";
+import { notifications } from "@/lib/notifications";
 import { useSession } from "@/lib/session";
 import { PUSH_BUILT_IN, registerForPush } from "@/lib/push";
 
-/** Who this phone is signed in as, notifications, call sync, which version of the app it runs, and signing out. */
+/**
+ * Who this phone is signed in as, notifications, call sync, which version of the app it runs, and signing out. On an
+ * iPhone, its calls instead of call sync — caller ID and refreshing it — and its own notifications
+ * (src/components/iphone-calls.tsx).
+ */
 export default function Settings() {
   const router = useRouter();
   const { me, signOut } = useSession();
   const [sync, setSync] = useState(calls.getCallSync());
+  const [iphoneOn, setIphoneOn] = useState(phone.callsOn());
   const [result, setResult] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -24,6 +31,7 @@ export default function Settings() {
   useFocusEffect(
     useCallback(() => {
       setSync(calls.getCallSync());
+      setIphoneOn(phone.callsOn());
       if (PUSH_BUILT_IN) void Notifications.getPermissionsAsync().then((p) => setNotifying(p.granted)).catch(() => setNotifying(null));
     }, []),
   );
@@ -39,6 +47,9 @@ export default function Settings() {
         </Text>
       </Card>
 
+      {/* Android's (src/lib/push.ts); an iPhone's are further down (src/components/iphone-calls.tsx). */}
+      {!notifications.available && (
+        <>
       <Heading>Notifications</Heading>
       <Card>
         {!PUSH_BUILT_IN ? (
@@ -64,6 +75,8 @@ export default function Settings() {
           </>
         )}
       </Card>
+        </>
+      )}
 
       {calls.available && (
         <>
@@ -88,6 +101,27 @@ export default function Settings() {
             {result && <Notice>{result}</Notice>}
             <Button title={sync.on ? "Change call sync" : "Set up call sync"} kind="secondary" onPress={() => router.push("/setup")} />
           </Card>
+        </>
+      )}
+
+      {phone.available && (
+        <>
+          <Heading>Calls on this iPhone</Heading>
+          <Card>
+            <Text style={styles.body}>{iphoneOn ? "On — a customer's name shows when they ring, and a call you start from Deskzo is asked about afterwards." : "Off."}</Text>
+            <Button title={iphoneOn ? "Change calls on this iPhone" : "Set up calls on this iPhone"} kind="secondary" onPress={() => router.push("/setup")} />
+          </Card>
+          {iphoneOn && <CallerIdCard />}
+        </>
+      )}
+
+      {notifications.available && (
+        <>
+          <Heading>Notifications</Heading>
+          <NotificationsCard
+            why={"Get told what your bell says on the web — a lead given to you, something to approve, a task, a ticket's reply — and when a colleague messages you or Deskzo rings this phone."}
+            on={'On — what your bell says, chat messages and "Ring my phone", even with the app closed.'}
+          />
         </>
       )}
 

@@ -85,6 +85,7 @@ export default function TasksScreen() {
           value={title}
           onChangeText={setTitle}
           placeholder={view === "today" || view === "overdue" ? "A task for today" : "A new task"}
+          accessibilityLabel="New task"
           placeholderTextColor={colors.muted}
           returnKeyType="done"
           onSubmitEditing={() => void add()}

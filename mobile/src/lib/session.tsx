@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, onSignedOut, type Me } from "@/lib/api";
+import { calling } from "@/lib/calling";
 import { calls } from "@/lib/native";
+import { notifications } from "@/lib/notifications";
 
 /**
  * Who this phone is signed in as. The token lives in the native module's private storage (so the
@@ -28,6 +30,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const forget = useCallback(() => {
     calls.clearSession();
+    // An iPhone's reminders, the call it was waiting on and its caller ID (src/lib/calling.ios.ts) — nothing on Android.
+    calling.forget();
+    void notifications.clear();
     setPaired(false);
     setMe(null);
   }, []);

@@ -10,12 +10,18 @@
  * Uses sharp from the main project's node_modules (it comes with Next). Writes assets/ for the app and
  * store/graphics/ for the Play listing. A new icon reaches phones only with a new build from the store —
  * an over-the-air update carries the screens, not the icon.
+ *
+ * The iPhone's icon is drawn on its own (owner, 22 Oct 2026): a full square with no transparency — the App Store
+ * refuses an icon with an alpha channel, and iOS rounds the corners itself — and the dark and tinted icons iOS 18
+ * offers, the D alone on nothing, for the system to put on its own dark or tinted ground.
  */
 const fs = require("node:fs");
 const path = require("node:path");
 const sharp = require(path.join(__dirname, "..", "..", "node_modules", "sharp"));
 
 const BRAND = "#0249FE";
+/** Deskzo blue made lighter, to read on a dark ground. */
+const BRAND_ON_DARK = "#6E95FF";
 const ROOT = path.join(__dirname, "..");
 const ASSETS = path.join(ROOT, "assets");
 const STORE = path.join(ROOT, "store", "graphics");
@@ -50,8 +56,9 @@ function tileD(left, top, size, fill, scale = 1) {
 
 const svg = (w, h, body) => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${body}</svg>`);
 
-async function write(file, w, h, body) {
-  await sharp(svg(w, h, body)).png().toFile(file);
+async function write(file, w, h, body, { opaque = false } = {}) {
+  const image = sharp(svg(w, h, body));
+  await (opaque ? image.flatten({ background: BRAND }).removeAlpha() : image).png().toFile(file);
   console.log("wrote", path.relative(ROOT, file));
 }
 
@@ -65,6 +72,13 @@ async function write(file, w, h, body) {
   await write(path.join(ASSETS, "android-icon-monochrome.png"), 1024, 1024, tileD(0, 0, 1024, "#000000", 0.8));
   await write(path.join(ASSETS, "splash-icon.png"), 1024, 1024, tileD(0, 0, 1024, BRAND, 1.2));
   await write(path.join(ASSETS, "favicon.png"), 48, 48, `<rect width="48" height="48" rx="11" fill="#FFFFFF"/>${tileD(0, 0, 48, BRAND)}`);
+
+  // iOS (app.config.ts ios.icon): the official icon, opaque and edge to edge; the dark one the D in the blue that
+  // reads on a dark ground (the app's dark mode, src/components/ui.tsx), and the tinted one in white, which iOS
+  // tints — both on nothing. The dark one is the dark launch screen's too (plugins/with-ios-splash.js).
+  await write(path.join(ASSETS, "ios-icon.png"), 1024, 1024, `<rect width="1024" height="1024" fill="#FFFFFF"/>${tileD(0, 0, 1024, BRAND)}`, { opaque: true });
+  await write(path.join(ASSETS, "ios-icon-dark.png"), 1024, 1024, tileD(0, 0, 1024, BRAND_ON_DARK));
+  await write(path.join(ASSETS, "ios-icon-tinted.png"), 1024, 1024, tileD(0, 0, 1024, "#FFFFFF"));
 
   // Google Play: the 512 icon (square — Play rounds it), and the 1024×500 feature graphic: the icon and the
   // wordmark in white on Deskzo blue.

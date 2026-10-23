@@ -2,10 +2,12 @@ import { useCallback, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { Button, Card, Heading, Notice, colors, styles } from "@/components/ui";
+import { BOXED_TEXT_SCALE, Button, Card, Heading, Notice, colors, styles } from "@/components/ui";
 import { TaskRow } from "@/components/task-row";
 import { ClockCard } from "@/components/clock-card";
 import { FieldToday } from "@/components/field";
+import { NotificationsOffer } from "@/components/iphone-calls";
+import { notifications } from "@/lib/notifications";
 import { ApiError, api, type Today } from "@/lib/api";
 import { setWaiting } from "@/lib/badges";
 import { dayOf, days, span } from "@/lib/format";
@@ -73,6 +75,9 @@ export default function TodayScreen() {
         <ClockCard attendance={today.attendance} policy={today.location ?? null} onChanged={(attendance, location) => setToday({ ...today, attendance, location })} />
       )}
 
+      {/* On an iPhone, the one offer of notifications — once there is something on the day's screen they are for. */}
+      {today && notifications.available && <NotificationsOffer />}
+
       {/* Always here — Approvals has no tab of its own, so this is the way in, with or without anything waiting. */}
       {today && (
         <Pressable accessibilityRole="button" accessibilityLabel="Approvals" onPress={() => router.push("/approvals")}>
@@ -87,8 +92,10 @@ export default function TodayScreen() {
               </Text>
             </View>
             {today.approvals_waiting > 0 ? (
-              <View style={{ minWidth: 24, height: 24, borderRadius: 12, backgroundColor: colors.brand, alignItems: "center", justifyContent: "center", paddingHorizontal: 7 }}>
-                <Text style={{ color: "#fff", fontWeight: "700", fontSize: 13 }}>{today.approvals_waiting}</Text>
+              <View style={{ minWidth: 24, height: 24, borderRadius: 12, backgroundColor: colors.brandFill, alignItems: "center", justifyContent: "center", paddingHorizontal: 7 }}>
+                <Text style={{ color: "#fff", fontWeight: "700", fontSize: 13 }} maxFontSizeMultiplier={BOXED_TEXT_SCALE}>
+                  {today.approvals_waiting}
+                </Text>
               </View>
             ) : null}
             <Ionicons name="chevron-forward" size={20} color={colors.muted} />

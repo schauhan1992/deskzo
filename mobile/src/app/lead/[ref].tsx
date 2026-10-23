@@ -105,7 +105,7 @@ export default function LeadScreen() {
                 <Text style={[styles.body, { fontWeight: "600" }]}>{contact.name}</Text>
                 {contact.phone ? <Text style={styles.small}>{contact.phone}</Text> : null}
               </View>
-              <ContactButtons phone={contact.phone} email={contact.email} />
+              <ContactButtons phone={contact.phone} email={contact.email} name={contact.name} />
             </View>
           )}
         </Card>

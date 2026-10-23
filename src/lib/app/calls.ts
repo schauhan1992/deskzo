@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { recordAudit } from "@/lib/audit";
 import { ApiError } from "@/lib/api/handler";
 import { iso } from "@/lib/api/refs";
-import { callerCard, matchNumbers, numberKey, obviousLead, openLeadsFor, type PhoneMatch } from "@/lib/app/match";
+import { callerCard, directoryEntries, matchNumbers, numberKey, obviousLead, openLeadsFor, type PhoneMatch } from "@/lib/app/match";
 import { callOutcomeLabels, callOutcomeValues } from "@/lib/calls";
 import { canSeeCompany } from "@/lib/authz/company-scope";
 import { requireModuleUser } from "@/lib/modules-access";
@@ -24,31 +24,48 @@ import { isModuleEnabled } from "@/actions/module";
  *   · A customer's call missed is a callback owed: due now, on the calls list and the person's tasks — once,
  *     however many times they rang before it was returned.
  *   · Only calls since the phone was paired, and none from the future.
+ *   · An iPhone can't read its call log (owner, 22 Oct 2026): its person says how a call went on the app's
+ *     after-call sheet, and it comes `manual`, with that outcome and usually no length. Logged as they said —
+ *     never inferred from a length — and marked as of unknown length (`CallLog.lengthUnknown`); a callback is
+ *     theirs to ask for on the same sheet (`reviewPhoneCall`), never raised as for a missed call. Everything
+ *     else as for a call log's: the same duplicates, the ring it answers, the lead's timeline.
  *
  * Everything here runs as the phone's person (src/lib/app/handler.ts) and asks Calls of them as the screens do.
  */
 
 const SYNC_MAX = 200;
 
+const outcomeEnum = z.enum(callOutcomeValues as [CallOutcome, ...CallOutcome[]]);
+
 export const syncBody = z.object({
   calls: z
     .array(
-      z.object({
-        /** The phone's own id for the call-log entry. */
-        key: z.string().trim().min(1).max(100),
-        number: z.string().trim().min(3).max(40),
-        direction: z.enum(["out", "in"]),
-        started_at: z.iso.datetime({ offset: true }),
-        /** Seconds talking; 0 for a call nobody answered. */
-        duration: z.number().int().min(0).max(86_400),
-      }),
+      z
+        .object({
+          /** The phone's own id for the call-log entry — or, logged by hand, for the call it logged. */
+          key: z.string().trim().min(1).max(100),
+          number: z.string().trim().min(3).max(40),
+          direction: z.enum(["out", "in"]),
+          started_at: z.iso.datetime({ offset: true }),
+          /** Seconds talking; 0 for a call nobody answered. Left out of a call logged by hand: an iPhone can't know it. */
+          duration: z.number().int().min(0).max(86_400).optional(),
+          /** Logged by hand on the phone, from the after-call sheet, rather than read from its call log. */
+          manual: z.boolean().optional(),
+          /** How it went, as its person said — for a call logged by hand, and only for one. */
+          outcome: outcomeEnum.optional(),
+        })
+        .superRefine((call, ctx) => {
+          if (call.manual && !call.outcome) ctx.addIssue({ code: "custom", path: ["outcome"], message: "Say how a call logged by hand went." });
+          if (!call.manual && call.outcome) ctx.addIssue({ code: "custom", path: ["outcome"], message: "Only a call logged by hand says how it went — a call log's is worked out from its length." });
+          if (!call.manual && call.duration === undefined) ctx.addIssue({ code: "custom", path: ["duration"], message: "Say how long the call was, in seconds." });
+        }),
     )
     .min(1)
     .max(SYNC_MAX),
 });
 
 export const reviewBody = z.object({
-  outcome: z.enum(callOutcomeValues as [CallOutcome, ...CallOutcome[]]),
+  outcome: outcomeEnum,
   notes: z.string().trim().max(4000).optional(),
   /** When they asked to be called back. */
   follow_up_at: z.iso.datetime({ offset: true }).nullable().optional(),
@@ -93,7 +110,7 @@ async function stillBelongs(companyId: string, ids: { contactId: string | null; 
   };
 }
 
-export async function syncPhoneCalls(device: { id: string; callSync: boolean; createdAt: Date }, body: unknown): Promise<SyncResult[]> {
+export async function syncPhoneCalls(device: { id: string; callSync: boolean; createdAt: Date; platform?: string }, body: unknown): Promise<SyncResult[]> {
   const user = await callsUser();
   if (!device.callSync) throw new ApiError(409, "call_sync_off", "Call sync is switched off on this phone.");
   const { calls } = syncBody.parse(body);
@@ -132,7 +149,10 @@ export async function syncPhoneCalls(device: { id: string; callSync: boolean; cr
     }
 
     const inbound = item.direction === "in";
-    const outcome: CallOutcome = item.duration > 0 ? "CONNECTED" : "NO_ANSWER";
+    const manual = item.manual === true;
+    const duration = item.duration ?? 0;
+    // By hand: as its person said. From a call log: what its length says, until they say.
+    const outcome: CallOutcome = manual ? item.outcome! : duration > 0 ? "CONNECTED" : "NO_ANSWER";
     const request = inbound ? null : await requestFor(device.id, key, startedAt);
     const context = request
       ? await stillBelongs(match.company.id, request)
@@ -140,7 +160,8 @@ export async function syncPhoneCalls(device: { id: string; callSync: boolean; cr
     const contactId = context.contactId ?? match.contact.id;
 
     // A customer's call nobody took: a callback owed, unless one for them is already waiting on this person.
-    const missed = inbound && item.duration === 0;
+    // Only a call log says that — a call logged by hand asks for its own callback, or doesn't.
+    const missed = !manual && inbound && duration === 0;
     const owed = missed
       ? await db.callLog.findFirst({ where: { userId: user.id, contactId, followUpAt: { not: null }, followUpDone: false }, select: { id: true } })
       : null;
@@ -159,7 +180,8 @@ export async function syncPhoneCalls(device: { id: string; callSync: boolean; cr
             direction: inbound ? "INBOUND" : "OUTBOUND",
             outcome,
             startedAt,
-            durationSeconds: item.duration,
+            durationSeconds: duration,
+            lengthUnknown: manual && item.duration === undefined,
             userId: user.id,
             source: "PHONE",
             appDeviceId: device.id,
@@ -195,12 +217,19 @@ export async function syncPhoneCalls(device: { id: string; callSync: boolean; cr
     }
 
     // On the lead's timeline too, as a call typed into a dialog is; its notes join it when they are given.
+    const how = manual ? `logged by hand on the ${device.platform === "ios" ? "iPhone" : "phone"}` : "from the phone";
     if (context.leadId) {
       await db.activity
-        .create({ data: { leadId: context.leadId, userId: user.id, type: "CALL", notes: `${outcomeWords(outcome)} — from the phone`, occurredAt: startedAt } })
+        .create({ data: { leadId: context.leadId, userId: user.id, type: "CALL", notes: `${outcomeWords(outcome)} — ${how}`, occurredAt: startedAt } })
         .catch(() => null);
     }
-    await recordAudit({ userId: user.id, action: "CREATE", entityType: "CallLog", entityId: created.id, entityLabel: `Call ${inbound ? "from" : "to"} ${match.company.name} — ${outcomeWords(outcome)}` });
+    await recordAudit({
+      userId: user.id,
+      action: "CREATE",
+      entityType: "CallLog",
+      entityId: created.id,
+      entityLabel: `Call ${inbound ? "from" : "to"} ${match.company.name} — ${outcomeWords(outcome)}${manual ? `, ${how}` : ""}`,
+    });
     touched.add(match.company.id);
     results.push({ key: item.key, status: "logged", call_id: created.id, contact: match.contact.name, company: match.company.name });
   }
@@ -279,7 +308,7 @@ export async function callsToReview() {
     where: { userId: user.id, source: "PHONE", reviewedAt: null, startedAt: { gte: new Date(Date.now() - 3 * 86_400_000) } },
     orderBy: { startedAt: "desc" },
     take: 50,
-    select: { id: true, phoneNumber: true, direction: true, outcome: true, startedAt: true, durationSeconds: true, leadId: true, companyId: true, company: { select: { name: true } }, contact: { select: { name: true } } },
+    select: { id: true, phoneNumber: true, direction: true, outcome: true, startedAt: true, durationSeconds: true, lengthUnknown: true, leadId: true, companyId: true, company: { select: { name: true } }, contact: { select: { name: true } } },
   });
   const leads = new Map<string, Awaited<ReturnType<typeof openLeadsFor>>>();
   for (const companyId of new Set(rows.map((r) => r.companyId))) leads.set(companyId, await openLeadsFor(user.id, companyId));
@@ -290,6 +319,8 @@ export async function callsToReview() {
     outcome: r.outcome,
     started_at: iso(r.startedAt),
     duration: r.durationSeconds,
+    /** False for a call logged by hand without a length — its duration is 0 without meaning nobody answered. */
+    length_known: !r.lengthUnknown,
     contact: r.contact?.name ?? null,
     company: r.company.name,
     lead_id: r.leadId,
@@ -316,6 +347,12 @@ export async function lookupNumber(number: string) {
   if (!key) return null;
   const match = (await matchNumbers(user.id, [number])).get(key);
   return match ? callerCard(user.id, match) : null;
+}
+
+/** Caller ID ahead of time, for an iPhone's Call Directory: every customer's number this person may see (src/lib/app/match.ts). */
+export async function callerDirectory() {
+  const user = await callsUser();
+  return directoryEntries(user.id);
 }
 
 /**

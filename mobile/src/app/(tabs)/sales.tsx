@@ -104,7 +104,7 @@ export default function SalesScreen() {
             <ListRow
               title={item.name}
               subtitle={[item.company?.name, item.designation_name].filter(Boolean).join(" · ")}
-              right={<ContactButtons phone={item.phone} email={item.email} />}
+              right={<ContactButtons phone={item.phone} email={item.email} name={item.name} />}
               onPress={item.company ? () => router.push({ pathname: "/company/[ref]", params: { ref: item.company!.ref ?? item.company!.id } }) : undefined}
             />
           );

@@ -41,8 +41,10 @@ export function MessageMenu({
 
   return (
     <Modal transparent animationType="fade" visible onRequestClose={onClose}>
-      <Pressable style={s.backdrop} onPress={onClose} accessibilityLabel="Close">
-        <Pressable style={s.sheet} onPress={() => {}}>
+      {/* Not one element each for VoiceOver and TalkBack, or the buttons inside couldn't be reached: the sheet closes with
+          the screen reader's own "back" (two-finger scrub on iOS) instead. */}
+      <Pressable style={s.backdrop} onPress={onClose} accessible={false}>
+        <Pressable style={s.sheet} onPress={() => {}} accessible={false} onAccessibilityEscape={onClose}>
           <View style={s.emojis}>
             {REACTIONS.map((e) => (
               <Pressable

@@ -4,7 +4,8 @@
  *
  *   · An update signed with a key of the suite's own is kept, and a phone on its native build is handed it — the
  *     manifest byte for byte, signed, in the multipart answer of the Expo Updates protocol; one already running it,
- *     or on another build, is told there's nothing (204).
+ *     or on another build, is told there's nothing (204) — and so is an iPhone, answered as a phone the server
+ *     serves, but never handed Android's update.
  *   · Its files come back by their hashes, cacheable for good; an unknown hash is a 404.
  *   · Nothing unsigned is kept: the publish address refuses the suite's key (only Deskzo's certificate is trusted),
  *     and the store refuses a body changed after signing, a file that doesn't match its hash, a missing file, the
@@ -105,6 +106,8 @@ async function main() {
     ok("a phone is told there's nothing (204, protocol 1)", nothing.status === 204 && nothing.headers.get("expo-protocol-version") === "1", nothing.status);
     const bad = await manifestRoute.GET(new Request(`${SERVER}/api/app-updates/manifest`, { headers: { "expo-platform": "windows", "expo-runtime-version": RV } }));
     ok("a platform it doesn't serve: 400", bad.status === 400, bad.status);
+    const iphoneFirst = await manifestRoute.GET(new Request(`${SERVER}/api/app-updates/manifest`, { headers: { "expo-protocol-version": "1", "expo-platform": "ios", "expo-runtime-version": RV } }));
+    ok("an iPhone is answered too: nothing (204), not an error", iphoneFirst.status === 204, iphoneFirst.status);
 
     section("Publishing");
     const first = manifestFor([bundle, image], new Date(Date.now() - 60_000));
@@ -143,6 +146,8 @@ async function main() {
     ok("a phone already running it: nothing (204)", already.status === 204, already.status);
     const otherBuild = await manifestRoute.GET(new Request(`${SERVER}/api/app-updates/manifest`, { headers: { "expo-protocol-version": "1", "expo-platform": "android", "expo-runtime-version": `${RV}-other` } }));
     ok("a phone on another native build: nothing", otherBuild.status === 204, otherBuild.status);
+    const iphone = await manifestRoute.GET(new Request(`${SERVER}/api/app-updates/manifest`, { headers: { "expo-protocol-version": "1", "expo-platform": "ios", "expo-runtime-version": RV } }));
+    ok("an iPhone: nothing — Android's update is Android's alone", iphone.status === 204, iphone.status);
 
     section("Its files");
     const file = await assetRoute.GET(new Request(`${SERVER}/api/app-updates/assets/${hashOf(bundle.bytes)}`), { params: Promise.resolve({ hash: hashOf(bundle.bytes) }) });
