@@ -97,6 +97,12 @@ export const BLOCK_INFO: Record<BlockType, BlockInfo> = {
     pageTop: true,
   },
   helpIndex: { label: "Help Center index", description: "Every published guide, grouped by product, with a search box. For the Help Center page.", icon: LifeBuoy, group: "Live data and forms" },
+  productStrip: {
+    label: "Product strip",
+    description: "Every product by its 3D icon, name and line, each linking to its page. Built from the product list, so a new product is in it on its own; you write the words around it.",
+    icon: Grid3x3,
+    group: "Sections",
+  },
 };
 
 export const BLOCK_GROUPS: BlockGroup[] = ["Top of page", "Sections", "Text", "Live data and forms"];
@@ -213,6 +219,7 @@ const STARTERS: { [K in BlockType]: () => BlockPropsMap[K] } = {
     related: [],
   }),
   helpIndex: () => siteDefault("helpIndex") ?? { searchLabel: "Search the guides", everyProductHeading: "In every product", emptyText: "The guides are on their way." },
+  productStrip: () => siteDefault("productStrip") ?? { heading: "Every product", intro: "A sentence that sets up the products below." },
 };
 
 /** A new block of `type`, with a fresh id. Call from an event handler (the id is random). */

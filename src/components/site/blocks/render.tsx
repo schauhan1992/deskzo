@@ -24,6 +24,7 @@ import { WorkspaceSigninBlock } from "@/components/site/blocks/workspace-signin"
 import { ProductVsSuiteBlock } from "@/components/site/blocks/product-vs-suite";
 import { HelpGuideBlock } from "@/components/site/blocks/help-guide";
 import { HelpIndexBlock } from "@/components/site/blocks/help-index";
+import { ProductStripBlock } from "@/components/site/blocks/product-strip";
 
 /**
  * A page's blocks, in order. A block of a type this code does not know — content saved by a newer
@@ -83,6 +84,8 @@ function renderBlock(block: SiteBlock, ctx: SiteRenderContext, key: string): Rea
       return <HelpGuideBlock key={key} props={block.props} ctx={ctx} />;
     case "helpIndex":
       return <HelpIndexBlock key={key} props={block.props} ctx={ctx} />;
+    case "productStrip":
+      return <ProductStripBlock key={key} props={block.props} ctx={ctx} />;
     default:
       return null;
   }

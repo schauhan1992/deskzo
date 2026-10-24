@@ -360,6 +360,12 @@ Push to `main`. If automatic deployment is on, Coolify builds and starts the new
 post-deployment migrations. Otherwise press **Redeploy**. Watch the deployment log for `tenants:migrate`: a workspace
 whose migration fails is held at the maintenance page, and the console's Migrations page says why (runbook §3).
 
+A release that adds to a page published from the website CMS can't change that page by itself: the CMS's copy is
+what the site shows. Such a release comes with a script, run once in the application's **Terminal** after it deploys —
+each does nothing when there is nothing to do, and leaves alone a page with changes someone hasn't published yet:
+
+- `npm run site:home-products` — the product strip on the home page (24 Oct 2026).
+
 ## Not covered here
 
 - **PgBouncer** (runbook §7): one app container keeps at most 70 database connections, inside the 200 set in step 2.

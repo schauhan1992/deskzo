@@ -283,7 +283,8 @@
     "check:domain-edge": "tsx scripts/check-domain-edge.ts",
     "check:loopholes": "tsx scripts/check-loopholes.ts",
     "check:browse-host": "tsx scripts/check-browse-host.ts",
-    "site:seed-pages": "tsx scripts/site-seed-pages.ts"
+    "site:seed-pages": "tsx scripts/site-seed-pages.ts",
+    "site:home-products": "tsx scripts/site-home-products.ts"
   },
   "dependencies": {
     "@anthropic-ai/bedrock-sdk": "^0.35.0",

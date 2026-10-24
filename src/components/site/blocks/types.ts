@@ -276,6 +276,21 @@ export type ProductVsSuiteProps = {
 };
 
 /**
+ * Every product, by its icon (src/components/site/blocks/product-strip.tsx; owner, 24 Oct 2026) — each its
+ * 3D icon, name and line, linking to its page. Only the words around it are written: the products, their
+ * order and their icons are src/lib/products.ts's and src/lib/brand/product-icons.ts's, so a product added
+ * there is in the strip without an edit.
+ */
+export type ProductStripProps = {
+  anchor?: string;
+  eyebrow?: string;
+  heading: string;
+  intro?: string;
+  /** Under the strip: "Compare every product". */
+  action?: SiteAction;
+};
+
+/**
  * A module's guide in the Help Center (/help/<slug>, src/lib/help/guides.ts): one per module in
  * src/lib/modules.ts, every one on the same outline, in this order — what it is for, who can use it,
  * setting it up, everyday tasks step by step, each setting explained, questions and troubleshooting —
@@ -350,6 +365,7 @@ export type BlockPropsMap = {
   productVsSuite: ProductVsSuiteProps;
   helpGuide: HelpGuideProps;
   helpIndex: HelpIndexProps;
+  productStrip: ProductStripProps;
 };
 
 export type BlockType = keyof BlockPropsMap;
@@ -380,6 +396,7 @@ export const BLOCK_TYPES = [
   "productVsSuite",
   "helpGuide",
   "helpIndex",
+  "productStrip",
 ] as const satisfies readonly BlockType[];
 // Every block type is in the list: this fails to compile if one is added to BlockPropsMap and not here.
 type Assert<T extends true> = T;

@@ -19,6 +19,7 @@ import type {
   PageHeaderProps,
   PricingTableProps,
   ProductPreviewsProps,
+  ProductStripProps,
   RelatedLinksProps,
   RichTextProps,
   SecurityHighlightsProps,
@@ -938,6 +939,24 @@ function HelpIndexForm({ props, onChange }: FormProps<"helpIndex">) {
   );
 }
 
+function ProductStripForm({ props, onChange }: FormProps<"productStrip">) {
+  const set = <K extends keyof ProductStripProps>(key: K, value: ProductStripProps[K]) => onChange({ ...props, [key]: value });
+  return (
+    <>
+      <p className="rounded-md border border-info/30 bg-info-bg px-3 py-2 text-xs text-info">
+        Every product is in the strip by itself — its icon, name and line, linking to its page — in the order of the Product menu. These are the words around it.
+      </p>
+      <Row>
+        <TextField label="Eyebrow" name="eyebrow" value={props.eyebrow} onChange={(v) => set("eyebrow", v)} max={80} />
+        <AnchorField value={props.anchor} onChange={(v) => set("anchor", v)} />
+      </Row>
+      <TextField label="Heading" name="heading" value={props.heading} onChange={(v) => set("heading", v)} max={HEADING} required />
+      <TextField label="Introduction" name="intro" value={props.intro} onChange={(v) => set("intro", v)} max={BODY} multiline rows={2} />
+      <ActionField label="Link under the strip" name="action" value={props.action} onChange={(v) => set("action", v)} />
+    </>
+  );
+}
+
 /** The form for one block, by its type. */
 export function BlockForm({ block, onChange }: { block: SiteBlock; onChange: (next: SiteBlock) => void }) {
   switch (block.type) {
@@ -989,6 +1008,8 @@ export function BlockForm({ block, onChange }: { block: SiteBlock; onChange: (ne
       return <HelpGuideForm props={block.props} onChange={(props) => onChange({ ...block, props })} />;
     case "helpIndex":
       return <HelpIndexForm props={block.props} onChange={(props) => onChange({ ...block, props })} />;
+    case "productStrip":
+      return <ProductStripForm props={block.props} onChange={(props) => onChange({ ...block, props })} />;
     default:
       return <p className="text-sm text-muted">This block&apos;s type is not known to this editor. It is kept as it is.</p>;
   }

@@ -1,4 +1,4 @@
-import type { SitePage, SiteSettings } from "@/components/site/blocks/types";
+import type { SiteBlock, SitePage, SiteSettings } from "@/components/site/blocks/types";
 import { MODULE_REGISTRY } from "@/lib/modules";
 
 /**
@@ -127,6 +127,19 @@ const SECURITY_ITEMS = [
 
 // ─── Pages ───────────────────────────────────────────────────────────────────────────────────────
 
+/** The home page's product strip: the products and their icons are products.ts's, these are the words around them. */
+export const HOME_PRODUCT_STRIP: SiteBlock = {
+  id: "home-products",
+  type: "productStrip",
+  props: {
+    anchor: "products",
+    eyebrow: "Products",
+    heading: "Start with one product, or have them all",
+    intro: "Each product runs one kind of work. Take the one you need and add more as you grow — they share one set of records, so nothing is typed in twice.",
+    action: { kind: "link", label: "Compare every product and module", href: "/product" },
+  },
+};
+
 const HOME: SitePage = {
   slug: "home",
   title: "Home",
@@ -162,6 +175,8 @@ const HOME: SitePage = {
         ],
       },
     },
+    // Every product by its icon (owner, 24 Oct 2026). A published home page gets it from `npm run site:home-products`.
+    HOME_PRODUCT_STRIP,
     {
       id: "home-modules",
       type: "moduleGrid",

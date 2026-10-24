@@ -23,6 +23,7 @@ import { productByKey } from "@/lib/products";
 import { GUIDE_SECTIONS, moduleAvailability } from "@/lib/help/guides";
 import { getPermissionDefinition } from "@/lib/permissions";
 import { comparisonRows } from "@/components/site/blocks/product-vs-suite-view";
+import { stripProducts } from "@/components/site/blocks/product-strip";
 import type {
   SeoContent,
   SeoContentImage,
@@ -594,6 +595,16 @@ function block(c: Collector, b: SiteBlock, index: number, root: "blocks" | "body
       // The guides themselves are read live; what the content holds is the words around them.
       label(c, t(p.searchLabel));
       label(c, t(p.everyProductHeading));
+      break;
+    case "productStrip":
+      // The products are products.ts's, so what a reader sees is read from there: each name, linking to its page, and its line.
+      sectionHead(c, p, t, field);
+      for (const product of stripProducts()) {
+        link(c, product.path, product.name, field);
+        label(c, product.name);
+        paragraph(c, product.tagline, field);
+      }
+      action(c, p.action as SiteAction, ctx, field);
       break;
     case "signatureGenerator":
       // The generator itself is drawn in the browser; what the content holds is the words around it.

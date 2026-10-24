@@ -22,6 +22,7 @@ import { SecurityHighlightsBlock } from "@/components/site/blocks/security-highl
 import { SignupFormBlock } from "@/components/site/blocks/signup-form";
 import { SignatureGeneratorBlock } from "@/components/site/blocks/signature-generator";
 import { ProductVsSuiteView } from "@/components/site/blocks/product-vs-suite-view";
+import { ProductStripBlock } from "@/components/site/blocks/product-strip";
 import { StatsBlock } from "@/components/site/blocks/stats";
 import { TestimonialBlock } from "@/components/site/blocks/testimonial";
 import { WorkspaceSigninBlock } from "@/components/site/blocks/workspace-signin";
@@ -181,6 +182,8 @@ function renderBlock(block: SiteBlock, ctx: SiteRenderContext): ReactNode {
       return <HelpGuideView props={block.props} ctx={ctx} related={[]} />;
     case "helpIndex":
       return <HelpIndexPlaceholder props={block.props} ctx={ctx} />;
+    case "productStrip":
+      return <ProductStripBlock props={block.props} ctx={ctx} />;
     default:
       return null;
   }

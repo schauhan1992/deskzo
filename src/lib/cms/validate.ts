@@ -219,6 +219,8 @@ const BLOCK_SPECS = {
     related: { k: "texts", max: 60, maxItems: 12 },
   },
   helpIndex: { anchor: { k: "anchor" }, searchLabel: text(LABEL, true), everyProductHeading: text(SHORT, true), emptyText: text(BODY, true) },
+  // The products are products.ts's; only the words around them are the page's.
+  productStrip: { ...SECTION_HEAD, action: { k: "action" } },
 } satisfies { [K in BlockType]: Record<keyof BlockPropsMap[K], Field> };
 
 const SEO_SPEC: Fields = {
