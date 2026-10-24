@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, type MouseEvent, type PointerEvent } from "react";
+import { useEffect, useId, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from "react";
 import { ArrowRight, ChevronDown, Menu, X } from "lucide-react";
-import type { NavItem, NavMenu, SiteLink } from "@/components/site/blocks/types";
+import type { NavItem, NavMenu, NavMenuItem, SiteLink } from "@/components/site/blocks/types";
 import { isNavMenu } from "@/components/site/nav";
 import { ButtonLink, Container, SiteAnchor } from "@/components/site/ui";
 import { SiteLogo } from "@/components/site/logo";
+import { NAV_ICONS, navIconKey } from "@/components/site/nav-icons";
+import { ProductIcon } from "@/components/brand/product-icon";
+import { productByPath, type Product } from "@/lib/products";
 import { cn } from "@/lib/utils";
 
 /**
@@ -22,6 +25,15 @@ import { cn } from "@/lib/utils";
  *   · Every panel is in the server's HTML, hidden until opened: no script is needed to read the
  *     links, so crawlers see all of them.
  *
+ *   · While one is open the page under it is dimmed, and the panel ends in a bar: the menu's own
+ *     link ("See every module") and the call to action.
+ *
+ * A link to a product's page carries the product's icon (src/lib/brand/product-icons.ts), in the
+ * panel and the accordion alike — found by its address, so the menus' content needn't name it. A
+ * menu of products is laid out as one (owner, 24 Oct 2026: "improve the mega menu"): Deskzo One as
+ * a feature card with every product's icon in it, the products in two even stacks, the add-ons in a
+ * side panel (`productShape`).
+ *
  * Below `lg` the items fold into a menu button, and each menu becomes an accordion (taps of 44 px).
  * The header's six-odd menus and two buttons need a wide screen side by side, hence `lg`.
  */
@@ -31,9 +43,6 @@ type Open = { index: number; pinned: boolean };
 const HOVER_OPEN_MS = 120;
 const HOVER_SWITCH_MS = 40;
 const HOVER_CLOSE_MS = 200;
-/** A menu with few columns keeps them together at the left of the page rather than spread across it. */
-const PANEL_GRID_WIDTH: Record<number, string> = { 1: "max-w-xs", 2: "max-w-2xl", 3: "max-w-5xl", 4: "", 5: "" };
-const PANEL_GRID: Record<number, string> = { 1: "grid-cols-1", 2: "grid-cols-2", 3: "grid-cols-3", 4: "grid-cols-4", 5: "grid-cols-5" };
 
 export function SiteHeader({ siteName, nav, signin, cta }: { siteName: string; nav: NavItem[]; signin: SiteLink; cta: SiteLink }) {
   const baseId = useId();
@@ -103,6 +112,8 @@ export function SiteHeader({ siteName, nav, signin, cta }: { siteName: string; n
         }
       }}
     >
+      {/* While a menu is open, the page under it is dimmed; a press on it closes the menu (the outside-press handler) rather than following what is beneath. */}
+      {openIndex !== null && <div aria-hidden="true" className="absolute inset-x-0 top-full hidden h-dvh bg-slate-950/20 backdrop-blur-[2px] motion-safe:animate-fade-in lg:block" />}
       <Container className="flex h-16 items-center gap-4">
         <SiteLogo name={siteName} />
         <nav ref={navRef} aria-label="Main" className="ml-2 hidden lg:block">
@@ -134,12 +145,12 @@ export function SiteHeader({ siteName, nav, signin, cta }: { siteName: string; n
                     aria-controls={`${baseId}-panel-${i}`}
                     onClick={() => clickMenu(i)}
                     className={cn(
-                      "inline-flex items-center gap-1 rounded-md px-2.5 py-2 text-sm font-medium transition-colors hover:text-text",
-                      openIndex === i ? "text-text" : "text-muted",
+                      "inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-sm font-medium transition-colors hover:text-text",
+                      openIndex === i ? "bg-surface-sunken text-text" : "text-muted",
                     )}
                   >
                     {item.label}
-                    <ChevronDown aria-hidden="true" className={cn("h-3.5 w-3.5 text-subtle transition-transform duration-150", openIndex === i && "rotate-180")} />
+                    <ChevronDown aria-hidden="true" className={cn("h-3.5 w-3.5 text-subtle transition-transform duration-200", openIndex === i && "rotate-180 text-text")} />
                   </button>
                   <div
                     id={`${baseId}-panel-${i}`}
@@ -147,12 +158,12 @@ export function SiteHeader({ siteName, nav, signin, cta }: { siteName: string; n
                     className="absolute inset-x-0 top-full z-50"
                     onClick={closeOnLink}
                   >
-                    <MenuPanel menu={item} idPrefix={`${baseId}-panel-${i}`} />
+                    <MenuPanel menu={item} idPrefix={`${baseId}-panel-${i}`} cta={cta} />
                   </div>
                 </li>
               ) : (
                 <li key={`link-${i}`}>
-                  <SiteAnchor href={item.href} className="rounded-md px-2.5 py-2 text-sm font-medium text-muted transition-colors hover:text-text">
+                  <SiteAnchor href={item.href} className="rounded-full px-3 py-1.5 text-sm font-medium text-muted transition-colors hover:text-text">
                     {item.label}
                   </SiteAnchor>
                 </li>
@@ -209,13 +220,25 @@ export function SiteHeader({ siteName, nav, signin, cta }: { siteName: string; n
                             </p>
                           )}
                           <ul aria-labelledby={column.title ? `${baseId}-section-${i}-${c}` : undefined}>
-                            {column.items.map((link, j) => (
-                              <li key={j}>
-                                <SiteAnchor href={link.href} className="flex min-h-11 items-center rounded-md px-4 text-[15px] text-muted hover:bg-surface-sunken hover:text-text">
-                                  {link.label}
-                                </SiteAnchor>
-                              </li>
-                            ))}
+                            {column.items.map((link, j) => {
+                              const product = productByPath(link.href);
+                              return (
+                                <li key={j}>
+                                  <SiteAnchor href={link.href} className="flex min-h-11 items-center gap-3 rounded-md px-4 text-[15px] text-muted hover:bg-surface-sunken hover:text-text">
+                                    {product && <ProductIcon product={product.key} className="h-8 w-8" />}
+                                    {product && link.description ? (
+                                      // A product's line under its name, on one line: the row stays a 44 px tap.
+                                      <span className="min-w-0">
+                                        <span className="block truncate">{link.label}</span>
+                                        <span className="block truncate text-xs text-subtle">{link.description}</span>
+                                      </span>
+                                    ) : (
+                                      link.label
+                                    )}
+                                  </SiteAnchor>
+                                </li>
+                              );
+                            })}
                           </ul>
                         </div>
                       ))}
@@ -248,45 +271,265 @@ export function SiteHeader({ siteName, nav, signin, cta }: { siteName: string; n
 }
 
 /**
- * A menu's panel: the full width of the header, under it, with the page's own content width inside —
- * its columns side by side (a title, then each link and its line) and the link along its foot. Taller
- * than the screen, it scrolls on its own rather than the page behind it.
+ * A menu's panel: the full width of the header, under it, with the page's own content width inside, and
+ * a bar along its foot — the menu's own link, and the call to action. Taller than the screen, it scrolls
+ * on its own rather than the page behind it. A menu of products is drawn as the Product menu
+ * (`productShape`); any other as its columns side by side.
  */
-function MenuPanel({ menu, idPrefix }: { menu: NavMenu; idPrefix: string }) {
-  const cols = Math.min(Math.max(menu.columns.length, 1), 5);
+function MenuPanel({ menu, idPrefix, cta }: { menu: NavMenu; idPrefix: string; cta: SiteLink }) {
+  const shape = productShape(menu);
   return (
-    <div className="max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain border-b border-line bg-surface shadow-lg motion-safe:animate-fade-in">
-      <Container className="py-8">
-      <div className={cn("grid gap-x-10 gap-y-6", PANEL_GRID[cols], PANEL_GRID_WIDTH[cols])}>
-        {menu.columns.map((column, c) => (
-          <div key={c} className="min-w-0">
-            {column.title && (
-              <p id={`${idPrefix}-${c}`} className="px-2 text-xs font-semibold uppercase tracking-wide text-subtle">
-                {column.title}
-              </p>
-            )}
-            <ul aria-labelledby={column.title ? `${idPrefix}-${c}` : undefined} className={cn("space-y-0.5", column.title && "mt-2")}>
-              {column.items.map((link, j) => (
-                <li key={j}>
-                  <SiteAnchor href={link.href} className="block rounded-lg px-2 py-2 transition-colors hover:bg-surface-sunken">
-                    <span className="block text-sm font-medium text-text">{link.label}</span>
-                    {link.description && <span className="mt-0.5 block text-[13px] leading-5 text-muted">{link.description}</span>}
-                  </SiteAnchor>
-                </li>
-              ))}
-            </ul>
+    <div className="max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain border-b border-line bg-surface shadow-[0_32px_64px_-24px_rgb(15_23_42/0.3)] motion-safe:animate-fade-rise">
+      <Container className="py-7">{shape ? <ProductPanel shape={shape} idPrefix={idPrefix} /> : <ColumnsPanel menu={menu} idPrefix={idPrefix} />}</Container>
+      {menu.footer && (
+        <div className="border-t border-line bg-surface-sunken/60">
+          <Container className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 py-3.5">
+            <SiteAnchor href={menu.footer.href} className="group inline-flex items-center gap-1.5 text-sm font-medium text-text transition-colors hover:text-brand">
+              {menu.footer.label}
+              <ArrowRight aria-hidden="true" className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+            </SiteAnchor>
+            <SiteAnchor href={cta.href} className="group inline-flex items-center gap-1.5 text-sm font-semibold text-brand">
+              {cta.label}
+              <ArrowRight aria-hidden="true" className="h-3.5 w-3.5 transition-transform duration-200 group-hover:translate-x-0.5" />
+            </SiteAnchor>
+          </Container>
+        </div>
+      )}
+    </div>
+  );
+}
+
+type Column = { title: string; index: number; items: NavMenuItem[] };
+type ProductEntry = { link: NavMenuItem; product: Product };
+type ProductColumn = { title: string; index: number; links: ProductEntry[] };
+type ProductShape = { feature: ProductColumn | null; stacks: ProductColumn[][]; side: Column[]; every: Product[] };
+
+/**
+ * How a menu of products is laid out — found from its links, so the CMS's menu needs nothing more. A
+ * column whose every link is a product's page is a product column. The one holding a single product is
+ * the feature (Deskzo One, which is all of them); the rest go into two stacks of about the same height,
+ * each column to the shorter in turn; any other column (add-ons, capabilities) sits to the side. Null
+ * for a menu without a product column.
+ */
+function productShape(menu: NavMenu): ProductShape | null {
+  const products: ProductColumn[] = [];
+  const side: Column[] = [];
+  menu.columns.forEach((column, index) => {
+    const links = column.items.map((link) => ({ link, product: productByPath(link.href) }));
+    if (links.length && links.every((l): l is ProductEntry => !!l.product)) products.push({ title: column.title, index, links });
+    else side.push({ title: column.title, index, items: column.items });
+  });
+  if (!products.length) return null;
+  const feature = products.find((c) => c.links.length === 1) ?? null;
+  const stacks: [ProductColumn[], ProductColumn[]] = [[], []];
+  // A column's height: its links, and its title.
+  const height = (stack: ProductColumn[]) => stack.reduce((n, c) => n + c.links.length + 1, 0);
+  for (const column of products.filter((c) => c !== feature)) (height(stacks[0]) <= height(stacks[1]) ? stacks[0] : stacks[1]).push(column);
+  return { feature, stacks: stacks.filter((s) => s.length), side, every: products.flatMap((c) => c.links.map((l) => l.product)) };
+}
+
+function ColumnTitle({ id, children }: { id: string; children: ReactNode }) {
+  return (
+    <p id={id} className="px-2 text-[11px] font-semibold uppercase tracking-[0.09em] text-subtle">
+      {children}
+    </p>
+  );
+}
+
+/**
+ * A page's icon in its small tile, beside a link's name (src/components/site/nav-icons.ts); nothing for an
+ * address without one. `raised`: on the side panel's grey, the tile is white.
+ */
+function NavIconChip({ href, raised = false }: { href: string; raised?: boolean }) {
+  const key = navIconKey(href);
+  if (!key) return null;
+  const Icon = NAV_ICONS[key]!;
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted ring-1 ring-line transition-colors group-hover:text-brand group-hover:ring-[color-mix(in_srgb,var(--brand)_35%,var(--line))]",
+        raised ? "bg-surface" : "bg-surface-sunken group-hover:bg-surface",
+      )}
+    >
+      <Icon className="h-4 w-4" />
+    </span>
+  );
+}
+
+/** The arrow that slides in beside a link's name as the pointer comes over it. */
+function HoverArrow() {
+  return <ArrowRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 -translate-x-1 opacity-0 transition-[opacity,transform] duration-200 group-hover:translate-x-0 group-hover:opacity-100" />;
+}
+
+/**
+ * The Product menu: the feature card at the left, the products in two stacks — each with its icon, name
+ * and line — and the other columns in a quieter panel at the right. Between `lg` and `xl` the side panel
+ * moves under the rest, its links three across.
+ */
+function ProductPanel({ shape, idPrefix }: { shape: ProductShape; idPrefix: string }) {
+  const { feature, stacks, side, every } = shape;
+  const grid = feature
+    ? side.length
+      ? "lg:grid-cols-[15rem_minmax(0,1fr)] xl:grid-cols-[17rem_minmax(0,1fr)_18rem]"
+      : "lg:grid-cols-[15rem_minmax(0,1fr)] xl:grid-cols-[17rem_minmax(0,1fr)]"
+    : side.length
+      ? "lg:grid-cols-[minmax(0,1fr)_18rem]"
+      : "";
+  return (
+    <div className={cn("grid gap-6 xl:gap-8", grid)}>
+      {feature && <FeatureCard column={feature} id={`${idPrefix}-${feature.index}`} every={every} />}
+      <div className={cn("grid gap-x-6 gap-y-7", stacks.length > 1 && "sm:grid-cols-2")}>
+        {stacks.map((stack, s) => (
+          <div key={s} className="flex min-w-0 flex-col gap-7">
+            {stack.map((column) => (
+              <div key={column.index}>
+                {column.title && <ColumnTitle id={`${idPrefix}-${column.index}`}>{column.title}</ColumnTitle>}
+                <ul aria-labelledby={column.title ? `${idPrefix}-${column.index}` : undefined} className={cn("space-y-0.5", column.title && "mt-2")}>
+                  {column.links.map(({ link, product }, j) => (
+                    <li key={j}>
+                      <SiteAnchor href={link.href} className="group flex items-start gap-3 rounded-xl p-2 transition-colors hover:bg-surface-sunken">
+                        <ProductIcon product={product.key} className="h-10 w-10 transition-transform duration-200 ease-out group-hover:-translate-y-0.5" />
+                        <span className="min-w-0 pt-px">
+                          <span className="flex items-center gap-1 text-sm font-semibold text-text transition-colors group-hover:text-brand">
+                            {link.label}
+                            <HoverArrow />
+                          </span>
+                          {link.description && <span className="mt-0.5 line-clamp-2 text-[13px] leading-5 text-muted">{link.description}</span>}
+                        </span>
+                      </SiteAnchor>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
           </div>
         ))}
       </div>
-      {menu.footer && (
-        <div className="mt-6 border-t border-line px-2 pt-5">
-          <SiteAnchor href={menu.footer.href} className="inline-flex items-center gap-1 text-sm font-medium text-brand hover:underline">
-            {menu.footer.label}
-            <ArrowRight aria-hidden="true" className="h-3.5 w-3.5" />
-          </SiteAnchor>
+      {side.length > 0 && (
+        <div className={cn("space-y-5 rounded-2xl bg-surface-sunken/70 p-3", feature && "lg:col-span-2 xl:col-span-1")}>
+          {side.map((column) => (
+            <div key={column.index}>
+              {column.title && (
+                <div className="pt-2">
+                  <ColumnTitle id={`${idPrefix}-${column.index}`}>{column.title}</ColumnTitle>
+                </div>
+              )}
+              <ul aria-labelledby={column.title ? `${idPrefix}-${column.index}` : undefined} className={cn("grid gap-0.5", column.title && "mt-2", feature && "lg:grid-cols-3 xl:grid-cols-1")}>
+                {column.items.map((link, j) => (
+                  <li key={j}>
+                    <SiteAnchor href={link.href} className="group flex items-start gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-surface">
+                      <NavIconChip href={link.href} raised />
+                      <span className="min-w-0">
+                        <span className="flex items-center gap-1 text-sm font-medium text-text transition-colors group-hover:text-brand">
+                          {link.label}
+                          <HoverArrow />
+                        </span>
+                        {/* Under the rest, three across (below `xl`), the names alone keep the panel short. */}
+                        {link.description && <span className={cn("mt-0.5 text-[12.5px] leading-5 text-muted", feature ? "block lg:hidden xl:block" : "block")}>{link.description}</span>}
+                      </span>
+                    </SiteAnchor>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </div>
       )}
-      </Container>
+    </div>
+  );
+}
+
+/**
+ * The featured product — Deskzo One — as a card in Deskzo blue's light: its icon, name and line, and the
+ * icons of every product it holds, which lift in a wave as the pointer comes over the card.
+ */
+function FeatureCard({ column, id, every }: { column: ProductColumn; id: string; every: Product[] }) {
+  const first = column.links[0];
+  if (!first) return null;
+  const { link, product } = first;
+  const others = every.filter((p) => p.key !== product.key);
+  return (
+    <div className="flex min-w-0 flex-col">
+      {column.title && <ColumnTitle id={id}>{column.title}</ColumnTitle>}
+      <SiteAnchor
+        href={link.href}
+        className={cn(
+          "group relative flex flex-1 flex-col overflow-hidden rounded-2xl border border-[color-mix(in_srgb,var(--brand)_22%,var(--line))] bg-[linear-gradient(160deg,color-mix(in_srgb,var(--brand)_12%,var(--surface))_0%,var(--surface)_70%)] p-5 transition-shadow duration-300 hover:shadow-[0_18px_40px_-18px_color-mix(in_srgb,var(--brand)_55%,transparent)]",
+          column.title && "mt-2",
+        )}
+      >
+        <span aria-hidden="true" className="pointer-events-none absolute -right-14 -top-14 h-44 w-44 rounded-full bg-brand opacity-15 blur-3xl transition-opacity duration-300 group-hover:opacity-25" />
+        <ProductIcon product={product.key} className="relative h-14 w-14 transition-transform duration-300 ease-out group-hover:-translate-y-1" />
+        <span className="relative mt-4 text-lg font-semibold tracking-tight text-text">{link.label}</span>
+        {link.description && <span className="relative mt-1 text-sm leading-6 text-muted">{link.description}</span>}
+        {others.length > 0 && (
+          // At the card's foot, like a dock: as many across as fit, the last row centred.
+          <span aria-hidden="true" className="relative mt-auto block pt-6">
+            <span className="flex flex-wrap justify-center gap-1 rounded-xl border border-line/70 bg-surface/80 p-2 shadow-sm xl:gap-1.5">
+              {others.map((p, k) => (
+                <ProductIcon key={p.key} product={p.key} className="h-8 w-8 transition-transform duration-300 ease-out group-hover:-translate-y-1 xl:h-9 xl:w-9" style={{ transitionDelay: `${k * 25}ms` }} />
+              ))}
+            </span>
+          </span>
+        )}
+        <span aria-hidden="true" className={cn("relative inline-flex items-center gap-1.5 text-sm font-semibold text-brand", others.length ? "mt-4" : "mt-auto pt-5")}>
+          {`Explore ${link.label}`}
+          <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
+        </span>
+      </SiteAnchor>
+    </div>
+  );
+}
+
+/** Any other menu: its columns side by side, kept together at the left when there are few. */
+const COLUMNS_GRID: Record<number, string> = { 1: "grid-cols-1 max-w-md", 2: "grid-cols-2 max-w-3xl", 3: "grid-cols-3 max-w-5xl", 4: "grid-cols-4", 5: "grid-cols-5" };
+
+/** Names alone (the Compare menu): tiles, three across, rather than a long thin list. */
+const asTiles = (column: NavMenu["columns"][number]) => column.items.length > 3 && column.items.every((i) => !i.description);
+
+function ColumnsPanel({ menu, idPrefix }: { menu: NavMenu; idPrefix: string }) {
+  const cols = Math.min(Math.max(menu.columns.length, 1), 5);
+  const single = menu.columns[0];
+  return (
+    <div className={cn("grid gap-x-8 gap-y-7", cols === 1 && single && asTiles(single) ? "grid-cols-1 max-w-2xl" : COLUMNS_GRID[cols])}>
+      {menu.columns.map((column, c) => {
+        const tiles = asTiles(column);
+        return (
+          <div key={c} className="min-w-0">
+            {column.title && <ColumnTitle id={`${idPrefix}-${c}`}>{column.title}</ColumnTitle>}
+            <ul aria-labelledby={column.title ? `${idPrefix}-${c}` : undefined} className={cn(tiles ? "grid grid-cols-2 gap-2 xl:grid-cols-3" : "space-y-0.5", column.title && (tiles ? "mt-3" : "mt-2"))}>
+              {column.items.map((link, j) => {
+                const product = productByPath(link.href);
+                return (
+                  <li key={j}>
+                    {tiles ? (
+                      <SiteAnchor
+                        href={link.href}
+                        className="group flex items-center justify-between gap-2 rounded-xl border border-line bg-surface px-3 py-2.5 text-sm font-medium text-text transition-colors hover:border-line-strong hover:bg-surface-sunken"
+                      >
+                        <span className="truncate">{link.label}</span>
+                        <ArrowRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-subtle transition-[color,transform] duration-200 group-hover:translate-x-0.5 group-hover:text-brand" />
+                      </SiteAnchor>
+                    ) : (
+                      <SiteAnchor href={link.href} className="group flex items-start gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-surface-sunken">
+                        {product ? <ProductIcon product={product.key} className="h-9 w-9" /> : <NavIconChip href={link.href} />}
+                        <span className="min-w-0">
+                          <span className="flex items-center gap-1 text-sm font-medium text-text transition-colors group-hover:text-brand">
+                            {link.label}
+                            <HoverArrow />
+                          </span>
+                          {link.description && <span className="mt-0.5 line-clamp-2 text-[13px] leading-5 text-muted">{link.description}</span>}
+                        </span>
+                      </SiteAnchor>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        );
+      })}
     </div>
   );
 }

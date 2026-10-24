@@ -1,14 +1,21 @@
+import { ProductIcon } from "@/components/brand/product-icon";
 import type { HeroProps, SiteRenderContext } from "@/components/site/blocks/types";
 import { MediaView } from "@/components/site/blocks/media";
 import { fill, resolveAction } from "@/components/site/links";
 import { ButtonLink, Container } from "@/components/site/ui";
+import { productByKey } from "@/lib/products";
+import { cn } from "@/lib/utils";
 
-/** The top of the home page: the page's h1, what the product is, the two ways on, and a look at it. */
+/**
+ * The top of the home page: the page's h1, what the product is, the two ways on, and a look at it. On a
+ * product's own page — its trial button starts a trial of that product — the product's icon heads it.
+ */
 export function HeroBlock({ props, ctx }: { props: HeroProps; ctx: SiteRenderContext }) {
   const primary = props.primary ? resolveAction(props.primary, ctx) : null;
   const secondary = props.secondary ? resolveAction(props.secondary, ctx) : null;
   const note = fill(ctx.signupOpen ? props.note : props.noteInviteOnly, ctx);
   const eyebrow = fill(props.eyebrow, ctx);
+  const product = props.primary?.kind === "signup" ? productByKey(props.primary.product) : null;
   return (
     <section className="relative overflow-hidden border-b border-line">
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[radial-gradient(70%_55%_at_50%_0%,color-mix(in_srgb,var(--brand)_16%,transparent),transparent_75%)]" />
@@ -18,6 +25,7 @@ export function HeroBlock({ props, ctx }: { props: HeroProps; ctx: SiteRenderCon
       />
       <Container className="relative pb-16 pt-14 sm:pb-24 sm:pt-24">
         <div className="mx-auto max-w-3xl text-center">
+          {product && <ProductIcon product={product.key} className={cn("mx-auto block h-20 w-20 sm:h-24 sm:w-24", eyebrow && "mb-5")} />}
           {eyebrow && (
             <p className="inline-flex max-w-full items-center gap-2 rounded-full border border-line bg-surface px-3 py-1 text-xs font-medium text-muted shadow-sm">
               <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />

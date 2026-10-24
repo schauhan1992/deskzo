@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Check } from "lucide-react";
+import { ProductIcon } from "@/components/brand/product-icon";
 import type { PricingTableProps, SiteRenderContext } from "@/components/site/blocks/types";
 import { CountryPicker } from "@/components/site/forms/country-picker";
 import { anchorId, fill, resolveAction } from "@/components/site/links";
@@ -164,8 +165,13 @@ export async function PricingTableBlock({ props, ctx }: { props: PricingTablePro
                       // A product with several plans: its name over a card for each.
                       return (
                         <li key={product.key} className={cn("rounded-2xl border bg-surface-sunken p-4 sm:p-6 md:col-span-2 lg:col-span-3", suite ? "border-brand" : "border-line")}>
-                          <h3 className="text-lg font-semibold text-text">{product.name}</h3>
-                          <p className="mt-1 text-sm leading-6 text-muted">{product.tagline}</p>
+                          <div className="flex items-center gap-4">
+                            <ProductIcon product={product.key} className="h-12 w-12" />
+                            <div className="min-w-0">
+                              <h3 className="text-lg font-semibold text-text">{product.name}</h3>
+                              <p className="mt-1 text-sm leading-6 text-muted">{product.tagline}</p>
+                            </div>
+                          </div>
                           <ul className={cn("mt-4 grid gap-4", plans.length === 2 ? "md:grid-cols-2" : "md:grid-cols-2 lg:grid-cols-3")}>
                             {plans.map((plan) => (
                               <li key={plan.key} className="flex flex-col rounded-xl border border-line bg-surface p-5 shadow-sm sm:p-6">
@@ -189,6 +195,7 @@ export async function PricingTableBlock({ props, ctx }: { props: PricingTablePro
                     const wide = suite && groups.length > 1;
                     return (
                       <li key={plan.key} className={cn("flex flex-col rounded-2xl border bg-surface p-6 shadow-sm sm:p-8", suite ? "border-brand ring-1 ring-brand" : "border-line", wide && "md:col-span-2 lg:col-span-3")}>
+                        {product && <ProductIcon product={product.key} className="mb-4 h-12 w-12" />}
                         <div className="flex items-start justify-between gap-3">
                           <h3 className="text-lg font-semibold text-text">{product?.name ?? plan.name}</h3>
                           <SavingChip plan={plan} interval={interval} />

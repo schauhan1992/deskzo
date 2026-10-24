@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Check, Minus } from "lucide-react";
+import { ProductIcon } from "@/components/brand/product-icon";
 import type { ProductVsSuiteProps, SiteRenderContext } from "@/components/site/blocks/types";
 import { CountryPicker } from "@/components/site/forms/country-picker";
 import { anchorId, fill, resolveAction } from "@/components/site/links";
@@ -159,6 +160,7 @@ export function ProductVsSuiteView({ props, ctx, offer }: { props: ProductVsSuit
 
         <div className="mt-6 grid gap-6 md:grid-cols-2">
           <div className="flex flex-col rounded-2xl border border-line bg-surface p-6 shadow-sm sm:p-8">
+            <ProductIcon product={product.key} className="mb-4 h-14 w-14" />
             <h3 className="text-lg font-semibold text-text">{product.name}</h3>
             <p className="mt-2 text-sm leading-6 text-muted">{product.tagline}</p>
             {available ? (
@@ -180,6 +182,7 @@ export function ProductVsSuiteView({ props, ctx, offer }: { props: ProductVsSuit
 
           <div className="relative flex flex-col rounded-2xl border border-brand bg-surface p-6 shadow-sm ring-1 ring-brand sm:p-8">
             <span className="absolute -top-3 left-6 rounded-full bg-brand px-2.5 py-0.5 text-xs font-semibold text-brand-contrast">Every product</span>
+            <ProductIcon product={suite.key} className="mb-4 h-14 w-14" />
             <h3 className="text-lg font-semibold text-text">{suite.name}</h3>
             <p className="mt-2 text-sm leading-6 text-muted">{suite.tagline}</p>
             <Price prices={offer?.suite ?? []} interval={interval} currency={offer?.currency ?? ""} />
@@ -187,10 +190,13 @@ export function ProductVsSuiteView({ props, ctx, offer }: { props: ProductVsSuit
             <p className="mt-6 border-t border-line pt-6 text-xs font-semibold uppercase tracking-wider text-subtle">{available ? `Everything in ${product.name}, plus` : "Includes"}</p>
             <ul className="mt-3 space-y-2.5">
               {(available ? others : [product, ...others]).map((p) => (
-                <Line key={p.key}>
-                  <span className="font-medium">{p.name}</span>
-                  <span className="block text-xs leading-5 text-muted">{p.tagline}</span>
-                </Line>
+                <li key={p.key} className="flex gap-2.5 text-sm leading-6 text-text">
+                  <ProductIcon product={p.key} className="mt-0.5 h-7 w-7" />
+                  <span>
+                    <span className="font-medium">{p.name}</span>
+                    <span className="block text-xs leading-5 text-muted">{p.tagline}</span>
+                  </span>
+                </li>
               ))}
               {ADD_ONS.filter((a) => a.includedIn.includes("one") && a.modules.length && a.modules.every((k) => soldIn(MODULE_REGISTRY.find((m) => m.key === k)!, country.code))).map((a) => (
                 <Line key={a.key}>

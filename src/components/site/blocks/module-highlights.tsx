@@ -1,12 +1,14 @@
 import { ArrowRight } from "lucide-react";
+import { ProductIcon } from "@/components/brand/product-icon";
 import type { ModuleHighlightsProps, SiteRenderContext } from "@/components/site/blocks/types";
 import { anchorId, fill, linkShown, safeHref } from "@/components/site/links";
 import { Section, SectionHeading, SiteAnchor } from "@/components/site/ui";
+import { productByPath } from "@/lib/products";
 
 /**
  * A hub page's map of the pages under it (the product, solutions and compare hubs): groups, each a
  * heading and its links, every link a line on what the page covers. Links go to pages on this site
- * only; one that doesn't is left out.
+ * only; one that doesn't is left out. A link to a product's page carries the product's icon.
  */
 export function ModuleHighlightsBlock({ props, ctx }: { props: ModuleHighlightsProps; ctx: SiteRenderContext }) {
   const t = (s?: string) => fill(s, ctx);
@@ -19,17 +21,23 @@ export function ModuleHighlightsBlock({ props, ctx }: { props: ModuleHighlightsP
           <div key={i}>
             <h3 className="border-b border-line pb-3 text-lg font-semibold text-text">{t(group.title)}</h3>
             <ul className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {group.items.map((item, j) => (
-                <li key={j} className="min-w-0">
-                  <SiteAnchor href={item.href} className="group flex h-full flex-col rounded-xl border border-line bg-surface p-4 transition-colors hover:border-line-strong hover:bg-surface-sunken/40">
-                    <span className="flex items-center justify-between gap-3 text-sm font-semibold text-text">
-                      {t(item.label)}
-                      <ArrowRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-subtle transition-[color,transform] duration-150 group-hover:translate-x-0.5 group-hover:text-brand" />
-                    </span>
-                    {item.description && <span className="mt-1 text-sm leading-6 text-muted">{t(item.description)}</span>}
-                  </SiteAnchor>
-                </li>
-              ))}
+              {group.items.map((item, j) => {
+                const product = productByPath(item.href);
+                return (
+                  <li key={j} className="min-w-0">
+                    <SiteAnchor href={item.href} className="group flex h-full items-start gap-3.5 rounded-xl border border-line bg-surface p-4 transition-colors hover:border-line-strong hover:bg-surface-sunken/40">
+                      {product && <ProductIcon product={product.key} className="h-11 w-11" />}
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="flex items-center justify-between gap-3 text-sm font-semibold text-text">
+                          {t(item.label)}
+                          <ArrowRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-subtle transition-[color,transform] duration-150 group-hover:translate-x-0.5 group-hover:text-brand" />
+                        </span>
+                        {item.description && <span className="mt-1 text-sm leading-6 text-muted">{t(item.description)}</span>}
+                      </span>
+                    </SiteAnchor>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         ))}

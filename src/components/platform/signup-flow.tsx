@@ -5,6 +5,7 @@ import { ChevronDown, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { SiteLogoMark } from "@/components/site/logo";
+import { ProductIcon } from "@/components/brand/product-icon";
 import { checkWorkspaceName, heldAddress, signupProgress, startSignup, verifySignup, type SignupForm } from "@/actions/platform/signup";
 import { MIN_SIGNUP_NAME, suggestedName } from "@/lib/workspace-names";
 import { DEFAULT_BRAND_NAME } from "@/lib/brand-names";
@@ -446,14 +447,17 @@ export function SignupFlow({
       }}
     >
       {chosen && (
-        <div className="rounded-base border border-line bg-surface-sunken px-3 py-2">
-          <p className="text-sm font-medium text-text">{chosen.key === "one" ? `Your free trial: ${chosen.name}, every product` : `Your free trial: ${chosen.name}`}</p>
-          <p className="mt-0.5 text-xs text-muted">{chosen.tagline}</p>
-          {chosen.key !== "one" && (
-            <button type="button" className="mt-1.5 text-xs font-medium text-brand hover:underline" onClick={everyProduct}>
-              Try every product instead
-            </button>
-          )}
+        <div className="flex items-start gap-3 rounded-base border border-line bg-surface-sunken px-3 py-2.5">
+          <ProductIcon product={chosen.key} className="h-10 w-10" />
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-text">{chosen.key === "one" ? `Your free trial: ${chosen.name}, every product` : `Your free trial: ${chosen.name}`}</p>
+            <p className="mt-0.5 text-xs text-muted">{chosen.tagline}</p>
+            {chosen.key !== "one" && (
+              <button type="button" className="mt-1.5 text-xs font-medium text-brand hover:underline" onClick={everyProduct}>
+                Try every product instead
+              </button>
+            )}
+          </div>
         </div>
       )}
       <div>

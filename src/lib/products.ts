@@ -223,6 +223,12 @@ export function productByKey(key: string | null | undefined): Product | null {
   return PRODUCTS.find((p) => p.key === key) ?? null;
 }
 
+/** The product whose page a link goes to ("/crm", "/crm#plans"); null for any other address. */
+export function productByPath(href: string | null | undefined): Product | null {
+  const path = href?.split(/[?#]/)[0]?.toLowerCase();
+  return path ? (PRODUCTS.find((p) => p.path === path) ?? null) : null;
+}
+
 /** The products a module belongs to (several, for a shared one like orders). */
 export function productsOfModule(moduleKey: string): Product[] {
   return PRODUCTS.filter((p) => p.modules.includes(moduleKey));
