@@ -26,8 +26,13 @@ export type ChannelSettings = {
     answers: BotAnswer[];
     /** Before handing over, ask for a name — and on the website, a phone number or email. */
     askDetails: boolean;
-    /** What the customer is told when the bot hands them to a person. */
+    /** What the customer is told when the bot hands them to a person. `{name}`: their first name, when known. */
     handover: string;
+    /**
+     * What the assistant calls itself ("Asha"), on its messages and when asked who it is. Empty: "the
+     * assistant". Asked whether it's a person, it says it's the virtual assistant, whatever its name.
+     */
+    name: string;
     /**
      * Deskzo AI answers what the set answers don't (owner: an option you switch on). It is told only the
      * conversation, the set answers and `about`, and hands over whenever it isn't sure. Each answer is
@@ -37,7 +42,7 @@ export type ChannelSettings = {
   };
   /** A new customer makes a lead (owner: WhatsApp and bot chats can create leads) — once the bot has a name and a way to reach them. */
   autoLead: boolean;
-  /** Office hours: outside them, a customer is told when the team is back — once, not every message. */
+  /** Office hours: outside them, a customer is told when the team is back — once, not every message. `away` may hold `{name}`. */
   hours: { on: boolean; days: Record<Weekday, OpenSpan>; away: string };
   /** Who gets a conversation the bot hands over, or one that starts without it: the queue, or each in turn (`people`; empty: everybody who answers). */
   assign: { mode: "queue" | "rotate"; people: string[] };
@@ -63,21 +68,23 @@ export const INBOX_LIMITS = {
   about: 3000,
   away: 300,
   team: 50,
+  assistantName: 30,
 } as const;
 
 /** WhatsApp lets a business write freely for 24 hours after the customer's last message; after that, only an approved template. */
 export const WHATSAPP_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-export const DEFAULT_GREETING = "Hi! How can we help you today? Type “agent” at any time to talk to a person.";
-export const DEFAULT_HANDOVER = "Thanks — someone from the team will reply here shortly.";
-export const DEFAULT_AWAY = "Thanks for your message! We're closed right now, and we'll reply as soon as we're back.";
+// The way a person on the team would put it (owner, 24 Oct 2026: "like a real human agent talks").
+export const DEFAULT_GREETING = "Hi there! 👋 How can I help you today?";
+export const DEFAULT_HANDOVER = "Thanks, {name}! I've let the team know — someone will be with you in a moment.";
+export const DEFAULT_AWAY = "Thanks for writing in, {name}! We're closed right now, but we'll get back to you as soon as we're back.";
 export const DEFAULT_COLOUR = "#0249FE";
 const NINE_TO_SIX: OpenSpan = { from: "09:00", to: "18:00" };
 
 export function defaultChannelSettings(kind: InboxKind): ChannelSettings {
   return {
     greeting: DEFAULT_GREETING,
-    bot: { on: kind === "WEB", answers: [], askDetails: true, handover: DEFAULT_HANDOVER, ai: { on: false, about: "", chargedTo: null } },
+    bot: { on: kind === "WEB", answers: [], askDetails: true, handover: DEFAULT_HANDOVER, name: "", ai: { on: false, about: "", chargedTo: null } },
     autoLead: true,
     hours: { on: false, days: { mon: NINE_TO_SIX, tue: NINE_TO_SIX, wed: NINE_TO_SIX, thu: NINE_TO_SIX, fri: NINE_TO_SIX, sat: null, sun: null }, away: DEFAULT_AWAY },
     assign: { mode: "queue", people: [] },
@@ -122,6 +129,7 @@ export function channelSettings(raw: unknown, kind: InboxKind): ChannelSettings 
       answers,
       askDetails: typeof bot.askDetails === "boolean" ? bot.askDetails : d.bot.askDetails,
       handover: str(bot.handover, INBOX_LIMITS.handover) || d.bot.handover,
+      name: str(bot.name, INBOX_LIMITS.assistantName).replace(/[{}<>]/g, ""),
       ai: { on: ai.on === true, about: str(ai.about, INBOX_LIMITS.about), chargedTo: typeof ai.chargedTo === "string" && ai.chargedTo ? ai.chargedTo : null },
     },
     autoLead: typeof raw.autoLead === "boolean" ? raw.autoLead : d.autoLead,
@@ -174,6 +182,7 @@ export function checkChannelSettings(input: unknown, kind: InboxKind): { ok: tru
     if (String(a.answer).trim().length > INBOX_LIMITS.answer) return { ok: false, error: `Keep an answer under ${INBOX_LIMITS.answer} characters.` };
   }
   if (typeof input.greeting === "string" && input.greeting.trim().length > INBOX_LIMITS.greeting) return { ok: false, error: `Keep the greeting under ${INBOX_LIMITS.greeting} characters.` };
+  if (typeof bot.name === "string" && bot.name.trim().length > INBOX_LIMITS.assistantName) return { ok: false, error: `Keep the assistant's name under ${INBOX_LIMITS.assistantName} characters.` };
   const ai = isObj(bot.ai) ? bot.ai : {};
   if (typeof ai.about === "string" && ai.about.trim().length > INBOX_LIMITS.about) return { ok: false, error: `Keep what the AI may say under ${INBOX_LIMITS.about.toLocaleString("en-IN")} characters.` };
   if (ai.on === true && !str(ai.about, INBOX_LIMITS.about) && filled.length === 0) return { ok: false, error: "Give the AI something to go on: set answers, or a few lines about your business." };

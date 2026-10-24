@@ -88,6 +88,36 @@ export async function sendWhatsApp(message: WhatsAppOutbound): Promise<WhatsAppS
   }
 }
 
+type ReadMarker = (input: { phoneNumberId: string; messageId: string; typing: boolean }) => Promise<boolean>;
+let testRead: ReadMarker | null = null;
+
+/** For the checks: every read receipt and typing indicator goes here instead of to Meta. Null puts Meta back. */
+export function setTestWhatsAppRead(marker: ReadMarker | null) {
+  testRead = marker;
+}
+
+/**
+ * A customer's message marked read — the blue ticks they see — and, with `typing`, "typing…" shown to
+ * them until the reply goes (Meta shows it for up to 25 seconds). What a person on the phone would show.
+ * True when Meta took it. Never throws.
+ */
+export async function markWhatsAppRead(input: { phoneNumberId: string; messageId: string; typing: boolean }): Promise<boolean> {
+  if (testRead) return testRead(input);
+  const credentials = await whatsappCredentials().catch(() => null);
+  if (!credentials) return false;
+  try {
+    const response = await fetch(`${GRAPH}/${encodeURIComponent(input.phoneNumberId)}/messages`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${credentials.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ messaging_product: "whatsapp", status: "read", message_id: input.messageId, ...(input.typing ? { typing_indicator: { type: "text" } } : {}) }),
+      signal: AbortSignal.timeout(8_000),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 /** WhatsApp's own ceiling for what a customer can send (16 MB for media; documents allow more, which aren't kept). */
 export const MEDIA_LIMIT = 16 * 1024 * 1024;
 

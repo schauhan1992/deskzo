@@ -16,6 +16,7 @@ import {
   staffMakeTicket,
   staffReply,
   staffTemplate,
+  staffTyping,
   unreadCount,
   type InboxDetail,
   type InboxRow,
@@ -80,6 +81,13 @@ export async function inboxReply(id: string, text: string): Promise<ActionResult
   const viewer = await changingViewer();
   if (typeof viewer === "string") return { ok: false, error: viewer };
   return done(await staffReply(viewer, String(id ?? ""), String(text ?? "")));
+}
+
+/** "Typing…" for the customer while a reply is being written — the bubble's, and WhatsApp's own. */
+export async function inboxTyping(id: string): Promise<ActionResult<null>> {
+  const viewer = await changingViewer();
+  if (typeof viewer === "string") return { ok: false, error: viewer };
+  return done(await staffTyping(viewer, String(id ?? "")));
 }
 
 export async function inboxSendTemplate(id: string, template: { name: string; variables: string[] }): Promise<ActionResult<null>> {

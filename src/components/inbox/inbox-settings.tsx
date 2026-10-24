@@ -241,6 +241,12 @@ export function InboxSettings({
         <div>
           <Label htmlFor="ch-handover">When it hands over, it says</Label>
           <Input id="ch-handover" className="mt-1" value={d.settings.bot.handover} maxLength={INBOX_LIMITS.handover} onChange={(e) => setBot({ handover: e.target.value })} />
+          <p className="mt-1 text-xs text-muted">{"{name}"} becomes the customer&apos;s first name — or is left out, comma and all, when the bot doesn&apos;t know it. The away message takes it too.</p>
+        </div>
+        <div>
+          <Label htmlFor="ch-assistant">The assistant&apos;s name (optional)</Label>
+          <Input id="ch-assistant" className="mt-1 sm:w-64" value={d.settings.bot.name} maxLength={INBOX_LIMITS.assistantName} onChange={(e) => setBot({ name: e.target.value })} placeholder="Asha" />
+          <p className="mt-1 text-xs text-muted">Shown on its messages. It chats like a person on your team, but asked whether it&apos;s a person, it always says it&apos;s the virtual assistant and offers someone from the team.</p>
         </div>
         <div className="space-y-2 border-t border-line pt-3">
           <label className="flex items-center gap-2 text-sm text-text">

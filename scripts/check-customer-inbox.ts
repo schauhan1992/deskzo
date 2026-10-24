@@ -23,7 +23,10 @@ import path from "node:path";
 import { cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { directClient } from "../src/lib/tenancy/direct-client";
-import { ASK_CONTACT, ASK_NAME, botReply, contactIn, matchAnswer, nameIn, type BotState, type Known } from "../src/lib/inbox/bot";
+import { ASK_NAME_LINES, botReply, contactIn, firstNameOf, matchAnswer, nameIn, smallTalkOf, typingMs, withName, type BotState, type Known } from "../src/lib/inbox/bot";
+
+/** One of the bot's ways of asking a name. */
+const asksName = (line: string | undefined) => !!line && ASK_NAME_LINES.includes(line);
 import { channelSettings, checkChannelSettings, conversationRef, defaultChannelSettings, siteOrigin, whatsappWindowOpen, withinHours, type ChannelSettings } from "../src/lib/inbox/settings";
 import { parseWebhook, verifySignature } from "../src/lib/inbox/whatsapp";
 import { WIDGET_SCRIPT } from "../src/lib/inbox/widget-script";
@@ -71,7 +74,7 @@ const db = directClient();
 const TAG = "ZZPROBE_INBOX";
 const MAIL = "@zzprobe-inbox.invalid";
 const DOMAIN = "zzprobe-inbox.invalid";
-const PHONE_IDS = ["990000000101", "990000000102", "990000000103", "990000000104"];
+const PHONE_IDS = ["990000000101", "990000000102", "990000000103", "990000000104", "990000000105"];
 let failures = 0;
 const ok = (label: string, pass: boolean, detail: unknown = "") => {
   console.log(`${pass ? "  ok  " : " FAIL "} ${label}${detail !== "" ? ` — ${String(detail)}` : ""}`);
@@ -188,17 +191,41 @@ async function main() {
 
   const bot: ChannelSettings = { ...web, bot: { ...web.bot, answers } };
   const answered = talk(bot, "WEB", ["How much does it cost?"]);
-  ok("a set answer, and the bot keeps the conversation", answered.said.join() === "PRICE" && !answered.handover);
+  ok("a set answer, then — the first time — a check-in, and the bot keeps the conversation", answered.said[0] === "PRICE" && answered.said.length === 2 && /anything else/i.test(answered.said[1] ?? "") && !answered.handover);
+  const twice = talk(bot, "WEB", ["What does it cost?", "And the price?"]);
+  ok("  the check-in only after the first answer", twice.said.length === 3 && twice.said[2] === "PRICE");
   const handed = talk(bot, "WEB", ["Do you integrate with SAP?", "I'm Zz Visitor", "zz@example.com"]);
-  ok("a question it can't answer: its name asked, then a way to reach them, then a person", handed.said[0] === ASK_NAME && handed.said[1] === ASK_CONTACT && handed.handover && handed.known.name === "Zz Visitor" && handed.known.email === "zz@example.com", handed.said.join(" / "));
+  ok(
+    "a question it can't answer: its name asked, then a way to reach them (by name), then a person",
+    asksName(handed.said[0]) && /Zz/.test(handed.said[1] ?? "") && /number or email|phone number or email/i.test(handed.said[1] ?? "") && handed.handover && handed.said[2] === withName(bot.bot.handover, "Zz") && handed.known.name === "Zz Visitor" && handed.known.email === "zz@example.com",
+    handed.said.join(" / "),
+  );
   const person = talk(bot, "WEB", ["Can I talk to a person? I'm on 9876543210"]);
-  ok("asking for a person goes the same way, keeping a number given unasked", person.said[0] === ASK_NAME && person.known.phone === "9876543210");
+  ok("asking for a person goes the same way, keeping a number given unasked", asksName(person.said[0]) && person.known.phone === "9876543210");
   const wa = talk(bot, "WHATSAPP", ["agent please", "Zz Customer"], { name: null, email: null, phone: "+919800000000" });
-  ok("on WhatsApp the number is known: only the name is asked", wa.handover && wa.said.length === 2 && wa.said[0] === ASK_NAME);
+  ok("on WhatsApp the number is known: only the name is asked", wa.handover && wa.said.length === 2 && asksName(wa.said[0]));
   const stubborn = talk(bot, "WEB", ["agent", "Zz Visitor", "no", "still no"]);
   ok("no phone number or email after asking twice: handed over all the same", stubborn.handover);
   const quick = talk({ ...bot, bot: { ...bot.bot, askDetails: false } }, "WEB", ["agent"]);
-  ok("with nothing to ask, straight to a person", quick.handover && quick.said.join() === bot.bot.handover);
+  ok("with nothing to ask, straight to a person — the handover without a name it doesn't know", quick.handover && quick.said.join() === withName(bot.bot.handover, null) && !quick.said.join().includes("{name}"));
+
+  section("Talking like a person");
+  ok("small talk is recognised whole: a greeting, thanks, goodbye, okay, 'are you a bot?'", smallTalkOf("Hi!") === "hello" && smallTalkOf("namaste 🙏") === "hello" && smallTalkOf("ok thanks") === "thanks" && smallTalkOf("bye") === "bye" && smallTalkOf("👍") === "ack" && smallTalkOf("are you a real person?") === "bot");
+  ok("  but not inside a question", smallTalkOf("hi, what does it cost?") === null && smallTalkOf("thanks, but where do you deliver?") === null);
+  const hello = talk(bot, "WEB", ["hello"]);
+  ok("a greeting gets a greeting back — not a handover", !hello.handover && /hi|hello|hey/i.test(hello.said[0] ?? "") && botReply({ text: "hello", settings: bot, state: null, known: { name: null, email: null, phone: null }, kind: "WEB" }).reason === "smalltalk");
+  const named = botReply({ text: "thank you", settings: bot, state: null, known: { name: "Priya Sharma", email: null, phone: null }, kind: "WEB", seed: "s" });
+  ok("  thanks gets 'you're welcome', by their first name once known", !named.handover && /welcome|happy to help/i.test(named.replies[0] ?? "") && named.replies[0]!.includes("Priya") && !named.replies[0]!.includes("Sharma"));
+  const honest = botReply({ text: "Am I talking to a bot?", settings: { ...bot, bot: { ...bot.bot, name: "Asha" } }, state: null, known: { name: null, email: null, phone: null }, kind: "WEB", seed: "x" });
+  ok("asked whether it's a person, it says it's the virtual assistant — by its name — and offers the team", !honest.handover && honest.replies[0]!.includes("Asha") && /virtual assistant/i.test(honest.replies[0]!) && !/i('m| am) (a )?human/i.test(honest.replies[0]!));
+  const lines = new Set(["a", "b", "c", "d", "e", "f"].map((s) => botReply({ text: "agent", settings: bot, state: null, known: { name: null, email: null, phone: null }, kind: "WEB", seed: s }).replies[0]));
+  ok("it says things more than one way, by the conversation — and the same way for the same seed", lines.size > 1 && botReply({ text: "agent", settings: bot, state: null, known: { name: null, email: null, phone: null }, kind: "WEB", seed: "a" }).replies[0] === botReply({ text: "agent", settings: bot, state: null, known: { name: null, email: null, phone: null }, kind: "WEB", seed: "a" }).replies[0]);
+  ok("{name}: their first name, or left out comma and all", withName("Thanks, {name}! Back soon.", "Ravi") === "Thanks, Ravi! Back soon." && withName("Thanks, {name}! Back soon.", null) === "Thanks! Back soon." && firstNameOf("  Ravi Kumar ") === "Ravi");
+  ok("'hello' isn't taken for a name, nor 'ok'", nameIn("hello") === null && nameIn("ok") === null);
+  ok("a person's typing time: a beat, then by length, never long", typingMs("Hi") === 900 && typingMs("x".repeat(100)) === 2700 && typingMs("x".repeat(2000)) === 3200);
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const aiBrief = (require("../src/lib/inbox/ai") as typeof import("../src/lib/inbox/ai")).aiSystemPrompt({ ...bot, bot: { ...bot.bot, name: "Asha", ai: { on: true, about: "x", chargedTo: "u" } } }, "Zz", "Priya");
+  ok("the AI is told to chat like a person, by the customer's name, honest that it's the assistant", /support agent/i.test(aiBrief) && aiBrief.includes("Priya") && aiBrief.includes("Asha") && /never say you are human/i.test(aiBrief));
 
   const SECRET = "0123456789abcdef0123456789abcdef";
   const body = JSON.stringify({
@@ -305,6 +332,13 @@ async function main() {
     return { ok: true, id: `wamid.zzout${sent.length}` };
   });
   setTestPlatformMailer(async () => {});
+  // No pauses between the bot's messages here, and every read receipt and "typing…" kept instead of sent.
+  server.setInboxPacing(false);
+  const reads: { messageId: string; typing: boolean }[] = [];
+  whatsapp.setTestWhatsAppRead(async ({ messageId, typing }) => {
+    reads.push({ messageId, typing });
+    return true;
+  });
 
   await cleanup();
   try {
@@ -330,7 +364,7 @@ async function main() {
     section("A website visitor and the bot");
     const first = await server.receiveWebMessage(webChannel, { text: "How much does it cost?", pageUrl: "https://example.com/pricing" });
     const seen1 = (await server.webMessages(webChannel.id, first.token, null)) ?? [];
-    ok("a new conversation: the greeting, their message, the set answer", seen1.map((m) => `${m.from}:${m.body}`).join(" | ") === `bot:${bot.greeting} | you:How much does it cost? | bot:PRICE`, seen1.map((m) => m.body).join(" | "));
+    ok("a new conversation: the greeting, their message, the set answer, a check-in", seen1.slice(0, 3).map((m) => `${m.from}:${m.body}`).join(" | ") === `bot:${bot.greeting} | you:How much does it cost? | bot:PRICE` && seen1.length === 4 && seen1[3].from === "bot", seen1.map((m) => m.body).join(" | "));
     ok("  the token is theirs alone: a wrong one, or another channel's, reads nothing", (await server.webMessages(webChannel.id, "x".repeat(32), null)) === null && (await server.webMessages(shared.id, first.token, null)) === null);
     ok("  and the change was announced, by id", heard.includes(first.conversationId));
     const again = await server.receiveWebMessage(webChannel, { token: first.token, text: "Can I speak to someone?" });
@@ -432,7 +466,7 @@ async function main() {
     aiSays = "HANDOVER";
     await server.receiveWebMessage(aiChannel, { token: aiConv.token, text: "Can you fix my broken order?" });
     const afterAi = (await server.webMessages(aiChannel.id, aiConv.token, null)) ?? [];
-    ok("when it isn't sure, the bot goes towards a person (asking their name first)", afterAi[afterAi.length - 1]?.body === ASK_NAME);
+    ok("when it isn't sure, the bot goes towards a person (asking their name first)", asksName(afterAi[afterAi.length - 1]?.body));
     await server.receiveWebMessage(webChannel, { text: "Do you deliver to Goa?" });
     ok("a channel without the AI never asks it", asked.length === 2);
 
@@ -486,6 +520,41 @@ async function main() {
     ok("  a file in a conversation somebody can't see is not found, and not fetched", !notYours.ok && notYours.status === 404 && fetches === 1);
     const gone = await server.conversationFile(R, ownFile.id);
     ok("  one WhatsApp no longer has says so", !gone.ok && gone.status === 502 && /no longer/.test(gone.error));
+
+    section("Like a person: blue ticks, typing, seen");
+    await db.inboxChannel.create({ data: { kind: "WHATSAPP", name: `${TAG} bot wa`, phoneNumberId: PHONE_IDS[4], settings: { ...defaultChannelSettings("WHATSAPP"), autoLead: false, bot: { ...bot.bot, on: true } } as object, createdById: admin.id } });
+    const readsBefore = reads.length;
+    const sentBeforeBot = sent.length;
+    const askId = `wamid.zzask${Date.now()}`;
+    await server.receiveWhatsApp({ phoneNumberId: PHONE_IDS[4], from: "919900000920", profileName: "Zzprobe Asker", id: askId, at: new Date(), text: "What does it cost?" });
+    const botTexts = sent.slice(sentBeforeBot).map((m) => ("text" in m ? m.text : ""));
+    ok("on WhatsApp the bot reads the message (blue ticks) and shows 'typing…' before each reply", reads.slice(readsBefore).length === botTexts.length && reads.slice(readsBefore).every((r) => r.messageId === askId && r.typing) && botTexts.includes("PRICE"), botTexts.join(" / "));
+    ok("  greeting, answer, check-in — three short messages, as a person sends them", botTexts.length === 3 && botTexts[0] === bot.greeting && botTexts[1] === "PRICE");
+
+    const readsBeforeOpen = reads.length;
+    await server.conversationDetail(A, (await db.conversation.findFirstOrThrow({ where: { channelId: shared.id, waId: "919900000902" } })).id);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const knownLast = await db.conversationMessage.findFirstOrThrow({ where: { conversation: { channelId: shared.id, waId: "919900000902" }, author: "CUSTOMER" }, orderBy: { createdAt: "desc" } });
+    ok("a WhatsApp conversation opened by the team: the customer's message marked read — their blue ticks", reads.slice(readsBeforeOpen).some((r) => r.messageId === knownLast.externalId && !r.typing) && knownLast.delivery === "READ");
+    const readsBeforeAgain = reads.length;
+    await server.conversationDetail(A, knownLast.conversationId);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    ok("  once — opening it again tells Meta nothing new", reads.length === readsBeforeAgain);
+
+    const visitorConv = await db.conversation.findUniqueOrThrow({ where: { id: first.conversationId } });
+    ok("before anybody types, the bubble shows no 'typing…'", (await server.webPresence(webChannel.id, first.token))?.typing === null);
+    const typed = await server.staffTyping(A, visitorConv.id);
+    ok("a staff member typing: the bubble shows '<first name> is typing…'", typed.ok && (await server.webPresence(webChannel.id, first.token))?.typing === "Zzprobe");
+    ok("  for a few seconds, then not", server.typingIn(visitorConv.id, Date.now() + 7_000) === null);
+    await server.receiveWebMessage(webChannel, { token: first.token, text: "Are you still there?" });
+    ok("a new message the team hasn't read isn't 'Seen'", (await server.webPresence(webChannel.id, first.token))?.seen === false);
+    await server.conversationDetail(A, visitorConv.id);
+    ok("  once somebody opens it, it is", (await server.webPresence(webChannel.id, first.token))?.seen === true);
+    const readsBeforeWaTyping = reads.length;
+    await server.staffTyping(A, knownLast.conversationId);
+    await server.staffTyping(A, knownLast.conversationId);
+    ok("typing in a WhatsApp conversation shows 'typing…' on their phone — asked of Meta once, not every keystroke", reads.slice(readsBeforeWaTyping).length === 1 && reads[reads.length - 1]!.typing);
+    ok("someone who can't see a conversation can't type in it", !(await server.staffTyping(A, ownConv.id)).ok);
 
     section("Response times: the report");
     const handed = await db.conversation.findUniqueOrThrow({ where: { id: first.conversationId }, select: { needsPersonAt: true, createdAt: true } });
@@ -542,6 +611,8 @@ async function main() {
   } finally {
     whatsapp.setTestWhatsAppSender(null);
     whatsapp.setTestWhatsAppMedia(null);
+    whatsapp.setTestWhatsAppRead(null);
+    server.setInboxPacing(true);
     aiLib.setTestInboxAi(null);
     await cleanup();
     ok("everything named for this check is gone", (await db.inboxChannel.count({ where: { name: { startsWith: TAG } } })) === 0 && (await db.user.count({ where: { email: { endsWith: MAIL } } })) === 0);

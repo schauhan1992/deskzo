@@ -13,9 +13,10 @@ import { emitEvent } from "@/lib/automate/events";
 import { currentTenant } from "@/lib/tenancy/resolve";
 import { workspaceClock } from "@/lib/time/workspace";
 import { aiAnswer } from "@/lib/inbox/ai";
-import { botGreeting, botReply, type BotState, type Known } from "@/lib/inbox/bot";
+import { broadcast, onBroadcast } from "@/lib/cluster/hub";
+import { botGreeting, botReply, firstNameOf, typingMs, withName, type BotState, type Known } from "@/lib/inbox/bot";
 import { INBOX_LIMITS, channelSettings, conversationRef, whatsappWindowOpen, withinHours, type ChannelSettings, type InboxKind } from "@/lib/inbox/settings";
-import { fetchWhatsAppMedia, sendWhatsApp, type InboundMedia, type InboundWhatsApp, type WhatsAppStatus } from "@/lib/inbox/whatsapp";
+import { fetchWhatsAppMedia, markWhatsAppRead, sendWhatsApp, type InboundMedia, type InboundWhatsApp, type WhatsAppStatus } from "@/lib/inbox/whatsapp";
 
 /**
  * The Customer inbox (owner, 24 Oct 2026): every outside conversation in one place — a website's chat
@@ -62,6 +63,50 @@ async function announce(conversationId: string): Promise<void> {
   } catch {
     // Not live: the screens ask again on their own every little while.
   }
+}
+
+// ─── Like a person: pacing, typing, seen (owner, 24 Oct 2026: "like a real human agent talks") ───
+
+let pacing = true;
+
+/** For the checks: no waiting between the bot's messages. */
+export function setInboxPacing(on: boolean) {
+  pacing = on;
+}
+
+const pause = (ms: number) => (pacing && ms > 0 ? new Promise<void>((resolve) => setTimeout(resolve, ms)) : Promise.resolve());
+
+/** How long "typing…" lasts after a staff member's last keystroke. */
+const TYPING_MS = 6_000;
+/** WhatsApp shows its own "typing…" for up to 25 seconds; asked again no more often than this. */
+const WHATSAPP_TYPING_EVERY_MS = 20_000;
+
+type TypingState = { typing: Map<string, { name: string; until: number }>; whatsappAt: Map<string, number>; joined: boolean };
+
+/**
+ * Who on the team is typing in which conversation, for the website bubble's "Rahul is typing…". In memory,
+ * on `globalThis` (a route and the actions are bundled apart), and told to the container's other web
+ * processes (src/lib/cluster/hub.ts) — the bubble's next poll may land on any of them.
+ */
+function typingState(): TypingState {
+  const g = globalThis as { [key: symbol]: TypingState | undefined };
+  const key = Symbol.for("deskzo.inbox-typing");
+  g[key] ??= { typing: new Map(), whatsappAt: new Map(), joined: false };
+  const state = g[key]!;
+  if (!state.joined) {
+    state.joined = true;
+    onBroadcast("inbox:typing", (p) => {
+      const { id, name, until } = p as { id: string; name: string; until: number };
+      state.typing.set(id, { name, until });
+    });
+  }
+  return state;
+}
+
+/** The first name of whoever on the team is typing in this conversation now, or null. */
+export function typingIn(conversationId: string, now = Date.now()): string | null {
+  const t = typingState().typing.get(conversationId);
+  return t && t.until > now ? t.name : null;
 }
 
 // ─── The workspace's WhatsApp webhook settings ───────────────────────────────────────────────────
@@ -305,7 +350,7 @@ async function botSays(conversation: { id: string; kind: InboxKind; waId: string
  * customer needs a person — they're told if the team is out, it goes to whoever's turn it is, and the
  * workflows hear of it. Whoever needs telling is told.
  */
-async function afterCustomerMessage(conversationId: string, text: string, at: Date, opts: { first: boolean }): Promise<void> {
+async function afterCustomerMessage(conversationId: string, text: string, at: Date, opts: { first: boolean; externalId?: string | null }): Promise<void> {
   const previous = await db.conversation.findUniqueOrThrow({ where: { id: conversationId }, select: { lastCustomerAt: true } });
   await db.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: at, lastCustomerAt: at, status: "OPEN", closedAt: null } });
   await linkCustomer(conversationId);
@@ -323,18 +368,32 @@ async function afterCustomerMessage(conversationId: string, text: string, at: Da
 
   if (c.botActive && settings.bot.on) {
     const known: Known = { name: c.customerName, email: c.customerEmail, phone: c.customerPhone };
-    let turn = botReply({ text, settings, state: (c.botState as BotState | null) ?? null, known, kind });
+    const priorState = (c.botState as BotState | null) ?? null;
+    // The conversation and how far into it choose the bot's words, so it never says the same line twice running.
+    const seed = `${c.id}:${await db.conversationMessage.count({ where: { conversationId: c.id } })}`;
+    let turn = botReply({ text, settings, state: priorState, known, kind, seed });
     // No set answer fitted: Deskzo AI answers instead where the channel lets it, and hands over when it can't.
     if (turn.reason === "unknown" && settings.bot.ai.on) {
       const recent = await db.conversationMessage.findMany({ where: { conversationId: c.id }, orderBy: { createdAt: "desc" }, take: 12, select: { author: true, body: true } });
-      const ai = await aiAnswer({ settings, business: await businessName(), messages: recent.reverse() });
-      if ("text" in ai) turn = { replies: [ai.text], state: { step: "chatting" }, handover: false, learned: turn.learned, reason: "answer" };
+      const ai = await aiAnswer({ settings, business: await businessName(), messages: recent.reverse(), customerFirstName: firstNameOf(c.customerName) });
+      if ("text" in ai) turn = { replies: [ai.text], state: { step: "chatting", answered: priorState?.answered ?? 0 }, handover: false, learned: turn.learned, reason: "answer" };
     }
     needsPerson = needsPerson || turn.handover;
     botStillOn = !turn.handover;
     // The first WhatsApp message gets the greeting first: a website visitor saw it in the bubble already.
     const replies = opts.first && kind === "WHATSAPP" && botGreeting(settings) ? [botGreeting(settings)!, ...turn.replies] : turn.replies;
-    for (const reply of replies) await botSays({ id: c.id, kind, waId: c.waId }, c.channel, reply);
+    // On WhatsApp the bot reads the message (blue ticks), shows "typing…" and takes a moment, as a person would —
+    // at most six seconds in all, so the webhook still answers Meta in good time. The website bubble paces itself.
+    let paced = 0;
+    for (const reply of replies) {
+      if (kind === "WHATSAPP" && opts.externalId && c.channel.phoneNumberId) {
+        await markWhatsAppRead({ phoneNumberId: c.channel.phoneNumberId, messageId: opts.externalId, typing: true });
+        const wait = Math.min(typingMs(reply), Math.max(0, 6_000 - paced));
+        paced += wait;
+        await pause(wait);
+      }
+      await botSays({ id: c.id, kind, waId: c.waId }, c.channel, reply);
+    }
     await db.conversation.update({
       where: { id: c.id },
       data: {
@@ -356,7 +415,8 @@ async function afterCustomerMessage(conversationId: string, text: string, at: Da
   if (!botStillOn && !(await teamIn(settings, now)) && (!c.awayNoticeAt || now.getTime() - c.awayNoticeAt.getTime() > AWAY_EVERY_MS)) {
     const recentReply = await db.conversationMessage.findFirst({ where: { conversationId: c.id, author: "AGENT", createdAt: { gt: new Date(now.getTime() - 30 * 60_000) } }, select: { id: true } });
     if (!recentReply) {
-      await botSays({ id: c.id, kind, waId: c.waId }, c.channel, settings.hours.away);
+      const known = await db.conversation.findUnique({ where: { id: c.id }, select: { customerName: true } });
+      await botSays({ id: c.id, kind, waId: c.waId }, c.channel, withName(settings.hours.away, firstNameOf(known?.customerName)));
       await db.conversation.update({ where: { id: c.id }, data: { awayNoticeAt: now } });
     }
   }
@@ -447,20 +507,36 @@ export async function webMessages(channelId: string, token: string, after?: stri
   const c = await visitorConversation(channelId, token);
   if (!c) return null;
   const since = after ? new Date(after) : null;
-  const rows = await db.conversationMessage.findMany({
-    where: { conversationId: c.id, author: { not: "SYSTEM" }, ...(since && !Number.isNaN(since.getTime()) ? { createdAt: { gt: since } } : {}) },
-    orderBy: { createdAt: "asc" },
-    take: 200,
-    select: { id: true, author: true, body: true, createdAt: true, user: { select: { name: true } } },
-  });
+  const [rows, channel] = await Promise.all([
+    db.conversationMessage.findMany({
+      where: { conversationId: c.id, author: { not: "SYSTEM" }, ...(since && !Number.isNaN(since.getTime()) ? { createdAt: { gt: since } } : {}) },
+      orderBy: { createdAt: "asc" },
+      take: 200,
+      select: { id: true, author: true, body: true, createdAt: true, user: { select: { name: true } } },
+    }),
+    db.inboxChannel.findUnique({ where: { id: channelId }, select: { settings: true } }),
+  ]);
+  const assistant = channelSettings(channel?.settings, "WEB").bot.name.trim() || null;
   return rows.map((m) => ({
     id: m.id,
     from: m.author === "CUSTOMER" ? "you" : m.author === "BOT" ? "bot" : "agent",
-    // A first name only: a visitor learns who is helping them, not the whole team's names.
-    name: m.author === "AGENT" ? (m.user?.name?.split(/\s+/)[0] ?? null) : null,
+    // A first name only: a visitor learns who is helping them, not the whole team's names. The assistant by its own.
+    name: m.author === "AGENT" ? (m.user?.name?.split(/\s+/)[0] ?? null) : m.author === "BOT" ? assistant : null,
     body: m.body,
     at: m.createdAt.toISOString(),
   }));
+}
+
+/**
+ * What the bubble shows besides the messages, as a chat app does: whoever on the team is typing, and
+ * whether the visitor's last message has been seen by somebody on the team.
+ */
+export async function webPresence(channelId: string, token: string): Promise<{ typing: string | null; seen: boolean } | null> {
+  const c = await visitorConversation(channelId, token);
+  if (!c) return null;
+  const row = await db.conversation.findUnique({ where: { id: c.id }, select: { lastCustomerAt: true, reads: { orderBy: { readAt: "desc" }, take: 1, select: { readAt: true } } } });
+  const lastRead = row?.reads[0]?.readAt ?? null;
+  return { typing: typingIn(c.id), seen: !!row?.lastCustomerAt && !!lastRead && lastRead >= row.lastCustomerAt };
 }
 
 // ─── WhatsApp ────────────────────────────────────────────────────────────────────────────────────
@@ -498,7 +574,7 @@ export async function receiveWhatsApp(m: InboundWhatsApp): Promise<"stored" | "d
     if ((err as { code?: string }).code === "P2002") return "duplicate";
     throw err;
   }
-  await afterCustomerMessage(c.id, m.text, m.at, { first });
+  await afterCustomerMessage(c.id, m.text, m.at, { first, externalId: m.id });
   return "stored";
 }
 
@@ -576,6 +652,42 @@ export async function staffReply(viewer: InboxViewer, id: string, raw: string): 
   }
   await afterStaffMessage(viewer, c);
   return { ok: true, data: null };
+}
+
+/**
+ * A staff member is typing a reply: the website bubble shows "<first name> is typing…" for a few seconds,
+ * and on WhatsApp the customer sees "typing…" (asked of Meta no more than every twenty seconds).
+ */
+export async function staffTyping(viewer: InboxViewer, id: string, now = Date.now()): Promise<StaffResult> {
+  const c = await visibleConversation(viewer, id);
+  if (!c) return { ok: false, error: NOT_FOUND };
+  const state = typingState();
+  const me = await db.user.findUnique({ where: { id: viewer.id }, select: { name: true } });
+  const typing = { id: c.id, name: firstNameOf(me?.name) ?? "Somebody", until: now + TYPING_MS };
+  state.typing.set(c.id, { name: typing.name, until: typing.until });
+  broadcast("inbox:typing", typing);
+  if (c.kind === "WHATSAPP" && c.channel.phoneNumberId && whatsappWindowOpen(c.lastCustomerAt) && now - (state.whatsappAt.get(c.id) ?? 0) > WHATSAPP_TYPING_EVERY_MS) {
+    const last = await db.conversationMessage.findFirst({ where: { conversationId: c.id, author: "CUSTOMER", externalId: { not: null } }, orderBy: { createdAt: "desc" }, select: { externalId: true } });
+    if (last?.externalId) {
+      state.whatsappAt.set(c.id, now);
+      await markWhatsAppRead({ phoneNumberId: c.channel.phoneNumberId, messageId: last.externalId, typing: true });
+    }
+  }
+  return { ok: true, data: null };
+}
+
+/**
+ * A WhatsApp customer's messages, read by somebody on the team: Meta is told, so they see the blue ticks a
+ * person on the phone would give them. The newest unread one is enough — WhatsApp marks the ones before it.
+ */
+async function sendReadReceipt(conversationId: string): Promise<void> {
+  const c = await db.conversation.findUnique({ where: { id: conversationId }, select: { kind: true, channel: { select: { phoneNumberId: true } } } });
+  if (c?.kind !== "WHATSAPP" || !c.channel.phoneNumberId) return;
+  const last = await db.conversationMessage.findFirst({ where: { conversationId, author: "CUSTOMER", externalId: { not: null } }, orderBy: { createdAt: "desc" }, select: { id: true, externalId: true, delivery: true } });
+  if (!last?.externalId || last.delivery === "READ") return;
+  if (await markWhatsAppRead({ phoneNumberId: c.channel.phoneNumberId, messageId: last.externalId, typing: false })) {
+    await db.conversationMessage.update({ where: { id: last.id }, data: { delivery: "READ" } });
+  }
 }
 
 /** An approved WhatsApp template — the one way to write once the 24 hours are up. */
@@ -766,7 +878,7 @@ export type InboxMessage = {
 };
 
 export type InboxDetail = InboxRow & {
-  channel: { id: string; kind: InboxKind; name: string; displayPhone: string | null; shared: boolean };
+  channel: { id: string; kind: InboxKind; name: string; displayPhone: string | null; shared: boolean; assistantName: string | null };
   customerName: string | null;
   customerEmail: string | null;
   customerPhone: string | null;
@@ -801,7 +913,7 @@ export async function conversationDetail(viewer: InboxViewer, id: string): Promi
       createdAt: true,
       botActive: true,
       assignedToUserId: true,
-      channel: { select: { id: true, kind: true, name: true, displayPhone: true, ownerUserId: true } },
+      channel: { select: { id: true, kind: true, name: true, displayPhone: true, ownerUserId: true, settings: true } },
       assignedTo: { select: { id: true, name: true } },
       contact: { select: { id: true, name: true } },
       company: { select: { id: true, name: true, companySeq: true } },
@@ -816,6 +928,8 @@ export async function conversationDetail(viewer: InboxViewer, id: string): Promi
   });
   if (!c || !mayRead(viewer, c)) return null;
   await markRead(c.id, viewer.id);
+  // The customer's blue ticks, without holding up the page.
+  void sendReadReceipt(c.id).catch(() => {});
   const last = c.messages.find((m) => m.author !== "SYSTEM");
   return {
     id: c.id,
@@ -830,7 +944,14 @@ export async function conversationDetail(viewer: InboxViewer, id: string): Promi
     assignedTo: c.assignedTo,
     unread: false,
     botActive: c.botActive,
-    channel: { id: c.channel.id, kind: c.channel.kind as InboxKind, name: c.channel.name, displayPhone: c.channel.displayPhone, shared: c.channel.ownerUserId === null },
+    channel: {
+      id: c.channel.id,
+      kind: c.channel.kind as InboxKind,
+      name: c.channel.name,
+      displayPhone: c.channel.displayPhone,
+      shared: c.channel.ownerUserId === null,
+      assistantName: channelSettings(c.channel.settings, c.channel.kind as InboxKind).bot.name.trim() || null,
+    },
     customerName: c.customerName,
     customerEmail: c.customerEmail,
     customerPhone: c.customerPhone,

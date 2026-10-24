@@ -3,7 +3,7 @@ import { restoreInProgressFor } from "@/lib/backup/maintenance";
 import { clientIpFrom } from "@/lib/client-ip";
 import { moduleAvailableForTenant } from "@/lib/modules-access";
 import { siteAllowance } from "@/lib/platform/find-workspaces";
-import { receiveWebMessage, webChannel, webMessages } from "@/lib/inbox/server";
+import { receiveWebMessage, webChannel, webMessages, webPresence } from "@/lib/inbox/server";
 import { INBOX_LIMITS, channelSettings, withinHours } from "@/lib/inbox/settings";
 import { workspaceClock } from "@/lib/time/workspace";
 import { TenantHostMismatch, TenantNotFound, TenantNotResolved, currentTenant } from "@/lib/tenancy/resolve";
@@ -78,13 +78,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ key
     if (!siteAllowance([{ key: k(`config:${ip}`), max: 120 }], TEN_MINUTES)) return answer({ ok: false }, 429, origin);
     // Outside the channel's office hours the bubble says so up front, as the conversation will.
     const away = settings.hours.on && !withinHours(settings.hours, (await workspaceClock()).parts(new Date())) ? settings.hours.away : null;
-    return answer({ ok: true, title: settings.look.title, colour: settings.look.colour, position: settings.look.position, greeting: settings.greeting, away }, 200, origin);
+    return answer({ ok: true, title: settings.look.title, colour: settings.look.colour, position: settings.look.position, greeting: settings.greeting, assistant: settings.bot.name || null, away }, 200, origin);
   }
 
   if (op === "poll") {
-    if (!siteAllowance([{ key: k(`poll:${ip}`), max: 600 }], TEN_MINUTES)) return answer({ ok: false }, 429, origin);
-    const messages = await webMessages(channel.id, str(body.token), str(body.after) || null);
-    return answer(messages ? { ok: true, messages } : { ok: true, messages: [], forget: true }, 200, origin);
+    // Every 2.5 seconds while a chat is open, so typing shows as it happens.
+    if (!siteAllowance([{ key: k(`poll:${ip}`), max: 900 }], TEN_MINUTES)) return answer({ ok: false }, 429, origin);
+    const token = str(body.token);
+    const [messages, presence] = await Promise.all([webMessages(channel.id, token, str(body.after) || null), webPresence(channel.id, token)]);
+    // As a chat app shows it: who on the team is typing, and whether the visitor's last message was seen.
+    return answer(messages ? { ok: true, messages, typing: presence?.typing ?? null, seen: presence?.seen ?? false } : { ok: true, messages: [], forget: true }, 200, origin);
   }
 
   if (op === "send") {

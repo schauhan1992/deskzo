@@ -12,6 +12,7 @@ import {
   inboxReply,
   inboxSendTemplate,
   inboxSetStatus,
+  inboxTyping,
 } from "@/actions/inbox";
 import { useChatLive } from "@/components/chat/chat-live";
 import { useClock } from "@/components/time/clock-provider";
@@ -78,6 +79,7 @@ export function InboxApp({
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const threadEnd = useRef<HTMLDivElement>(null);
+  const lastTyping = useRef(0);
   const filters = useRef({ view, channelId, q });
   const selectedRef = useRef(selected);
   useEffect(() => {
@@ -281,16 +283,16 @@ export function InboxApp({
           {ours && (
             <span className={cn("mb-0.5 flex items-center gap-1 text-[11px]", m.author === "BOT" ? "text-muted" : "text-brand-contrast/80")}>
               {m.author === "BOT" ? <Bot aria-hidden="true" className="h-3 w-3" /> : null}
-              {m.author === "BOT" ? "Bot" : (m.userName ?? "Us")}
+              {m.author === "BOT" ? (detail?.channel.assistantName ?? "Bot") : (m.userName ?? "Us")}
             </span>
           )}
           <p className="whitespace-pre-wrap break-words">{m.body}</p>
           {m.media && media(m.id, m.media)}
           <span className={cn("mt-0.5 flex items-center justify-end gap-1 text-[10px]", ours && m.author !== "BOT" ? "text-brand-contrast/70" : "text-subtle")}>
             {time(m.at)}
-            {m.delivery === "SENT" && <Check aria-label="Sent" className="h-3 w-3" />}
-            {m.delivery === "DELIVERED" && <CheckCheck aria-label="Delivered" className="h-3 w-3" />}
-            {m.delivery === "READ" && <CheckCheck aria-label="Read" className="h-3 w-3 text-sky-300" />}
+            {ours && m.delivery === "SENT" && <Check aria-label="Sent" className="h-3 w-3" />}
+            {ours && m.delivery === "DELIVERED" && <CheckCheck aria-label="Delivered" className="h-3 w-3" />}
+            {ours && m.delivery === "READ" && <CheckCheck aria-label="Read" className="h-3 w-3 text-sky-300" />}
           </span>
           {m.delivery === "FAILED" && <span className="mt-1 block text-[11px] font-medium text-danger">Not delivered{m.error ? `: ${m.error}` : ""}</span>}
         </div>
@@ -347,7 +349,15 @@ export function InboxApp({
             value={draft}
             maxLength={2000}
             placeholder={detail.kind === "WHATSAPP" ? "Reply on WhatsApp" : "Reply in the website chat"}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              // The customer sees "typing…" — told no more than every three seconds while the keys move.
+              const now = Date.now();
+              if (e.target.value.trim() && now - lastTyping.current > 3_000) {
+                lastTyping.current = now;
+                void inboxTyping(detail.id).catch(() => {});
+              }
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
