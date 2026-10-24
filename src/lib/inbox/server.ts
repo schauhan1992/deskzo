@@ -363,6 +363,9 @@ async function afterCustomerMessage(conversationId: string, text: string, at: Da
 
   let justAssigned = false;
   if (needsPerson) {
+    // When response times start (src/lib/inbox/report.ts). Written on its own: a workspace not migrated yet
+    // loses only this, never the message.
+    await db.conversation.updateMany({ where: { id: c.id, needsPersonAt: null }, data: { needsPersonAt: at } }).catch(() => {});
     const before = c.assignedToUserId;
     await assignInTurn(c.id, c.channel, settings);
     justAssigned = !before && !!(await db.conversation.findUnique({ where: { id: c.id }, select: { assignedToUserId: true } }))?.assignedToUserId;

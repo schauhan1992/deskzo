@@ -27,6 +27,7 @@ import { ASK_CONTACT, ASK_NAME, botReply, contactIn, matchAnswer, nameIn, type B
 import { channelSettings, checkChannelSettings, conversationRef, defaultChannelSettings, siteOrigin, whatsappWindowOpen, withinHours, type ChannelSettings } from "../src/lib/inbox/settings";
 import { parseWebhook, verifySignature } from "../src/lib/inbox/whatsapp";
 import { WIDGET_SCRIPT } from "../src/lib/inbox/widget-script";
+import { clockFor } from "../src/lib/time/zone";
 
 let actorId = "";
 let viewingAs = false;
@@ -259,6 +260,30 @@ async function main() {
   const photo = parseWebhook({ object: "whatsapp_business_account", entry: [{ changes: [{ value: { metadata: { phone_number_id: "1" }, messages: [{ from: "91", id: "w1", type: "image", image: { id: "media-1", mime_type: "image/jpeg; codecs=x", caption: "bill" } }] } }] }] });
   ok("a photo's media id comes with it, its type without parameters", photo.messages[0]?.media?.id === "media-1" && photo.messages[0]?.media?.mime === "image/jpeg");
 
+  section("Response times: the arithmetic");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const reportLib = require("../src/lib/inbox/report") as typeof import("../src/lib/inbox/report");
+  ok("median and the 90th percentile, nearest rank; nothing for none", reportLib.median([5, 1, 3]) === 3 && reportLib.percentile([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 90) === 9 && reportLib.median([]) === null);
+  ok("the share within a target", reportLib.shareWithin([1, 2, 10], 2) === 2 / 3 && reportLib.shareWithin([], 5) === null);
+  const ist = clockFor("Asia/Kolkata");
+  const weekdays = { ...web.hours, on: true };
+  const at = (d: number, h: number, m: number) => ist.at(2026, 9, d, h, m);
+  const MIN = 60_000;
+  ok("office-hours time: Monday 17:30 answered Tuesday 09:15 is 45 minutes", reportLib.officeMs(at(26, 17, 30), at(27, 9, 15), weekdays, ist) === 45 * MIN);
+  ok("  a Saturday message answered Monday 09:10 is 10 minutes", reportLib.officeMs(at(24, 11, 0), at(26, 9, 10), weekdays, ist) === 10 * MIN);
+  ok("  without office hours it's the clock's time", reportLib.officeMs(at(24, 11, 0), at(26, 9, 10), web.hours, ist) === at(26, 9, 10).getTime() - at(24, 11, 0).getTime());
+  const t = (m: number) => new Date(Date.UTC(2026, 9, 24, 10, m));
+  const waits = reportLib.replyWaits([
+    { conversationId: "a", author: "CUSTOMER", userId: null, at: t(0) },
+    { conversationId: "a", author: "CUSTOMER", userId: null, at: t(2) },
+    { conversationId: "a", author: "AGENT", userId: "u1", at: t(5) },
+    { conversationId: "a", author: "AGENT", userId: "u1", at: t(6) },
+    { conversationId: "a", author: "CUSTOMER", userId: null, at: t(10) },
+    { conversationId: "a", author: "AGENT", userId: "u2", at: t(30) },
+  ]);
+  ok("every reply's wait runs from the first message the team hadn't answered; a second reply in a row isn't a wait", waits.length === 2 && waits[0].at.getTime() - waits[0].from.getTime() === 5 * MIN && waits[1].userId === "u2" && waits[1].at.getTime() - waits[1].from.getTime() === 20 * MIN);
+  ok("durations as people say them", reportLib.durationText(45_000) === "45 s" && reportLib.durationText(12 * MIN) === "12 min" && reportLib.durationText(185 * MIN) === "3 h 5 min" && reportLib.durationText(52 * 60 * MIN) === "2 d 4 h" && reportLib.durationText(null) === "—");
+
   /* eslint-disable @typescript-eslint/no-require-imports */
   const server = require("../src/lib/inbox/server") as typeof import("../src/lib/inbox/server");
   const whatsapp = require("../src/lib/inbox/whatsapp") as typeof import("../src/lib/inbox/whatsapp");
@@ -462,6 +487,21 @@ async function main() {
     const gone = await server.conversationFile(R, ownFile.id);
     ok("  one WhatsApp no longer has says so", !gone.ok && gone.status === 502 && /no longer/.test(gone.error));
 
+    section("Response times: the report");
+    const handed = await db.conversation.findUniqueOrThrow({ where: { id: first.conversationId }, select: { needsPersonAt: true, createdAt: true } });
+    const awayStart = await db.conversation.findUniqueOrThrow({ where: { id: awayConv.id }, select: { needsPersonAt: true, createdAt: true } });
+    ok("the clock starts when the bot hands over — or, without a bot, at the first message", !!handed.needsPersonAt && handed.needsPersonAt > handed.createdAt && !!awayStart.needsPersonAt && Math.abs(awayStart.needsPersonAt.getTime() - awayStart.createdAt.getTime()) < 5_000);
+    const sharedReport = await reportLib.inboxReport(M, { days: 7, channelId: shared.id });
+    ok("a channel's report: its conversations, the ones answered, a first response time", sharedReport.totals.started >= 2 && sharedReport.totals.answered >= 1 && sharedReport.totals.firstResponse.median !== null && sharedReport.byChannel.length === 1 && sharedReport.byChannel[0].id === shared.id);
+    ok("  who answered, for somebody who sees every conversation", sharedReport.byPerson?.some((p) => p.id === agent.id && p.firstResponses >= 1 && p.replies >= 1) === true);
+    const agentReport = await reportLib.inboxReport(A, { days: 7, channelId: shared.id });
+    ok("  and not for anybody else", agentReport.byPerson === null);
+    ok("a rep's own number: in management's figures, not a colleague's", (await reportLib.inboxReport(M, { days: 7, channelId: own.id })).totals.started >= 1 && (await reportLib.inboxReport(A, { days: 7, channelId: own.id })).totals.started === 0);
+    const aiReport = await reportLib.inboxReport(M, { days: 7, channelId: aiChannel.id });
+    ok("a conversation the bot still has counts as handled by the bot alone", aiReport.totals.botOnly === 1 && aiReport.totals.neededPerson === 0);
+    ok("waiting for a person now: open, needing one, nobody's replied", (await reportLib.inboxReport(M, { days: 7, channelId: awayChannel.id })).totals.waitingNow === 1);
+    ok("a day for each day of the period", sharedReport.byDay.length === 7 && sharedReport.byDay.reduce((n, d) => n + d.started, 0) === sharedReport.totals.started);
+
     section("The pages, as the server draws them");
     /* eslint-disable @typescript-eslint/no-require-imports */
     const InboxPage = (require("../src/app/(dashboard)/inbox/page") as { default: Page }).default;
@@ -477,6 +517,14 @@ async function main() {
     ok("somebody without the inbox gets not found", (await thrown(() => render(InboxPage))) === "notFound");
     actorId = admin.id;
     const settingsHtml = await render(SettingsPage);
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const ReportsPage = (require("../src/app/(dashboard)/inbox/reports/page") as { default: Page }).default;
+    actorId = manager.id;
+    const reportHtml = await render(ReportsPage, { days: "7" });
+    ok("the reports page: the figures, day by day, by channel and by person", reportHtml.includes("Inbox reports") && reportHtml.includes("First response (median)") && reportHtml.includes("By channel") && reportHtml.includes("By person"));
+    actorId = agent.id;
+    ok("  without who answered what for somebody who doesn't see every conversation", !(await render(ReportsPage, {})).includes("By person"));
+    actorId = admin.id;
     ok("the settings: each channel, the website snippet, the webhook to give Meta, and no secret", settingsHtml.includes(`${TAG} site`) && settingsHtml.includes("/api/inbox/public/widget.js") && settingsHtml.includes("/api/inbox/public/whatsapp") && settingsHtml.includes("Verify token") && !/whatsappTokenCipher|whatsappAppSecretCipher/.test(settingsHtml));
 
     section("Unread, and the actions");

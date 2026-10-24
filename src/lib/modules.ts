@@ -714,7 +714,11 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
     description:
       "Website chat and WhatsApp in one inbox: a chat bubble for your website whose bot answers from your own set answers and hands over to a person, WhatsApp on a shared number and on reps' own, leads made from new customers, and a ticket from any conversation.",
     navGroup: "Support",
-    navItems: [{ href: "/inbox", label: "Customer inbox", icon: MessageSquareMore }],
+    navItems: [
+      { href: "/inbox", label: "Customer inbox", icon: MessageSquareMore },
+      // Response times (src/lib/inbox/report.ts), over the conversations each person may see.
+      { href: "/inbox/reports", label: "Inbox reports", icon: ChartColumn },
+    ],
   },
   {
     key: "reports",

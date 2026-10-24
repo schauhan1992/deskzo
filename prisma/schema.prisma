@@ -16691,6 +16691,11 @@ model Conversation {
    */
   lastCustomerAt   DateTime?
   /**
+   * When the customer first needed a person — the bot handed over, or the conversation began without one.
+   * Response times run from here, so the time a customer spent happily with the bot isn't counted against the team.
+   */
+  needsPersonAt    DateTime?
+  /**
    * The first reply by a person, for response times.
    */
   firstResponseAt  DateTime?
