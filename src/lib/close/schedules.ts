@@ -150,7 +150,7 @@ export async function createAccountingSchedule(
         if (!doc || doc.docType !== "BILL" || doc.status === "DRAFT" || doc.status === "CANCELLED") {
           return { ok: false as const, error: "A prepaid is made from an issued vendor bill." };
         }
-        if (doc.origin === "IMPORTED") {
+        if (doc.origin === "IMPORTED" || doc.origin === "MIGRATED") {
           return { ok: false as const, error: `${doc.docNumber} was brought from your old system — it was expensed there, so a prepaid isn't made from it here.` };
         }
         bill = doc;

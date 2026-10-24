@@ -200,7 +200,7 @@ export async function repostFxDocument(
   userId: string,
 ): Promise<{ date: Date; reversal: { id: string; entryNumber: string }; repost: { id: string; entryNumber: string } } | null> {
   const doc = await tx.tradeDocument.findUnique({ where: { id: documentId }, select: { ...documentPostingSelect, origin: true } });
-  if (!doc || doc.origin === "IMPORTED") return null;
+  if (!doc || doc.origin === "IMPORTED" || doc.origin === "MIGRATED") return null;
   const original = await tx.journalEntry.findFirst({
     where: { documentId, ...LIVE },
     orderBy: { createdAt: "desc" },

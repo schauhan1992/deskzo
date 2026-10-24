@@ -50,6 +50,7 @@
     "check:pay-periods": "tsx scripts/check-pay-periods.ts",
     "check:crm-migration": "tsx scripts/check-crm-migration.ts",
     "check:opening-balances": "tsx scripts/check-opening-balances.ts",
+    "check:migration": "tsx scripts/check-migration.ts",
     "check:balance-summary": "tsx scripts/check-balance-summary.ts",
     "check:aging-report": "tsx scripts/check-aging-report.ts",
     "check:statements": "tsx scripts/check-statements.ts",

@@ -55,7 +55,7 @@ export const isDocumentImportType = (value: unknown): value is DocumentImportTyp
 export const OPENING_TYPES: readonly TradeDocumentType[] = ["INVOICE", "BILL", "CREDIT_NOTE"];
 export const needsOpeningDate = (type: TradeDocumentType) => OPENING_TYPES.includes(type);
 
-const C = {
+export const DOCUMENT_COLUMNS = {
   number: "Number",
   date: "Date",
   party: "Party",
@@ -80,6 +80,7 @@ const C = {
   tax: "Tax %",
   total: "Total",
 } as const;
+const C = DOCUMENT_COLUMNS;
 
 /** What each type's own export calls its number, date and party (Zoho Books' among them). */
 const OWN: Record<DocumentImportType, { number: string[]; date: string[]; party: string[]; against?: string[] }> = {
@@ -97,7 +98,7 @@ const OWN: Record<DocumentImportType, { number: string[]; date: string[]; party:
 };
 
 /** The usual headings, matched ignoring case and punctuation. To be tightened against real exports. */
-function aliasesFor(type: DocumentImportType): Record<string, string[]> {
+export function aliasesFor(type: DocumentImportType): Record<string, string[]> {
   const own = OWN[type];
   return {
     [C.number]: [...own.number, "Document Number"],
@@ -135,10 +136,10 @@ const headingsFor = (type: DocumentImportType) => ({ templateColumns: Object.val
 type Applied = { created: number; updated: number; skipped: number; failed: { line: number; error: string }[] };
 export type DocumentImportOptions = { openingDate?: string | null };
 
-type Group = { number: string; firstLine: number; rows: { line: number; row: Record<string, string> }[] };
+export type Group = { number: string; firstLine: number; rows: { line: number; row: Record<string, string> }[] };
 
 /** Rows sharing a Number, in file order. A row with no Number belongs to the document above it. */
-function groupRows(rows: Record<string, string>[]): Group[] {
+export function groupRows(rows: Record<string, string>[]): Group[] {
   const groups: Group[] = [];
   const byNumber = new Map<string, Group>();
   rows.forEach((row, i) => {
@@ -167,7 +168,7 @@ const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const rupees = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 
 type Opening = { day: string; at: Date } | null;
-type Ready = {
+export type Ready = {
   input: TradeDocumentInput;
   status: TradeDocumentStatus;
   partyName: string;
@@ -176,10 +177,17 @@ type Ready = {
   /** For an invoice, bill or credit note: what is still due (or, on a credit note, still to use). */
   balance: number | null;
 };
-type Resolved = { error: string; line?: number } | { skip: string } | Ready;
+export type Resolved = { error: string; line?: number } | { skip: string } | Ready;
+
+/**
+ * A year brought across (src/lib/migration): the first day of the financial year and the day the company
+ * switched. Its documents are dated inside it and may be settled already; one made before by the same
+ * migration is passed over.
+ */
+export type HistoryWindow = { from: string; to: string };
 
 /** What a group of rows makes: the form's input for it, or why it can't be made, or that it's already here. */
-async function resolveGroup(type: DocumentImportType, group: Group, clock: Awaited<ReturnType<typeof workspaceClock>>, opening: Opening): Promise<Resolved> {
+export async function resolveGroup(type: DocumentImportType, group: Group, clock: Awaited<ReturnType<typeof workspaceClock>>, opening: Opening, history: HistoryWindow | null = null): Promise<Resolved> {
   if (!group.number) return { error: `${C.number} is required — every document keeps the number it had.` };
   const head = new RowReader(group.rows[0]!.row, clock);
   const purchase = documentDirection[type] === "PURCHASE";
@@ -187,7 +195,7 @@ async function resolveGroup(type: DocumentImportType, group: Group, clock: Await
 
   const taken = await db.tradeDocument.findUnique({ where: { docNumber: group.number }, select: { docType: true, origin: true, company: { select: { name: true } } } });
   if (taken) {
-    if (taken.docType === type && taken.origin === "IMPORTED") return { skip: `${group.number} is already in Deskzo` };
+    if (taken.docType === type && taken.origin === (history ? "MIGRATED" : "IMPORTED")) return { skip: `${group.number} is already in Deskzo` };
     return { error: `${group.number} is already used by another document in Deskzo (${tradeDocumentLabels[taken.docType].toLowerCase()} for ${taken.company.name}).` };
   }
 
@@ -209,6 +217,12 @@ async function resolveGroup(type: DocumentImportType, group: Group, clock: Await
   if (!issueDate) return { error: `${C.date} is required — the day the document was raised.` };
   if (opening && issueDate.toISOString().slice(0, 10) > opening.day) {
     return { error: `It's dated after ${opening.day}, the day your books start in Deskzo — raise it in Deskzo instead.` };
+  }
+  if (history) {
+    const day = issueDate.toISOString().slice(0, 10);
+    if (day < history.from || day >= history.to) {
+      return { error: `It's dated ${day}, outside the year being brought across (${history.from} to the day before ${history.to}).` };
+    }
   }
 
   // A credit note reduces an invoice, which has to be here for it to name.
@@ -332,7 +346,7 @@ async function resolveGroup(type: DocumentImportType, group: Group, clock: Await
 
   // What is still to settle: blank means all of it; nothing left means it stays in the old system.
   let balance: number | null = null;
-  if (needsOpeningDate(type)) {
+  if (needsOpeningDate(type) && !history) {
     const cell = head.number(C.balance);
     if (head.error) return { error: head.error };
     balance = cell === undefined ? total : round2(cell);

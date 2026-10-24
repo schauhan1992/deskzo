@@ -64,6 +64,7 @@ const FORWARDED_FOR: Record<string, Allowed> = {};
 const SPAWNS: Record<string, Allowed> = {
   "src/lib/platform/reference-sync.ts": { reason: "PIN and GeoNames sync workers write the shared reference database, which belongs to no workspace" },
   "src/lib/platform/migrate.ts": { reason: "prisma migrate deploy, told the one database it migrates — not a workspace" },
+  "src/lib/backup/restore-tool.ts": { reason: "prisma migrate deploy over the database a restore or an off-site recovery just filled, told that one database — not a worker" },
   "src/actions/platform/signup.ts": { reason: "the platform worker, which sets workspaces up — it belongs to none of them" },
   "src/actions/platform/console.ts": { reason: "the platform worker, started from the console to retry a job or top up the warm pool" },
 };

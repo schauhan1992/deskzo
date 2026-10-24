@@ -445,7 +445,7 @@ export async function createDraftDocument(
 
   const typedNumber = data.docNumber?.trim() || null;
   // A number brought from the old system is the one it was issued under there, whatever its shape.
-  const numberProblem = typedNumber && origin !== "IMPORTED" ? gstNumberProblem(data.docType, typedNumber) : null;
+  const numberProblem = typedNumber && origin !== "IMPORTED" && origin !== "MIGRATED" ? gstNumberProblem(data.docType, typedNumber) : null;
   if (numberProblem) return { ok: false, error: numberProblem };
 
   // Before the transaction: these read through `db`, and resolving may create the head office.

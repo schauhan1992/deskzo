@@ -523,11 +523,16 @@ export async function writeDocumentEntry(
  *     balance first (Dr Deferred Revenue), the rest being a sales return as before.
  *
  * Both happen only when the entry is first written, so issuing again never touches a schedule.
+ *
+ * `history`: a document brought across with the rest of its financial year (src/lib/migration) posts its
+ * plain entry on its own date and nothing else — its revenue was recognised, and its credits applied, in
+ * the old system, so neither schedules nor a reduction of them are made here.
  */
 export async function postDocumentToLedger(
   tx: Tx,
   documentId: string,
   userId: string,
+  options: { history?: boolean } = {},
 ): Promise<{ id: string; entryNumber: string } | null> {
   await lockPosting(tx, `document:${documentId}`);
   const doc = await tx.tradeDocument.findUnique({ where: { id: documentId }, select: documentPostingSelect });
@@ -548,6 +553,8 @@ export async function postDocumentToLedger(
     const entry = posted.find((e) => !e.reversedBy) ?? posted[0];
     return { id: entry.id, entryNumber: entry.entryNumber };
   }
+
+  if (options.history) return writeDocumentEntry(tx, doc, userId, { date: doc.issueDate });
 
   if (doc.docType === "INVOICE") {
     const plan = await planInvoiceDeferral(tx, doc, revenueInRupees(doc));

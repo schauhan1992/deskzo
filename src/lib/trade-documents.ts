@@ -129,6 +129,7 @@ export const documentOriginLabels: Record<DocumentOrigin, string> = {
   CONSIGNMENT: "Consignment",
   RECURRING_BILLING: "Recurring billing",
   IMPORTED: "Brought from the old system",
+  MIGRATED: "Brought across with the year",
 };
 
 /** Muted throughout: provenance is context, not status, and should not compete with the status badge. */
@@ -140,6 +141,7 @@ export const documentOriginTone: Record<DocumentOrigin, "default" | "blue"> = {
   CONSIGNMENT: "default",
   RECURRING_BILLING: "blue",
   IMPORTED: "default",
+  MIGRATED: "default",
 };
 
 export const statusTone: Record<TradeDocumentStatus, "default" | "green" | "blue" | "red" | "amber" | "brand"> = {

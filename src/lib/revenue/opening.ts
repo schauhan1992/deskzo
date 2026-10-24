@@ -230,7 +230,7 @@ export async function previewOpening(
     const problem = (why: string) => ({ ...base, problem: why });
     if (!doc || !line) return problem("That invoice line no longer exists.");
     if (doc.docType !== "INVOICE" || doc.status === "DRAFT" || doc.status === "CANCELLED") return problem(`${doc.docNumber} isn't an issued invoice.`);
-    if (doc.origin === "IMPORTED") return problem(`${doc.docNumber} was brought from your old system — its revenue was booked there.`);
+    if (doc.origin === "IMPORTED" || doc.origin === "MIGRATED") return problem(`${doc.docNumber} was brought from your old system — its revenue was booked there.`);
     if (doc.issueDate < window.from || doc.issueDate >= window.to) {
       return problem(`${doc.docNumber} wasn't issued in the ${OPENING_LOOKBACK_MONTHS} months up to the end of ${params.asAt}.`);
     }

@@ -2148,6 +2148,149 @@ enum DocumentOrigin {
    * (src/lib/portability/documents.ts).
    */
   IMPORTED
+  /**
+   * Brought across with the rest of the financial year when a company switched to Deskzo partway through it
+   * (owner, 24 Oct 2026; src/lib/migration): issued, posted and settled on its own dates as it was there. Unlike
+   * IMPORTED it counts in sales and statements; like it, never in a GST return, a target, commission or an
+   * e-invoice (src/lib/documents/imported.ts).
+   */
+  MIGRATED
+}
+
+/**
+ * Where a switch to Deskzo partway through a financial year has got to (src/lib/migration).
+ */
+enum MigrationStatus {
+  /**
+   * Being brought across: what it made can still be taken back with Undo.
+   */
+  OPEN
+  /**
+   * Every month agreed with the old system's books, and an admin finished it: the months are locked.
+   */
+  FINISHED
+  /**
+   * Taken back with Undo before it was finished. Kept as the record that it happened.
+   */
+  UNDONE
+}
+
+/**
+ * A company's switch to Deskzo partway through its financial year (owner, 24 Oct 2026): the year's
+ * history brought from the old system — invoices, credit notes and receipts, with their own numbers and
+ * dates — checked against that system's trial balance at every month end, then locked (src/lib/migration).
+ * One open at a time.
+ */
+model Migration {
+  id           String          @id @default(cuid())
+  /**
+   * "zoho-books", or "template" — Deskzo's own columns, filled from any system.
+   */
+  source       String
+  /**
+   * The first day of the financial year being brought across, and the first day in Deskzo — the year's
+   * history is everything from the one up to the day before the other.
+   */
+  yearStart    DateTime        @db.Date
+  switchDate   DateTime        @db.Date
+  status       MigrationStatus @default(OPEN)
+  createdById  String
+  createdAt    DateTime        @default(now())
+  finishedById String?
+  finishedAt   DateTime?
+  undoneById   String?
+  undoneAt     DateTime?
+  /**
+   * What was brought, by kind — {"invoices": 812, "receipts": 640, …} — kept after an Undo as the record of it.
+   */
+  counts       Json?
+
+  files    MigrationFile[]
+  records  MigrationRecord[]
+  balances MigrationBalance[]
+
+  @@index([status])
+  @@map("books_migrations")
+}
+
+/**
+ * A file uploaded for one step, read once and kept as rows until the step has been imported — so a big
+ * year goes in a part at a time, and a closed tab carries on where it stopped. Deleted at the finish.
+ */
+model MigrationFile {
+  id          String    @id @default(cuid())
+  migrationId String
+  migration   Migration @relation(fields: [migrationId], references: [id], onDelete: Cascade)
+  /**
+   * "invoices", "credit-notes" or "receipts".
+   */
+  step        String
+  filename    String
+  /**
+   * The rows as the file had them, headings matched to the template's.
+   */
+  rows        Json
+  /**
+   * How many documents or payments the rows make, and how many the import has been through so far.
+   */
+  units       Int
+  done        Int       @default(0)
+  /**
+   * The rows the import couldn't bring, with why: [{"line": 14, "key": "INV-0012", "error": "…"}].
+   */
+  failures    Json?
+  createdById String
+  createdAt   DateTime  @default(now())
+
+  @@index([migrationId, step])
+  @@map("books_migration_files")
+}
+
+/**
+ * One thing a migration made — a document, a payment, a journal entry — by the number it had in the old
+ * system. Bringing the same file again finds it here and makes nothing twice; Undo takes back exactly these.
+ */
+model MigrationRecord {
+  id          String    @id @default(cuid())
+  migrationId String
+  migration   Migration @relation(fields: [migrationId], references: [id], onDelete: Cascade)
+  /**
+   * "document", "payment" or "journal".
+   */
+  kind        String
+  recordId    String
+  /**
+   * The old system's own number for it: an invoice's, a payment's, an adjustment's.
+   */
+  key         String
+  createdAt   DateTime  @default(now())
+
+  @@unique([kind, recordId])
+  @@unique([migrationId, kind, key])
+  @@index([migrationId, kind])
+  @@map("books_migration_records")
+}
+
+/**
+ * The old system's trial balance at one month end, an account a row, as uploaded — what Deskzo's own books
+ * at that date are compared with before the migration can be finished.
+ */
+model MigrationBalance {
+  id          String    @id @default(cuid())
+  migrationId String
+  migration   Migration @relation(fields: [migrationId], references: [id], onDelete: Cascade)
+  /**
+   * "2026-04": the month whose last day the balance is at.
+   */
+  month       String
+  accountId   String
+  /**
+   * Debit less credit at the month end, in rupees.
+   */
+  balance     Decimal   @db.Decimal(14, 2)
+
+  @@unique([migrationId, month, accountId])
+  @@map("books_migration_balances")
 }
 
 /**

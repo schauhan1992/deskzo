@@ -18,7 +18,7 @@ import { workspaceClock } from "@/lib/time/workspace";
 import { NONE, ROW_CAP, type FactSource, type SourceContext } from "./types";
 import { listLeadMasker } from "@/lib/leads/masking";
 import { maskCustomValues } from "@/lib/authz/fields";
-import { RAISED_IN_DESKZO } from "@/lib/documents/imported";
+import { SOLD_THIS_YEAR } from "@/lib/documents/imported";
 import { AGING_BUCKETS, agingBucket, daysOverdue, settleInvoice } from "@/lib/receivables";
 
 /**
@@ -465,9 +465,10 @@ async function loadInvoices(ctx: SourceContext) {
         docType: { in: ["INVOICE", "CREDIT_NOTE"] },
         status: { in: ["ISSUED", "PARTIALLY_PAID", "PAID"] },
         ...where,
-        // Sales made here: one brought from the old system was sold, and counted, there (src/lib/documents/imported.ts).
-        // Under AND beside whatever the scope brought, so neither replaces the other.
-        AND: [...(where.AND ? (Array.isArray(where.AND) ? where.AND : [where.AND]) : []), RAISED_IN_DESKZO],
+        // The year's sales: one still open from before the books started was sold, and counted, there; the rest of
+        // the year brought across counts (src/lib/documents/imported.ts). Under AND beside whatever the scope brought,
+        // so neither replaces the other.
+        AND: [...(where.AND ? (Array.isArray(where.AND) ? where.AND : [where.AND]) : []), SOLD_THIS_YEAR],
       },
       include: {
         company: {

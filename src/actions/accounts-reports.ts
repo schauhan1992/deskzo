@@ -13,7 +13,7 @@ import { financialYearBounds } from "@/lib/india-time";
 import { SYSTEM_ACCOUNTS } from "@/lib/ledger/chart";
 import { bookingRate } from "@/lib/ledger/posting";
 import { settleInvoice } from "@/lib/receivables";
-import { RAISED_IN_DESKZO } from "@/lib/documents/imported";
+import { SOLD_THIS_YEAR } from "@/lib/documents/imported";
 import { fromPaise, round2, toPaise } from "@/lib/accounts/money";
 import { resolvePage, resolvePageSize } from "@/lib/pagination";
 import { dateParam, tableToCsv, type Cell, type ReportColumn, type ReportResult, type ReportRow, type ReportTable } from "@/components/reports/accounts/table";
@@ -662,7 +662,8 @@ async function gstSummary(p: AccountsReportParams, pg: Paging): Promise<ReportTa
   const docs = await db.tradeDocument.findMany({
     where: {
       AND: [
-        RAISED_IN_DESKZO,
+        // The year's tax, the migrated months included — a summary, not a return (those stay as filed).
+        SOLD_THIS_YEAR,
         { docType: docTypeIn(["INVOICE", "CREDIT_NOTE", "DEBIT_NOTE", "BILL"]), status: { notIn: [...NOT_RETURNED] }, ...(w.filter ? { issueDate: w.filter } : {}) },
       ],
     },

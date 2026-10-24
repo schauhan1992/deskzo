@@ -60,7 +60,7 @@ import { findTradeDocumentFor } from "@/lib/documents/load";
 import { viewerHas } from "@/actions/permission";
 import { releaseBillingMilestones, syncBillingMilestones } from "@/lib/projects/billing-sync";
 import { moduleAccessFor } from "@/lib/modules-access";
-import { RAISED_IN_DESKZO, isImported } from "@/lib/documents/imported";
+import { SOLD_THIS_YEAR, isImported } from "@/lib/documents/imported";
 import {
   bankAccountRefusal,
   branchWithRegistration,
@@ -1149,9 +1149,10 @@ export async function tradeDocumentSummary(docType: TradeDocumentType) {
       where: { AND: [{ docType }, scope] },
       _count: { _all: true },
     }),
-    // The value is what was issued here: one brought from the old system was issued, and counted, there.
+    // The value is what was issued this year: one still open from before the books started was issued, and
+    // counted, there; the rest of the year brought across (MIGRATED) counts.
     db.tradeDocument.findMany({
-      where: { AND: [{ docType }, scope, RAISED_IN_DESKZO] },
+      where: { AND: [{ docType }, scope, SOLD_THIS_YEAR] },
       select: { status: true, total: true, exchangeRate: true },
     }),
   ]);
