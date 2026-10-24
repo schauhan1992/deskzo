@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import type { SiteRenderContext } from "@/components/site/blocks/types";
 import { SiteBlocks } from "@/components/site/blocks/render";
 import { CookieNotice } from "@/components/site/cookie-notice";
+import { SiteChatScript } from "@/components/site/site-chat";
 import { SiteFooter } from "@/components/site/footer";
 import { SiteHeader } from "@/components/site/header";
 import { fill, resolveAction } from "@/components/site/links";
@@ -50,7 +51,7 @@ function thisYear(): number {
   return indiaClock.parts(new Date()).year;
 }
 
-/** The site's frame: header, main, footer, and the cookie notice — which asks only while the referral cookie is on. */
+/** The site's frame: header, main, footer, the cookie notice — which asks only while the referral cookie is on — and the chat bubble, when the CMS names one. */
 export async function SiteShell({ children }: { children: ReactNode }) {
   const [ctx, referralDays] = await Promise.all([renderContext(), referralCookieDays()]);
   const { settings } = ctx;
@@ -71,6 +72,7 @@ export async function SiteShell({ children }: { children: ReactNode }) {
       </main>
       <SiteFooter ctx={ctx} year={thisYear()} />
       <CookieNotice referralDays={referralDays} />
+      <SiteChatScript chat={settings.chat} workspaceSuffix={ctx.workspaceSuffix} />
     </div>
   );
 }

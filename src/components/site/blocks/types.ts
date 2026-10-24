@@ -467,6 +467,11 @@ export type SiteSettings = {
    * privacy request (src/lib/platform/privacy-requests.ts) is copied to this address. Empty until set.
    */
   privacy: { officer: string; email: string; phone: string; address: string };
+  /**
+   * The chat bubble on every page (owner, 24 Oct 2026): a workspace's Customer inbox, by the workspace's
+   * name and its website channel's key (src/lib/platform/site-chat.ts). Both empty: no chat.
+   */
+  chat: { workspace: string; key: string };
   nav: NavItem[];
   signinLink: SiteLink;
   signupCta: { open: SiteLink; inviteOnly: SiteLink };

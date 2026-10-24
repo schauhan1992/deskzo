@@ -1,7 +1,7 @@
 "use client";
 
-import { useId, useRef } from "react";
-import { ArrowDown, ArrowUp, AtSign, Globe, Plus, Search, Share2, ShieldCheck, SignpostBig, X } from "lucide-react";
+import { useId, useRef, useState } from "react";
+import { ArrowDown, ArrowUp, AtSign, Globe, MessageCircle, Plus, Search, Share2, ShieldCheck, SignpostBig, X } from "lucide-react";
 import { Banner } from "@/components/console/kit/banner";
 import { Panel } from "@/components/console/kit/panel";
 import { StatusPill } from "@/components/console/kit/status";
@@ -13,13 +13,14 @@ import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Label, Select } from "@/components/ui/input";
 import type { MediaRow, SettingsDetail } from "@/lib/cms/types";
+import { chatFromSnippet, chatIsOn, chatProblems } from "@/lib/platform/site-chat";
 import { cn } from "@/lib/utils";
 import { PublishStatus, SaveBar } from "./settings-publishing";
 import { useSettingsDraft } from "./use-settings-draft";
 
 /**
  * Settings › General: who the site says it is (name, tagline, the domain it writes in text), the
- * sales address it shows, who answers for personal data (the grievance officer), its social links, what search engines and link previews get by default,
+ * sales address it shows, who answers for personal data (the grievance officer), the chat bubble on every page, its social links, what search engines and link previews get by default,
  * and the page for an address it does not have. Editors and admins edit; everybody else reads the
  * same form with nothing to press.
  *
@@ -35,6 +36,7 @@ type GeneralForm = {
   displayDomain: string;
   salesEmail: string;
   privacy: { officer: string; email: string; phone: string; address: string };
+  chat: { workspace: string; key: string };
   social: KeyedSocial[];
   seo: { titleTemplate: string; defaultTitle: string; description: string; ogImage: string };
   notFound: { heading: string; body: string; links: KeyedLink[] };
@@ -58,6 +60,7 @@ function toForm(s: SiteSettings): GeneralForm {
     displayDomain: s.displayDomain ?? "",
     salesEmail: s.salesEmail ?? "",
     privacy: { officer: s.privacy?.officer ?? "", email: s.privacy?.email ?? "", phone: s.privacy?.phone ?? "", address: s.privacy?.address ?? "" },
+    chat: { workspace: s.chat?.workspace ?? "", key: s.chat?.key ?? "" },
     social: (s.social ?? []).map((x, i) => ({ key: `social-${i}`, network: x.network, href: x.href ?? "", label: x.label ?? "" })),
     seo: { titleTemplate: s.seo?.titleTemplate ?? "", defaultTitle: s.seo?.defaultTitle ?? "", description: s.seo?.description ?? "", ogImage: s.seo?.ogImage ?? "" },
     notFound: { heading: s.notFound?.heading ?? "", body: s.notFound?.body ?? "", links: keyLinks(s.notFound?.links ?? [], "nf") },
@@ -71,6 +74,7 @@ function toPartial(f: GeneralForm): Partial<SiteSettings> {
     displayDomain: f.displayDomain,
     salesEmail: f.salesEmail,
     privacy: { officer: f.privacy.officer, email: f.privacy.email, phone: f.privacy.phone, address: f.privacy.address },
+    chat: { workspace: f.chat.workspace.trim(), key: f.chat.key.trim() },
     social: f.social.map(({ network, href, label }) => ({ network, href, ...(label.trim() ? { label } : {}) })),
     seo: { titleTemplate: f.seo.titleTemplate, defaultTitle: f.seo.defaultTitle, description: f.seo.description, ...(f.seo.ogImage ? { ogImage: f.seo.ogImage } : {}) },
     notFound: { heading: f.notFound.heading, body: f.notFound.body, links: unkeyLinks(f.notFound.links) },
@@ -102,6 +106,7 @@ const SECTIONS = [
   { id: "identity", label: "Identity", icon: Globe },
   { id: "contact", label: "Contact email", icon: AtSign },
   { id: "privacy", label: "Privacy contact", icon: ShieldCheck },
+  { id: "chat", label: "Website chat", icon: MessageCircle },
   { id: "social", label: "Social links", icon: Share2 },
   { id: "seo", label: "Search & sharing", icon: Search },
   { id: "not-found", label: "Page not found", icon: SignpostBig },
@@ -241,6 +246,14 @@ export function GeneralSettingsForm({
           </div>
         </Panel>
 
+        <Panel
+          id="chat"
+          title="Website chat"
+          description="A chat bubble on every page of the site, answered from a workspace's Customer inbox — Deskzo's own. A visitor's message lands in that workspace's Inbox, like any website chat."
+        >
+          <ChatSettings chat={form.chat} onChange={(chat) => set("chat", chat)} issues={issues} readOnly={readOnly} />
+        </Panel>
+
         <Panel id="social" title="Social links" description="Along the bottom of every page. Full https:// addresses only.">
           <SocialEditor links={form.social} onChange={(v) => set("social", v)} issues={issues} readOnly={readOnly} />
         </Panel>
@@ -346,6 +359,101 @@ export function GeneralSettingsForm({
           ))}
         </div>
       </nav>
+    </div>
+  );
+}
+
+/**
+ * The website chat (src/lib/platform/site-chat.ts): the code from a workspace's Settings › Customer inbox,
+ * pasted, gives the workspace and the key — the two things kept; the code itself isn't, as the site makes
+ * the script's address from the workspace's name.
+ */
+function ChatSettings({
+  chat,
+  onChange,
+  issues,
+  readOnly,
+}: {
+  chat: GeneralForm["chat"];
+  onChange: (next: GeneralForm["chat"]) => void;
+  issues: Record<string, string>;
+  readOnly: boolean;
+}) {
+  const [pasted, setPasted] = useState("");
+  const fromPaste = pasted.trim() ? chatFromSnippet(pasted) : null;
+  const on = chatIsOn({ workspace: chat.workspace.trim(), key: chat.key.trim() });
+  const problems = chatProblems(chat);
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        {on ? (
+          <>
+            <StatusPill tone="success">On</StatusPill>
+            <span className="text-muted">
+              Every page shows the bubble, answered from <span className="font-mono text-text">{chat.workspace.trim()}</span>&apos;s inbox — once published.
+            </span>
+          </>
+        ) : (
+          <>
+            <StatusPill tone="neutral">Off</StatusPill>
+            <span className="text-muted">No chat on the site.</span>
+          </>
+        )}
+      </div>
+      {!readOnly && (
+        <TextAreaField
+          label="Paste the chat code"
+          value={pasted}
+          onChange={(v) => {
+            setPasted(v);
+            const found = v.trim() ? chatFromSnippet(v) : null;
+            if (found) onChange(found);
+          }}
+          rows={2}
+          placeholder='<script src="https://deskzo.deskzo.com/api/inbox/public/widget.js" data-key="…" async></script>'
+          error={pasted.trim() && !fromPaste ? "That isn't the chat code: copy it from the workspace's Settings › Customer inbox, under the website channel." : null}
+          hint={fromPaste ? `Read: workspace ${fromPaste.workspace}, key ${fromPaste.key}.` : "From the workspace's Settings › Customer inbox — the website channel's code. It fills in the two boxes below."}
+        />
+      )}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <TextField
+          label="Workspace"
+          value={chat.workspace}
+          onChange={(v) => onChange({ ...chat, workspace: v.trim().toLowerCase() })}
+          max={40}
+          readOnly={readOnly}
+          mono
+          placeholder="deskzo"
+          error={issues["chat.workspace"] ?? problems.workspace}
+          hint="Its name, as in its address: deskzo for deskzo.deskzo.com."
+        />
+        <TextField
+          label="Chat key"
+          value={chat.key}
+          onChange={(v) => onChange({ ...chat, key: v.trim() })}
+          max={64}
+          readOnly={readOnly}
+          mono
+          error={issues["chat.key"] ?? problems.key}
+          hint="data-key in the chat code."
+        />
+      </div>
+      <Banner tone="info" title="Let the site show it">
+        In the workspace, under Settings › Customer inbox, list this site&apos;s addresses — https://deskzo.com and https://www.deskzo.com — in the website channel&apos;s allowed sites. With the list empty, any site may show the bubble.
+      </Banner>
+      {!readOnly && (chat.workspace || chat.key) && (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() => {
+            setPasted("");
+            onChange({ workspace: "", key: "" });
+          }}
+        >
+          Turn the chat off
+        </Button>
+      )}
     </div>
   );
 }

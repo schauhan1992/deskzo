@@ -59,6 +59,8 @@ export function settingsChanges(next: SiteSettings, live: SiteSettings): Setting
     textChange("tagline", "Tagline", live.tagline, next.tagline),
     textChange("displayDomain", "Display domain", live.displayDomain, next.displayDomain),
     textChange("salesEmail", "Sales email", live.salesEmail, next.salesEmail),
+    textChange("chat.workspace", "Website chat: workspace", live.chat?.workspace, next.chat?.workspace),
+    textChange("chat.key", "Website chat: key", live.chat?.key, next.chat?.key),
     sameValue(live.social, next.social) ? null : { key: "social", label: "Social links", from: social(live), to: social(next) },
     textChange("seo.titleTemplate", "Title template", live.seo?.titleTemplate, next.seo?.titleTemplate),
     textChange("seo.defaultTitle", "Default title", live.seo?.defaultTitle, next.seo?.defaultTitle),

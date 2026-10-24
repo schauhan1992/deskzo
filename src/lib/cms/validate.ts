@@ -13,6 +13,7 @@ import {
 import { BUILTIN_PAGE_SLUGS, GUIDE_PAGE_SEGMENT, RESERVED_PAGE_SEGMENTS, type CmsIssue, type PageDocument, type PostSeo } from "@/lib/cms/types";
 import { keywordProblems, MAX_KEYWORDS, normaliseKeywords } from "@/lib/seo/keywords";
 import { PRODUCT_KEYS, productByKey } from "@/lib/products";
+import { chatProblems } from "@/lib/platform/site-chat";
 
 /**
  * Checking what an editor sends before it is stored — against the site's own content model
@@ -245,6 +246,8 @@ const SETTINGS_SPEC: Fields = {
   displayDomain: keep(100),
   salesEmail: { k: "text", max: 254, keep: true, email: true },
   privacy: { k: "object", req: true, of: { officer: keep(LABEL), email: { k: "text", max: 254, keep: true, email: true }, phone: keep(32), address: keep(300) } },
+  // Their form is checked in checkSiteSettings (src/lib/platform/site-chat.ts).
+  chat: { k: "object", req: true, of: { workspace: keep(40), key: keep(64) } },
   nav: list(navItemSpec, NAV_LIMITS.items, true, 0, "items in the header"),
   signinLink: { k: "link", req: true },
   signupCta: { k: "object", req: true, of: { open: { k: "link", req: true }, inviteOnly: { k: "link", req: true } } },
@@ -839,6 +842,9 @@ export function checkSiteSettings(input: unknown, mode: ValidationMode): Checked
   const ctx: Ctx = { mode, issues: [], media: new Set() };
   const settings = checkObject(SETTINGS_SPEC, input, "", ctx) as unknown as SiteSettings;
   if (settings.seo && !String(settings.seo.titleTemplate ?? "").includes("%s")) issue(ctx, "seo.titleTemplate", 'The title template needs "%s" where the page\'s title goes.');
+  const chat = chatProblems(settings.chat);
+  if (chat.workspace) issue(ctx, "chat.workspace", chat.workspace);
+  if (chat.key) issue(ctx, "chat.key", chat.key);
   return finish(ctx, settings);
 }
 

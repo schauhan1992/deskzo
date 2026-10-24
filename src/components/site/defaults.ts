@@ -29,6 +29,7 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   displayDomain: "yourdomain.com",
   salesEmail: "sales@yourdomain.com",
   privacy: { officer: "", email: "", phone: "", address: "" },
+  chat: { workspace: "", key: "" },
   nav: [
     { label: "Product", href: "/#modules" },
     { label: "Pricing", href: "/pricing" },
@@ -836,6 +837,10 @@ const PRIVACY: SitePage = {
               [{ text: "No analytics or advertising cookies. ", strong: true }, { text: "Only the cookies the site needs to work — see " }, { text: "Cookies", href: "/privacy#cookies" }, { text: " below." }],
               [{ text: "Setting up a workspace: ", strong: true }, { text: "your company's name and address on the platform, your name, work email and country, your password (kept only as a one-way hash), and the network address you signed up from when it is known. One cookie links the emailed code to the browser that asked for it." }],
               [{ text: "The contact form: ", strong: true }, { text: "what you type, sent to our inbox." }],
+              [
+                { text: "The chat: ", strong: true },
+                { text: "what you write in the chat bubble, and the name, phone number or email you give it, kept in our customer inbox so we can answer. Once you send a message, your browser keeps a token so the conversation carries on; nothing is kept before that." },
+              ],
               [{ text: "A privacy request: ", strong: true }, { text: "what you type, kept so we can answer it and show we did." }],
               [{ text: "Find my workspaces: ", strong: true }, { text: "your email address, used once to look up your workspaces and email you the list." }],
             ],
@@ -899,7 +904,7 @@ const PRIVACY: SitePage = {
           },
           {
             type: "paragraph",
-            text: "No analytics or advertising cookies, and nothing that follows you to other sites. Your light or dark theme is kept in your own browser, not in a cookie. Change your choice at any time from Cookie settings at the foot of every page.",
+            text: "No analytics or advertising cookies, and nothing that follows you to other sites. Your light or dark theme is kept in your own browser, not in a cookie, and so is the chat's token once you write to us. Change your choice at any time from Cookie settings at the foot of every page.",
           },
           { type: "heading", level: 2, text: "This notice in another language" },
           {
