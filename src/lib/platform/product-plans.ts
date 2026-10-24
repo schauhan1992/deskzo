@@ -18,6 +18,7 @@ import { PLAN_CREDITS } from "@/lib/ai/catalogue";
  *   addon-ai-copilot     AI Plus: Deskzo AI credits a month for each unit (750 to start with)
  *   addon-more-people    one seat for each unit
  *   addon-automate-plus  Automate Plus: Deskzo Automate's limits raised (src/lib/automate/limits.ts)
+ *   addon-customer-inbox the Customer inbox (website chat and WhatsApp), bought with any product; in One already
  *
  * Names and descriptions come from products.ts. Books is sold in India only, as accounting is
  * (src/lib/modules.ts `countries`); everything else everywhere, where a product's India-only module
@@ -44,6 +45,7 @@ export const ADD_ON_PLAN_KEYS: Record<AddOnKey, string> = {
   copilot: "addon-ai-copilot",
   seats: "addon-more-people",
   automate_plus: "addon-automate-plus",
+  inbox: "addon-customer-inbox",
 };
 
 /**
@@ -156,6 +158,22 @@ export function productCatalogue(): CataloguePlan[] {
       isDefault: false,
       active: true,
       sortOrder: 215,
+    },
+    {
+      key: ADD_ON_PLAN_KEYS.inbox,
+      name: addOn("inbox").name,
+      kind: "ADDON",
+      description: addOn("inbox").tagline,
+      productKey: null,
+      allModules: false,
+      modules: [...addOn("inbox").modules],
+      countries: [],
+      seats: null,
+      copilotTokens: null,
+      automation: { ...NO_LIMITS },
+      isDefault: false,
+      active: true,
+      sortOrder: 217,
     },
     {
       key: ADD_ON_PLAN_KEYS.seats,

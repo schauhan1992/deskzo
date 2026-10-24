@@ -38,6 +38,9 @@ export const TRIGGERS: readonly TriggerDefinition[] = [
   { type: "renewal.due", label: "A subscription is coming up for renewal (daily)", fields: ["order", "company", "daysLeft"], event: true },
   { type: "form.submitted", label: "A form is sent", fields: ["form", "submission", "companyId", "contactId", "leadId", "invited"], event: true },
   { type: "booking.made", label: "Somebody books a slot", fields: ["booking", "companyId", "contactId", "leadId"], event: true },
+  // The Customer inbox (owner, 24 Oct 2026; src/lib/inbox/server.ts).
+  { type: "conversation.started", label: "A customer starts a conversation (website chat or WhatsApp)", fields: ["conversation", "companyId", "contactId", "leadId"], event: true },
+  { type: "conversation.needs_person", label: "A customer conversation needs a person (the bot handed over)", fields: ["conversation", "companyId", "contactId", "leadId"], event: true },
   { type: "task.created", label: "A task is created", fields: ["task"], event: true },
   { type: "task.completed", label: "A task is done", fields: ["task"], event: true },
   { type: "person.joined", label: "Somebody joins the company", fields: ["person"], event: true },
@@ -67,6 +70,18 @@ const PARTS: Record<string, readonly Field[]> = {
   task: [f("id", "id"), f("title", "title"), f("status", "status"), f("priority", "priority"), f("dueDate", "due date"), f("assignedToUserId", "assigned to"), f("createdByUserId", "created by"), f("companyId", "customer id"), f("leadId", "lead id"), f("ticketId", "ticket id")],
   form: [f("id", "id"), f("name", "name")],
   submission: [f("id", "id")],
+  conversation: [
+    f("id", "id"),
+    f("ref", "number"),
+    f("channel", "channel"),
+    f("kind", "kind (WEB or WHATSAPP)"),
+    f("customerName", "customer's name"),
+    f("customerPhone", "customer's phone"),
+    f("customerEmail", "customer's email"),
+    f("firstMessage", "first message"),
+    f("pageUrl", "page it started on"),
+    f("assignedToUserId", "assigned to"),
+  ],
 };
 
 const LABELS: Record<string, string> = {
@@ -82,6 +97,7 @@ const LABELS: Record<string, string> = {
   person: "Person",
   form: "Form",
   submission: "Response",
+  conversation: "Conversation",
   from: "From",
   to: "To",
 };

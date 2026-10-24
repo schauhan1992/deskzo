@@ -120,9 +120,10 @@ eq("The application names thirteen roles of its own — the eight it shipped wit
   // Sales manager (9 Oct 2026): the preset, and Sales's own menu copied rather than a fixed one.
   const managerSql = readFileSync(join(__dirname, "..", "prisma", "migrations", "20261030120000_built_in_sales_manager_role", "migration.sql"), "utf8");
   const managerRows = [...managerSql.matchAll(/\('([A-Z_]+)', '([a-zA-Z.]+)', (true|false)\)/g)].map((m) => ({ role: m[1]!, key: m[2]!, allowed: m[3] === "true" }));
-  const managerGranted = managerRows.filter((r) => r.role === "SALES_MANAGER" && r.allowed).map((r) => r.key).sort();
   const managerWanted = [...(getPreset("sales-manager")?.permissions ?? [])].map(String).sort();
-  ok("SALES_MANAGER starts as the sales-manager preset", managerGranted.join() === managerWanted.join() && managerRows.every((r) => r.allowed), `migration ${managerGranted.length}, preset ${managerWanted.length}`);
+  // Its rows, and a key added since (the Customer inbox, 24 Oct 2026) by the role's default — as the HR roles above.
+  const managerGranted = startsWith("SALES_MANAGER", managerRows, managerWanted);
+  ok("SALES_MANAGER starts as the sales-manager preset", managerGranted.join() === managerWanted.join() && managerRows.every((r) => r.allowed), `migration and defaults ${managerGranted.length}, preset ${managerWanted.length}`);
   ok("  with the menu Sales has in the workspace", /rp\."role" = 'SALES' AND rp\."permission" LIKE 'section\.%'/.test(managerSql));
   const executive = (getPreset("sales-executive")?.permissions ?? []) as readonly string[];
   ok("  and everything a sales executive has, so moving up never takes anything away", executive.every((k) => managerWanted.includes(k)), executive.filter((k) => !managerWanted.includes(k)).join(", "));

@@ -178,6 +178,7 @@
     "check:custom-fields": "tsx scripts/check-custom-fields.ts",
     "check:wishes": "tsx scripts/check-wishes.ts",
     "check:chat": "tsx scripts/check-chat.ts",
+    "check:customer-inbox": "tsx scripts/check-customer-inbox.ts",
     "check:order-billing": "tsx scripts/check-order-billing.ts",
     "check:vendor-po": "tsx scripts/check-vendor-po.ts",
     "check:word-filter": "tsx scripts/check-word-filter.ts",

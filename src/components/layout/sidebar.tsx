@@ -13,6 +13,19 @@ import { cn } from "@/lib/utils";
 import { useWording } from "@/components/terms/wording-provider";
 import { slot } from "@/lib/terms/dictionary";
 import { openSupport } from "@/components/support/open-support";
+import { useInboxUnread } from "@/components/inbox/inbox-unread";
+
+/** The Customer inbox's link, which carries a count of the conversations waiting (src/components/inbox/inbox-unread.tsx). */
+const INBOX_HREF = "/inbox";
+
+/** A count beside a link: "99+" past ninety-nine. */
+function CountPill({ count }: { count: number }) {
+  return (
+    <span aria-hidden="true" className="ml-auto shrink-0 rounded-full bg-brand px-1.5 py-px text-[10px] font-semibold leading-4 text-brand-contrast">
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
 
 /** Every module link, for working out which one is the most specific match for the current page. */
 const NAV_HREFS = MODULE_REGISTRY.flatMap((m) => m.navItems.map((i) => i.href));
@@ -136,13 +149,14 @@ function NavLink({
   );
 }
 
-/** A page inside a section, indented under it on the section's guide line. */
-function SubLink({ href, label, active, onNavigate }: { href: string; label: string; active: boolean; onNavigate?: () => void }) {
+/** A page inside a section, indented under it on the section's guide line. `count`: things waiting there (the Customer inbox). */
+function SubLink({ href, label, active, onNavigate, count = 0 }: { href: string; label: string; active: boolean; onNavigate?: () => void; count?: number }) {
   return (
     <Link
       href={href}
       onClick={onNavigate}
       aria-current={active ? "page" : undefined}
+      aria-label={count > 0 ? `${label}, ${count} waiting` : undefined}
       className={cn(
         "relative flex h-8 items-center rounded-base px-2.5 transition-colors duration-150",
         PAGE_TEXT,
@@ -152,6 +166,7 @@ function SubLink({ href, label, active, onNavigate }: { href: string; label: str
       {/* Drawn over the guide line, level with the page you are on. */}
       {active && <span aria-hidden="true" className="absolute -left-[9px] top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-brand" />}
       <span className="truncate">{label}</span>
+      {count > 0 && <CountPill count={count} />}
     </Link>
   );
 }
@@ -210,6 +225,8 @@ export function Sidebar({
    */
   const [search, setSearch] = useState("");
   const collapsed = useSyncExternalStore(collapsedStore.subscribe, collapsedStore.get, collapsedStore.server);
+  // Only once the server has put the Customer inbox in this person's menu.
+  const inboxWaiting = useInboxUnread(navigation.some((section) => section.items.some((item) => item.href === INBOX_HREF)));
 
   /**
    * The section opened by a click on its row — one at a time, so opening another closes it. Before
@@ -483,6 +500,8 @@ export function Sidebar({
                   >
                     <Icon aria-hidden="true" className={cn("h-4 w-4 shrink-0", current && "text-brand")} />
                     <span className="min-w-0 flex-1 truncate">{group}</span>
+                    {/* A folded section still says the inbox has people waiting. */}
+                    {!open && inboxWaiting > 0 && items.some((item) => item.href === INBOX_HREF) && <CountPill count={inboxWaiting} />}
                     <ChevronDown
                       aria-hidden="true"
                       className={cn("h-3.5 w-3.5 shrink-0 text-subtle transition-transform duration-150", DARK_WHITE, open && "rotate-180")}
@@ -502,6 +521,7 @@ export function Sidebar({
                             label={item.label}
                             active={item.exact ? pathname === item.href : isActive(item.href)}
                             onNavigate={onNavigate}
+                            count={item.href === INBOX_HREF ? inboxWaiting : 0}
                           />
                         ));
                         // A group that isn't split, or a part of one page (Overview, Settings): the links alone.

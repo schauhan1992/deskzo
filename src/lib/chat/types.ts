@@ -101,4 +101,9 @@ export type ChatEvent =
   /** A chat's name or members changed, or it was created — reload its row. */
   | { type: "chat-changed"; chatId: string }
   /** My unread count, after something read elsewhere (another tab, the rail). */
-  | { type: "unread"; total: number };
+  | { type: "unread"; total: number }
+  /**
+   * A Customer inbox conversation changed (src/lib/inbox): its id only — each screen asks again as its own
+   * person, who may not be allowed to see it. Rides chat's one live connection rather than opening another.
+   */
+  | { type: "inbox"; conversationId: string };

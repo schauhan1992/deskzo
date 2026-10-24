@@ -83,6 +83,9 @@ export const SOURCE_POINTS: Record<LeadSource, number> = {
   WALK_IN: 8,
   // Somebody who was handed a card and chose to send their details back: met, and interested.
   DIGITAL_CARD: 10,
+  // They wrote to us first, on WhatsApp or the website's chat (the Customer inbox): as warm as the website.
+  WHATSAPP: 10,
+  LIVE_CHAT: 10,
   EVENT: 8,
   PARTNER: 8,
   EMAIL: 5,
@@ -175,6 +178,8 @@ function sourceWords(source: LeadSource): string {
       EXISTING_CUSTOMER: "an existing customer",
       WALK_IN: "walking in",
       DIGITAL_CARD: "sharing back from a digital card",
+      WHATSAPP: "WhatsApp",
+      LIVE_CHAT: "the website chat",
       OTHER: "another route",
     } satisfies Record<LeadSource, string>
   )[source];

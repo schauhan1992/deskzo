@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { ClipboardPen, Trophy, DoorOpen, CalendarClock as CalendarClockIcon, MessagesSquare, ClipboardCheck, KeyRound, FolderKanban, BarChart4, StickyNote, MessageCircle, Building2, CalendarDays, Fingerprint, LocateFixed, IdCard, Plane, Target, UserRound, Package, PackageCheck, CalendarClock, Banknote, Users, Ticket, Truck, CheckSquare, Handshake, ShoppingCart, HandCoins, Store, FileText, FileCheck2, Receipt, ReceiptText, FileMinus2, FilePlus2, ClipboardList, MapPin, Wallet, Scale, BookOpen, NotebookPen, ListTree, TrendingUp, Landmark, PhoneCall, Globe, LayoutList, BadgeCheck, UserPlus, PartyPopper, Waves, Boxes, FileSpreadsheet, Percent, Lock, Laptop, Gauge, MessageSquareQuote, Star, Megaphone, Route, ShieldBan, MailCheck, ScanSearch, Inbox, BellRing, Tags, ShieldCheck, Mail, Send, ListPlus, Combine, CalendarRange, Layers, Hourglass, ListChecks, PiggyBank, Coins, WalletCards, PenLine, MailPlus, CalendarCheck, Workflow, History as RunHistory, LayoutTemplate, Cable, FolderOpen, Warehouse, Ruler, PackagePlus, ArrowLeftRight, ChartColumn, SlidersHorizontal, BookText, Library, TableProperties, NotebookTabs } from "lucide-react";
+import { ClipboardPen, Trophy, DoorOpen, CalendarClock as CalendarClockIcon, MessagesSquare, ClipboardCheck, KeyRound, FolderKanban, BarChart4, StickyNote, MessageCircle, Building2, CalendarDays, Fingerprint, LocateFixed, IdCard, Plane, Target, UserRound, Package, PackageCheck, CalendarClock, Banknote, Users, Ticket, Truck, CheckSquare, Handshake, ShoppingCart, HandCoins, Store, FileText, FileCheck2, Receipt, ReceiptText, FileMinus2, FilePlus2, ClipboardList, MapPin, Wallet, Scale, BookOpen, NotebookPen, ListTree, TrendingUp, Landmark, PhoneCall, Globe, LayoutList, BadgeCheck, UserPlus, PartyPopper, Waves, Boxes, FileSpreadsheet, Percent, Lock, Laptop, Gauge, MessageSquareQuote, Star, Megaphone, Route, ShieldBan, MailCheck, ScanSearch, Inbox, BellRing, Tags, ShieldCheck, Mail, Send, ListPlus, Combine, CalendarRange, Layers, Hourglass, ListChecks, PiggyBank, Coins, WalletCards, PenLine, MailPlus, CalendarCheck, Workflow, History as RunHistory, LayoutTemplate, Cable, FolderOpen, Warehouse, Ruler, PackagePlus, ArrowLeftRight, ChartColumn, SlidersHorizontal, BookText, Library, TableProperties, NotebookTabs, MessageSquareMore } from "lucide-react";
 import type { PermissionKey } from "@/lib/permissions";
 import type { TermKey } from "@/lib/terms/dictionary";
 
@@ -706,6 +706,15 @@ export const MODULE_REGISTRY: ModuleDefinition[] = [
       // Which customers take the most support against what they pay — src/lib/support/load.ts.
       { href: "/tickets/load", label: "Support load", icon: Gauge },
     ],
+  },
+  {
+    key: "inbox",
+    viewPermission: "inbox.view",
+    label: "Customer inbox",
+    description:
+      "Website chat and WhatsApp in one inbox: a chat bubble for your website whose bot answers from your own set answers and hands over to a person, WhatsApp on a shared number and on reps' own, leads made from new customers, and a ticket from any conversation.",
+    navGroup: "Support",
+    navItems: [{ href: "/inbox", label: "Customer inbox", icon: MessageSquareMore }],
   },
   {
     key: "reports",

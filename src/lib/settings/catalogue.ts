@@ -57,6 +57,7 @@ import {
   EyeOff,
   Network,
   Smartphone,
+  MessageSquareMore,
 } from "lucide-react";
 import { deskzoAppReady } from "@/lib/app/ready";
 
@@ -446,6 +447,16 @@ export const SETTINGS: SettingsSection[] = [
             icon: Inbox,
             permission: "settings.manage",
             module: "helpdesk",
+          },
+          {
+            // Owner, 24 Oct 2026: website chat and WhatsApp in one inbox (src/lib/inbox).
+            key: "inbox",
+            label: "Customer inbox",
+            description: "Your website's chat bubble and what its bot answers, your WhatsApp numbers — shared and reps' own — and whether new customers become leads.",
+            href: "/settings/inbox",
+            icon: MessageSquareMore,
+            permission: "settings.manage",
+            module: "inbox",
           },
         ],
       },

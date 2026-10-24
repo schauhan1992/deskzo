@@ -507,6 +507,8 @@ enum NotificationType {
   REPORT_SHARED
   /// Somebody asked for access to a report you own.
   REPORT_ACCESS_REQUESTED
+  /// A customer wrote in the Customer inbox: a conversation handed to you, or on your own WhatsApp number (src/lib/inbox).
+  INBOX_MESSAGE
 }
 
 model User {
@@ -935,6 +937,10 @@ model User {
   chatPresence                  ChatPresence?           @relation("ChatPresence")
   chatReactions                 ChatReaction[]          @relation("ChatReactions")
   chatPinsMade                  ChatPin[]               @relation("ChatPinsMade")
+  inboxChannelsOwned            InboxChannel[]          @relation("InboxChannelOwner")
+  conversationsAssigned         Conversation[]          @relation("ConversationAssignee")
+  conversationMessagesSent      ConversationMessage[]   @relation("ConversationMessageAuthor")
+  conversationReads             ConversationRead[]      @relation("ConversationReads")
   apiKeys                       ApiKey[]                @relation("ApiKeyUser")
   appDevices                    AppDevice[]             @relation("AppDevices")
   appPairings                   AppPairing[]            @relation("AppPairings")
@@ -1190,6 +1196,7 @@ model Company {
   paymentFollowUps    PaymentFollowUp[]
   calendarEvents      CalendarEvent[]
   bookings            Booking[]
+  conversations Conversation[] @relation("ConversationCompany")
 
   @@index([stage])
   @@index([assignedToUserId])
@@ -1504,6 +1511,7 @@ model Contact {
   portalLogins     PortalLogin[]         @relation("PortalLoginContact")
   calendarEvents   CalendarEvent[]
   bookings         Booking[]
+  conversations Conversation[] @relation("ConversationContact")
 
   @@index([companyId])
   @@index([emailStatus])
@@ -1633,6 +1641,7 @@ model Lead {
   stickyNotes     StickyNote[]     @relation("StickyNoteLead")
   calendarEvents  CalendarEvent[]
   bookings        Booking[]
+  conversations Conversation[] @relation("ConversationLead")
 
   @@unique([captureKeyId, externalId])
   @@index([companyId])
@@ -4541,6 +4550,7 @@ model Ticket {
   stickyNotes      StickyNote[]      @relation("StickyNoteTicket")
   calendarEvents   CalendarEvent[]
   emails           SupportEmail[]
+  conversations Conversation[] @relation("ConversationTicket")
 
   @@index([companyId])
   @@index([status])
@@ -13080,6 +13090,10 @@ enum LeadSource {
   WALK_IN
   /// Shared back from somebody's digital card (Deskzo Cards).
   DIGITAL_CARD
+  /// A WhatsApp conversation in the Customer inbox (src/lib/inbox).
+  WHATSAPP
+  /// The chat on a website, through the Customer inbox's bubble and its bot.
+  LIVE_CHAT
   OTHER
 }
 
@@ -16559,4 +16573,222 @@ model SavedReportView {
   @@id([userId, reportId])
   @@index([userId, viewedAt])
   @@map("saved_report_views")
+}
+
+// ─── Customer inbox (owner, 24 Oct 2026) ─────────────────────────────────────────────────────────
+
+/**
+ * Where a customer conversation comes in: the chat bubble on a website, or a WhatsApp number
+ * (src/lib/inbox). Team chat between colleagues is src/lib/chat, and stays apart.
+ */
+enum InboxChannelKind {
+  WEB
+  WHATSAPP
+}
+
+enum ConversationStatus {
+  OPEN
+  CLOSED
+}
+
+enum ConversationAuthor {
+  CUSTOMER
+  AGENT
+  BOT
+  SYSTEM
+}
+
+/**
+ * How far a WhatsApp message got, from Meta's receipts. Null for anything else.
+ */
+enum ConversationDelivery {
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+/**
+ * A website's chat bubble or a WhatsApp number (owner, 24 Oct 2026: one shared number, and reps' own,
+ * both). Its bot's answers, the bubble's look and the sites allowed to show it, and whether a new
+ * conversation makes a lead, are `settings` (src/lib/inbox/settings.ts).
+ */
+model InboxChannel {
+  id            String           @id @default(cuid())
+  kind          InboxChannelKind
+  name          String
+  active        Boolean          @default(true)
+  /**
+   * WEB: the key the website's snippet names. Public — it is in the page's source — not a secret.
+   */
+  publicKey     String?          @unique
+  /**
+   * WHATSAPP: Meta's phone number ID, which every inbound message names.
+   */
+  phoneNumberId String?          @unique
+  /**
+   * WHATSAPP: the number as people dial it, for showing.
+   */
+  displayPhone  String?
+  /**
+   * WHATSAPP: the person whose own number it is; null for a number the team shares.
+   */
+  ownerUserId   String?
+  owner         User?            @relation("InboxChannelOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  settings      Json             @default("{}")
+  /**
+   * Round-robin (settings.assign.mode "rotate"): who was given the last conversation, so the next goes to whoever follows.
+   */
+  lastAssignedUserId String?
+  createdById   String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  conversations Conversation[]
+
+  @@map("inbox_channels")
+}
+
+/**
+ * One customer's conversation on one channel, CNV-000123 to staff. A website visitor is known by a
+ * token their browser keeps (only its digest is stored here); a WhatsApp customer by their number.
+ * While `botActive`, the channel's bot answers; a person replying, or the bot handing over, ends it.
+ */
+model Conversation {
+  id               String             @id @default(cuid())
+  seq              Int                @unique @default(autoincrement())
+  channelId        String
+  channel          InboxChannel       @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  kind             InboxChannelKind
+  status           ConversationStatus @default(OPEN)
+  assignedToUserId String?
+  assignedTo       User?              @relation("ConversationAssignee", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  contactId        String?
+  contact          Contact?           @relation("ConversationContact", fields: [contactId], references: [id], onDelete: SetNull)
+  companyId        String?
+  company          Company?           @relation("ConversationCompany", fields: [companyId], references: [id], onDelete: SetNull)
+  leadId           String?
+  lead             Lead?              @relation("ConversationLead", fields: [leadId], references: [id], onDelete: SetNull)
+  ticketId         String?
+  ticket           Ticket?            @relation("ConversationTicket", fields: [ticketId], references: [id], onDelete: SetNull)
+  customerName     String?
+  customerEmail    String?
+  customerPhone    String?
+  /**
+   * WHATSAPP: the customer's number, digits only, as WhatsApp names it.
+   */
+  waId             String?
+  /**
+   * WEB: the digest of the visitor's token. The browser keeps the token; the server never does.
+   */
+  visitorTokenHash String?            @unique
+  pageUrl          String?
+  botActive        Boolean            @default(false)
+  botState         Json?
+  lastMessageAt    DateTime           @default(now())
+  /**
+   * The customer's last message: WhatsApp allows free text for 24 hours after it, templates after that.
+   */
+  lastCustomerAt   DateTime?
+  /**
+   * The first reply by a person, for response times.
+   */
+  firstResponseAt  DateTime?
+  /**
+   * When the customer was last told the team is away (the channel's office hours) — once in twelve hours, not every message.
+   */
+  awayNoticeAt     DateTime?
+  closedAt         DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  messages ConversationMessage[]
+  reads    ConversationRead[]
+
+  @@index([status, lastMessageAt])
+  @@index([assignedToUserId, status])
+  @@index([channelId, waId])
+  @@map("conversations")
+}
+
+model ConversationMessage {
+  id             String                @id @default(cuid())
+  conversationId String
+  conversation   Conversation          @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  author         ConversationAuthor
+  userId         String?
+  user           User?                 @relation("ConversationMessageAuthor", fields: [userId], references: [id], onDelete: SetNull)
+  body           String
+  /**
+   * WHATSAPP: the approved template sent, when it was one.
+   */
+  templateName   String?
+  /**
+   * WHATSAPP: Meta's message id, which its receipts name.
+   */
+  externalId     String?               @unique
+  delivery       ConversationDelivery?
+  error          String?
+  /**
+   * WHATSAPP: a photo, document, voice note or video the customer sent — Meta's media id, fetched into
+   * `file` the first time somebody opens it (src/app/api/inbox/files/[id]).
+   */
+  mediaId        String?
+  mediaMime      String?
+  mediaName      String?
+  file           ConversationFile?
+  createdAt      DateTime              @default(now())
+
+  @@index([conversationId, createdAt])
+  @@map("conversation_messages")
+}
+
+/**
+ * A customer's file, kept once fetched from Meta (whose links last minutes, and whose copy goes after 30 days).
+ */
+model ConversationFile {
+  id        String              @id @default(cuid())
+  messageId String              @unique
+  message   ConversationMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  mime      String
+  name      String?
+  size      Int
+  bytes     Bytes
+  createdAt DateTime            @default(now())
+
+  @@map("conversation_files")
+}
+
+/**
+ * How far a person has read a conversation, for unread counts.
+ */
+model ConversationRead {
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation("ConversationReads", fields: [userId], references: [id], onDelete: Cascade)
+  readAt         DateTime     @default(now())
+
+  @@id([conversationId, userId])
+  @@map("conversation_reads")
+}
+
+/**
+ * The workspace's WhatsApp for the inbox: the token Meta echoes when the webhook is set up, made at
+ * random; the Meta app's secret, encrypted, that signs every inbound call; and its access token,
+ * encrypted — else the WhatsApp provider's in Mail & messaging, which only Campaigns can open.
+ */
+model InboxSettings {
+  id                      String   @id @default("global")
+  whatsappVerifyToken     String
+  whatsappAppSecretCipher String?
+  whatsappTokenCipher     String?
+  /**
+   * The language approved templates are sent in ("en", "en_GB", "hi").
+   */
+  whatsappLanguage        String?
+  updatedById             String?
+  updatedAt               DateTime @updatedAt
+
+  @@map("inbox_settings")
 }

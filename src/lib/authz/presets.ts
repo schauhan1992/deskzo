@@ -86,7 +86,9 @@ export const ROLE_PRESETS: RolePreset[] = [
       // Their own accounts and leads, to a colleague — never somebody else's.
       "accounts.handOffOwn",
       // Chasing what their clients owe, and logging what they said (off by default; this profile turns it on).
-      "collections.followUp"],
+      "collections.followUp",
+      // Website chats and WhatsApp in the Customer inbox (owner, 24 Oct 2026).
+      "inbox.view"],
   },
   {
     key: "sales-manager",
@@ -133,6 +135,9 @@ export const ROLE_PRESETS: RolePreset[] = [
       "fields.seeRestricted",
       // The stages leads move through (owner, 2 Oct 2026).
       "pipeline.manage",
+      // The Customer inbox, their reps' own WhatsApp numbers too.
+      "inbox.view",
+      "inbox.viewAll",
     ],
   },
   // ─── Calling / profiling ────────────────────────────────────────────────────────────────────
@@ -142,7 +147,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     description: "Works a calling list and logs outcomes. Deliberately narrow — this is the profile with the widest access to contact details and the least need for anything else.",
     role: "CALLING",
     // leads.assign: a qualified call is handed to the salesperson who will work it.
-    permissions: [...ACCOUNT_VIEWS_WITHOUT_MONEY, ...EVERY_PROFILE, "tickets.create", "companies.viewAll", "leads.assign"],
+    permissions: [...ACCOUNT_VIEWS_WITHOUT_MONEY, ...EVERY_PROFILE, "tickets.create", "companies.viewAll", "leads.assign", "inbox.view"],
   },
   {
     key: "data-profiler",
@@ -160,7 +165,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     // Not assets.manage (owner, 9 Oct 2026): it includes seeing licence keys, so it is the lead's.
     permissions: [...ACCOUNT_VIEWS, ...EVERY_PROFILE, "meetings.schedule",
       "visitors.view",
-      "vault.use","tickets.create", "assets.viewAll", "feedback.request", "contacts.viewRestricted", "companies.viewAll"],
+      "vault.use","tickets.create", "assets.viewAll", "feedback.request", "contacts.viewRestricted", "companies.viewAll", "inbox.view"],
   },
   {
     key: "project-manager",
@@ -201,6 +206,8 @@ export const ROLE_PRESETS: RolePreset[] = [
       "feedback.viewAll",
       "contacts.viewRestricted",
       "performance.view",
+      "inbox.view",
+      "inbox.viewAll",
     ],
   },
   // ─── Accounts ───────────────────────────────────────────────────────────────────────────────

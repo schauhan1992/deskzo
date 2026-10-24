@@ -119,6 +119,7 @@ export const NOTIFICATION_CATALOGUE: NotificationDefinition[] = [
   // ─── Customers ──────────────────────────────────────────────────────────────────────────────
   { type: "FEEDBACK_RECEIVED", label: "A customer leaves feedback", when: "A customer answers a feedback request on your account.", group: "customers" },
   { type: "FEEDBACK_SUBMITTED", label: "Feedback about me", when: "Somebody leaves feedback naming you.", group: "customers" },
+  { type: "INBOX_MESSAGE", label: "A customer writes in the Customer inbox", when: "A customer writes on your own WhatsApp number or in a conversation you have, or somebody gives you one. Says who, never what.", group: "customers" },
   { type: "FORM_RESPONSE", label: "Somebody answers a form", when: "A customer answers a form of yours, or replies to an invitation you sent.", group: "customers" },
   { type: "PORTAL_REQUEST", label: "A customer asks for something", when: "A customer raises a renewal, licence or question from their portal.", group: "customers" },
 

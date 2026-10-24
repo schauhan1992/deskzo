@@ -13,6 +13,8 @@ export const LEAD_SOURCE_LABELS: Record<LeadSource, string> = {
   EXISTING_CUSTOMER: "Existing customer",
   WALK_IN: "Walk-in",
   DIGITAL_CARD: "Digital card",
+  WHATSAPP: "WhatsApp",
+  LIVE_CHAT: "Website chat",
   OTHER: "Other",
 };
 

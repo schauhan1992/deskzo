@@ -1081,6 +1081,22 @@ export const PERMISSION_REGISTRY = [
     group: "Support",
   },
   {
+    // The Customer inbox (owner, 24 Oct 2026): website chat and WhatsApp, in one inbox — src/lib/inbox.
+    key: "inbox.view",
+    label: "Answer customer conversations",
+    description:
+      "The Customer inbox: read and reply to website chats and WhatsApp messages on the team's shared channels and your own number, take or pass on a conversation, and make a lead or a ticket from one.",
+    defaultRoles: ["CALLING", "SALES", "SALES_MANAGER", "SUPPORT", "MANAGEMENT"],
+    group: "Support",
+  },
+  {
+    key: "inbox.viewAll",
+    label: "See every customer conversation",
+    description: "Also the conversations on colleagues' own WhatsApp numbers, which otherwise only they — and whoever a conversation is given to — can read.",
+    defaultRoles: ["SALES_MANAGER", "MANAGEMENT"],
+    group: "Support",
+  },
+  {
     /**
      * Moving an account or a lead from one person to another — any the holder can see.
      *
@@ -1351,6 +1367,7 @@ export const PERMISSION_REGISTRY = [
   { key: "section.customerPortal", label: "Support › Customer Portal", description: "See Customer Portal in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.feedback", label: "Support › Customer Feedback", description: "See Customer Feedback in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.helpdesk", label: "Support › Helpdesk / Tickets", description: "See Helpdesk / Tickets in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
+  { key: "section.inbox", label: "Support › Customer inbox", description: "See Customer inbox in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.projects", label: "Delivery › Projects", description: "See Projects in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.visits", label: "Field Visits", description: "See Field Visits in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },
   { key: "section.expenses", label: "People › Expenses", description: "See Expenses in the menu and open its pages. Untick to hide it from this role.", defaultRoles: [], everyone: true, delegable: false, group: "Sections" },

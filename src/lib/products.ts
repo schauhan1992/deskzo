@@ -52,7 +52,7 @@ export type Product = {
   group: "suite" | "sell" | "run" | "people";
 };
 
-export type AddOnKey = "revenue_close" | "copilot" | "seats" | "automate_plus";
+export type AddOnKey = "revenue_close" | "copilot" | "seats" | "automate_plus" | "inbox";
 
 export type AddOn = {
   key: AddOnKey;
@@ -212,6 +212,9 @@ export const ADD_ONS: readonly AddOn[] = [
     onProduct: null,
     includedIn: [],
   },
+  // The Customer inbox (owner, 24 Oct 2026: "let the platform admin choose") — an add-on staff may price and sell on its own,
+  // or tick into any plan in the console; Deskzo One has every module, so it's there already.
+  { key: "inbox", name: "Customer inbox", tagline: "Website chat with a bot, and WhatsApp, answered from one inbox", modules: ["inbox"], onProduct: null, includedIn: ["one"] },
 ];
 
 /** A product's plan key in the catalogue — an identifier invitations and scripts name, so it never follows a rename of the brand. */

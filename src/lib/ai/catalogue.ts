@@ -12,12 +12,14 @@ import type { AiProviderKind } from "@deskzo/control-client";
 
 // ─── Features ────────────────────────────────────────────────────────────────────────────────────
 
-export type AiFeature = "copilot.chat" | "automate.draft";
+export type AiFeature = "copilot.chat" | "automate.draft" | "inbox.answer";
 
 /** Each feature that calls a model: what it is called, and what it sends — shown before it is used. */
 export const AI_FEATURES: readonly { key: AiFeature; label: string; sends: string }[] = [
   { key: "copilot.chat", label: "Copilot chat", sends: "The question, and the records the copilot looks up for the person asking." },
   { key: "automate.draft", label: "Automate: drafting a workflow", sends: "The description typed, and Deskzo's list of triggers and steps. No records." },
+  // The Customer inbox's bot (owner, 24 Oct 2026): an option a channel switches on, src/lib/inbox/ai.ts.
+  { key: "inbox.answer", label: "Customer inbox: answering customers", sends: "The customer's conversation, and the channel's set answers and notes about the business. No records." },
 ];
 
 export const isAiFeature = (value: unknown): value is AiFeature => AI_FEATURES.some((f) => f.key === value);
