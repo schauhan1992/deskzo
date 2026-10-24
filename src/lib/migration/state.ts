@@ -6,7 +6,9 @@ import { indiaClock } from "@/lib/time/zone";
 /**
  * A switch to Deskzo partway through the financial year (owner, 24 Oct 2026; the plan: "Switching mid-year",
  * docs). The company brings the year's history across from its old system — invoices, credit notes and
- * receipts, each on its own date with its own number (src/lib/migration/documents.ts, receipts.ts) — and
+ * receipts, each on its own date with its own number (src/lib/migration/documents.ts, receipts.ts); bills,
+ * vendor credits and vendor payments (purchases.ts, receipts.ts); expenses and manual journals as vouchers
+ * (expenses.ts, journals.ts) — and
  * proves it with that system's trial balance at every month end (balances.ts). Then an admin finishes it, which
  * locks the months; until then Undo takes back everything it made.
  *
@@ -147,14 +149,16 @@ const BATCH = 200;
  * stays in the audit log and in the migration's counts.
  *
  * In batches, each its own transaction, deleting each thing's MigrationRecord with it: interrupted, it can be
- * run again and carries on. Payments go first (their allocations go with them), then credit notes before the
- * invoices they reduce, then the rest; each one's entries before it.
+ * run again and carries on. Payments go first (their allocations go with them), then vendor credits (what
+ * they were set against goes with them), then the expenses' and journals' vouchers, then credit notes before
+ * the invoices they reduce, then the rest; each one's entries before it. A voucher's number stays used, as a
+ * cancelled one's does.
  */
-export async function undoMigration(migrationId: string, userId: string): Promise<{ documents: number; payments: number; entries: number }> {
+export async function undoMigration(migrationId: string, userId: string): Promise<{ documents: number; payments: number; vendorCredits: number; vouchers: number; entries: number }> {
   const m = await db.migration.findUnique({ where: { id: migrationId }, select: { status: true } });
   if (!m) throw new MigrationRefused("That migration isn't there.");
   if (m.status !== "OPEN") throw new MigrationRefused(m.status === "FINISHED" ? "A finished migration can't be undone — its months are locked." : "It has been undone already.");
-  const taken = { documents: 0, payments: 0, entries: 0 };
+  const taken = { documents: 0, payments: 0, vendorCredits: 0, vouchers: 0, entries: 0 };
 
   const drain = async (kind: string, order: (ids: string[]) => Promise<string[]>, remove: (tx: Parameters<Parameters<typeof db.$transaction>[0]>[0], ids: string[]) => Promise<void>) => {
     for (;;) {
@@ -174,6 +178,20 @@ export async function undoMigration(migrationId: string, userId: string): Promis
     await tx.payment.deleteMany({ where: { id: { in: ids } } });
     taken.entries += entries.count;
     taken.payments += ids.length;
+  });
+  // Vendor credits, their entries, and what they were set against.
+  await drain("vendor-credit", async (ids) => ids, async (tx, ids) => {
+    const entries = await tx.journalEntry.deleteMany({ where: { vendorCreditId: { in: ids } } });
+    await tx.vendorCredit.deleteMany({ where: { id: { in: ids } } });
+    taken.entries += entries.count;
+    taken.vendorCredits += ids.length;
+  });
+  // The expenses' and journals' vouchers, and their entries.
+  await drain("voucher", async (ids) => ids, async (tx, ids) => {
+    const entries = await tx.journalEntry.deleteMany({ where: { accountVoucherId: { in: ids } } });
+    await tx.accountVoucher.deleteMany({ where: { id: { in: ids } } });
+    taken.entries += entries.count;
+    taken.vouchers += ids.length;
   });
   // Documents: credit notes first, so nothing still points at an invoice when it goes.
   for (const pass of ["notes", "rest"] as const) {
@@ -208,7 +226,7 @@ export async function undoMigration(migrationId: string, userId: string): Promis
     action: "DELETE",
     entityType: "Migration",
     entityId: migrationId,
-    entityLabel: `Undid a migration: ${taken.documents} documents, ${taken.payments} payments and ${taken.entries} journal entries taken back`,
+    entityLabel: `Undid a migration: ${taken.documents} documents, ${taken.payments} payments, ${taken.vendorCredits} vendor credits, ${taken.vouchers} vouchers and ${taken.entries} journal entries taken back`,
   });
   return taken;
 }

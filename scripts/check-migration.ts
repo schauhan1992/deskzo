@@ -12,7 +12,15 @@
  *     into the bank account named; the invoices' statuses from what settled them;
  *   · migrated documents count in sales but never in a GST return, a target or commission, and nothing here
  *     generates their e-invoice or e-way bill again;
- *   · Undo takes back every document, payment and entry, leaving the opening entry;
+ *   · bills from Zoho-style rows: two vendors' bills with the same number kept apart, numbered in Deskzo's series
+ *     with the vendor's number as the reference, each line posted to the account the file names (by code or
+ *     name), TDS withheld at its rate; a void bill left behind, an unknown account or a bank account refused;
+ *   · a vendor credit posted to its line's account and set against its bill; vendor payments applied to bills
+ *     by the vendor's number, an advance left over, paid through the bank or cash; bills' statuses from them;
+ *   · expenses as payment vouchers — tax worked out, inclusive or not, two alike on one day both brought, the
+ *     same file again bringing nothing; manual journals as journal and contra vouchers, an unbalanced one or a
+ *     payable line with no contact refused; the accounts they touch at the month end what the files add up to;
+ *   · Undo takes back every document, payment, vendor credit, voucher and entry, leaving the opening entry;
  *   · the old system's month-end trial balances: a Month column or the month chosen, a bad month or an unknown
  *     account keeping nothing; each month compared account by account; a deliberate difference shown, then
  *     covered by an adjustment;
@@ -104,6 +112,8 @@ async function scenario() {
   const actions = require("../src/actions/migration") as typeof import("../src/actions/migration");
   const state = require("../src/lib/migration/state") as typeof import("../src/lib/migration/state");
   const balances = require("../src/lib/migration/balances") as typeof import("../src/lib/migration/balances");
+  const ledgerLib = require("../src/lib/migration/ledger") as typeof import("../src/lib/migration/ledger");
+  const steps = require("../src/lib/migration/steps") as typeof import("../src/lib/migration/steps");
   const journal = require("../src/lib/ledger/journal") as typeof import("../src/lib/ledger/journal");
   const openingLib = require("../src/lib/portability/opening-balances") as typeof import("../src/lib/portability/opening-balances");
   const imported = require("../src/lib/documents/imported") as typeof import("../src/lib/documents/imported");
@@ -133,8 +143,20 @@ async function scenario() {
   const capital = await db.ledgerAccount.create({ data: { code: "ZZ-CAP", name: "Zz Capital", type: "EQUITY" } });
   const hdfcLedger = await db.ledgerAccount.create({ data: { code: "ZZ-HDFC", name: "Zz HDFC Current", type: "ASSET" } });
   await db.bankAccount.create({ data: { name: "Zz HDFC", ledgerAccountId: hdfcLedger.id } });
+  const vendor = async (name: string, state: string, gstin: string) => {
+    const c = await db.company.create({ data: { name, normalizedName: name.toLowerCase(), relationshipType: "VENDOR", createdById: boss.id, ownerUserId: boss.id } });
+    await db.companyLocation.create({ data: { companyId: c.id, label: "Head office", isPrimary: true, state, gstNumber: gstin, gstTreatment: "REGISTERED_REGULAR", city: "City", address: "1 Road", pincode: "400001", country: "India" } });
+    return c;
+  };
+  const steel = await vendor("Zz Steel Supplies", "Maharashtra", "27AAACS1111A1Z1");
+  const spices = await vendor("Zz Kerala Spices", "Kerala", "32AAACK2222B1Z2");
+  // The old system's own accounts, which the chart is given before its purchases come across.
+  const rent = await db.ledgerAccount.create({ data: { code: "ZZ-RENT", name: "Zz Rent", type: "EXPENSE" } });
+  const supplies = await db.ledgerAccount.create({ data: { code: "ZZ-OFF", name: "Zz Office Supplies", type: "EXPENSE" } });
+  const furniture = await db.ledgerAccount.create({ data: { code: "ZZ-FUR", name: "Zz Furniture", type: "ASSET" } });
 
   section("Who may");
+  ok("every step is in this plan", (await steps.stepsInPlan()).length === steps.STEPS.length);
   actorId = outsider.id;
   ok("posting journals without importing finance data isn't enough", !(await actions.startMigrationAction({ source: "zoho-books", yearStart: "2026-04-01", switchDate: "2026-07-01" })).ok);
 
@@ -185,6 +207,43 @@ async function scenario() {
     { "Payment Number": "ZZM-PAY-003", Date: "2026-06-11", "Customer Name": "Zz Bright Retail", Amount: "500", "Payment Mode": "Cash", "Deposit To": "", "Invoice Number": "ZZM-INV-999", "Amount Applied to Invoice": "500" },
   ];
 
+  // The purchase side, as Zoho Books exports it. Both vendors numbered a bill V-100.
+  const bill = (number: string, date: string, vendorName: string, status: string, item: string, desc: string, qty: string, rate: string, account: string, more: Record<string, string> = {}) => ({
+    "Bill Number": number, "Bill Date": date, "Vendor Name": vendorName, "Bill Status": status, "Item Name": item, "Item Desc": desc, Quantity: qty, Rate: rate, "Item Tax %": "18", Account: account, "TDS Percentage": "", "TDS Section": "", Total: "", ...more,
+  });
+  const billRows = [
+    bill("V-100", "2026-04-15", "Zz Steel Supplies", "Paid", "Office chairs", "", "2", "10000", "Zz Furniture", { Total: "24780" }),
+    bill("V-100", "", "", "", "", "Printer paper", "1", "1000", "ZZ-OFF"),
+    bill("V-100", "2026-05-10", "Zz Kerala Spices", "Paid", "", "Warehouse rent for May", "1", "50000", "Zz Rent", { "TDS Percentage": "10", "TDS Section": "194I", Total: "54000" }),
+    bill("V-101", "2026-05-11", "Zz Steel Supplies", "Void", "Bolts", "", "1", "100", ""),
+    bill("V-102", "2026-05-12", "Zz Steel Supplies", "Open", "Bolts", "", "1", "100", "Zz Nowhere"),
+    bill("V-103", "2026-05-13", "Zz Steel Supplies", "Open", "Bolts", "", "1", "100", "Zz HDFC"),
+  ];
+  const vendorCreditRows = [{ "Vendor Credit Number": "VC-1", "Vendor Credit Date": "2026-05-20", "Vendor Name": "Zz Steel Supplies", "Item Name": "Damaged chair", Account: "Zz Furniture", Amount: "5000", "Item Tax %": "18", "Bill Number": "V-100", "Amount Applied": "5900", Total: "5900" }];
+  const vendorPaymentRows = [
+    { "Payment Number": "VP-1", Date: "2026-06-05", "Vendor Name": "Zz Steel Supplies", Amount: "18880", "Payment Mode": "Bank Transfer", "Paid Through": "Zz HDFC", "Bill Number": "V-100", "Amount Applied to Bill": "18880" },
+    { "Payment Number": "VP-2", Date: "2026-06-06", "Vendor Name": "Zz Kerala Spices", Amount: "60000", "Payment Mode": "Bank Transfer", "Paid Through": "Petty Cash", "Bill Number": "V-100", "Amount Applied to Bill": "" },
+    { "Payment Number": "VP-3", Date: "2026-06-07", "Vendor Name": "Zz Steel Supplies", Amount: "100", "Payment Mode": "Cash", "Paid Through": "", "Bill Number": "V-999", "Amount Applied to Bill": "100" },
+  ];
+  const rentExpense = { "Expense Reference ID": "", "Expense Date": "2026-04-20", "Expense Account": "Zz Rent", "Paid Through": "Zz HDFC", "Vendor Name": "Zz Landlord", "Expense Amount": "30000", "Tax Percentage": "18", "Is Inclusive Tax": "false", "Reference#": "APR-RENT", Notes: "" };
+  const expenseRows = [
+    rentExpense,
+    rentExpense,
+    { ...rentExpense, "Expense Reference ID": "EXP-9", "Expense Date": "2026-05-02", "Expense Account": "ZZ-OFF", "Paid Through": "Petty Cash", "Vendor Name": "", "Expense Amount": "1180", "Is Inclusive Tax": "true", "Reference#": "", Notes: "Stationery" },
+    { ...rentExpense, "Expense Reference ID": "EXP-10", "Expense Account": "Zz HDFC", "Paid Through": "Petty Cash", "Expense Amount": "100", "Tax Percentage": "" },
+  ];
+  const journalLine = (number: string, date: string, account: string, debit: string, credit: string, contact = "", notes = "") => ({ "Journal Number": number, "Journal Date": date, Notes: notes, Account: account, "Contact Name": contact, Debit: debit, Credit: credit });
+  const journalRows = [
+    journalLine("J-1", "2026-06-30", "ZZ-RENT", "2000", "", "", "Rent for June, billed in July"),
+    journalLine("J-1", "", "Accounts Payable", "", "2000", "Zz Kerala Spices"),
+    journalLine("J-2", "2026-06-15", "Cash", "5000", "", "", "Cash withdrawn"),
+    journalLine("J-2", "", "Zz HDFC", "", "5000"),
+    journalLine("J-3", "2026-06-16", "ZZ-RENT", "100", "", "", "Unbalanced"),
+    journalLine("J-3", "", "Zz HDFC", "", "90"),
+    journalLine("J-4", "2026-06-17", "ZZ-RENT", "100", "", "", "No contact"),
+    journalLine("J-4", "", "Accounts Payable", "", "100"),
+  ];
+
   const bring = async (step: string, rows: Record<string, string>[]) => {
     const up = await actions.uploadMigrationFile(step, file(rows, `${step}.csv`));
     if (!up.ok) throw new Error(`${step}: ${up.error}`);
@@ -208,7 +267,12 @@ async function scenario() {
     const inv = await bring("invoices", invoiceRows());
     const cn = await bring("credit-notes", creditRows);
     const rc = await bring("receipts", receiptRows);
-    return { inv, cn, rc };
+    const bl = await bring("bills", billRows);
+    const vc = await bring("vendor-credits", vendorCreditRows);
+    const vp = await bring("vendor-payments", vendorPaymentRows);
+    const ex = await bring("expenses", expenseRows);
+    const jn = await bring("journals", journalRows);
+    return { inv, cn, rc, bl, vc, vp, ex, jn };
   };
 
   section("Invoices");
@@ -242,6 +306,78 @@ async function scenario() {
   const statuses = await db.tradeDocument.findMany({ where: { docNumber: { in: ["ZZM-INV-001", "ZZM-INV-002", "ZZM-INV-003"] } }, select: { docNumber: true, status: true }, orderBy: { docNumber: "asc" } });
   ok("  statuses from what settled them: paid, paid, issued", statuses.map((s) => s.status).join() === "PAID,PAID,ISSUED", statuses);
 
+  section("Bills");
+  const head = await ledgerLib.headOffice();
+  const intra = head.stateCode === "27";
+  const linesOf = async (where: { documentId?: string; vendorCreditId?: string; accountVoucherId?: string }) => {
+    const entry = await db.journalEntry.findFirst({ where, include: { lines: { include: { account: { select: { code: true } } } } } });
+    const sums = new Map<string, number>();
+    for (const l of entry?.lines ?? []) sums.set(l.account.code, Math.round(((sums.get(l.account.code) ?? 0) + Number(l.debit) - Number(l.credit)) * 100) / 100);
+    return { entry, sums };
+  };
+  const code = (key: string) => accounts.get(key)!.code;
+  const billErrors = first.bl.outcomes.filter((o) => o.kind === "error");
+  ok("six rows make five bills: two to bring, the void one left behind, two with a problem", first.bl.up.units === 5 && first.bl.outcomes.filter((o) => o.kind === "create").length === 2 && first.bl.outcomes.filter((o) => o.kind === "skip").length === 1 && billErrors.length === 2, first.bl.outcomes);
+  ok("  an account the chart hasn't got: refused, naming it", billErrors.some((e) => e.label === "V-102" && /Zz Nowhere/.test(e.error ?? "")));
+  ok("  a bank account on a line: refused", billErrors.some((e) => e.label === "V-103" && /bank or cash/.test(e.error ?? "")));
+  const bills = await db.tradeDocument.findMany({ where: { docType: "BILL" }, orderBy: { issueDate: "asc" }, select: { id: true, docNumber: true, reference: true, origin: true, companyId: true, total: true, status: true, withholdingSection: true, withholdingAmount: true } });
+  const steelBill = bills.find((b) => b.companyId === steel.id);
+  const spicesBill = bills.find((b) => b.companyId === spices.id);
+  ok("both vendors' V-100 came across, apart: Deskzo's own numbers, V-100 kept as the reference, MIGRATED", bills.length === 2 && !!steelBill && !!spicesBill && steelBill.docNumber !== spicesBill.docNumber && bills.every((b) => b.reference === "V-100" && b.origin === "MIGRATED"), bills);
+  const steelEntry = await linesOf({ documentId: steelBill?.id });
+  ok(
+    "  Steel's: each line to its account — chairs to Furniture, paper to Office Supplies (by code) — tax as input, Payables the total",
+    steelEntry.sums.get("ZZ-FUR") === 20000 && steelEntry.sums.get("ZZ-OFF") === 1000 && steelEntry.sums.get(code("AP")) === -24780 && !steelEntry.sums.has(code("PURCHASES")) && (intra ? steelEntry.sums.get(code("INPUT_CGST")) === 1890 : steelEntry.sums.get(code("INPUT_IGST")) === 3780),
+    Object.fromEntries(steelEntry.sums),
+  );
+  ok("  posted on its own date", steelEntry.entry?.date.toISOString().slice(0, 10) === "2026-04-15", steelEntry.entry?.date);
+  const spicesEntry = await linesOf({ documentId: spicesBill?.id });
+  ok(
+    "  the Kerala vendor's rent: to Rent, IGST, TDS withheld at 10% under 194I, Payables what's left (the file's total after TDS agreed)",
+    spicesEntry.sums.get("ZZ-RENT") === 50000 && spicesEntry.sums.get(code("INPUT_IGST")) === 9000 && spicesEntry.sums.get(code("TDS_PAYABLE")) === -5000 && spicesEntry.sums.get(code("AP")) === -54000 && spicesBill?.withholdingSection === "194I",
+    Object.fromEntries(spicesEntry.sums),
+  );
+
+  section("Vendor credits and payments");
+  const credit = await db.vendorCredit.findFirst({ where: { vendorId: steel.id }, include: { applications: true } });
+  ok("the vendor credit: Steel's VC-1, ₹5,900, set against its V-100 on its own date", credit?.reference === "VC-1" && Number(credit.total) === 5900 && credit.applications.length === 1 && credit.applications[0]!.billId === steelBill?.id && Number(credit.applications[0]!.amount) === 5900 && credit.applications[0]!.createdAt.toISOString().slice(0, 10) === "2026-05-20", credit);
+  const creditEntry = await linesOf({ vendorCreditId: credit?.id });
+  ok("  posted back to the chairs' account, its input tax reversed, Payables down", creditEntry.sums.get("ZZ-FUR") === -5000 && creditEntry.sums.get(code("AP")) === 5900, Object.fromEntries(creditEntry.sums));
+  ok("  vendor payments: two brought, one refused for a bill that isn't here", first.vp.progress?.created === 2 && first.vp.progress?.failed.some((f) => /V-999/.test(f.error)), first.vp.progress);
+  const paidOut = await db.payment.findMany({ where: { direction: "PAID" }, include: { allocations: true } });
+  const vp1 = paidOut.find((p) => p.companyId === steel.id);
+  const vp2 = paidOut.find((p) => p.companyId === spices.id);
+  ok("  VP-1 from the HDFC account settles what Steel's bill still owed after the credit", vp1?.bankAccountId !== null && Number(vp1?.allocations[0]?.amount) === 18880 && vp1?.allocations[0]?.documentId === steelBill?.id);
+  ok("  VP-2 paid through petty cash: cash, the bill's ₹54,000 applied, ₹6,000 left as an advance", vp2?.method === "CASH" && vp2.bankAccountId === null && Number(vp2.allocations[0]?.amount) === 54000);
+  const billStatuses = await db.tradeDocument.findMany({ where: { docType: "BILL" }, select: { status: true } });
+  ok("  both bills are paid", billStatuses.every((b) => b.status === "PAID"), billStatuses);
+
+  section("Expenses and journals");
+  ok("four expense rows: three to bring (two alike on one day are two), one refused for a bank account as the expense", first.ex.up.units === 4 && first.ex.progress?.created === 3 && first.ex.progress?.failed.length === 1 && /bank or cash/.test(first.ex.progress?.failed[0]?.error ?? ""), first.ex.progress);
+  const vouchers = await db.accountVoucher.findMany({ orderBy: { number: "asc" }, include: { journalEntries: true } });
+  const payments = vouchers.filter((v) => v.type === "PAYMENT");
+  ok("  each a posted payment voucher, numbered in the year's series, posted on its date", payments.length === 3 && payments.every((v) => v.status === "POSTED" && v.number.startsWith("PMT/2026-27/") && v.journalEntries.length === 1 && v.journalEntries[0]!.date.getTime() === v.date.getTime()), payments.map((v) => [v.number, v.status, v.date]));
+  const rentVoucher = payments.find((v) => v.reference === "APR-RENT");
+  const rentLines = await linesOf({ accountVoucherId: rentVoucher?.id });
+  ok("  the rent: ₹30,000 to Rent, ₹5,400 input tax, ₹35,400 out of HDFC; the unknown landlord kept in the narration", rentLines.sums.get("ZZ-RENT") === 30000 && rentLines.sums.get("ZZ-HDFC") === -35400 && /Zz Landlord/.test(rentVoucher?.narration ?? ""), { ...Object.fromEntries(rentLines.sums), narration: rentVoucher?.narration });
+  const stationery = payments.find((v) => v.narration.startsWith("Stationery"));
+  const stationeryLines = await linesOf({ accountVoucherId: stationery?.id });
+  ok("  tax inclusive: ₹1,180 is ₹1,000 and ₹180 tax, out of cash", stationeryLines.sums.get("ZZ-OFF") === 1000 && stationeryLines.sums.get(code("CASH")) === -1180, Object.fromEntries(stationeryLines.sums));
+  const journalErrors = first.jn.progress?.failed ?? [];
+  ok("journals: two brought, the unbalanced one and the payable with no contact refused", first.jn.progress?.created === 2 && journalErrors.some((f) => /doesn't balance/.test(f.error)) && journalErrors.some((f) => /choose whose/.test(f.error)), first.jn.progress);
+  const j1 = vouchers.find((v) => v.reference === "J-1");
+  const j2 = vouchers.find((v) => v.reference === "J-2");
+  ok("  the provision is a journal voucher with the vendor on its payable line; the withdrawal a contra", j1?.type === "JOURNAL" && j1.companyId === spices.id && j2?.type === "CONTRA", { j1: j1?.type, j2: j2?.type });
+  const at = async (accountId: string) => {
+    const s = await db.journalLine.aggregate({ where: { accountId, entry: { date: { lt: state.afterMonth("2026-06") } } }, _sum: { debit: true, credit: true } });
+    return Number(s._sum.debit ?? 0) - Number(s._sum.credit ?? 0);
+  };
+  ok("Rent at 30 June is what the files add up to: the bill, two expenses and the provision", (await at(rent.id)) === 112000, await at(rent.id));
+  ok("  Furniture: the chairs less the credit; Office Supplies: the paper and the stationery", (await at(furniture.id)) === 15000 && (await at(supplies.id)) === 2000, { furniture: await at(furniture.id), supplies: await at(supplies.id) });
+  ok("  and nothing went to Purchases", (await at(accounts.get("PURCHASES")!.id)) === 0);
+  const expensesAgain = await bring("expenses", expenseRows);
+  ok("  the same expenses again bring nothing twice", expensesAgain.progress?.created === 0, expensesAgain.progress);
+
   section("Where migrated documents count");
   const ours = { docNumber: { startsWith: "ZZM-" } };
   ok("in the year's sales", (await db.tradeDocument.count({ where: { AND: [ours, imported.SOLD_THIS_YEAR] } })) === 4);
@@ -251,15 +387,15 @@ async function scenario() {
   section("Undo");
   const before = await db.journalEntry.count();
   const undone = await actions.undoMigrationAction();
-  ok("everything it brought is taken back", undone.ok && undone.data.documents === 4 && undone.data.payments === 2, undone);
-  ok("  documents, payments and their entries gone; the opening entry stays", (await db.tradeDocument.count({ where: ours })) === 0 && (await db.payment.count()) === 0 && (await db.journalEntry.count()) === 1 && before > 1, { before, after: await db.journalEntry.count() });
+  ok("everything it brought is taken back: six documents, four payments, the vendor credit, five vouchers", undone.ok && undone.data.documents === 6 && undone.data.payments === 4 && undone.data.vendorCredits === 1 && undone.data.vouchers === 5, undone);
+  ok("  documents, payments, credits, vouchers and their entries gone; the opening entry stays", (await db.tradeDocument.count()) === 0 && (await db.payment.count()) === 0 && (await db.vendorCredit.count()) === 0 && (await db.accountVoucher.count()) === 0 && (await db.journalEntry.count()) === 1 && before > 1, { before, after: await db.journalEntry.count() });
   ok("  and the migration is marked undone", (await state.openMigration()) === null && (await state.latestMigration())?.status === "UNDONE");
 
   section("Again, then the month-end check");
   ok("a new one starts", (await actions.startMigrationAction({ source: "zoho-books", yearStart: "2026-04-01", switchDate: "2026-07-01" })).ok);
   m = (await state.openMigration())!;
   const again = await everything();
-  ok("everything comes back", again.inv.progress?.created === 3 && again.cn.progress?.created === 1 && again.rc.progress?.created === 2);
+  ok("everything comes back", again.inv.progress?.created === 3 && again.cn.progress?.created === 1 && again.rc.progress?.created === 2 && again.bl.progress?.created === 2 && again.vc.progress?.created === 1 && again.vp.progress?.created === 2 && again.ex.progress?.created === 3 && again.jn.progress?.created === 2, again);
   const once = await bring("invoices", invoiceRows(false));
   ok("  the same invoices again bring nothing twice", once.progress?.created === 0 && once.outcomes.every((o) => o.kind === "skip"), once.outcomes);
 

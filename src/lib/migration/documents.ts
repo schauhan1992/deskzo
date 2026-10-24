@@ -77,7 +77,7 @@ const rupees = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionD
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 /** The old system's status word: void and draft documents stay there. */
-function leftBehind(text: string): string | null {
+export function leftBehind(text: string): string | null {
   const t = text.trim().toLowerCase();
   if (/void|cancel/.test(t)) return "void in the old system — not a sale";
   if (/draft/.test(t)) return "a draft in the old system — never issued";
@@ -121,16 +121,27 @@ export async function checkDocument(type: DocumentStepType, group: Group, ctx: C
   };
 }
 
-/** Recomputes an invoice's status from what has been paid and credited against it. */
-export async function refreshInvoiceStatus(tx: Prisma.TransactionClient, invoiceId: string): Promise<void> {
-  const [doc, paid, credited] = await Promise.all([
-    tx.tradeDocument.findUnique({ where: { id: invoiceId }, select: { total: true, paidBefore: true, status: true } }),
-    tx.paymentAllocation.aggregate({ where: { documentId: invoiceId }, _sum: { amount: true } }),
-    tx.creditNoteApplication.aggregate({ where: { invoiceId }, _sum: { amount: true } }),
+type Client = Prisma.TransactionClient | typeof db;
+
+/** What an invoice or a bill still has to settle: its total less what was paid, credited, or set against it by a vendor credit. */
+export async function settlementOf(client: Client, documentId: string) {
+  const [doc, paid, credited, vendorCredited] = await Promise.all([
+    client.tradeDocument.findUnique({ where: { id: documentId }, select: { total: true, paidBefore: true, status: true } }),
+    client.paymentAllocation.aggregate({ where: { documentId }, _sum: { amount: true } }),
+    client.creditNoteApplication.aggregate({ where: { invoiceId: documentId }, _sum: { amount: true } }),
+    client.vendorCreditApplication.aggregate({ where: { billId: documentId }, _sum: { amount: true } }),
   ]);
-  if (!doc || doc.status === "CANCELLED" || doc.status === "DRAFT") return;
-  const status = settledStatus(settleInvoice(Number(doc.total), Number(paid._sum.amount ?? 0), Number(credited._sum.amount ?? 0), Number(doc.paidBefore ?? 0)));
-  if (status !== doc.status) await tx.tradeDocument.update({ where: { id: invoiceId }, data: { status } });
+  if (!doc) return null;
+  const settlement = settleInvoice(Number(doc.total), Number(paid._sum.amount ?? 0), Number(credited._sum.amount ?? 0) + Number(vendorCredited._sum.amount ?? 0), Number(doc.paidBefore ?? 0));
+  return { status: doc.status, settlement };
+}
+
+/** Recomputes an invoice's or a bill's status from what has been paid and credited against it. */
+export async function refreshSettledStatus(tx: Prisma.TransactionClient, documentId: string): Promise<void> {
+  const found = await settlementOf(tx, documentId);
+  if (!found || found.status === "CANCELLED" || found.status === "DRAFT") return;
+  const status = settledStatus(found.settlement);
+  if (status !== found.status) await tx.tradeDocument.update({ where: { id: documentId }, data: { status } });
 }
 
 /** Brings one document across: made, issued and posted on its own date, recorded against the migration. */
@@ -180,17 +191,13 @@ export async function applyDocument(type: DocumentStepType, group: Group, ctx: C
       if (entry) await tx.migrationRecord.create({ data: { migrationId: ctx.migrationId, kind: "journal", recordId: entry.id, key: `${key}:entry` } });
 
       // A credit note reduces the invoice it names: by what the file says, else by what that invoice still owed.
+      // Dated the credit note's own day, as the month-end tie-out and ageing read an application.
       if (type === "CREDIT_NOTE" && doc.againstDocumentId) {
-        const invoice = await tx.tradeDocument.findUniqueOrThrow({ where: { id: doc.againstDocumentId }, select: { total: true, paidBefore: true } });
-        const [paid, credited] = await Promise.all([
-          tx.paymentAllocation.aggregate({ where: { documentId: doc.againstDocumentId }, _sum: { amount: true } }),
-          tx.creditNoteApplication.aggregate({ where: { invoiceId: doc.againstDocumentId }, _sum: { amount: true } }),
-        ]);
-        const owed = settleInvoice(Number(invoice.total), Number(paid._sum.amount ?? 0), Number(credited._sum.amount ?? 0), Number(invoice.paidBefore ?? 0)).balance;
+        const owed = (await settlementOf(tx, doc.againstDocumentId))?.settlement.balance ?? 0;
         const amount = round2(Math.min(history.applied ?? owed, Number(doc.total), owed));
         if (amount > 0) {
-          await tx.creditNoteApplication.create({ data: { creditNoteId: id, invoiceId: doc.againstDocumentId, amount: new Prisma.Decimal(amount), appliedByUserId: ctx.userId } });
-          await refreshInvoiceStatus(tx, doc.againstDocumentId);
+          await tx.creditNoteApplication.create({ data: { creditNoteId: id, invoiceId: doc.againstDocumentId, amount: new Prisma.Decimal(amount), appliedByUserId: ctx.userId, createdAt: issueDate } });
+          await refreshSettledStatus(tx, doc.againstDocumentId);
         }
       }
     });

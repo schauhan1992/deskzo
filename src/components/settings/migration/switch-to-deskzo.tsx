@@ -23,9 +23,9 @@ import { Input, Label, Select } from "@/components/ui/input";
 
 /**
  * Settings › Import & export › Switch to Deskzo (src/lib/migration): one screen from choosing the old system
- * to a finished, locked year. The steps run in order — the year's start, invoices, credit notes, receipts,
- * then the month-end check — and each file goes in a part at a time, so a big year shows its progress and a
- * closed tab carries on where it stopped.
+ * to a finished, locked year. The steps run in order — the year's start; invoices, credit notes, receipts;
+ * bills, vendor credits, vendor payments; expenses and manual journals; then the month-end check — and each
+ * file goes in a part at a time, so a big year shows its progress and a closed tab carries on where it stopped.
  */
 
 type MigrationRow = { id: string; source: string; yearStart: string; switchDate: string; status: "OPEN" | "FINISHED" | "UNDONE"; counts: Record<string, number> };
@@ -38,6 +38,21 @@ const STEPS = [
   { key: "invoices", label: "Invoices", units: "invoices", hint: "Every invoice from the start of the year to the day before the switch, paid or not — one row a line, as Zoho Books exports them. Void and draft ones are left behind." },
   { key: "credit-notes", label: "Credit notes", units: "credit notes", hint: "Each names the invoice it reduces, which must already be here. It's applied to that invoice — by the amount the file says, else by what the invoice still owed." },
   { key: "receipts", label: "Customer receipts", units: "payments", hint: "One row an invoice a payment paid, as Zoho Books exports customer payments. What isn't applied to an invoice stays on account." },
+  {
+    key: "bills",
+    label: "Bills",
+    units: "bills",
+    hint: "Every vendor bill in the year, one row a line. Each line goes to the account the old system posted it to (Account), Purchases when blank — so add any account Deskzo's chart lacks first. Numbered in Deskzo's bill series; the vendor's own number is kept as the reference. TDS at the file's rate.",
+  },
+  { key: "vendor-credits", label: "Vendor credits", units: "vendor credits", hint: "Credits and debit notes from vendors, one row a line, each to its account (Purchase Rebates when blank). Set against the bill each names, by the vendor's number for it." },
+  { key: "vendor-payments", label: "Vendor payments", units: "vendor payments", hint: "One row a bill a payment settled, as Zoho Books exports vendor payments; what isn't applied stays as an advance. Paid through the bank account named, or cash." },
+  { key: "expenses", label: "Expenses", units: "expenses", hint: "What was paid without a bill — rent, travel, subscriptions — each as a payment voucher: its expense account, its input tax, and the account it was paid through." },
+  {
+    key: "journals",
+    label: "Manual journals",
+    units: "journals",
+    hint: "Journals written by hand, one row a line, each as a voucher of its kind. Anything else the old system posted that no file here brings — a fund transfer, a deposit, a stock adjustment — can go in this file, so the months agree.",
+  },
 ] as const;
 
 const money = (n: number) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -77,10 +92,15 @@ export function SwitchToDeskzo(props: {
   adjustments: Adjustment[];
   accounts: Account[];
   canFinish: boolean;
+  /** The steps the plan has room for (src/lib/migration/steps.ts `stepsInPlan`). */
+  steps: string[];
 }) {
   if (!props.migration) return <StartForm sources={props.sources} defaults={props.defaults} latest={props.latest} />;
   const m = props.migration;
   const agreed = props.months.length > 0 && props.months.every((x) => x.agrees);
+  const steps = STEPS.filter((s) => props.steps.includes(s.key));
+  // The month-end check comes after the start and the steps.
+  const checkSection = steps.length + 2;
   return (
     <div className="space-y-5">
       <Summary migration={m} sources={props.sources} />
@@ -101,14 +121,21 @@ export function SwitchToDeskzo(props: {
             </Link>{" "}
             — and those customers left out of the trial balance&apos;s party rows.
           </li>
+          <li>
+            Bills from before {dayLabel(m.yearStart)} still unpaid on it, the same way, from{" "}
+            <Link href="/purchase/bills" className="text-brand hover:underline">
+              Purchase › Vendor bills › Import
+            </Link>
+            .
+          </li>
         </ul>
       </Section>
-      {STEPS.map((s, i) => (
+      {steps.map((s, i) => (
         <StepCard key={s.key} number={i + 2} step={s} file={props.files.find((f) => f.step === s.key) ?? null} count={m.counts[s.key] ?? 0} />
       ))}
-      <BalancesCard months={props.months} />
-      <DifferencesCard months={props.months} adjustments={props.adjustments} accounts={props.accounts} />
-      <FinishCard migration={m} agreed={agreed} canFinish={props.canFinish} />
+      <BalancesCard number={checkSection} months={props.months} />
+      <DifferencesCard number={checkSection + 1} months={props.months} adjustments={props.adjustments} accounts={props.accounts} />
+      <FinishCard number={checkSection + 2} migration={m} agreed={agreed} canFinish={props.canFinish} />
     </div>
   );
 }
@@ -208,7 +235,7 @@ function Summary({ migration, sources }: { migration: MigrationRow; sources: { v
           Bringing {dayLabel(migration.yearStart)} to the day before {dayLabel(migration.switchDate)} across from {sources.find((s) => s.value === migration.source)?.label ?? migration.source}
         </p>
         <p className="text-xs text-muted">
-          {brought.length ? `So far: ${brought.map(([k, n]) => `${n.toLocaleString("en-IN")} ${k.replace("-", " ")}`).join(", ")}. ` : "Nothing brought yet. "}
+          {brought.length ? `So far: ${brought.map(([k, n]) => `${n.toLocaleString("en-IN")} ${STEPS.find((s) => s.key === k)?.units ?? k.replace(/-/g, " ")}`).join(", ")}. ` : "Nothing brought yet. "}
           Accounting reports say their figures aren&apos;t final until it&apos;s finished.
         </p>
       </div>
@@ -217,7 +244,7 @@ function Summary({ migration, sources }: { migration: MigrationRow; sources: { v
       </Button>
       <Dialog open={confirming} onClose={() => !pending && setConfirming(false)} title="Undo the migration">
         <div className="space-y-4">
-          <p className="text-sm text-text">Every invoice, credit note, payment and entry it brought is taken back, and it&apos;s marked undone. You can start again after.</p>
+          <p className="text-sm text-text">Every invoice, bill, credit, payment, expense, journal and entry it brought is taken back, and it&apos;s marked undone. You can start again after.</p>
           <ActionNoticeRegion notice={error ? { tone: "error", message: error } : null} />
           <div className="flex justify-end gap-2">
             <Button type="button" variant="secondary" onClick={() => setConfirming(false)} disabled={pending}>
@@ -394,7 +421,7 @@ function Problems({ title, rows }: { title: string; rows: { line: number; label:
   );
 }
 
-function BalancesCard({ months }: { months: MonthCheck[] }) {
+function BalancesCard({ number, months }: { number: number; months: MonthCheck[] }) {
   const router = useRouter();
   const input = useRef<HTMLInputElement | null>(null);
   const [month, setMonth] = useState("");
@@ -404,7 +431,7 @@ function BalancesCard({ months }: { months: MonthCheck[] }) {
   const uploadedAll = months.every((x) => x.uploaded);
   return (
     <Section
-      number={5}
+      number={number}
       title="The old system's month-end trial balances"
       done={uploadedAll}
       actions={
@@ -474,10 +501,10 @@ function BalancesCard({ months }: { months: MonthCheck[] }) {
   );
 }
 
-function DifferencesCard({ months, adjustments, accounts }: { months: MonthCheck[]; adjustments: Adjustment[]; accounts: Account[] }) {
+function DifferencesCard({ number, months, adjustments, accounts }: { number: number; months: MonthCheck[]; adjustments: Adjustment[]; accounts: Account[] }) {
   const off = months.filter((x) => x.uploaded && !x.agrees);
   return (
-    <Section number={6} title="Differences" done={months.length > 0 && months.every((x) => x.agrees)}>
+    <Section number={number} title="Differences" done={months.length > 0 && months.every((x) => x.agrees)}>
       {off.length === 0 ? (
         <p className="text-sm text-muted">
           {months.some((x) => x.uploaded) ? "Every month uploaded agrees with the old system, account by account." : "Upload the trial balances to see how each month compares."}
@@ -625,13 +652,13 @@ function AdjustmentForm({ months, accounts }: { months: string[]; accounts: Acco
   );
 }
 
-function FinishCard({ migration, agreed, canFinish }: { migration: MigrationRow; agreed: boolean; canFinish: boolean }) {
+function FinishCard({ number, migration, agreed, canFinish }: { number: number; migration: MigrationRow; agreed: boolean; canFinish: boolean }) {
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   return (
-    <Section number={7} title="Finish" done={false}>
+    <Section number={number} title="Finish" done={false}>
       {!agreed ? (
         <p className="flex items-start gap-1.5 text-sm text-muted">
           <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />

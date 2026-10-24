@@ -6,7 +6,7 @@ import { can } from "@/lib/authz/resolve";
 import { db } from "@/lib/db";
 import { financialYearStartOf } from "@/lib/india-time";
 import { compareMonths, listAdjustments } from "@/lib/migration/balances";
-import { stepFiles } from "@/lib/migration/steps";
+import { stepFiles, stepsInPlan } from "@/lib/migration/steps";
 import { MIGRATION_SOURCES, latestMigration, openMigration } from "@/lib/migration/state";
 import { isModuleEnabled } from "@/actions/module";
 import { ModuleDisabledNotice } from "@/components/settings/module-disabled-notice";
@@ -26,7 +26,7 @@ export default async function SwitchToDeskzoPage() {
   const user = await requireUser();
   if (!(await can(user.id, "ledger.post")) || !(await can(user.id, "data.importFinance"))) notFound();
 
-  const [migration, latest, canFinish] = await Promise.all([openMigration(), latestMigration().catch(() => null), can(user.id, "books.close")]);
+  const [migration, latest, canFinish, steps] = await Promise.all([openMigration(), latestMigration().catch(() => null), can(user.id, "books.close"), stepsInPlan()]);
   const [files, months, adjustments, accounts] = migration
     ? await Promise.all([
         stepFiles(migration),
@@ -49,7 +49,7 @@ export default async function SwitchToDeskzoPage() {
       </p>
       <h1 className="text-xl font-semibold text-text">Switch to Deskzo partway through the year</h1>
       <p className="mt-1 max-w-3xl text-sm text-muted">
-        Bring the rest of this financial year across from the old system — every invoice, credit note and receipt on its own date with its own number — checked
+        Bring the rest of this financial year across from the old system — every invoice, bill, credit, payment, expense and journal on its own date — checked
         against the old system&apos;s books at every month end.
       </p>
       <div className="mt-6">
@@ -63,6 +63,7 @@ export default async function SwitchToDeskzoPage() {
           adjustments={adjustments}
           accounts={accounts}
           canFinish={canFinish}
+          steps={steps}
         />
       </div>
     </div>

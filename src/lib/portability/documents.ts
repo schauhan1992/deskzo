@@ -193,7 +193,11 @@ export async function resolveGroup(type: DocumentImportType, group: Group, clock
   const purchase = documentDirection[type] === "PURCHASE";
   const label = tradeDocumentLabels[type].toLowerCase();
 
-  const taken = await db.tradeDocument.findUnique({ where: { docNumber: group.number }, select: { docType: true, origin: true, company: { select: { name: true } } } });
+  // A migrated bill is numbered in Deskzo's bill series, the vendor's own number kept as its reference: vendors'
+  // numbers clash with each other's and with ours, and a year of bills makes that likely. Its migration knows
+  // it by vendor and number (src/lib/migration/purchases.ts).
+  const seriesNumbered = history !== null && type === "BILL";
+  const taken = seriesNumbered ? null : await db.tradeDocument.findUnique({ where: { docNumber: group.number }, select: { docType: true, origin: true, company: { select: { name: true } } } });
   if (taken) {
     if (taken.docType === type && taken.origin === (history ? "MIGRATED" : "IMPORTED")) return { skip: `${group.number} is already in Deskzo` };
     return { error: `${group.number} is already used by another document in Deskzo (${tradeDocumentLabels[taken.docType].toLowerCase()} for ${taken.company.name}).` };
@@ -309,14 +313,14 @@ export async function resolveGroup(type: DocumentImportType, group: Group, clock
     docType: type,
     companyId: party.id,
     locationId: location?.id ?? "",
-    docNumber: group.number,
+    docNumber: seriesNumbered ? "" : group.number,
     placeOfSupplyCode,
     gstTreatment,
     buyerGstin: gstin,
     issueDate: day(issueDate),
     dueDate: day(dueDate),
     validUntil: day(validUntil),
-    reference: head.text(C.reference).slice(0, 120),
+    reference: (seriesNumbered ? [group.number, head.text(C.reference)].filter(Boolean).join(" · ") : head.text(C.reference)).slice(0, 120),
     salespersonId: salesperson?.id ?? "",
     notes: head.text(C.notes),
     terms: head.text(C.terms),
