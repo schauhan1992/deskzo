@@ -27,6 +27,9 @@ import { autoDeprovision } from "@/lib/platform/settings";
 import type { Clock } from "@/lib/time/zone";
 import { overdueWakes } from "@/lib/automate/wake";
 import { platformPause } from "@/lib/automate/switches";
+import { offsiteFacts } from "@/lib/offsite/status";
+import { platformEnv } from "@/lib/platform/console-page";
+import { CLOCK_TOLERANCE_MS } from "@/lib/platform/time-sync";
 
 /**
  * The console's alerts: what is wrong now, or about to be, derived on every request from the control
@@ -100,7 +103,15 @@ type AlertKind =
   | "signups.stuck"
   | "grant.live"
   | "automate.backlog"
-  | "automate.stalled";
+  | "automate.stalled"
+  | "offsite.unconfigured"
+  | "offsite.stalled"
+  | "offsite.failing"
+  | "offsite.control-stale"
+  | "offsite.logs-stale"
+  | "offsite.drill-failed"
+  | "offsite.drill-overdue"
+  | "clock.drift";
 
 type KindSpec = {
   severity: AlertSeverity;
@@ -140,6 +151,16 @@ const KINDS: Record<AlertKind, KindSpec> = {
   // Deskzo Automate's worker behind: past five minutes a warning, past an hour critical (docs/runbook.md).
   "automate.backlog": { severity: "warning", category: "jobs", instance: false },
   "automate.stalled": { severity: "critical", category: "jobs", instance: false },
+  // Backups and logs off the server (src/lib/offsite — owner, 24 Oct 2026). Unconfigured only in production.
+  "offsite.unconfigured": { severity: "critical", category: "security", instance: false },
+  "offsite.stalled": { severity: "critical", category: "jobs", instance: false },
+  "offsite.failing": { severity: "warning", category: "jobs", instance: false },
+  "offsite.control-stale": { severity: "critical", category: "jobs", instance: false },
+  "offsite.logs-stale": { severity: "warning", category: "jobs", instance: false },
+  "offsite.drill-failed": { severity: "critical", category: "jobs", instance: true },
+  "offsite.drill-overdue": { severity: "warning", category: "jobs", instance: false },
+  // This server's clock against NPL's and NIC's (src/lib/platform/time-sync.ts) — CERT-In asks for it.
+  "clock.drift": { severity: "warning", category: "security", instance: false },
 };
 
 const isKind = (k: string): k is AlertKind => Object.prototype.hasOwnProperty.call(KINDS, k);
@@ -438,6 +459,62 @@ async function securityAlerts(): Promise<Alert[]> {
         href: "/health#configuration",
       }),
     );
+  }
+  return out;
+}
+
+/**
+ * Backups and logs off the server: not set up (production), the worker not copying, a sync, the control
+ * plane's dump or the log archive behind, a restore drill that failed or is overdue, the clock out.
+ */
+async function offsiteAlerts({ now, clock }: Ctx): Promise<Alert[]> {
+  const f = await offsiteFacts();
+  const out: Alert[] = [];
+  const href = "/settings/offsite";
+  const ago = (at: Date | undefined) => (at ? now.getTime() - at.getTime() : Infinity);
+  const when = (at: Date | undefined) => (at ? `last on ${clock.dateTime(at)}` : "never yet");
+  if (f.clock && f.clock.offsetMs !== null && Math.abs(f.clock.offsetMs) > CLOCK_TOLERANCE_MS) {
+    out.push(
+      make("clock.drift", [], {
+        title: `The server's clock is ${(Math.abs(f.clock.offsetMs) / 1000).toFixed(1)} s ${f.clock.offsetMs < 0 ? "behind" : "ahead"}`,
+        detail: `Against ${f.clock.server}. CERT-In asks for clocks kept to NPL's or NIC's time — set the server's time service to them (docs/runbook.md §14).`,
+        href: `${href}#cert-in`,
+        since: new Date(f.clock.at),
+      }),
+    );
+  }
+  if (!f.configured) {
+    if (platformEnv().key === "production") {
+      out.push(
+        make("offsite.unconfigured", [], {
+          title: "Backups and logs are only on this server",
+          detail: "Losing it loses every workspace's backups, the control plane's keys and the logs CERT-In requires. Set up an off-site store.",
+          href,
+        }),
+      );
+    }
+    return out;
+  }
+  const sync = f.latest.SYNC;
+  if (ago(sync?.finishedAt ?? sync?.startedAt) > 3 * 3_600_000) {
+    out.push(make("offsite.stalled", [], { title: "Backups haven't been copied off-site for over 3 hours", detail: `The platform worker copies them every hour (${when(sync?.startedAt)}). Is it running?`, href, since: sync?.startedAt ?? null }));
+  } else if (sync?.status === "FAILED") {
+    out.push(make("offsite.failing", [], { title: "Copying backups off-site is failing", detail: errorLine(sync.error ?? sync.summary ?? "") || "See the last run.", href: `${href}#runs`, since: sync.startedAt }));
+  }
+  if (ago(f.lastSucceeded.CONTROL_DUMP) > 30 * 3_600_000) {
+    out.push(make("offsite.control-stale", [], { title: "No control plane dump off-site in the last day", detail: `It holds every workspace's keys; without it no backup opens on another server (${when(f.lastSucceeded.CONTROL_DUMP)}).`, href: `${href}#runs`, since: f.lastSucceeded.CONTROL_DUMP ?? null }));
+  }
+  if (ago(f.lastSucceeded.LOGS) > 50 * 3_600_000) {
+    out.push(make("offsite.logs-stale", [], { title: "The log archive is behind", detail: `Logs are archived every night (${when(f.lastSucceeded.LOGS)}). CERT-In requires 180 days of them.`, href: `${href}#runs`, since: f.lastSucceeded.LOGS ?? null }));
+  }
+  const failedDrills = [f.drills.workspace, f.drills.control].filter((d) => d?.status === "FAILED");
+  for (const drill of failedDrills) {
+    if (!drill) continue;
+    const what = drill.tenantId ? "A workspace's restore drill failed" : "The control plane's restore drill failed";
+    out.push(make("offsite.drill-failed", [part(drill.id)], { title: what, detail: errorLine(drill.error ?? drill.summary ?? "") || "A backup fetched back from the store couldn't be restored.", href: `${href}#drills`, since: drill.startedAt }));
+  }
+  if (failedDrills.length === 0 && f.firstRunAt && ago(f.firstRunAt) > 8 * DAY && ago(f.lastSucceeded.DRILL) > 15 * DAY) {
+    out.push(make("offsite.drill-overdue", [], { title: "No restore drill has worked in over two weeks", detail: `Drills run weekly in the early morning (${when(f.lastSucceeded.DRILL)}).`, href: `${href}#drills`, since: f.lastSucceeded.DRILL ?? null }));
   }
   return out;
 }
@@ -753,6 +830,7 @@ async function derive(role: ConsoleRole, now: Date): Promise<Alert[]> {
     ["seats", seatAlerts],
     ["closed workspaces", purgeAlerts],
     ["support grants", grantAlerts],
+    ["off-site backups", offsiteAlerts],
   ];
   // The signups page is theirs alone (decision D2); the count would lead anybody else to a page they cannot open.
   if (hasRole(role, SIGNUP_VIEWERS)) sources.push(["signups", signupAlerts]);

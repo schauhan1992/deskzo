@@ -11,8 +11,11 @@ import { openForPlatform, sealForPlatform } from "@/lib/platform/kek";
  */
 
 export const GATEWAY_SECRET_KEYS = ["stripe.secretKey", "stripe.webhookSecret", "razorpay.keyId", "razorpay.keySecret", "razorpay.webhookSecret"] as const;
-/** `cloudflare.apiToken`: workspaces' own addresses on Cloudflare for SaaS (src/lib/platform/cloudflare-hostnames.ts). */
-export const SECRET_KEYS = [...GATEWAY_SECRET_KEYS, "cloudflare.apiToken"] as const;
+/**
+ * `cloudflare.apiToken`: workspaces' own addresses on Cloudflare for SaaS (src/lib/platform/cloudflare-hostnames.ts).
+ * `offsite.secret`: the off-site store's SAS token or secret access key (src/lib/offsite/config.ts).
+ */
+export const SECRET_KEYS = [...GATEWAY_SECRET_KEYS, "cloudflare.apiToken", "offsite.secret"] as const;
 export type SecretKey = (typeof SECRET_KEYS)[number];
 /**
  * `platform.lastTick`: what the platform tick did last, as JSON (src/lib/platform/tick-summary.ts).
@@ -67,6 +70,18 @@ export const PLAIN_KEYS = [
   "ai.paused",
   "ai.packs",
   "trial.aiCredits",
+  // Off-site backups and the log archive (src/lib/offsite/config.ts): the store, and how long each is kept there.
+  "offsite.provider",
+  "offsite.config",
+  "offsite.backupKeepDays",
+  "offsite.logKeepDays",
+  // The platform's own security logs (staff, CMS, partners) are archived through this day, UTC (src/lib/logs/archive.ts).
+  "offsite.logsThrough",
+  // A "Run now" from the console waiting for the platform worker, and the day closed workspaces' backups were last swept off-site (src/lib/offsite/chores.ts).
+  "offsite.requested",
+  "offsite.orphansSweptOn",
+  // The last check of this server's clock against India's time servers (src/lib/platform/time-sync.ts), as JSON.
+  "platform.clockCheck",
 ] as const;
 export type PlainKey = (typeof PLAIN_KEYS)[number];
 

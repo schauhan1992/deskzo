@@ -503,13 +503,17 @@ const SECURITY: SitePage = {
             text: "Platform staff work from a separate console, with its own sign-in and two-factor authentication. They cannot open a workspace unless its owner grants support access, for a time the owner chooses, and every such visit is recorded in the workspace's own activity log. Every action staff take in the console is recorded in the platform's audit log.",
           },
           { type: "heading", level: 2, text: "Records", anchor: "records" },
-          { type: "paragraph", text: "Each workspace keeps an activity log of sign-ins, exports and changes, which its administrators can read." },
+          {
+            type: "paragraph",
+            text: "Each workspace keeps an activity log of sign-ins, exports and changes, which its administrators can read. We also keep a sealed copy of every workspace's sign-ins and activity, and a log of every request to the service, for a year — Indian law (CERT-In's directions of April 2022) requires a service provider to keep its logs for at least 180 days. It is kept away from the workspaces, and nobody in one can see or shorten it.",
+          },
           { type: "heading", level: 2, text: "Backups and recovery", anchor: "backups" },
           {
             type: "list",
             items: [
               "Point-in-time recovery of the database cluster",
               "Scheduled, sealed backups of each workspace, kept apart from every other's",
+              "Every backup copied off our servers, still encrypted, and one restored every week to prove they work",
               "Your data, exported whenever you like, from your workspace's settings",
             ],
           },
@@ -851,6 +855,8 @@ const PRIVACY: SitePage = {
               ["A workspace's data", "While it has a workspace", "On closing: a final backup, then its database deleted"],
               ["A closed workspace's final backup and keys", "90 days", "Keys wiped: every copy unreadable"],
               ["Platform database backups", "30 days", "Expire"],
+              ["A workspace's backups, and their copies off our servers", "35 days — the newest three whatever their age", "Expire"],
+              ["Security logs: sign-ins, requests to the service, what administrators and staff did", "1 year (Indian law requires 180 days at least)", "Deleted"],
               ["Billing records and invoices", "As long as tax law requires (in India, 8 years)", "Deleted"],
             ],
           },

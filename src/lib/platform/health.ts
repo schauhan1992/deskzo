@@ -264,6 +264,7 @@ const KEY_WORDS: Record<SecretKey, string> = {
   "razorpay.keySecret": "the key secret",
   "razorpay.webhookSecret": "the webhook secret",
   "cloudflare.apiToken": "the API token",
+  "offsite.secret": "the off-site store's SAS token or secret key",
 };
 const GATEWAY_KEYS: { stripe: readonly SecretKey[]; razorpay: readonly SecretKey[] } = {
   stripe: ["stripe.secretKey", "stripe.webhookSecret"],

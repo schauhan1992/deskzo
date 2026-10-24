@@ -16,6 +16,12 @@
  * workspaces on the wake list that are due; every ten minutes, and with --once, every active one —
  * which catches a wake that was lost. A delay of minutes needs this to run as a long-lived process;
  * as a five-minute --once it still runs everything, just up to five minutes late.
+ *
+ * And, while it keeps going, the off-site work (src/lib/offsite/chores.ts): backups copied off the
+ * server every hour, the control plane dumped and the logs archived every night, a restore drill every
+ * week. Beside the rest, never in its way — a sync takes minutes, the provisioning jobs can't wait for
+ * it. Not with --once: the signup form starts one of those, and a signup isn't the moment to copy
+ * backups (`npm run offsite` runs them by hand).
  */
 import "dotenv/config";
 import { closeControlDb } from "../src/lib/platform/control-db";
@@ -23,6 +29,7 @@ import { withPlatformLease } from "../src/lib/platform/fanout";
 import { fillWarmPool, runNextJob } from "../src/lib/platform/provisioning";
 import { installLogLabels } from "../src/lib/tenancy/log-labels";
 import { runAutomate } from "../src/lib/automate/worker";
+import { runDueChores } from "../src/lib/offsite/chores";
 
 // Each line it writes names the workspace it was working on.
 installLogLabels();
@@ -31,6 +38,7 @@ const once = process.argv.includes("--once");
 const POLL_MS = 2_000;
 const POOL_EVERY_MS = 60_000;
 const AUTOMATE_SWEEP_EVERY_MS = 10 * 60_000;
+const OFFSITE_EVERY_MS = 30_000;
 
 async function drainJobs(): Promise<number> {
   let done = 0;
@@ -65,6 +73,31 @@ async function automate(sweepAll: boolean): Promise<void> {
   }
 }
 
+let offsite: Promise<void> | null = null;
+let offsiteFailure = { message: "", at: 0 };
+
+/** Starts the off-site chores that are due, unless the last lot is still going. Never awaited by the loop. */
+function offsiteTurn(): void {
+  if (offsite) return;
+  offsite = runDueChores()
+    .then((outcomes) => {
+      for (const o of outcomes) {
+        if (o.ran) console.log(`[worker] off-site ${o.chore}: ${o.ok ? o.summary : `failed — ${o.summary} ${o.error ?? ""}`.trim()}`);
+      }
+    })
+    .catch((err: unknown) => {
+      // The same failure every 30 seconds (the release's migration not run yet, say) is said once an hour.
+      const message = err instanceof Error ? err.message : String(err);
+      if (message !== offsiteFailure.message || Date.now() - offsiteFailure.at > 3_600_000) {
+        console.error("[worker] the off-site work could not start", err);
+        offsiteFailure = { message, at: Date.now() };
+      }
+    })
+    .finally(() => {
+      offsite = null;
+    });
+}
+
 async function main() {
   if (once) {
     await drainJobs();
@@ -72,10 +105,15 @@ async function main() {
     await automate(true);
     return;
   }
-  console.log("[worker] running — provisioning jobs, the warm pool and workflows");
+  console.log("[worker] running — provisioning jobs, the warm pool, workflows and off-site backups");
   let lastPool = 0;
   let lastSweep = 0;
+  let lastOffsite = 0;
   for (;;) {
+    if (Date.now() - lastOffsite > OFFSITE_EVERY_MS) {
+      offsiteTurn();
+      lastOffsite = Date.now();
+    }
     await drainJobs().catch((err) => console.error("[worker] taking jobs failed", err));
     if (Date.now() - lastPool > POOL_EVERY_MS) {
       await topUpPool();

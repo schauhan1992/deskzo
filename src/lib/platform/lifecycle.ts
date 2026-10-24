@@ -1,6 +1,8 @@
 import { rm } from "node:fs/promises";
 import { runBackup } from "@/lib/backup/run";
 import { backupRootFor } from "@/lib/backup/maintenance";
+import { removeWorkspaceBackups } from "@/lib/offsite/backups";
+import { currentStore } from "@/lib/offsite/config";
 import { consoleClock } from "@/lib/platform/console-clock";
 import { controlDb } from "@/lib/platform/control-db";
 import { releaseDomainEdges } from "@/lib/platform/domains";
@@ -18,8 +20,10 @@ import { runAsTenant } from "@/lib/tenancy/resolve";
  *   · deprovision — closed: a final full backup into its own folder, then its database and role are
  *     dropped, its addresses and terminal routes let go. Its keys are kept, because the final backup
  *     is unreadable without them.
- *   · purge — after the retention period (90 days): its keys are wiped and its backups deleted. After
- *     this nothing of it can be read by anybody.
+ *   · purge — after the retention period (90 days): its keys are wiped and its backups deleted, here and
+ *     off-site (src/lib/offsite/backups.ts; a store unreachable then is caught by the next day's sync).
+ *     After this nothing of it can be read by anybody. Its security logs stay in the log archive for as
+ *     long as the archive keeps every day's (src/lib/logs/archive.ts) — the law asks for them.
  */
 
 export const RETENTION_DAYS = 90;
@@ -106,6 +110,9 @@ export async function purgeTenant(tenantId: string, actor: string, options: { fo
   // The day on the console's clock: the refusal is shown to staff as it is.
   if (!options.force && due > new Date()) throw new LifecycleRefused(`Workspace ${row.slug} is kept until ${(await consoleClock()).date(due)}.`);
   await rm(backupRootFor({ id: row.id, isDefault: false }), { recursive: true, force: true });
+  const offsite = await currentStore().catch(() => null);
+  if (offsite) await removeWorkspaceBackups(offsite.store, row.id).catch((err) => console.error(`[lifecycle] ${row.slug}'s backups off-site are left for the next sync to remove`, err));
+  await control.offsiteWorkspace.deleteMany({ where: { tenantId } }).catch(() => {});
   await control.tenant.update({ where: { id: tenantId }, data: { keyBundleCipher: "" } });
   await audit(tenantId, actor, "tenant.purge");
   forgetRegistry();

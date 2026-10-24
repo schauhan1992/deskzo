@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight, Check, Clock, CreditCard, Globe, LifeBuoy, Link2, Mail, Network, ReceiptText, Server, ShieldCheck, Sparkles, UserPlus, Waypoints, Workflow, type LucideIcon } from "lucide-react";
+import { ArrowRight, Check, Clock, CreditCard, Globe, HardDrive, LifeBuoy, Link2, Mail, Network, ReceiptText, Server, ShieldCheck, Sparkles, UserPlus, Waypoints, Workflow, type LucideIcon } from "lucide-react";
 import { InvoicingSettingsForm } from "@/components/console/settings/invoicing-settings";
 import { bankProblem, readBank, readSeller, sellerProblem } from "@/lib/billing/tax-invoice";
 import { GST_STATE_CODES } from "@/lib/gst-engine";
@@ -40,6 +40,7 @@ import { lastTick, type TickSummary } from "@/lib/platform/tick-summary";
 import { MAIL_STREAMS } from "@/lib/console-shared/mail-catalogue";
 import { mailSetup } from "@/lib/platform/mail/store";
 import { SUPPORT_SETTING_KEYS, getSupportSettings } from "@/lib/support/settings";
+import { offsiteStatus } from "@/lib/offsite/status";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -55,6 +56,7 @@ const SECTIONS: { id: string; label: string; icon: LucideIcon }[] = [
   { id: "time-zone", label: "Time zone", icon: Clock },
   { id: "support", label: "Support", icon: LifeBuoy },
   { id: "mail", label: "Mail", icon: Mail },
+  { id: "offsite", label: "Backups & logs", icon: HardDrive },
   { id: "environment", label: "Environment", icon: Server },
 ];
 
@@ -77,7 +79,7 @@ export default async function ConsoleSettingsPage() {
   const caps = capsFor(staff.role);
   const [seller, bank, waitingInvoices] = await Promise.all([readSeller(), readBank(), controlDb().invoice.count({ where: { taxNumber: null, currency: "INR", status: "PAID" } })]);
   const sellerIssue = sellerProblem(seller);
-  const [rows, modes, policy, open, days, people, autoClose, presence, tick, facts, support, linked, domainsOffered, timeZone, mail, automate, ai] = await Promise.all([
+  const [rows, modes, policy, open, days, people, autoClose, presence, tick, facts, support, linked, domainsOffered, timeZone, mail, automate, ai, offsite] = await Promise.all([
     settingsOverview(),
     gatewayModes(),
     staffTwoFactorPolicy(),
@@ -97,6 +99,8 @@ export default async function ConsoleSettingsPage() {
     automateState(),
     // Null until the release's migration has made the AI tables.
     aiSetup().catch(() => null),
+    // Null until the release's migration has made the off-site tables.
+    offsiteStatus().catch(() => null),
   ]);
   const env = platformEnv();
   const production = env.key === "production";
@@ -397,6 +401,33 @@ export default async function ConsoleSettingsPage() {
             }
           >
             {mail ? <MailSummary mail={mail} /> : <p className="text-sm text-muted">{"Mail settings appear once this release's migrations have run."}</p>}
+          </Panel>
+
+          <Panel
+            id="offsite"
+            title="Backups & logs"
+            description="Where every workspace's backups, the control plane's dump and the logs CERT-In asks for are kept off this server, and the restore drills that prove them."
+            footer={
+              <Link href="/settings/offsite" className={LINK}>
+                {caps.owner ? "Manage backups & logs" : "See backups & logs"}
+                <ArrowRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+              </Link>
+            }
+          >
+            {offsite ? (
+              <p className="flex flex-wrap items-center gap-2 text-sm">
+                <StatusPill tone={offsite.setup.config ? (offsite.latest.SYNC?.status === "FAILED" || offsite.latest.DRILL?.status === "FAILED" ? "warning" : "success") : production ? "danger" : "neutral"}>
+                  {offsite.setup.config ? "Off-site" : "Not set up"}
+                </StatusPill>
+                <span className="text-muted">
+                  {offsite.setup.config
+                    ? `${offsite.label} · backups ${offsite.setup.backupKeepDays} days, logs ${offsite.setup.logKeepDays} days`
+                    : "Backups, the control plane and the logs are only on this server."}
+                </span>
+              </p>
+            ) : (
+              <p className="text-sm text-muted">{"Off-site settings appear once this release's migrations have run."}</p>
+            )}
           </Panel>
 
           <Panel

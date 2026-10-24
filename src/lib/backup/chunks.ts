@@ -136,7 +136,7 @@ export function manifestPath(root: string, id: string): string {
  * Fanned out by the first byte of the hash because a single directory holding a hundred thousand
  * files is slow to list on every filesystem and hostile on some.
  */
-function chunkPath(root: string, hash: string): string {
+export function chunkPath(root: string, hash: string): string {
   return path.join(chunkDir(root), hash.slice(0, 2), `${hash}.gz`);
 }
 

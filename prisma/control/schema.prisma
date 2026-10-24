@@ -2826,3 +2826,69 @@ model AppUpdateAsset {
 
   @@map("app_update_assets")
 }
+
+/// Off-site storage's work (src/lib/offsite — owner, 24 Oct 2026): each pass of the backup sync, the
+/// control plane's nightly dump, a restore drill, the log archive. The console's Backups & logs page and
+/// its alerts read the latest of each kind. Kept 180 days (src/lib/offsite/chores.ts).
+model OffsiteRun {
+  id         String           @id @default(cuid())
+  kind       OffsiteRunKind
+  status     OffsiteRunStatus @default(RUNNING)
+  /// "worker", "staff:<id>", "script".
+  startedBy  String
+  startedAt  DateTime         @default(now())
+  finishedAt DateTime?
+  /// What it did, in a line: "41 workspaces; 3 backups sent (88 MB); 2 old ones removed".
+  summary    String?
+  /// The failure, in a line — for a pass over many workspaces, the first few that failed.
+  error      String?
+  /// Objects written to the store, and their bytes.
+  objects    Int              @default(0)
+  bytes      BigInt           @default(0)
+  /// A drill's workspace (null for the control plane's), and its scratch database while that exists —
+  /// a drill that died is cleaned up by the next one.
+  tenantId   String?
+  scratchDb  String?
+
+  @@index([kind, startedAt])
+  @@map("offsite_runs")
+}
+
+enum OffsiteRunKind {
+  /// Workspaces' backups and support files copied off-site, and old ones pruned there.
+  SYNC
+  /// The control plane dumped, sealed and copied.
+  CONTROL_DUMP
+  /// A backup fetched back from the store and restored into a scratch database.
+  DRILL
+  /// Finished days of the access log and the security logs, sealed and copied.
+  LOGS
+}
+
+enum OffsiteRunStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+/// Each workspace's backups off-site: what is there, and when it was last brought up to date.
+model OffsiteWorkspace {
+  tenantId       String    @id
+  /// The newest of its backups off-site, by when it was taken, and how many there are.
+  latestBackupAt DateTime?
+  backups        Int       @default(0)
+  lastSyncedAt   DateTime?
+  /// Why its last sync failed. Cleared by the next success.
+  lastError      String?
+  /// When its old backups and unused pieces were last pruned off-site — once a day.
+  lastPrunedAt   DateTime?
+  /// When this server's record of what is off-site was last checked against the store itself — weekly.
+  lastVerifiedAt DateTime?
+  /// Its security logs are archived up to and including this day (UTC, "YYYY-MM-DD").
+  logsThrough    String?
+  lastDrillAt    DateTime?
+  lastDrillOk    Boolean?
+  updatedAt      DateTime  @updatedAt
+
+  @@map("offsite_workspaces")
+}

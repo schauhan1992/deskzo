@@ -551,6 +551,9 @@ export const ACTION_LABELS: Record<string, string> = {
   "ai.packs": "AI credit packs changed",
   "ai.trial": "A trial's AI credits changed",
   "ai.credits.grant": "AI credits added to a workspace",
+  "offsite.save": "Off-site store for backups and logs saved",
+  "offsite.off": "Off-site copies of backups and logs turned off",
+  "offsite.run": "Off-site backup work started by hand",
   "bulk.apply-standing": "Billing rules applied to a batch",
   "bulk.trial-extend": "Trials extended in bulk",
   "export.invoices": "Invoices exported",
@@ -697,7 +700,7 @@ export const AUDIT_CATEGORIES: readonly { key: AuditCategoryKey; label: string; 
   { key: "partners", label: "Partners", prefixes: ["partner.", "export.partners", "export.commissions", "export.partner-report"] },
   { key: "notes", label: "Notes and tags", prefixes: ["tenant.note.", "tenant.tags", "bulk.tag"] },
   { key: "terminals", label: "Terminals", prefixes: ["device-route."] },
-  { key: "console", label: "Console", prefixes: ["alert.", "announcement.", "help.", "export.workspaces", "export.audit", "cms.", "linked.settings", "domains.settings", "console.time-zone", "mail."] },
+  { key: "console", label: "Console", prefixes: ["alert.", "announcement.", "help.", "export.workspaces", "export.audit", "cms.", "linked.settings", "domains.settings", "console.time-zone", "mail.", "offsite."] },
 ];
 
 export function categoryOf(action: string): AuditCategoryKey | null {
@@ -1136,6 +1139,7 @@ export function auditHref(action: string, detail: unknown, workspaceSlug: string
   if (action.startsWith("reference.")) return "/reference";
   if (action.startsWith("alert.")) return "/alerts";
   if (action.startsWith("mail.")) return "/settings/mail";
+  if (action.startsWith("offsite.")) return "/settings/offsite";
   if (action === "signup.code.resend") return "/signups";
   if (action === "warm-pool.top-up") return "/provisioning#warm-pool";
   if (!workspaceSlug) return null;

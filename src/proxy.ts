@@ -23,6 +23,7 @@ import type { Tenant } from "@/lib/tenancy/state";
 import { billingHeldPage, noWorkspacePage, unavailableWorkspacePage } from "@/lib/tenancy/pages";
 import { holdFor } from "@/lib/tenancy/hold";
 import { clockOfTenant } from "@/lib/time/workspace";
+import { accessLogEnabled, logAccess } from "@/lib/logs/access-log";
 
 /**
  * Served from the proxy while a restore is running, so it depends on nothing.
@@ -388,7 +389,29 @@ const withSession = edgeAuth(async (req: NextRequest & { auth: unknown }) => {
  */
 export default async function proxy(...args: Parameters<Awaited<typeof withSession>>) {
   const handler = await withSession;
-  return handler(...args);
+  const response = await handler(...args);
+  if (accessLogEnabled()) noteAccess(args[0] as NextRequest & { auth?: unknown }, response);
+  return response;
+}
+
+/**
+ * One line in the access log (src/lib/logs/access-log.ts) for every request through here — CERT-In's
+ * web log. The status only when this proxy answered; a request passed on to its page or API is logged
+ * with none, since its own answer is decided after this. The person is the session this workspace
+ * accepted above (req.auth, cleared for a session from another workspace).
+ */
+function noteAccess(req: NextRequest & { auth?: unknown }, response: Response | null | undefined | void): void {
+  const passed = !response || response.headers.has("x-middleware-next") || response.headers.has("x-middleware-rewrite");
+  const host = requestHost(req.headers);
+  logAccess({
+    host: typeof host === "string" ? host : (req.headers.get("host") ?? ""),
+    method: req.method,
+    path: req.nextUrl.pathname,
+    status: passed ? null : response.status,
+    ip: clientIp(req),
+    userAgent: req.headers.get("user-agent"),
+    userId: (req.auth as { user?: { id?: string } } | null | undefined)?.user?.id || null,
+  });
 }
 
 async function handle(req: NextRequest & { auth: unknown }, pathname: string, tenant: Tenant): Promise<NextResponse> {

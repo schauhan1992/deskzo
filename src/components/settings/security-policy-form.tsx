@@ -201,6 +201,10 @@ export function SecurityPolicyForm({ policy }: { policy: SecurityPolicyShape }) 
                 Minimum 30. Short enough to lose last month&rsquo;s incident is not a retention policy, and the DPDP Act
                 expects you to be able to show what happened to personal data.
               </p>
+              <p className="mt-1 text-sm text-muted">
+                This is how long they stay here. Deskzo separately keeps a sealed copy of sign-ins and activity for a year, as
+                Indian law (CERT-In) requires of service providers — out of the app, and not shortened by this setting.
+              </p>
             </div>
           </div>
 

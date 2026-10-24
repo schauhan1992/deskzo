@@ -69,7 +69,8 @@ ENV NODE_ENV=production \
     PDF_BROWSER_NO_SANDBOX=true \
     BACKUP_DIR=/data/backups \
     SUPPORT_DIR=/data/support \
-    GEOIP_DIR=/data/geoip
+    GEOIP_DIR=/data/geoip \
+    LOG_DIR=/data/logs
 
 # Chromium's sandbox needs kernel features a container doesn't give an unprivileged user. It only
 # ever opens this app's own print pages, which is why it may run without one.
@@ -77,8 +78,8 @@ ENV NODE_ENV=production \
 COPY --from=builder --chown=node:node /app /app
 
 # /data is the one directory to keep on a persistent volume: workspace backups, support
-# attachments, the GeoIP file. Everything else in the container is rebuilt on every deploy.
-RUN mkdir -p /data/backups /data/support /data/geoip /app/.next/cache /app/platform-outbox \
+# attachments, the GeoIP file, the access log. Everything else in the container is rebuilt on every deploy.
+RUN mkdir -p /data/backups /data/support /data/geoip /data/logs /app/.next/cache /app/platform-outbox \
   && chown -R node:node /data /app/.next/cache /app/platform-outbox
 
 USER node

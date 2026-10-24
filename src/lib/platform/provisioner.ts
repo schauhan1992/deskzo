@@ -130,6 +130,53 @@ export async function createWorkspaceDatabase(): Promise<WorkspaceDatabase> {
   return { dbName: name, dbRole: name, url: workspaceUrl(name, name, password) };
 }
 
+/** A database or role name the recovery below may make: a plain identifier, never one of the server's own. */
+const RECOVERABLE = /^[a-z_][a-z0-9_]{1,62}$/;
+const SERVER_OWN = new Set(["postgres", "template0", "template1"]);
+
+export class RecoveryRefused extends Error {}
+
+/**
+ * A workspace's database made again, for putting it back from an off-site copy onto a server that has lost
+ * it (src/lib/offsite/recover.ts). Its name, role and password are the ones its sealed address holds, so
+ * that address keeps working: the role is made when missing (its password set again when not), the
+ * database when missing. One that exists and has tables is refused unless `replace`, which drops it first.
+ */
+export async function ensureWorkspaceDatabase(dbName: string, dbRole: string, password: string, options: { replace?: boolean } = {}): Promise<{ made: boolean }> {
+  for (const name of [dbName, dbRole]) {
+    if (!RECOVERABLE.test(name) || SERVER_OWN.has(name)) throw new RecoveryRefused(`Refusing "${name}": not a workspace database or role name.`);
+  }
+  const quoted = password.replace(/'/g, "''");
+  return withProvisioner(async (admin) => {
+    const role = await admin.$queryRaw<unknown[]>`select 1 from pg_roles where rolname = ${dbRole}`;
+    if (role.length === 0) await admin.$executeRawUnsafe(`CREATE ROLE "${dbRole}" LOGIN PASSWORD '${quoted}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT`);
+    else await admin.$executeRawUnsafe(`ALTER ROLE "${dbRole}" LOGIN PASSWORD '${quoted}'`);
+    if (NAME.test(dbRole)) await applyLimits(admin, dbRole);
+    await admin.$executeRawUnsafe(`GRANT "${dbRole}" TO CURRENT_USER`).catch(() => {});
+
+    const exists = (await admin.$queryRaw<unknown[]>`select 1 from pg_database where datname = ${dbName}`).length > 0;
+    if (exists) {
+      const inside = directClient(adminUrlFor(dbName), { max: 1 });
+      const tables = await inside
+        .$queryRaw<{ n: number }[]>`select count(*)::int as n from information_schema.tables where table_schema = 'public'`
+        .finally(() => inside.$disconnect());
+      if (tables[0].n > 0 && !options.replace) throw new RecoveryRefused(`The database ${dbName} already exists and has ${tables[0].n} tables. Give --replace to drop it and put the copy back in its place.`);
+      if (tables[0].n > 0) await admin.$executeRawUnsafe(`DROP DATABASE "${dbName}" WITH (FORCE)`);
+      else return { made: false };
+    }
+    await admin.$executeRawUnsafe(`CREATE DATABASE "${dbName}" OWNER "${dbRole}"`);
+    await admin.$executeRawUnsafe(`REVOKE CONNECT, TEMPORARY ON DATABASE "${dbName}" FROM PUBLIC`);
+    return { made: true };
+  });
+}
+
+/** The provisioner's own address, on another database of the same server. */
+function adminUrlFor(dbName: string): string {
+  const u = new URL(provisionerUrl());
+  u.pathname = `/${dbName}`;
+  return u.toString();
+}
+
 /** Drops a workspace's database and its role. Refuses any name it did not make. */
 export async function dropWorkspaceDatabase(dbName: string, dbRole: string): Promise<void> {
   if (!NAME.test(dbName) || !NAME.test(dbRole)) throw new Error(`Refusing to drop "${dbName}" / "${dbRole}": not a workspace database this platform made.`);

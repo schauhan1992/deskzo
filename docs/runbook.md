@@ -52,6 +52,8 @@ Set in the server's environment (pm2 ecosystem file or systemd unit), never in t
 | `TENANCY_STATEMENT_TIMEOUT_MS` (30000), `TENANCY_LOCK_TIMEOUT_MS` (10000), `TENANCY_IDLE_IN_TRANSACTION_MS` (60000), `TENANCY_ROLE_CONNECTION_LIMIT` (20) | tune | Each workspace role's limits; after changing, `npm run platform:tenant -- limits` |
 | `BACKUP_DIR` | no (`backups/`) | Where workspace backups are written; each workspace under `workspaces/<id>/` |
 | `SUPPORT_DIR` | no (`storage/support` in the app's folder) | Contact Support's attachments and screen recordings (§11) — **back it up** (§4). Every app process must see the same folder: a file is uploaded to one and claimed when the request is sent, perhaps by another |
+| `LOG_DIR` | no (`logs/`; `/data/logs` in the image) | The web access log, a file a day per web process (§14). On the persistent volume with `BACKUP_DIR`: the platform worker archives it from there, so it must see the same folder |
+| `ACCESS_LOG` | no | `on` or `off`; unset, on in production only (§14.1) |
 | `PDF_BROWSER_PATH`, `PDF_BROWSER_NO_SANDBOX` | for PDFs | A Chromium for printing documents |
 
 The gateways' keys (Stripe, Razorpay) are **not** environment settings: an owner enters them in the console, under Billing, where they are sealed and never shown back.
@@ -90,14 +92,61 @@ Migrations lift a workspace role's time limits while they run and put them back 
 
 | What | Why | How |
 |---|---|---|
-| `PLATFORM_MASTER_KEY` | Without it no workspace's database address or keys can be opened — every workspace, and every backup of one, is unreadable. | Offline, in two places (a password manager with a break-glass entry and a sealed paper copy). Never with the database backups. |
-| The control plane | Holds every workspace's sealed address and key bundle, plans, subscriptions, staff. Losing it loses the keys to every workspace's backups. | Point-in-time recovery with the cluster, **and** a nightly `pg_dump` kept 30 days off the server. |
-| Workspace databases | The customers' data. | Cluster point-in-time recovery (base backup + WAL archive), plus each workspace's own scheduled backups in `BACKUP_DIR` (sealed, per workspace), copied off the server. |
-| `BACKUP_DIR` | The per-workspace archives a customer or staff restore from. Encrypted on disk under a key derived from `PLATFORM_MASTER_KEY` for each workspace, so a copy is unreadable without that key — keep the two apart. Backups from before this release are encrypted by running `npm run db:backup -- --seal-existing --all-workspaces` once; until then they restore as they always did. | Synced off-site nightly. |
-| `SUPPORT_DIR` | Support requests' attachments and screen recordings. The requests themselves are in the control plane; their files are only here. | Synced off-site nightly with `BACKUP_DIR`. |
+| `PLATFORM_MASTER_KEY` | Without it no workspace's database address or keys can be opened — every workspace, and every backup of one, is unreadable. | Offline, in two places (a password manager with a break-glass entry and a sealed paper copy). Never with the database backups. The break-glass entry also holds the off-site store's address and a credential that can read it (§4.1). |
+| The control plane | Holds every workspace's sealed address and key bundle, plans, subscriptions, staff. Losing it loses the keys to every workspace's backups. | Point-in-time recovery with the cluster, **and** dumped every night by the platform worker (after 01:00, console time): sealed, the newest week in `BACKUP_DIR/platform/control/`, and off-site as long as the backups (§4.1). |
+| Workspace databases | The customers' data. | Cluster point-in-time recovery (base backup + WAL archive), plus each workspace's own scheduled backups in `BACKUP_DIR` (sealed, per workspace), copied off the server (§4.1). |
+| `BACKUP_DIR` | The per-workspace archives a customer or staff restore from. Encrypted on disk under a key derived from `PLATFORM_MASTER_KEY` for each workspace, so a copy is unreadable without that key — keep the two apart. Backups from before this release are encrypted by running `npm run db:backup -- --seal-existing --all-workspaces` once; until then they restore as they always did, and go off-site encrypted anyway. | Copied off-site every hour by the platform worker, still encrypted; kept there 35 days, the newest three of each workspace whatever their age. |
+| `SUPPORT_DIR` | Support requests' attachments and screen recordings. The requests themselves are in the control plane; their files are only here. | Mirrored off-site with `BACKUP_DIR`, encrypted under each workspace's key — and deleted there when the support retention deletes them here. |
+| `LOG_DIR` | The web access log CERT-In asks for (§14). | Archived off-site every night, sealed; kept a year (180 days at least). Two weeks here after that. |
 | The reference database | Shared PIN and place data. | Re-loadable from source (`db:reference`, `db:geonames`); a dump is quicker. |
 
-Test a restore every quarter (§5.1 and §5.2) and write down how long it took.
+A restore drill runs every week by itself (§4.1). Still rehearse §5.2 and §5.10 once a quarter on a spare server, and write down how long each took.
+
+### 4.1 Off-site storage
+
+Set up in the console under **Settings › Backups & logs** (owners). Until it is, nothing leaves the server, and the console says so in red in production.
+
+**Where.** One of:
+
+- **Azure Blob Storage** — a container in a storage account in Central India or South India, with a SAS token on the container: read, add, create, write, delete, list; a year's expiry or more, with a reminder to renew it.
+- **S3-compatible** — AWS S3 in `ap-south-1` (Mumbai), or Cloudflare R2, Wasabi, MinIO…: an access key for that one bucket, allowed to put, get, list and delete. Tick "address the bucket in the path" for MinIO.
+- **A folder** — a disk mounted from elsewhere (an Azure Files share, NFS). Never one on the same disk: the console refuses a folder inside `BACKUP_DIR` or `LOG_DIR`.
+
+Keep it in India: CERT-In requires the logs (§14) to stay in the country. Use **Check connection** before saving — it writes, reads, lists and deletes a small object and says which of the four failed.
+
+**Protect it from deletion** with the store's own controls, so a stolen key or a ransomware run on the server can't empty it: Azure blob soft delete (14 days) and versioning, or an immutability policy; S3 versioning, or Object Lock in governance mode. A delete the store refuses is reported as "kept by the store's own retention", not as a failure — the old backup simply stays until the store lets it go.
+
+**What runs** — in the platform worker, beside its other work (never with `--once`, which signups start):
+
+| Every | What |
+|---|---|
+| hour | Each workspace's new backups (pieces first, then the manifest naming them) and support files sent; once a day per workspace, backups past the days set removed there and the pieces nothing names any more; once a week, what this server thinks is there checked against a listing of the store, and anything missing sent again; once a day, a closed workspace's backups removed. |
+| night, after 01:00 | The control plane dumped (`deskzo-control-<UTC time>.dump`), sealed, sent. Logs archived (§14). Tried again two hours after a failure. |
+| week, 03:00–07:00 | **The restore drill:** the newest backup of the workspace drilled longest ago, and the control plane's newest dump, fetched back from the store, checked against their checksums, restored into scratch databases made like a workspace's, read (the backup's own migration, people in it; workspaces in the control plane) and dropped. Timed; the result is on the page. |
+| day | This server's clock against NPL's and NIC's (§14.2). |
+
+Each runs under a lease, so two workers never run the same one. **Run now** on the page asks the worker, which starts it within a minute. From the server: `npm run offsite -- status | check | run <sync|control|logs|drill|clock> [--workspace <slug>] | list <prefix> | fetch <key> <out> | recover <slug>`.
+
+**In the store**, under the folder set (`deskzo/` by default):
+
+```
+backups/workspaces/<id>/chunks/ab/<hash>.gz       a piece of a chunked backup
+backups/workspaces/<id>/manifests/<backup>.json   its list of pieces
+backups/workspaces/<id>/dumps/<file>.dump(.json)  a full backup and its sidecar
+backups/control/deskzo-control-<UTC>.dump         the control plane
+support/<id>/<request>/<attachment>               a support file
+logs/<UTC day>/access/<host>-<pid>.jsonl.gz       the access log (§14)
+logs/<UTC day>/workspaces/<id>.jsonl.gz           a workspace's security logs that day
+logs/<UTC day>/platform.jsonl.gz                  the console's, the CMS's and the partner portal's
+```
+
+Everything is sealed before it leaves (AES-256-GCM, keys derived from `PLATFORM_MASTER_KEY`), so the store only ever holds ciphertext; `npm run offsite -- fetch` opens any of it. Changing the store, the bucket or the folder starts again from nothing in the new one; the old one is left as it was.
+
+**Alerts:** not set up (production); nothing copied for 3 hours (the worker stopped); copying failing; no control plane dump for a day; the log archive two nights behind; a drill failed; no drill working for two weeks; the clock more than a second out.
+
+**Break glass.** The store's address is saved in the control plane — the thing that may be lost. Keep it in the break-glass entry with `PLATFORM_MASTER_KEY`, with a credential that can read and list (a second SAS token or key, read-only), for §5.3 and §5.10.
+
+**Checks:** `npm run check:offsite` — fake S3 (each signature checked with AWS's own signer) and Azure servers, a folder, a scratch control plane, a real backup restored, recovery, the logs, the console.
 
 ## 5. Recovering
 
@@ -116,7 +165,16 @@ Test a restore every quarter (§5.1 and §5.2) and write down how long it took.
 
 ### 5.3 The control plane lost, workspace databases intact
 
-Restore it from its nightly dump or the cluster's recovery — it is the only record of each workspace's keys. Without either, the first workspace can be adopted again (`npm run platform:adopt`), but **no other workspace can be recovered**: their keys are gone. This is why §4 keeps the control plane in two places.
+Restore it from the cluster's recovery, or from its nightly dump off-site (§4.1) — it is the only record of each workspace's keys. With the store's address and a read credential from the break-glass entry, and the same `PLATFORM_MASTER_KEY`:
+
+```
+OFFSITE_STORE='{"provider":"azure","containerUrl":"https://<account>.blob.core.windows.net/<container>","prefix":"deskzo"}' OFFSITE_SECRET='<SAS token>' npm run offsite -- list backups/control/
+OFFSITE_STORE=… OFFSITE_SECRET=… npm run offsite -- fetch backups/control/deskzo-control-<newest>.dump control.dump
+pg_restore --no-owner --no-privileges --dbname=<an empty control database> control.dump
+npm run control:migrate
+```
+
+(S3: `{"provider":"s3","endpoint":"https://s3.ap-south-1.amazonaws.com","region":"ap-south-1","bucket":"…","accessKeyId":"…","prefix":"deskzo"}` with the secret key as `OFFSITE_SECRET`.) A copy taken up to a day before the loss: a workspace created or a plan changed since is not in it. Without either copy, the first workspace can be adopted again (`npm run platform:adopt`), but **no other workspace can be recovered**: their keys are gone. This is why §4 keeps the control plane in two places.
 
 ### 5.4 `PLATFORM_MASTER_KEY` lost
 
@@ -147,6 +205,17 @@ Each workspace's role has its own limits: a statement stops at thirty seconds, a
 3. Establish scope: which records, which people, which window.
 4. The customers are the controllers of their data: notify each affected workspace's owner without undue delay, and within the time the DPA promises (docs/privacy/data-processing-agreement.md), so they can meet their own duties under GDPR and the DPDP Act.
 5. Fix, add a probe for it to `scripts/pentest.ts`, reopen.
+
+### 5.10 Everything lost — recovering from the off-site store
+
+The server and the cluster's own backups both gone; the off-site store (§4.1) is what is left.
+
+1. A new server, the app deployed with the same `PLATFORM_MASTER_KEY`, `AUTH_SECRET` and settings; an empty PostgreSQL 16. Give the database server the name the old one had (the Compose service `postgres`, or the same DNS name): the workspaces' sealed addresses name it.
+2. The control plane, from its dump (§5.3).
+3. Each workspace: `npm run offsite -- recover <slug>`. Its database and role are made again under the names and password its sealed address holds, its newest backup off-site fetched, checked and restored, and this release's migrations run over it. `--backup <id or file>` for an older one (`npm run offsite -- list backups/workspaces/<id>/manifests/`); a database already there with tables is left alone unless `--replace`. It takes about as long as the drill reports for that workspace.
+4. The reference database, from its sources (`npm run db:reference`, `npm run db:geonames`).
+5. Support files a request still needs: `npm run offsite -- fetch support/<workspace>/<request>/<file> <SUPPORT_DIR>/<workspace>/<request>/<file>`.
+6. `npm run tenants:migrate`, `npm run check:tenancy`; sign in to two workspaces and the console. Tell each owner what was lost between their last backup and the loss — up to a day.
 
 ## 6. Everyday operations from the server
 
@@ -229,7 +298,9 @@ Checked by `npm run check:cluster` (a real three-process cluster, with a probe i
 ## 8. Before the first paying customer
 
 - [ ] `NODE_ENV=production`, TLS at the proxy, `TRUST_PROXY=1`.
-- [ ] `PLATFORM_MASTER_KEY` backed up offline, twice (§4). The control plane dumped nightly, off the server.
+- [ ] `PLATFORM_MASTER_KEY` backed up offline, twice (§4), with the off-site store's address and a read-only credential beside it.
+- [ ] Settings › Backups & logs: an off-site store in India that passes **Check connection**, protected from deletion by its own controls (§4.1); after the first night, a sync, a control plane dump and the log archive all **Done**, and **Run a drill** passing.
+- [ ] CERT-In (§14): chrony on the VM pointed at NPL and NIC, and the clock on the page within a second; the point of contact and a deputy named and sent to CERT-In; whoever runs the platform knows the 6-hour rule.
 - [ ] Staff two-factor **required** (console → Staff); `PLATFORM_CONSOLE_IP_ALLOWLIST` set.
 - [ ] `cms.<domain>` in DNS and the proxy's certificate; the first CMS admin invited; CMS two-factor **required** (CMS → Settings → Security, or `npm run cms:user -- two-factor required`); the placeholders (tagline, display domain, sales email) replaced and published.
 - [ ] PgBouncer in front of workspace databases (§7); the three schedulers running (§1); the worker under pm2.
@@ -246,7 +317,8 @@ Checked by `npm run check:cluster` (a real three-process cluster, with a probe i
 |---|---|
 | Every release | The check suites; `npm run pentest` for anything touching sign-in, tenancy or billing |
 | After changing capacity settings, and before a large onboarding | `npm run load:test` |
-| Quarterly | A restore of one workspace and of the control plane, timed (§4) |
+| Weekly | Settings › Backups & logs: last week's restore drills passed, and how long they took (§4.1) |
+| Quarterly | §5.2 and §5.10 rehearsed on a spare server, timed; the SAS token or access key's expiry checked (§4.1) |
 | Monthly | Console → Billing: failed webhooks; console → Migrations: anything behind; console → Provisioning: anything failed |
 | Monthly, from the statement day | Console → Commissions: the flagged entries reviewed, the drafted statements approved and paid; console → Partners → Requests: applications, deals, changes and flagged attributions |
 
@@ -355,3 +427,57 @@ The health board's Automate row and the console alerts **automate.backlog** (wor
 A workspace restored from a backup resumes its runs where the backup left them; the restore lets go of runs a worker held then and wakes the workspace. A step that reached outside Deskzo (an email, a webhook, a message) after the backup was taken is not done again: such steps are recorded in the control plane (`automation_sent_steps`, kept 120 days), and a run that reaches one again stops at **Needs a decision**, saying it went out before the restore. The worker leaves a workspace alone while it is being restored.
 
 **Checks:** `npm run check:automate-hardening` (restores, the security review's fixes, the alarm), `check:automate-limits`, and the other `check:automate*` suites.
+
+## 14. CERT-In: logs, time and incidents
+
+CERT-In's Directions of 28 April 2022 (under section 70B(6) of the IT Act) apply to Deskzo as a service provider:
+
+| They ask | Here |
+|---|---|
+| Report a cyber security incident within **6 hours** of noticing it | §14.3 |
+| Keep the logs of all ICT systems for a rolling **180 days, in India**, and hand them over when asked | §14.1 — a year, off-site, sealed; the store in an Indian region (§4.1) |
+| Keep every system's clock to the NTP servers of **NIC or NPL** (or time traceable to them) | §14.2 |
+| Name a **point of contact** for CERT-In | §14.4 |
+
+Ask counsel whether part (vi) — five years of subscriber records, written for data centres, VPS, cloud and VPN providers — reaches a software service like this one; the control plane keeps workspaces' owners and billing details for as long as their workspaces exist anyway.
+
+### 14.1 The logs
+
+- **The web access log.** Every request through the proxy, one JSON line each — time (UTC), the address asked for, method, path (never the query), the proxy's own answer when it gave one, the caller's address as `src/lib/client-ip.ts` decides it, user agent, and the person when signed in. A file per UTC day per web process in `LOG_DIR/access/` (`/data/logs` in the image), on in production (`ACCESS_LOG=off` to turn it off, `on` to have it elsewhere). Biometric terminals (`/iclock`) and Automate's webhook addresses don't pass the proxy and aren't in it; Traefik's and Cloudflare's own logs cover the edge.
+- **Each workspace's security logs** — its activity log (sign-ins, failed ones, exports, prints, screenshots, page views where on), its sign-ins with address and place, its audit log (who changed what — the fields' names, not their values). Exported every night, a file per workspace per day; the first export reaches back 180 days. Kept whatever the workspace's own retention setting says: that is how long its admins see them in the app (the setting says so).
+- **The platform's own** — the console's audit log and staff sign-ins, the CMS's, the partner portal's.
+
+Archived nightly to the off-site store (`logs/<day>/…`), sealed, kept a year unless changed (Settings › Backups & logs; never under 180 days); access log files stay two weeks on the server after that. Without a store they stay on the server for the whole period instead.
+
+**Handing them over:** `npm run offsite -- fetch logs/<day>/workspaces/<id>.jsonl.gz out.jsonl` (or `…/access/<file>.gz`, `…/platform.jsonl.gz`) gives the plain JSON lines. Give only what is asked, for the days asked; it is personal data.
+
+### 14.2 Time
+
+The containers use the host's clock, so it is the VM that is kept: chrony, pointed at NPL and NIC. In `/etc/chrony/chrony.conf` (Ubuntu: `apt install chrony`), before any other `pool`/`server` line:
+
+```
+server time.nplindia.org iburst prefer
+server samay1.nic.in iburst
+server samay2.nic.in iburst
+```
+
+then `systemctl restart chrony` and `chronyc sources -v` (one marked `*`). Outgoing UDP 123 must be open — Azure's default outbound rules allow it. The platform worker asks NPL, then NIC, once a day how far the clock is from theirs; Settings › Backups & logs shows it, and more than a second out is an alert. "Couldn't check" there means UDP 123 is blocked from the container.
+
+### 14.3 Incidents — the 6 hours
+
+The clock starts when anybody here *notices* an incident — not when it is understood. CERT-In's list includes targeted scanning of our systems, a compromised server or account, unauthorised access to data, a data breach or leak, malicious code, an attack on the application, identity theft, spoofing and phishing aimed at us, and a DoS that takes the service down.
+
+1. **Whoever notices** tells the point of contact (§14.4) at once, by phone, with what they saw and when.
+2. **Within 6 hours**, the point of contact reports to CERT-In with what is known — it can be completed later: email `incident@cert-in.org.in`, phone 1800-11-4949, fax 1800-11-6969, using the incident form on cert-in.org.in. Keep a copy of what was sent and when.
+3. Contain: hold affected workspaces (console), revoke sessions and keys, rotate secrets; keep the evidence — don't wipe a server before its logs are archived (`npm run offsite -- run logs`).
+4. If personal data was involved: tell the affected workspaces' companies within 48 hours (the DPA's promise), and the Data Protection Board of India and the people affected as the DPDP Rules require (§5.9 for one workspace exposed to another).
+5. Answer CERT-In's follow-up questions, and hand over logs when asked (§14.1).
+
+### 14.4 Point of contact
+
+Name one person, and a deputy, and send CERT-In their name, designation, email, phone and address, as the Directions require (the format is on cert-in.org.in). Write them here, and update CERT-In when they change:
+
+| | Name | Phone | Email |
+|---|---|---|---|
+| Point of contact | — | — | — |
+| Deputy | — | — | — |

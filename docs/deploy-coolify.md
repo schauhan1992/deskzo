@@ -83,7 +83,7 @@ On the Deskzo application:
 - **Advanced:**
   - turn **off** *Inject Build Args to Dockerfile*, so no secret reaches the build;
   - leave the health check off, because the image has no curl or wget for one.
-- **Persistent Storage:** add a volume named `deskzo-data` with destination path `/data`. Workspace backups, support attachments and the GeoIP file live there.
+- **Persistent Storage:** add a volume named `deskzo-data` with destination path `/data`. Workspace backups, support attachments, the GeoIP file and the web access log (`/data/logs`, runbook §14) live there.
 - **Post-deployment command:** `npm run tenants:migrate`. Each release migrates every database just after the new container starts. The migrations are written expand-then-contract, so the new code tolerates the old schema meanwhile. A new column on an existing table is not tolerated by itself: Prisma names every column in a query without a `select`, sign-in's among them. Until a later release, such a column goes in `NOT_YET_EVERYWHERE` in `src/lib/tenancy/clients.ts`, and the code that reads it is ready for it to be missing. On the deploys before the first run (step 4) it fails, because the databases don't exist yet: that is expected. Coolify only logs a failing post-deployment command and still calls the deployment a success, so after every release read its log (Releases, below).
 - **Environment Variables → Developer view.** Paste this, with the database's password and host from step 2 put in the four URLs:
 
@@ -182,6 +182,12 @@ An installation set up before 18 Oct 2026 has a fourth Scheduled Task, **Worker*
 - https://deskzo.deskzo.com: your workspace.
 
 **Don't open signups yet.** A new customer's address, like `acme.deskzo.com`, has no certificate until phase 2.
+
+### 7. Backups off the server, and the clock
+
+Everything above keeps backups and logs on this one VM. In the console, **Settings › Backups & logs**: an Azure storage account in Central India (a container, and a SAS token on it with read, add, create, write, delete and list), **Check connection**, **Save** — runbook §4.1. Turn on soft delete and versioning for blobs in the storage account, so a deletion can be undone. The platform worker copies the backups within the hour, and the control plane's dump and the logs that night; the first restore drill runs the next early morning (or press **Run a drill**). Put the storage account's address and a second, read-only SAS token in the break-glass entry with `PLATFORM_MASTER_KEY`.
+
+On the VM, point chrony at India's time servers (runbook §14.2) — CERT-In asks for it, and the same page shows how far off the clock is.
 
 ## Phase 2 — a certificate for every workspace
 

@@ -32,7 +32,8 @@ const MAGIC = Buffer.from("DZBKENC1", "latin1");
 const HEADER = MAGIC.length + 1 + 12;
 const TAG = 16;
 type KeyKind = 1 | 2;
-export type SealedWhat = "dump" | "chunk";
+/** "log": an archived log (src/lib/logs/archive.ts); "file": a support attachment copied off-site (src/lib/offsite/support.ts). */
+export type SealedWhat = "dump" | "chunk" | "log" | "file";
 
 function keyFor(tenantId: string, kind: KeyKind): Buffer {
   if (kind === 1) return platformKeyFor(tenantId, "backup-at-rest");

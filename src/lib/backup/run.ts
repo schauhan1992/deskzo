@@ -283,7 +283,8 @@ export async function runBackup(options?: {
   }
 }
 
-function dump(tool: DumpTool, connection: Connection, target: string, compress = 6, sealFor: string | null = null): Promise<void> {
+/** Also the control plane's nightly dump (src/lib/offsite/control.ts), sealed under its own pseudo-workspace. */
+export function dump(tool: DumpTool, connection: Connection, target: string, compress = 6, sealFor: string | null = null): Promise<void> {
   /**
    * Custom format, compressed. It is what `pg_restore` can read selectively and in parallel, and it
    * is a third the size of plain SQL — which matters when the thing has to be copied off the box.
