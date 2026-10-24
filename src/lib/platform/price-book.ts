@@ -77,6 +77,9 @@ export const INDIA_LAUNCH_PRICES: readonly PriceBookEntry[] = [
   { planKey: "addon-ai-copilot", month: 499, year: 4990, perSeat: false },
   // Automate Plus: Deskzo Automate's limits raised for the whole workspace (owner, 17 Oct 2026).
   { planKey: "addon-automate-plus", month: 999, year: 9990, perSeat: false },
+  // Customer inbox: website chat with its bot, and WhatsApp, for the whole workspace. ₹899 to start (owner, 24 Oct 2026:
+  // "let the platform admin decide the price, but for now ₹899"); staff change it in the console.
+  { planKey: "addon-customer-inbox", month: 899, year: 8990, perSeat: false },
 ];
 
 /** What a run did, or would do, to one plan. */
